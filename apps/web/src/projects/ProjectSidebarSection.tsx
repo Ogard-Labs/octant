@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
   ProjectColor,
@@ -892,7 +893,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ] as const
             ).map((shelf) =>
               shelf.threads.length === 0 ? null : (
-                <details
+                <OctantCollapsible
                   className="project-archive project-shelf"
                   data-shelf={shelf.key}
                   key={shelf.key}
@@ -909,10 +910,13 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                       ? true
                       : undefined
                   }
+                  summary={
+                    <>
+                      <span className="project-archive__label">{shelf.label}</span>
+                      <span>{shelf.threads.length}</span>
+                    </>
+                  }
                 >
-                  <summary>
-                    {shelf.label} <span>{shelf.threads.length}</span>
-                  </summary>
                   <div className="project-threads">
                     <ProjectThreadRows
                       {...(props.threadActions === undefined
@@ -933,15 +937,20 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                       threads={shelf.threads}
                     />
                   </div>
-                </details>
+                </OctantCollapsible>
               ),
             )}
         {(currentFilters === undefined || currentFilters.lifecycle === "active") &&
         props.archivedProjects.length > 0 ? (
-          <details className="project-archive">
-            <summary>
-              Archive <span>{props.archivedProjects.length}</span>
-            </summary>
+          <OctantCollapsible
+            className="project-archive"
+            summary={
+              <>
+                <span className="project-archive__label">Archive</span>
+                <span>{props.archivedProjects.length}</span>
+              </>
+            }
+          >
             {props.archivedProjects.map((project) => (
               <div className="project-row project-row--archived" key={project.id}>
                 <span className="project-row__archived-name">{project.name}</span>
@@ -957,7 +966,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                 </OctantButton>
               </div>
             ))}
-          </details>
+          </OctantCollapsible>
         ) : null}
       </nav>
     </SidebarRowPropertiesContext.Provider>

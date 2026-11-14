@@ -185,15 +185,15 @@ export function CodeWorkspaceReplace(props: {
             saves remain.
           </p>
           {preview.map((file) => (
-            <details key={file.path}>
-              <summary>
-                {file.path} · {file.count} replacements
-              </summary>
+            <OctantCollapsible
+              key={file.path}
+              summary={`${file.path} · ${String(file.count)} replacements`}
+            >
               <p>Before</p>
               <pre>{file.before}</pre>
               <p>After</p>
               <pre>{file.after}</pre>
-            </details>
+            </OctantCollapsible>
           ))}
           <OctantButton
             size="sm"

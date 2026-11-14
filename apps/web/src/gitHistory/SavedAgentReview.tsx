@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunResultPacket, AgentRunReviewResponse } from "@octant/contracts";
@@ -84,8 +85,7 @@ export function SavedAgentReview(props: {
         <header className="git-history__commit-header">
           <h2>Generation {packet.generation} changes</h2>
           <p>{packet.modelId}</p>
-          <details className="git-history__message">
-            <summary>Attribution</summary>
+          <OctantCollapsible className="git-history__message" summary="Attribution">
             <div role="group" aria-label="Review attribution">
               <p>
                 Run: {packet.runId} · Parent: {packet.parentThreadId}
@@ -111,7 +111,7 @@ export function SavedAgentReview(props: {
                 </>
               )}
             </div>
-          </details>
+          </OctantCollapsible>
         </header>
         {unavailable ? (
           <p className="git-history__notice" role="status">

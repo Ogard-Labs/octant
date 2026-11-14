@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useState } from "react";
 import type { GitHistoryClient } from "@octant/client-runtime/git-history-client";
@@ -138,13 +139,18 @@ function LocalCommit(props: {
   const [open, setOpen] = useState(false);
   return (
     <li>
-      <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-        <summary>
-          {props.commit.subject} <code>{props.commit.oid.slice(0, 7)}</code>{" "}
-          <span>{props.commit.author}</span>
-        </summary>
+      <OctantCollapsible
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+        open={open}
+        summary={
+          <>
+            {props.commit.subject} <code>{props.commit.oid.slice(0, 7)}</code>{" "}
+            <span>{props.commit.author}</span>
+          </>
+        }
+      >
         {open ? <LocalCommitDiff {...props} /> : null}
-      </details>
+      </OctantCollapsible>
     </li>
   );
 }

@@ -570,6 +570,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The label takes the slack so the chevron leads and the count closes the row. */
+.project-archive__label {
+  flex: 1 1 auto;
+}
+
 /* The Snoozed and Put away shelves share the archive shelf's quiet summary
    row; their rows are ordinary thread rows, so nothing else is restyled. */
 .project-shelf > .project-threads {

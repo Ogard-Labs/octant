@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type {
   CodeProjectPullRequestBackgroundRefreshState,
@@ -404,20 +405,23 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
         ) : null
       ) : !hasProjects ? (
         dock ? (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             detail="Only a Code Project with a github.com origin lists pull requests."
             icon={<GitPullRequest size={20} />}
             title="No pull-request source for this Project"
           />
         ) : (
-          <OctantEmpty layout="line"
+          <OctantEmpty
+            layout="line"
             detail="Add a Code Project to see pull requests here."
             icon={<GitPullRequest size={20} />}
             title="No Code Projects yet"
           />
         )
       ) : !onGitHub ? (
-        <OctantEmpty layout="line"
+        <OctantEmpty
+          layout="line"
           action={
             <OctantButton
               disabled={busy}
@@ -473,7 +477,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 </p>
               ))}
           {visibleRows.length === 0 && normalizedSearch !== "" ? (
-            <OctantEmpty layout="line"
+            <OctantEmpty
+              layout="line"
               action={
                 <OctantButton
                   onClick={() => setSearch("")}
@@ -488,7 +493,8 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             />
           ) : null}
           {visibleRows.length === 0 && normalizedSearch === "" && filterCount > 0 ? (
-            <OctantEmpty layout="line"
+            <OctantEmpty
+              layout="line"
               action={
                 <OctantButton
                   onClick={() => chooseFilters(NO_PULL_REQUEST_FILTERS)}
@@ -578,14 +584,17 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </p>
           )}
           {dock || unconnectedProjects.length === 0 ? null : (
-            <details className="code-project-pull-requests__notice" role="note">
-              <summary>
-                {unconnectedProjects.length === 1
+            <OctantCollapsible
+              className="code-project-pull-requests__notice"
+              role="note"
+              summary={
+                unconnectedProjects.length === 1
                   ? "1 Project is not on GitHub"
-                  : `${String(unconnectedProjects.length)} Projects are not on GitHub`}
-              </summary>
+                  : `${String(unconnectedProjects.length)} Projects are not on GitHub`
+              }
+            >
               <span>{unconnectedProjects.map((project) => project.projectName).join(", ")}</span>
-            </details>
+            </OctantCollapsible>
           )}
         </>
       )}

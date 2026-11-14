@@ -235,6 +235,23 @@ describe("ChatWelcome", () => {
     expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull();
   });
 
+  it("keeps a staged file when the first send fails, and clears it once a send succeeds", async () => {
+    const user = userEvent.setup();
+    const onCreateChat = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    render(<ChatWelcome onCreateChat={onCreateChat} />);
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    const box = screen.getByRole("textbox", { name: "First message" });
+
+    await user.upload(screen.getByLabelText("Choose attachment file"), file);
+    await user.type(box, "Summarize{Enter}");
+    expect(onCreateChat).toHaveBeenLastCalledWith("Summarize", undefined, undefined, [file]);
+    expect(await screen.findByRole("list", { name: "Attachments" })).toHaveTextContent("notes.txt");
+
+    await user.type(box, "{Enter}");
+    expect(onCreateChat).toHaveBeenLastCalledWith("Summarize", undefined, undefined, [file]);
+    await vi.waitFor(() => expect(screen.queryByRole("list", { name: "Attachments" })).toBeNull());
+  });
+
   it("drops a staged file the person removes before sending", async () => {
     const user = userEvent.setup();
     const onCreateChat = vi.fn();

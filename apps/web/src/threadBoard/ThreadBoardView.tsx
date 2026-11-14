@@ -6,6 +6,7 @@ import { ThreadBoardStatusMark } from "./ThreadBoardCardParts";
 import { lastUsefulView, type ThreadBoardState } from "./threadBoardState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useHeldBoardPlacement } from "./useHeldBoardPlacement";
+import { ThreadBoardCardSlots } from "./ThreadBoardCardSlots";
 
 export interface ThreadBoardCardPresentation {
   readonly layout: "list" | "card";
@@ -93,16 +94,13 @@ export function ThreadBoardListView<
           {column.cards.length === 0 ? (
             <OctantEmpty layout="line" title="No threads" tone="lane" />
           ) : (
-            <ul className="issuelist">
-              {column.cards.map((card) => (
-                <li key={String(card.threadId)}>
-                  {props.renderCard(card, {
-                    layout: "list",
-                    statusPresentation: "visible",
-                  })}
-                </li>
-              ))}
-            </ul>
+            <ThreadBoardCardSlots
+              cards={column.cards}
+              className="issuelist"
+              renderCard={(card) =>
+                props.renderCard(card, { layout: "list", statusPresentation: "visible" })
+              }
+            />
           )}
         </section>
       ))}
@@ -163,16 +161,11 @@ export function ThreadBoardColumnView<
           <OctantEmpty layout="line" title="No threads" tone="lane" />
         </div>
       ) : (
-        <ul className="board-col-body">
-          {column.cards.map((card) => (
-            <li key={String(card.threadId)}>
-              {props.renderCard(card, {
-                layout: "card",
-                statusPresentation,
-              })}
-            </li>
-          ))}
-        </ul>
+        <ThreadBoardCardSlots
+          cards={column.cards}
+          className="board-col-body"
+          renderCard={(card) => props.renderCard(card, { layout: "card", statusPresentation })}
+        />
       )}
     </section>
   );

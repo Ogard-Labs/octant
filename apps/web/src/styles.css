@@ -7075,17 +7075,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-size: var(--oct-text-detail);
 }
 
-.code-board__card-details summary::-webkit-details-marker {
-  display: none;
-}
-
 .code-board__card-details summary:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-}
-
-.code-board__card-details[open] summary svg {
-  transform: rotate(180deg);
 }
 
 .code-board__view-popover {

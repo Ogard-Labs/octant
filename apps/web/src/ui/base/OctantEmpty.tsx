@@ -102,7 +102,15 @@ export function OctantEmpty(props: OctantEmptyProps) {
   return <CardEmpty {...props} />;
 }
 
-function CardEmpty({ action, className, eyebrow, icon, message, role, title }: OctantEmptyCardProps) {
+function CardEmpty({
+  action,
+  className,
+  eyebrow,
+  icon,
+  message,
+  role,
+  title,
+}: OctantEmptyCardProps) {
   const hasIcon = icon !== undefined;
   return (
     <Empty className={className} role={role}>
