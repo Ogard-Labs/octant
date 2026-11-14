@@ -1,6 +1,6 @@
 # Threads from several Projects in one window
 
-Status: Building (slice 1 of 3). Approved by a maintainer on 2026-11-14. The
+Status: Building (slice 2 of 3). Approved by a maintainer on 2026-11-14. The
 current rule (one visible tree belongs to one authority context) stays in force
 until slice 2 lands and rewrites it in the owning specifications.
 Size: Full: it changes what a window's authority is, which every server check
@@ -489,6 +489,66 @@ whether a window may reach a Project.
   even when the window reaches another" (red without the narrowing, green with
   it); the existing standing, routine, queued-device and Code runtime suites
   prove FR-10.
+
+### Detailed design: slice 2
+
+Written 2026-11-14 against `f29cc17eb`.
+
+- **Contract.** `WorkspacePane` gains `context?: WorkspaceContextKey`. Absent
+  means the lead's, and a pane in the lead's Project never carries one, so
+  every persisted workspace decodes and compares unchanged. Example:
+  `{ kind: "pane", nodeId, paneId, surface: { kind: "code-overview", threadId: B1, … }, context: { host: "local", mode: "code", projectId: B, boundRoot: "/b" } }`.
+- **Admission.** `resolveWorkspaceContext` no longer refuses a thread surface of
+  another Project of the same mode and host; it still refuses another mode,
+  another host, and a preview or Canvas of another Project (their bound root
+  is not known to the pure policy; deferred). After `applyWorkspaceOperation`,
+  `recordPaneContext(workspace, operation, resolves)` re-resolves the surface
+  the operation placed, wherever it now sits, and writes its context on that
+  pane, or removes it when the surface is context-free (welcome, Settings,
+  Side Chat), project-less (Files, which follow the lead as today) or in the
+  lead's Project. The renderer's fields are never read for the Project (FR-3).
+- **Validation.** Each pane is validated against its own context: mode equals
+  the layout's, host equals the lead's, and root-backed tabs (Browser, Files)
+  need that context's bound root, so they fail closed in a server Project's
+  pane.
+- **Reading admission.** `admissionSet(workspace, mode)` is the lead Project
+  plus every visible pane context's Project; `windowAdmitsProject(workspace,
+mode, projectId)` walks the visible layout once (at most 64 leaves, no
+  allocation beyond the walk). Stowed layouts are not read.
+- **Stow and restore (D-3).** Stowing makes no change to pane contexts; the
+  entry keeps its lead. On `switch-project-surface` the policy first looks, most
+  recently stowed first, for a stowed layout holding the opened thread; if none,
+  for the one keyed by the destination context; else the welcome. A restored
+  layout is rebased onto the new lead: panes that carried the old lead
+  implicitly get it explicitly, and panes in the new lead's Project lose theirs.
+  The opened thread's pane then becomes active through the existing
+  visible-surface path.
+- **Server sites.** Each site from "Today" that asks whether a window reaches a
+  Project for that Project's own sake moves to `windowAdmitsProject`:
+  `windowCanAccessCodeProject`, `windowCanAccessWorkProject`, child pending
+  requests, agent run creation, Browser authority, Canvas and preview routes
+  that judge a named Project, Work tooling and server Work Project actions,
+  Chat context and image scope, usage scope, and the workspace wiring. Sites
+  that read the lead for its own sake stay on the lead: the default Project of
+  a new thread, the mention and drop resolver (FR-12, Q-6), and the surface
+  catalog. A repository check refuses a new `contextByMode[…].projectId`
+  comparison outside an allow-list naming the lead-only sites (R9).
+- **Reconciliation.** Restart and stowed restore visit each pane: a pane whose
+  context names an inactive Project, or whose surface no longer resolves to its
+  recorded context, becomes the mode welcome with no context (FR-9).
+- **Renderer.** `refuseCrossAuthority` stops refusing another Project of the
+  same mode and host, the sidebar drag stops rerouting it, and a click on a
+  thread already visible activates its pane instead of switching. Mode and host
+  refusals stay.
+- **Failure modes.** A renderer naming a thread of an archived Project is
+  refused by the resolver as today. A concurrent archive between resolve and
+  journal leaves a pane that reconciliation clears on the next read, and every
+  server check re-reads activity, so no reach survives it.
+- **Tests.** Domain: admission per mode, FR-3 resolution, mode and host
+  refusals, 64-pane timing, stow/restore with rebase, validation of pane
+  contexts. Server: `windowAdmitsProject` at the Code, Work, Browser and server
+  Project terminal checks, reconciliation after archive, the mention resolver
+  unchanged by a B pane. Web: a B drop splits with no refusal.
 
 ### Acceptance tests
 

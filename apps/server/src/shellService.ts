@@ -41,6 +41,7 @@ import {
   normalizeEnvironmentPresentationState,
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
+  recordPaneContext,
   resolveWorkspaceContext,
   workspaceWelcomeSurface,
   type WorkspaceContextResolves,
@@ -509,10 +510,14 @@ export class ShellService implements ShellServiceApi {
         reconcileCanvasTabs(
           reconcilePreviewTabs(
             inferContextFromProjectTabs(
-              reconcileContextWithProjects(
-                reconcileProjectTabs(
-                  projectedWorkspace?.workspace ?? defaultWindowWorkspace(windowId),
+              reconcilePaneContexts(
+                reconcileContextWithProjects(
+                  reconcileProjectTabs(
+                    projectedWorkspace?.workspace ?? defaultWindowWorkspace(windowId),
+                    this.#persistence,
+                  ),
                   this.#persistence,
+                  this.#serverCodeProjects,
                 ),
                 this.#persistence,
                 this.#serverCodeProjects,
@@ -600,8 +605,12 @@ export class ShellService implements ShellServiceApi {
       }
       const projected = this.#persistence.readWindowWorkspace(command.windowId);
       const current = reconcileWorkspaceWithSettings(
-        reconcileContextWithProjects(
-          projected?.workspace ?? defaultWindowWorkspace(command.windowId),
+        reconcilePaneContexts(
+          reconcileContextWithProjects(
+            projected?.workspace ?? defaultWindowWorkspace(command.windowId),
+            this.#persistence,
+            this.#serverCodeProjects,
+          ),
           this.#persistence,
           this.#serverCodeProjects,
         ),
@@ -679,8 +688,16 @@ export class ShellService implements ShellServiceApi {
           }
         }
       }
-      const resolved = resolveWorkspaceContext(current, command.operation, this.#contextResolves());
-      const workspace = applyWorkspaceOperation(resolved, command.operation);
+      const resolves = this.#contextResolves();
+      const resolved = resolveWorkspaceContext(current, command.operation, resolves);
+      // The pane's own Project is written from what this host resolves for
+      // the placed surface; without it a surface of another Project would sit
+      // in the window under the lead's authority.
+      const workspace = recordPaneContext(
+        applyWorkspaceOperation(resolved, command.operation),
+        command.operation,
+        resolves,
+      );
       const committed = this.#persistence.journal.append({
         aggregate: { aggregateType: "window-workspace", aggregateId: command.windowId },
         expectedVersion: command.expectedVersion,
@@ -1013,6 +1030,58 @@ function reconcileContextWithProjects(
     ...workspace,
     contextByMode: { chat: chat.context, work: work.context, code: code.context },
     layouts: { chat: chat.layout, work: work.layout, code: code.layout },
+  };
+}
+
+/**
+ * Checks each pane that holds another Project than its layout's lead, in the
+ * visible layouts and the stowed ones alike: a pane whose Project was archived,
+ * removed or retyped becomes the mode's welcome and reaches nothing, and a
+ * relinked Project keeps its pane on the new root, as the lead's context does.
+ */
+function reconcilePaneContexts(
+  workspace: WindowWorkspace,
+  persistence: PersistenceService,
+  server: ServerCodeProjectBindings,
+): WindowWorkspace {
+  const visit = (
+    layout: WorkspaceLayoutNode,
+    mode: "chat" | "work" | "code",
+  ): WorkspaceLayoutNode => {
+    if (layout.kind === "split") {
+      return { ...layout, first: visit(layout.first, mode), second: visit(layout.second, mode) };
+    }
+    const context = layout.context;
+    if (context === undefined || context.projectId === null) return layout;
+    const { context: _context, ...bare } = layout;
+    const welcome = { ...bare, surface: workspaceWelcomeSurface(mode, layout.surface.id) };
+    const project = persistence.readProject(context.projectId);
+    if (project === undefined && isServerProjectFor(server, mode, context.projectId)) {
+      const rootBacked = layout.surface.kind === "browser" || layout.surface.kind === "files";
+      return {
+        ...(rootBacked ? welcome : bare),
+        context: { host: context.host, mode, projectId: context.projectId, boundRoot: null },
+      };
+    }
+    if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
+      return welcome;
+    }
+    const boundRoot = project.type === "chat" ? null : project.binding.canonicalRoot;
+    return boundRoot === context.boundRoot
+      ? layout
+      : { ...bare, context: { ...context, boundRoot } };
+  };
+  return {
+    ...workspace,
+    layouts: {
+      chat: visit(workspace.layouts.chat, "chat"),
+      work: visit(workspace.layouts.work, "work"),
+      code: visit(workspace.layouts.code, "code"),
+    },
+    stowedLayouts: workspace.stowedLayouts.map((stowed) => ({
+      ...stowed,
+      layout: visit(stowed.layout, stowed.context.mode),
+    })),
   };
 }
 
