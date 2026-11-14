@@ -7,7 +7,7 @@ import {
   type CreateHostViewScope,
 } from "@octant/domain";
 import { useEffect, useMemo, useState } from "react";
-import { Cloud } from "lucide-react";
+import { Cloud } from "../ui/icons";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface HostSelectorProps {

@@ -1,5 +1,5 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import { ChevronDown, ChevronUp, Ellipsis, GripVertical } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, GripVertical } from "../ui/icons";
 import { useId, useState } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Check, ChevronLeft, CircleCheck, CircleDot, Search } from "lucide-react";
+import { Check, ChevronLeft, CircleCheck, CircleDot, Search } from "../ui/icons";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   GithubAuthenticationSnapshot,

@@ -26,8 +26,8 @@ import {
   ShieldCheck,
   TabletSmartphone,
   UserRound,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { useEffect, useRef } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -68,7 +68,7 @@ const SETTINGS_GROUPS = [
 const SETTINGS_NAVIGATION_META: Readonly<
   Record<
     SettingsSectionId,
-    { readonly group: (typeof SETTINGS_GROUPS)[number]; readonly icon: LucideIcon }
+    { readonly group: (typeof SETTINGS_GROUPS)[number]; readonly icon: IconComponent }
   >
 > = {
   general: { group: "General", icon: Settings2 },
@@ -104,7 +104,7 @@ const SETTINGS_PAGE_ORDER = new Map(
 );
 
 /** The page's nav icon, shared with the tile in that page's header. */
-export function settingsSectionIcon(id: SettingsSectionId): LucideIcon {
+export function settingsSectionIcon(id: SettingsSectionId): IconComponent {
   return SETTINGS_NAVIGATION_META[id].icon;
 }
 

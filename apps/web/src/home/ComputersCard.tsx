@@ -1,7 +1,7 @@
 import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { HostResourceSnapshot } from "@octant/contracts/host-resources";
-import { Monitor } from "lucide-react";
+import { Monitor } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";

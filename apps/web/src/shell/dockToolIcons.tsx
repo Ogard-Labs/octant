@@ -19,11 +19,11 @@ import {
   SlidersHorizontal,
   SquareTerminal,
   Truck,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
-const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
+const ICONS: Readonly<Record<RightUtilityDockSurfaceId, IconComponent>> = {
   environment: SlidersHorizontal,
   browser: Globe2,
   canvas: FileStack,
@@ -45,7 +45,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   artifacts: Layers,
 };
 
-export function dockToolIcon(surface: RightUtilityDockSurfaceId): LucideIcon {
+export function dockToolIcon(surface: RightUtilityDockSurfaceId): IconComponent {
   return ICONS[surface] ?? CircleDashed;
 }
 

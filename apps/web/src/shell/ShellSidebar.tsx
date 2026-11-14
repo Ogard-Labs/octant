@@ -6,7 +6,7 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { House, PanelLeftClose, Search, SquarePen, X } from "lucide-react";
+import { House, PanelLeftClose, Search, SquarePen, X } from "../ui/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";

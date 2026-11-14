@@ -6,8 +6,8 @@ import {
   Search,
   Settings,
   SquarePen,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { Fragment, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
@@ -74,7 +74,7 @@ export interface SidebarRailProps {
 }
 
 const TILE_RAIL: Readonly<
-  Record<SidebarTileId, { readonly label: string; readonly icon: LucideIcon }>
+  Record<SidebarTileId, { readonly label: string; readonly icon: IconComponent }>
 > = {
   inbox: { label: "Inbox", icon: TILE_ICONS.inbox },
   running: { label: "Running", icon: TILE_ICONS.running },
@@ -315,7 +315,7 @@ function RailDivider() {
  */
 function RailButton(props: {
   readonly label: string;
-  readonly icon?: LucideIcon;
+  readonly icon?: IconComponent;
   readonly badge?: number;
   readonly active?: boolean;
   readonly onSelect?: () => void;

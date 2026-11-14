@@ -1,5 +1,5 @@
 import type { OpenInApplicationId } from "@octant/contracts/shell";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import type { OctantHostBridge, OpenInApplicationDescriptor } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";

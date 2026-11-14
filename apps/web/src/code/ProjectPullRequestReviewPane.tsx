@@ -12,7 +12,7 @@ import {
   type CodeProjectPullRequestSwitchesView,
   type CodeThreadId,
 } from "@octant/contracts";
-import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "lucide-react";
+import { Activity, GitBranch, GitPullRequest, MessageSquare, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";

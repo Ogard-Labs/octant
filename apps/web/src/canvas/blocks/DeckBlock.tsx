@@ -16,7 +16,7 @@ import {
   type CSSProperties,
   type RefObject,
 } from "react";
-import { ChevronLeft, ChevronRight, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play } from "../../ui/icons";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../../ui/base/OctantDialogPresence";

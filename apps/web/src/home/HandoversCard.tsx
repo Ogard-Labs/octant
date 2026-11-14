@@ -1,6 +1,6 @@
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ReceivedHandoverView } from "@octant/contracts";
-import { GitBranchPlus } from "lucide-react";
+import { GitBranchPlus } from "../ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";

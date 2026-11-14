@@ -1,4 +1,4 @@
-import { CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import { CircleCheck, Info, TriangleAlert, X } from "../icons";
 import { OctantButton, OctantIconButton } from "./OctantButton";
 
 export interface OctantToastProps {

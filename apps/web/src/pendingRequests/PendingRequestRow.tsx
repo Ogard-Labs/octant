@@ -2,7 +2,7 @@ import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { resolveSnoozePresets } from "@octant/domain";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
-import { CircleCheck, CirclePause } from "lucide-react";
+import { CircleCheck, CirclePause } from "../ui/icons";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { elapsedLabel } from "../lib/relativeTime";
 import { ProviderGlyph } from "../providers/ProviderGlyph";

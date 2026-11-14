@@ -7,7 +7,7 @@ import type {
   TaskAccessSnapshot,
   TaskAccessRecovery,
 } from "@octant/contracts";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { absoluteTimeFormatter } from "../lib/relativeTime";

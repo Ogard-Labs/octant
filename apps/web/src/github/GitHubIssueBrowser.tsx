@@ -16,7 +16,7 @@ import {
   FolderGit2,
   Search,
   SquarePen,
-} from "lucide-react";
+} from "../ui/icons";
 import "../code/pull-request-page.css";
 import { GitHubRepositoryPicker } from "../code/GitHubRepositoryPicker";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";

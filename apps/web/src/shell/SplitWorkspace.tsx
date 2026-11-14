@@ -16,7 +16,7 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummary,
 } from "@octant/contracts";
-import { GripVertical, X } from "lucide-react";
+import { GripVertical, X } from "../ui/icons";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenuIconSlot } from "../ui/base/OctantMenuIconSlot";

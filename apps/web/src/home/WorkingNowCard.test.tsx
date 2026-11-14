@@ -2,7 +2,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunCenterSummary } from "@octant/contracts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { createComputersCard } from "./ComputersCard";

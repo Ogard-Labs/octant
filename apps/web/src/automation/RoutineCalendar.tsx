@@ -1,5 +1,5 @@
 import type { AutomationSummary } from "@octant/contracts";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "../ui/icons";
 import { useMemo } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendarModel";

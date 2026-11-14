@@ -7,7 +7,7 @@ import {
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { ProviderUsageReporting } from "@octant/contracts";
 import { matchKeybinding } from "@octant/domain";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "../ui/icons";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";

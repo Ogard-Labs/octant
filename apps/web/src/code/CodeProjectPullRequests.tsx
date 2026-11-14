@@ -24,8 +24,8 @@ import {
   Search,
   Settings2,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import "./pull-request-page.css";
 import {
@@ -923,7 +923,7 @@ function FilterMenu(props: {
 
 function FilterGroup<T extends string>(props: {
   readonly label: string;
-  readonly icons?: Readonly<Record<string, LucideIcon>>;
+  readonly icons?: Readonly<Record<string, IconComponent>>;
   readonly options: ReadonlyArray<{ readonly value: T; readonly label: string }>;
   readonly value: T;
   readonly onChange: (value: T) => void;

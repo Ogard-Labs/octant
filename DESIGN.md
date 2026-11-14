@@ -464,7 +464,12 @@ compact field heights; a new desktop control takes a recipe height.
 
 ### Icons
 
-Lucide, one stroke of 1.5 set by `IconDefaults` (`apps/web/src/ui/IconDefaults.tsx`).
+Phosphor, imported only through the app's icon module (`apps/web/src/ui/icons`),
+which keeps the names call sites use. The family is drawn as filled outlines at
+fixed weights, so the weight follows the size: regular at 16px and below, light
+at 20px, bold for a tick inside a filled mark, fill for a selected state. A few
+glyphs have no exact match (a folder's git badge, a plus on a branch or an
+image) and draw the plain glyph.
 
 | Size | Token           | Where                                                          |
 | ---- | --------------- | -------------------------------------------------------------- |
@@ -473,8 +478,8 @@ Lucide, one stroke of 1.5 set by `IconDefaults` (`apps/web/src/ui/IconDefaults.t
 | 16   | `--oct-icon-md` | The default: buttons, menu rows, navigation rows, tool buttons |
 | 20   | `--oct-icon-lg` | An empty state, a dialog header, a page's empty mark           |
 
-A tick of 16px or less inside a filled mark takes `MARK_TICK_STROKE_WIDTH`
-(2.5). In a button pass the glyph with `data-icon` and let the recipe size it.
+A tick of 16px or less inside a filled mark asks for `MARK_TICK_STROKE_WIDTH`
+(2.5), which the module draws as the bold weight. In a button pass the glyph with `data-icon` and let the recipe size it.
 Provider marks are bundled, licensed artwork from `ProviderGlyph`, never
 fetched, never emoji.
 
@@ -1413,14 +1418,15 @@ The kit is `settings/primitives.tsx`; contents are in
 
 Every dialog is `OctantDialog`: 16px inset, the dialog title role, answers in
 one row at the trailing edge (the dismissing answer outlined first, the acting
+
 - **Buttons**: an action with words is a button with a fill at rest
   (`secondary`, or `ghost` resting on `--oct-fill-4` inside Settings); never
   bare text. Only an inline link in a sentence is text: the accent ink, an
   underline when pointed at (`variant="link"`).
-answer filled last, both 28px). A dialog that draws to its edges sets its inset
-with one class. A sheet is for a page-sized surface with the app live behind it;
-a non-modal glass panel anchored in its surface (Zen) stays a panel. Dialogs and
-sheets share `--oct-z-floating`; popups stand above them.
+  answer filled last, both 28px). A dialog that draws to its edges sets its inset
+  with one class. A sheet is for a page-sized surface with the app live behind it;
+  a non-modal glass panel anchored in its surface (Zen) stays a panel. Dialogs and
+  sheets share `--oct-z-floating`; popups stand above them.
 
 ### Toasts and notices
 

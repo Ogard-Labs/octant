@@ -1,5 +1,5 @@
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import {
   createContext,
   useContext,

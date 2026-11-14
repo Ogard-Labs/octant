@@ -1,6 +1,6 @@
 import type { ScaffoldEntry, ScaffoldRun } from "@octant/contracts/scaffolds";
 import { planScaffold } from "@octant/domain";
-import { Sparkles } from "lucide-react";
+import { Sparkles } from "../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";

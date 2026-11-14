@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronUp, Puzzle, Search, X } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {

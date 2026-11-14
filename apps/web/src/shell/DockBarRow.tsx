@@ -1,4 +1,4 @@
-import { ChevronDown, Ellipsis } from "lucide-react";
+import { ChevronDown, Ellipsis } from "../ui/icons";
 import {
   useLayoutEffect,
   useRef,

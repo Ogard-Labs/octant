@@ -6,7 +6,7 @@ import {
   type OctantKeybindingActionId,
   type OctantKeybindings,
 } from "@octant/domain";
-import { Check, Clock, CornerUpLeft, Minus, X, type LucideIcon } from "lucide-react";
+import { Check, Clock, CornerUpLeft, Minus, X, type IconComponent } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ParsedDiffFile } from "../code/unifiedDiff";
 import { UnifiedDiffList } from "../code/UnifiedDiffList";
@@ -112,7 +112,7 @@ function useLoaded<T>(
   return state.key === key ? state.loaded : { status: "loading" };
 }
 
-const CHECK_ICONS: Readonly<Record<ReviewCheckKind, LucideIcon>> = {
+const CHECK_ICONS: Readonly<Record<ReviewCheckKind, IconComponent>> = {
   passed: Check,
   failing: X,
   pending: Clock,

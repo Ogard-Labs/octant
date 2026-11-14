@@ -1,4 +1,4 @@
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import type { ThreadMessageQueueHoldReason, ThreadMessageQueueSnapshot } from "@octant/contracts";
 import { useId, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";

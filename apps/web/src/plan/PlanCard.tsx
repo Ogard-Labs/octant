@@ -1,5 +1,5 @@
 import type { ThreadPlan, ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
-import { CheckCircle2, Circle, CircleDot, CircleSlash } from "lucide-react";
+import { CheckCircle2, Circle, CircleDot, CircleSlash } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 

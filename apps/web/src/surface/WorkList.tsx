@@ -1,6 +1,6 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import { memo, type ReactNode } from "react";
-import { ArrowUpDown, ChevronDown } from "lucide-react";
+import { ArrowUpDown, ChevronDown } from "../ui/icons";
 import { compactRelativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
@@ -27,7 +27,7 @@ import { OctantTooltip } from "../ui/base/OctantTooltip";
 export interface WorkListState {
   readonly label: string;
   readonly tone: "open" | "draft" | "merged" | "closed";
-  readonly Icon: LucideIcon;
+  readonly Icon: IconComponent;
 }
 
 export interface WorkListRowProps {

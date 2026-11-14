@@ -7,7 +7,7 @@ import {
   type LinearIssueListPage,
   type LinearIssueRow,
 } from "@octant/contracts/linear-issues";
-import { Check, Circle, CircleCheck, CircleDashed, CircleDot, Search } from "lucide-react";
+import { Check, Circle, CircleCheck, CircleDashed, CircleDot, Search } from "../ui/icons";
 import { loadList, peekList } from "../composer/createFromCache";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";

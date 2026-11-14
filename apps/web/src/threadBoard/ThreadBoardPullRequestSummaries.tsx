@@ -2,7 +2,7 @@ import type {
   ThreadBoardPullRequestIdentity,
   ThreadBoardPullRequestSummaries as ThreadBoardPullRequestSummaryList,
 } from "@octant/contracts";
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ThreadBoardPullRequestSummariesProps {

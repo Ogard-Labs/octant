@@ -10,7 +10,7 @@ import {
   formatProviderAccountSignInCommand,
   formatProviderAccountStatusCommand,
 } from "@octant/domain";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "../../ui/icons";
 import { useState } from "react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";

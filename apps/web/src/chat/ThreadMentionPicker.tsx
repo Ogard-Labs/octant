@@ -4,7 +4,7 @@ import {
   parseThreadMentionToken,
   type ThreadMentionToken,
 } from "@octant/domain";
-import { Hash, MessagesSquare, X } from "lucide-react";
+import { Hash, MessagesSquare, X } from "../ui/icons";
 import { useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

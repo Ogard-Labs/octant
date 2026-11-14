@@ -15,7 +15,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { settleSettingsRail } from "./settingsRailScroll";
 import type { SkillRootStatus } from "@octant/contracts/extension-rpc";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
-import { ArrowLeft, Check, Menu, Search, X } from "lucide-react";
+import { ArrowLeft, Check, Menu, Search, X } from "../ui/icons";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { ServerProject } from "@octant/contracts/server-projects";

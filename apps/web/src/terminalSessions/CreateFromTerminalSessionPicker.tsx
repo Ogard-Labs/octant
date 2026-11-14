@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { Check, SquareTerminal } from "lucide-react";
+import { Check, SquareTerminal } from "../ui/icons";
 import type { TerminalSessionClient } from "@octant/client-runtime/terminal-session-client";
 import type {
   ProjectId,

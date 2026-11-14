@@ -1,6 +1,6 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeProjectPullRequestView } from "@octant/contracts";
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import type { HomeListCardDefinition, HomeListRead } from "./homeCards";

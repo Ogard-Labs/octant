@@ -10,7 +10,7 @@ import {
   isNativeHarnessDriverKind,
   modelCarriesAppManagedTools,
 } from "@octant/domain";
-import { Plus } from "lucide-react";
+import { Plus } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useHostPlatform } from "../platform";
 import { boundSubscriptionOffer } from "../providers/configuration/HttpConfigurationForms";

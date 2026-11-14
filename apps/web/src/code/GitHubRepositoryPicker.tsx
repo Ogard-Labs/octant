@@ -6,7 +6,7 @@ import type {
   GithubRepositoryRow,
   GithubRepositoryVisibility,
 } from "@octant/contracts";
-import { Check, Link, RefreshCw, Search } from "lucide-react";
+import { Check, Link, RefreshCw, Search } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { OctantInput } from "../ui/base/OctantInput";

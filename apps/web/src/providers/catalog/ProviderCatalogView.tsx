@@ -16,7 +16,7 @@ import {
   bundledProviderDriverCatalog,
   type ProviderDriverCatalogListing,
 } from "@octant/plugin-host/provider-drivers";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "../../ui/icons";
 import {
   useEffect,
   useId,

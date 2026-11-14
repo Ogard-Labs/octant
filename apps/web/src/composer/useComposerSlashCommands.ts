@@ -1,5 +1,5 @@
 import { createElement, useId, useState, type KeyboardEvent } from "react";
-import { Slash } from "lucide-react";
+import { Slash } from "../ui/icons";
 import {
   applySlashCommandToken,
   filterOctantCommands,

@@ -19,7 +19,7 @@ import {
   type ArrangeableItem,
   type ListArrangement,
 } from "@octant/client-runtime/list-arrangement";
-import { CalendarClock, ChevronDown, Pencil, Plus, Search, Sparkles } from "lucide-react";
+import { CalendarClock, ChevronDown, Pencil, Plus, Search, Sparkles } from "../ui/icons";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
 import { ROUTINE_REQUEST_SUGGESTIONS, type RoutineRequestDraft } from "./routineRequestDraft";

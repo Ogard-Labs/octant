@@ -8,7 +8,7 @@ import {
   GitBranch,
   LoaderCircle,
   RotateCcw,
-} from "lucide-react";
+} from "../ui/icons";
 
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { copyText } from "./TurnActionMenu";

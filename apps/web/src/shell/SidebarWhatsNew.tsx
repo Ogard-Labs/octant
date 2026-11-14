@@ -1,4 +1,4 @@
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight, X } from "../ui/icons";
 import type { MouseEvent } from "react";
 import type { WhatsNewCardContent } from "../settings/useWhatsNewAfterUpdate";
 import { OctantButton } from "../ui/base/OctantButton";

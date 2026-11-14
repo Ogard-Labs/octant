@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts/folder-browse";
 import type { HostId } from "@octant/contracts/host";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
-import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "lucide-react";
+import { ChevronRight, FolderOpen, GitBranch, Home, Search } from "../ui/icons";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";

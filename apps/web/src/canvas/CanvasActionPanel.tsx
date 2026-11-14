@@ -4,7 +4,7 @@ import {
   safeCanvasActionDenialReason,
   type CanvasActionAvailability,
 } from "@octant/domain/canvas-action-availability-policy";
-import { Ban, Check, Eye, LoaderCircle, LockKeyhole, Pencil, ShieldAlert } from "lucide-react";
+import { Ban, Check, Eye, LoaderCircle, LockKeyhole, Pencil, ShieldAlert } from "../ui/icons";
 import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 

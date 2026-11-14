@@ -1,6 +1,6 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { Bot } from "lucide-react";
+import { Bot } from "../ui/icons";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
 import {
   isActiveAgentHierarchyStatus,

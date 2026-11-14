@@ -1,4 +1,4 @@
-import { ChevronRight, type LucideIcon } from "lucide-react";
+import { ChevronRight, type IconComponent } from "../ui/icons";
 import { useId, useState, type ReactNode, type Ref } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -6,7 +6,7 @@ import { OctantButton } from "../ui/base/OctantButton";
  * The glyph tile every Environment row leads with. The glyph is decoration:
  * the row's title names it.
  */
-export function EnvironmentTile(props: { readonly icon: LucideIcon }) {
+export function EnvironmentTile(props: { readonly icon: IconComponent }) {
   return (
     <span aria-hidden="true" className="environment-tile">
       <props.icon size={14} />
@@ -44,7 +44,7 @@ export function EnvironmentCard(props: {
 export interface EnvironmentGroupProps {
   readonly title: string;
   /** The row's glyph; every Environment row leads with one so titles align. */
-  readonly icon?: LucideIcon;
+  readonly icon?: IconComponent;
   /** Short trailing summary shown on the header row (e.g. "+102 −0"). */
   readonly summary?: ReactNode;
   readonly defaultOpen?: boolean;

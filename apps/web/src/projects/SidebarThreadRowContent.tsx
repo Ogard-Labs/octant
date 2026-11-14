@@ -1,6 +1,6 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
-import { Bot, GitBranch, GitPullRequest, Network, type LucideIcon } from "lucide-react";
+import { Bot, GitBranch, GitPullRequest, Network, type IconComponent } from "../ui/icons";
 import { ProjectMark } from "./ProjectMark";
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
@@ -38,7 +38,7 @@ export interface SidebarThreadRowState {
   readonly status: SidebarThreadStatus;
   /** The visible words, such as "Working 14m" or "Needs you". */
   readonly text: string;
-  readonly icon?: LucideIcon | undefined;
+  readonly icon?: IconComponent | undefined;
 }
 
 /**

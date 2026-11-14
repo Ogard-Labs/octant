@@ -1,4 +1,4 @@
-import { Ellipsis, GitPullRequest } from "lucide-react";
+import { Ellipsis, GitPullRequest } from "../ui/icons";
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon, dockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";

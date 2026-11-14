@@ -5,6 +5,7 @@
 import { makeIcon } from "./makeIcon";
 import { AlarmIcon } from "@phosphor-icons/react/dist/csr/Alarm";
 import { AppWindowIcon } from "@phosphor-icons/react/dist/csr/AppWindow";
+import { CursorClickIcon } from "@phosphor-icons/react/dist/csr/CursorClick";
 import { ArchiveIcon } from "@phosphor-icons/react/dist/csr/Archive";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowCounterClockwiseIcon } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
@@ -378,6 +379,7 @@ export const Monitor = /* @__PURE__ */ makeIcon("monitor", MonitorIcon);
 export const MonitorUp = /* @__PURE__ */ makeIcon("monitor-up", MonitorArrowUpIcon);
 export const MoreHorizontal = /* @__PURE__ */ makeIcon("more-horizontal", DotsThreeIcon);
 export const MousePointer2 = /* @__PURE__ */ makeIcon("mouse-pointer2", CursorIcon);
+export const MousePointerClick = /* @__PURE__ */ makeIcon("mouse-pointer-click", CursorClickIcon);
 export const Network = /* @__PURE__ */ makeIcon("network", ShareNetworkIcon);
 export const NotebookPen = /* @__PURE__ */ makeIcon("notebook-pen", NotebookIcon);
 export const Palette = /* @__PURE__ */ makeIcon("palette", PaletteIcon);

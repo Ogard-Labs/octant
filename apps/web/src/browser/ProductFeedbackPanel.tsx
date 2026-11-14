@@ -2,7 +2,7 @@ import type {
   ProductFeedbackNote,
   ProductFeedbackPreview,
 } from "@octant/contracts/product-feedback";
-import { MessageSquare, X } from "lucide-react";
+import { MessageSquare, X } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";

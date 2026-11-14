@@ -2,15 +2,7 @@ import { homeRelativePath } from "../lib/homeRelativePath";
 import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { ProjectId } from "@octant/contracts/projects";
-import {
-  ArrowLeft,
-  Check,
-  FolderGit2,
-  FolderOpen,
-  FolderPlus,
-  Network,
-  Search,
-} from "lucide-react";
+import { ArrowLeft, Check, FolderGit2, FolderOpen, FolderPlus, Network, Search } from "../ui/icons";
 import {
   lazy,
   Suspense,

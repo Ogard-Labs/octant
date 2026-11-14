@@ -28,7 +28,7 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, AlertTriangle } from "lucide-react";
+import { FolderOpen, AlertTriangle } from "../../ui/icons";
 import {
   useCallback,
   useContext,

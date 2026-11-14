@@ -8,7 +8,7 @@ import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
 import { providerFamilyForThread } from "../providers/providerFamily";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
-import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { Compass, GraduationCap, ListChecks, PenLine } from "../ui/icons";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { pastedImageName } from "./composerImagePaste";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";

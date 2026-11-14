@@ -1,6 +1,6 @@
 import { useMinuteNow } from "../polling/useMinuteTick";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
-import { BellRing } from "lucide-react";
+import { BellRing } from "../ui/icons";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import type { HomeListCardDefinition, HomeListRead } from "./homeCards";
 import { threadListId } from "./homeListModel";

@@ -11,7 +11,7 @@ import {
   Handshake,
   PanelsTopLeft,
   UserRoundCog,
-} from "lucide-react";
+} from "../ui/icons";
 import { useMemo, useState } from "react";
 import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
 import {

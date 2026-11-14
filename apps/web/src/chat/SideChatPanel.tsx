@@ -5,7 +5,7 @@ import type {
   SideChatSidecar,
   ThreadMentionRequestId,
 } from "@octant/contracts";
-import { MessagesSquare } from "lucide-react";
+import { MessagesSquare } from "../ui/icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton } from "../ui/base/OctantButton";

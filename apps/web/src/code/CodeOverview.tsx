@@ -18,7 +18,7 @@ import {
   PinOff,
   RefreshCw,
   Terminal,
-} from "lucide-react";
+} from "../ui/icons";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";

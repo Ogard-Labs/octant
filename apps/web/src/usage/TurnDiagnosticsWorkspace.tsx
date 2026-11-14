@@ -19,7 +19,7 @@ import type {
   UsageQueryFilter,
 } from "@octant/contracts";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
-import { Copy, RefreshCw } from "lucide-react";
+import { Copy, RefreshCw } from "../ui/icons";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";

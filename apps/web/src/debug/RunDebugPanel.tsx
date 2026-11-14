@@ -11,7 +11,7 @@ import type {
   CodeDebugConfiguration,
   CodeDebugConfigurationsResult,
 } from "@octant/contracts/code-debug";
-import { Bug, Play, Plus, RotateCw } from "lucide-react";
+import { Bug, Play, Plus, RotateCw } from "../ui/icons";
 import { useDockBarControls } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { codeEditorRevealKey, requestCodeEditorReveal } from "../code/codeEditorReveal";

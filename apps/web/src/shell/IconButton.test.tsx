@@ -1,14 +1,14 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { LucideIcon, LucideProps } from "lucide-react";
+import type { IconComponent, IconProps } from "../ui/icons";
 import { IconButton } from "./IconButton";
 
-const TestIcon = function TestIcon({ size, strokeWidth, ...props }: LucideProps) {
+const TestIcon = function TestIcon({ size, strokeWidth, ...props }: IconProps) {
   return (
     <svg {...props} data-testid="test-icon" height={size} strokeWidth={strokeWidth} width={size} />
   );
-} as LucideIcon;
+} as IconComponent;
 
 describe("IconButton", () => {
   it("keeps icon-only shell actions named, titled, and outside drag regions", async () => {

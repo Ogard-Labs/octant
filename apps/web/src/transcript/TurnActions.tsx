@@ -1,4 +1,4 @@
-import { Copy, GitBranch, RotateCcw, Square, Volume2 } from "lucide-react";
+import { Copy, GitBranch, RotateCcw, Square, Volume2 } from "../ui/icons";
 
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { useReadAloud } from "../voice/useReadAloud";

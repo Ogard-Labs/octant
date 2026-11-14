@@ -4,7 +4,7 @@ import {
   type AgentRunConversationResponse,
 } from "@octant/contracts";
 import { agentRunRecoveryLabel } from "./agentsCenterModel";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 import { useId, useState } from "react";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { Markdown } from "../markdown/Markdown";

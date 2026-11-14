@@ -17,7 +17,7 @@ import {
   MoreHorizontal,
   RefreshCw,
   TriangleAlert,
-} from "lucide-react";
+} from "../ui/icons";
 import { useState, type ReactNode, type RefObject } from "react";
 import { Markdown } from "../markdown/Markdown";
 import { relativeTimeLabel } from "../lib/relativeTime";

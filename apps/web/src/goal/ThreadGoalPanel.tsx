@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { ThreadGoalBudget } from "@octant/contracts";
-import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "lucide-react";
+import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { GoalCard } from "./GoalCard";

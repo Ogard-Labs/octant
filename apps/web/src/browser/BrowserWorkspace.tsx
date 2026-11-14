@@ -60,7 +60,7 @@ import {
   ShieldCheck,
   Undo2,
   X,
-} from "lucide-react";
+} from "../ui/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton, OctantIconButton, octantButtonClassName } from "../ui/base/OctantButton";

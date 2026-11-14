@@ -23,7 +23,7 @@ import {
   subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
 } from "@octant/domain";
-import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "../ui/icons";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ProviderToolVerification } from "./ProviderToolVerification";
 import { ClaudeArtifactDeliverySetting } from "./ClaudeArtifactDeliverySetting";

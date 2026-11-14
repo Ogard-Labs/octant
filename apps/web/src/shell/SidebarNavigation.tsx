@@ -11,7 +11,7 @@ import {
   ListTodo,
   SquareKanban,
   SquarePen,
-} from "lucide-react";
+} from "../ui/icons";
 import type { ReactNode } from "react";
 import {
   buildSidebarNavigation,

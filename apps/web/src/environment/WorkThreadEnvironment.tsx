@@ -3,7 +3,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FolderOpen, Repeat } from "lucide-react";
+import { FolderOpen, Repeat } from "../ui/icons";
 import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";

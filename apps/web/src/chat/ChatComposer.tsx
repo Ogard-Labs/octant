@@ -11,7 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Globe2, Slash, SlidersHorizontal, X } from "lucide-react";
+import { Globe2, Slash, SlidersHorizontal, X } from "../ui/icons";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {

@@ -6,7 +6,7 @@ import {
   type CodeThreadId,
 } from "@octant/contracts";
 import type { CodeFileListingClient } from "@octant/client-runtime";
-import { FolderTree, RefreshCw } from "lucide-react";
+import { FolderTree, RefreshCw } from "../ui/icons";
 import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";

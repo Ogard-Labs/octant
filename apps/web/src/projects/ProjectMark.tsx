@@ -1,4 +1,4 @@
-import { Folder } from "lucide-react";
+import { Folder } from "../ui/icons";
 import type { CSSProperties } from "react";
 import { ProjectIcon } from "./ProjectIcon";
 

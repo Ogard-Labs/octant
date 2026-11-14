@@ -1,5 +1,5 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import type { ReactNode } from "react";
 import type { HomeListRow, HomeListSectionId, HomeListSeeAll } from "./homeListModel";
 
@@ -55,7 +55,7 @@ interface HomeCardIdentity {
   /** Stable, lower-case, stored in settings; never reused for another card. */
   readonly id: string;
   readonly title: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   /** Whether the card is on until the person turns it off. */
   readonly defaultOn: boolean;
   /**

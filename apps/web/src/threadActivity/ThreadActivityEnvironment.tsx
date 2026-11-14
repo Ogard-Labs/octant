@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { PictureInPicture2 } from "lucide-react";
+import { PictureInPicture2 } from "../ui/icons";
 import { EnvironmentTile } from "../environment/EnvironmentGroup";
 import { OctantButton } from "../ui/base/OctantButton";
 

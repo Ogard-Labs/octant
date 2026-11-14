@@ -1,5 +1,5 @@
 import type { ProjectAction } from "@octant/contracts/projects";
-import { ChevronDown, Play } from "lucide-react";
+import { ChevronDown, Play } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";

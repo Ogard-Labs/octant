@@ -5,7 +5,7 @@ import type {
   ThreadExternalContentSource,
   ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
-import { Globe } from "lucide-react";
+import { Globe } from "../ui/icons";
 import {
   createContext,
   useCallback,

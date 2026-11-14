@@ -1,4 +1,4 @@
-import { GitBranch } from "lucide-react";
+import { GitBranch } from "../ui/icons";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";

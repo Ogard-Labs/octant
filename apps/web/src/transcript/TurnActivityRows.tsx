@@ -12,7 +12,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldX,
-} from "lucide-react";
+} from "../ui/icons";
 import {
   useCallback,
   useEffect,

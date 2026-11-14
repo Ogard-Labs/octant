@@ -30,7 +30,7 @@ import {
   Paperclip,
   Server,
   Target,
-} from "lucide-react";
+} from "../ui/icons";
 import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAttachmentGallery";
 import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";

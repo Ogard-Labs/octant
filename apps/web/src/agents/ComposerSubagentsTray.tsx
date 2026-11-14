@@ -1,7 +1,7 @@
 import type { AgentObservedChild } from "@octant/contracts";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, X } from "../ui/icons";
 import { useContext, useEffect, useId, useState } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";

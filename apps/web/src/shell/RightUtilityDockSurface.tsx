@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { moveWithinTabList } from "../ui/base/radioGroupKeys";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "../ui/icons";
 import {
   useContext,
   useEffect,

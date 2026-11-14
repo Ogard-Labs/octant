@@ -50,7 +50,7 @@ describe("SidebarThreadRowContent Project icon", () => {
     const { fetcher, source } = iconSourceFor([projectId]);
     const { container } = rows(source, [undefined as never]);
     expect(fetcher).not.toHaveBeenCalled();
-    expect(container.querySelector("svg.lucide-folder")).not.toBeNull();
+    expect(container.querySelector("svg.octant-icon-folder")).not.toBeNull();
   });
 
   it("makes one icon request for many thread rows in the same Project", async () => {

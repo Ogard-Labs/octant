@@ -3,7 +3,7 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { GithubCloneClient } from "@octant/client-runtime/github-clone-client";
 import type { OctantMode } from "@octant/contracts/modes";
 import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
-import { FolderOpen, FolderGit2 } from "lucide-react";
+import { FolderOpen, FolderGit2 } from "../ui/icons";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { GithubCloneDestinationChoice } from "../code/GitHubRepositoryOnboarding";
 import type { OctantHostBridge } from "../shell/hostBridge";

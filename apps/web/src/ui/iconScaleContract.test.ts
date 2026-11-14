@@ -2,9 +2,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Search } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import { ICON_STROKE_WIDTH, IconDefaults, MARK_TICK_STROKE_WIDTH } from "./IconDefaults";
+import { Search } from "./icons";
 
 const sourceRoot = resolve(process.cwd(), "src");
 
@@ -89,17 +89,22 @@ describe("icon scale contract", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("gives an icon the one stroke when it asks for none", () => {
+  it("draws an icon at the size it asks for, inside the app's icon defaults", () => {
+    // The icon family is drawn as filled outlines at fixed weights, so the one
+    // stroke is now a weight chosen from the size inside each icon, not a
+    // stroke-width a provider hands down.
     const markup = renderToStaticMarkup(
       createElement(IconDefaults, null, createElement(Search, { size: 14 })),
     );
 
-    expect(markup).toContain(`stroke-width="${String(ICON_STROKE_WIDTH)}"`);
+    expect(markup).toContain('width="14"');
+    expect(markup).toContain("octant-icon-");
+    expect(markup).not.toContain("stroke-width");
   });
 
   it("sees a stroke or size given in a props object and not only in JSX", () => {
     const source = [
-      'import { Slash } from "lucide-react";',
+      'import { Slash } from "../ui/icons";',
       "createElement(Slash, { 'aria-hidden': true, size: 13, strokeWidth: 1.8 });",
       "const spread = <Slash {...{ size: 24 }} />;",
       "const tick = <Check strokeWidth={MARK_TICK_STROKE_WIDTH} />;",
@@ -165,7 +170,7 @@ function strokeWidths(source: string): ReadonlyArray<string> {
 }
 
 function importsIcons(source: string): boolean {
-  return /from\s+"lucide-react"/.test(source);
+  return /from\s+"(?:\.{1,2}\/)+(?:ui\/)?icons"/.test(source);
 }
 
 /**

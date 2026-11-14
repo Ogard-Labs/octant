@@ -20,7 +20,7 @@ import {
   Filter,
   RefreshCw,
   Trash2,
-} from "lucide-react";
+} from "../ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";

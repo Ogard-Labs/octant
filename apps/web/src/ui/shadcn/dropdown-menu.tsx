@@ -1,5 +1,5 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "../icons";
 import {
   createContext,
   useContext,

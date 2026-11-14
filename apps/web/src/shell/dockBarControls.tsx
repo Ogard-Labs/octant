@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import {
   createContext,
   useCallback,
@@ -18,7 +18,7 @@ export interface DockBarButton {
   /** The accessible name and, unless `title` says more, the tooltip. */
   readonly label: string;
   readonly title?: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly onSelect: () => void;
   readonly disabled?: boolean;
   /**
@@ -34,7 +34,7 @@ export interface DockBarMenu {
   readonly kind: "menu";
   readonly id: string;
   readonly label: string;
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly items: ReadonlyArray<{
     readonly id: string;
     readonly label: string;

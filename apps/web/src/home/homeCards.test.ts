@@ -1,4 +1,4 @@
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { describe, expect, it } from "vitest";
 import {
   arrangeHomeCards,

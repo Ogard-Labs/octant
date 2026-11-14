@@ -26,7 +26,7 @@ import { BenchmarksWorkspace } from "./benchmarks/BenchmarksWorkspace";
 import type { CodeProjectChoice } from "./benchmarks/BenchmarkSuiteEditor";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ProviderUsageLimitsPanel } from "./ProviderUsageLimitsPanel";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";

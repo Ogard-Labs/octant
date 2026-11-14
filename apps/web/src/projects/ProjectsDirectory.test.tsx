@@ -112,7 +112,7 @@ describe("ProjectsDirectory icons", () => {
 
     await waitFor(() => expect(container.querySelectorAll("img.project-icon")).toHaveLength(1));
     expect(container.querySelector("img.project-icon")).toHaveAttribute("src", "blob:harbor-icon");
-    expect(container.querySelectorAll("svg.lucide-folder")).toHaveLength(1);
+    expect(container.querySelectorAll("svg.octant-icon-folder")).toHaveLength(1);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

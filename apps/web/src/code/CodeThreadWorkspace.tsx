@@ -34,7 +34,7 @@ import {
   threadAccessOf,
   type PickerGroup,
 } from "@octant/domain";
-import { ChevronDown, CirclePause, X } from "lucide-react";
+import { ChevronDown, CirclePause, X } from "../ui/icons";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {

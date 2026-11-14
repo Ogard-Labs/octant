@@ -1,4 +1,4 @@
-import { Ellipsis, PanelLeft } from "lucide-react";
+import { Ellipsis, PanelLeft } from "../ui/icons";
 import {
   OctantMenuGroup,
   OctantMenuItem,

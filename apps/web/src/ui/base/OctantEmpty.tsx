@@ -4,8 +4,8 @@ import {
   RefreshCcw,
   TriangleAlert,
   WifiOff,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../icons";
 import { useId, type ReactNode } from "react";
 import {
   Empty,
@@ -30,7 +30,7 @@ export {
 
 export type OctantEmptyState = "disconnected" | "loading" | "neutral" | "warning";
 
-const stateIcons: Record<OctantEmptyState, LucideIcon> = {
+const stateIcons: Record<OctantEmptyState, IconComponent> = {
   disconnected: WifiOff,
   loading: LoaderCircle,
   neutral: Compass,
@@ -64,7 +64,7 @@ export interface OctantEmptyStateProps {
     readonly label: string;
     readonly onClick: () => void;
     /** The action's own glyph; a retry is the default, not the only meaning. */
-    readonly glyph?: LucideIcon;
+    readonly glyph?: IconComponent;
   };
   readonly eyebrow?: string;
   /** One sentence under the title; a loading line is the title alone. */

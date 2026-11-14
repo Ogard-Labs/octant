@@ -1,4 +1,4 @@
-import { Gauge } from "lucide-react";
+import { Gauge } from "../ui/icons";
 import { EnvironmentGroup } from "../environment/EnvironmentGroup";
 import { compactTokenCount } from "../context/contextInspectorModel";
 import {

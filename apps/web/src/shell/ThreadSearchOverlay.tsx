@@ -7,7 +7,7 @@ import {
   Settings,
   SquarePen,
   TriangleAlert,
-} from "lucide-react";
+} from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";

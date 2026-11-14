@@ -1,5 +1,5 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
+import { FolderOpen, FolderPlus, SquarePen } from "../ui/icons";
 import { WELCOME_QUESTION } from "../composer/WelcomeHeading";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkKindSwitch } from "./WorkKindSwitch";

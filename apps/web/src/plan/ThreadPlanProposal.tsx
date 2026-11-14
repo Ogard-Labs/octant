@@ -1,4 +1,4 @@
-import { ListChecks } from "lucide-react";
+import { ListChecks } from "../ui/icons";
 import { useId, useState } from "react";
 import { useRegisterComposerMenuAction } from "../composer/ComposerMenuActions";
 import { OctantDialog } from "../ui/base/OctantDialog";

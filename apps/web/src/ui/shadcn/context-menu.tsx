@@ -1,5 +1,5 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronRight } from "../icons";
 import type { ComponentProps } from "react";
 import { menuGroupLabel, menuRow, menuSeparator } from "./menu-row";
 import { cn } from "./utils";

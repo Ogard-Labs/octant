@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { GitBranch, MessageSquarePlus, X } from "lucide-react";
+import { GitBranch, MessageSquarePlus, X } from "../ui/icons";
 import type { SideTask, SideTaskContext, SideTaskResult } from "@octant/contracts";
 import {
   SideTaskClientFailure,

@@ -2,7 +2,7 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "lucide-react";
+import { CircleDot, Folder, GitPullRequest, ListTodo, RefreshCw } from "../ui/icons";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";

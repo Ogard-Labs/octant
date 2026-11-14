@@ -26,8 +26,8 @@ import {
   PinOff,
   RotateCcw,
   RotateCw,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import type { ReactNode } from "react";
 import {
   OctantContextMenuCheckboxItem,
@@ -648,7 +648,7 @@ export function ThreadCoordinatorMenuItems(props: {
   );
 }
 
-function MenuContent(props: { readonly icon: LucideIcon; readonly children: ReactNode }) {
+function MenuContent(props: { readonly icon: IconComponent; readonly children: ReactNode }) {
   const Icon = props.icon;
   return (
     <>

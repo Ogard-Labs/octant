@@ -1,5 +1,5 @@
 import { Select as SelectPrimitive } from "@base-ui/react/select";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "../icons";
 import type { ComponentProps } from "react";
 import { fieldPaint } from "./field-paint";
 import { menuGroupLabel, menuRow } from "./menu-row";

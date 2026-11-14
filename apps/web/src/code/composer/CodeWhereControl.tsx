@@ -1,6 +1,6 @@
 import { DEFAULT_CODE_NEW_THREAD_WORKSPACE } from "@octant/contracts/projects";
 import type { CodeNewThreadWorkspace } from "@octant/contracts/projects";
-import { ChevronDown, FolderGit2, FolderOpen } from "lucide-react";
+import { ChevronDown, FolderGit2, FolderOpen } from "../../ui/icons";
 import { useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { MiddleEllipsis } from "../../ui/base/MiddleEllipsis";

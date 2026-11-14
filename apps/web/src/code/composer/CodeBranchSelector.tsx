@@ -1,5 +1,5 @@
 import type { CodeWorktreeRef } from "@octant/contracts/code";
-import { Check, ChevronDown, GitBranch, Search } from "lucide-react";
+import { Check, ChevronDown, GitBranch, Search } from "../../ui/icons";
 import { useMemo, useRef, useState } from "react";
 import { OctantSwitch } from "../../ui/base/OctantSwitch";
 import { OctantBadge } from "../../ui/base/OctantBadge";

@@ -1,6 +1,6 @@
 import { useMinuteNow } from "../polling/useMinuteTick";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import { useMemo } from "react";
 import { elapsedLabel, relativeTimeLabel } from "../lib/relativeTime";
 import type { HomeListCardDefinition, HomeListRead } from "./homeCards";

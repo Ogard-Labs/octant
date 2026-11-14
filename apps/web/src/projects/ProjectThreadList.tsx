@@ -30,8 +30,8 @@ import {
   Pin,
   PinOff,
   RotateCcw,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "../ui/icons";
+import type { IconComponent } from "../ui/icons";
 import { resolveSnoozePresets } from "@octant/domain";
 import {
   sidebarThreadStatusInput,
@@ -126,7 +126,7 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
  * draws unread as a dot and idle as nothing at all, so an icon here would be a
  * second, louder reading of the same state.
  */
-export function sidebarThreadStatusIcon(status: SidebarThreadStatus): LucideIcon | undefined {
+export function sidebarThreadStatusIcon(status: SidebarThreadStatus): IconComponent | undefined {
   switch (status) {
     case "working":
       return LoaderCircle;
@@ -287,7 +287,7 @@ export function threadRowAge(updatedAt: string | undefined): string | undefined 
 
 /** One icon-and-label line of the info card. */
 interface ThreadRowFact {
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly key: string;
   readonly label: string;
 }

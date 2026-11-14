@@ -9,7 +9,7 @@ import {
   ShieldAlert,
   TriangleAlert,
   Unplug,
-} from "lucide-react";
+} from "../ui/icons";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { forwardRef, type ComponentType } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";

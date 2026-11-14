@@ -13,7 +13,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { DesktopOwnerUnlockPort } from "@octant/client-runtime";
-import { ArrowRight, ChevronRight, Laptop, Server } from "lucide-react";
+import { ArrowRight, ChevronRight, Laptop, Server } from "../../ui/icons";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantBadge } from "../../ui/base/OctantBadge";

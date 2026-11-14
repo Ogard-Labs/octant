@@ -1,4 +1,4 @@
-import { Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "../icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "./OctantButton";
 import { OctantInput } from "./OctantInput";

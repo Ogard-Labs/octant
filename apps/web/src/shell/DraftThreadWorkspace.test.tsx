@@ -5,7 +5,7 @@ import {
   decodeProviderModelId,
 } from "@octant/contracts";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Activity } from "lucide-react";
+import { Activity } from "../ui/icons";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {

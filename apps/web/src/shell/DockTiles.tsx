@@ -1,4 +1,4 @@
-import { LayoutPanelLeft, X } from "lucide-react";
+import { LayoutPanelLeft, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,

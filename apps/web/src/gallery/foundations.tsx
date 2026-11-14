@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
+import { Check, ChevronDown, Folder, GitBranch, Search } from "../ui/icons";
 import { useEffect, useState, type CSSProperties } from "react";
 import { MARK_TICK_STROKE_WIDTH } from "../ui/IconDefaults";
 import { Section, Specimen } from "./Specimen";

@@ -1,4 +1,4 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 import type { ReactNode } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
 

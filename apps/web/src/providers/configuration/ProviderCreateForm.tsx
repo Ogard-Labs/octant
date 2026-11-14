@@ -8,7 +8,7 @@ import {
   type ClaudeAccountAccent,
   type ClaudeAuthentication,
 } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../../ui/icons";
 import { useRef, useState } from "react";
 import { hostCredentialStore, useHostPlatform } from "../../platform";
 import { OctantButton } from "../../ui/base/OctantButton";

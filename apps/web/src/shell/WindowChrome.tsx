@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
+import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "../ui/icons";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useActionShortcut } from "../keybindings/useActionShortcut";

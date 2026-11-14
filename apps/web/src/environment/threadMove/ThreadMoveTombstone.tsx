@@ -1,5 +1,5 @@
 import type { ThreadMoveThreadStatus } from "@octant/contracts";
-import { ArrowRight, Laptop } from "lucide-react";
+import { ArrowRight, Laptop } from "../../ui/icons";
 import { useId, useRef, useState } from "react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";

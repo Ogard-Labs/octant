@@ -6,7 +6,7 @@ import type {
 } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
 import { findPickerModel, pickerCatalogs, providerAccountAccent } from "@octant/domain";
-import { Check, Clock, Plus, RotateCcw, Search, Star } from "lucide-react";
+import { Check, Clock, Plus, RotateCcw, Search, Star } from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   modelFavoriteKey,

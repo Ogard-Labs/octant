@@ -1,5 +1,5 @@
 import type { AgentObservedChild } from "@octant/contracts";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 

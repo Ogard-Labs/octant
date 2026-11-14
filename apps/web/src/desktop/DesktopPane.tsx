@@ -15,7 +15,7 @@ import type {
   LeasableDesktopProvider,
 } from "@octant/contracts";
 import { decodeDesktopPaneRequest } from "@octant/contracts";
-import { Clock, Monitor, Power, RotateCw } from "lucide-react";
+import { Clock, Monitor, Power, RotateCw } from "../ui/icons";
 import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { DeviceLine } from "../device/DeviceLine";

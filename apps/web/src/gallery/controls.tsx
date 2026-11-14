@@ -1,4 +1,4 @@
-import { Bell, Check, Plus, Settings, Trash2 } from "lucide-react";
+import { Bell, Check, Plus, Settings, Trash2 } from "../ui/icons";
 import { useState, type ReactNode } from "react";
 import { IconButton } from "../shell/IconButton";
 import { OctantBadge } from "../ui/base/OctantBadge";

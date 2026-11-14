@@ -92,8 +92,8 @@ describe("SidebarRail", () => {
     );
 
     const work = screen.getByRole("button", { name: "Work" });
-    expect(work.querySelector("svg.lucide-message-square")).not.toBeNull();
-    expect(work.querySelector("svg.lucide-folder-open")).toBeNull();
+    expect(work.querySelector("svg.octant-icon-message-square")).not.toBeNull();
+    expect(work.querySelector("svg.octant-icon-folder-open")).toBeNull();
   });
 
   describe("pinned Projects", () => {

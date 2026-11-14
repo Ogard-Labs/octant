@@ -5,7 +5,7 @@ import type {
   CodeProjectPullRequestView,
   ProjectId,
 } from "@octant/contracts";
-import { ArrowUpRight, GitPullRequest, RefreshCw } from "lucide-react";
+import { ArrowUpRight, GitPullRequest, RefreshCw } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import {
   checksStatus,

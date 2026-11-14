@@ -3,7 +3,7 @@ import type {
   CanvasCardStatus,
   CanvasThreadReferenceCard as Card,
 } from "@octant/contracts/canvas-cards";
-import { ChevronRight, FileStack, Maximize2 } from "lucide-react";
+import { ChevronRight, FileStack, Maximize2 } from "../ui/icons";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";

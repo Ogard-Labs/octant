@@ -6,7 +6,7 @@ import type {
   GithubAuthenticationState,
   GithubCapabilityKind,
 } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";

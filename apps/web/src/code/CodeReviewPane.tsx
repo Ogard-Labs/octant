@@ -21,7 +21,7 @@ import {
 import { Schema } from "effect";
 const decodeCodeDigest = Schema.decodeUnknownSync(CodeDigest);
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
-import { ClipboardCheck, MessageCircle } from "lucide-react";
+import { ClipboardCheck, MessageCircle } from "../ui/icons";
 import { Markdown } from "../markdown/Markdown";
 import "./project-pull-request-review.css";
 import { useState } from "react";

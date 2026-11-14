@@ -7,7 +7,7 @@ import {
 } from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import "../followUps/follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";

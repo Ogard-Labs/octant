@@ -3,7 +3,7 @@ import type {
   ArtifactMirrorProjectStatus,
   ArtifactMirrorSettings as MirrorSettings,
 } from "@octant/contracts/artifact-mirror";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp } from "../ui/icons";
 import { useState } from "react";
 import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";

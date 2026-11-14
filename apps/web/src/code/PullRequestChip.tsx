@@ -2,7 +2,7 @@ import type {
   ThreadBoardPullRequestChecksSummary,
   ThreadBoardPullRequestState,
 } from "@octant/contracts";
-import { GitPullRequest } from "lucide-react";
+import { GitPullRequest } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 
 const STATE_LABELS: Readonly<Record<ThreadBoardPullRequestState, string>> = {

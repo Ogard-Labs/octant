@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import { DockUtilityLauncher } from "./DockUtilityLauncher";
 import { IconButton } from "./IconButton";

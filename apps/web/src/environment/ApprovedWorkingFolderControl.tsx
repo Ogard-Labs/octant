@@ -4,7 +4,7 @@ import {
   type ApprovedWorkingFolder,
   type ThreadWorkingFolderChoice,
 } from "@octant/contracts";
-import { ChevronDown, FolderTree } from "lucide-react";
+import { ChevronDown, FolderTree } from "../ui/icons";
 import { useId, useState, useEffect } from "react";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";

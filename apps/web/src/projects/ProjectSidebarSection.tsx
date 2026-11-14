@@ -36,8 +36,8 @@ import {
   Star,
   Terminal,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { groupProjectsForView, sortProjectsForView } from "@octant/domain";
 import { ContextHealthWarning } from "../context/ContextHealthWarning";
 import {
@@ -179,7 +179,7 @@ interface OtherModeProjectsHint {
 const SIDEBAR_THREAD_LIMIT = 8;
 type ProjectSort = "manual" | "updated" | "name";
 
-const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, LucideIcon>> = {
+const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, IconComponent>> = {
   folder: Folder,
   "folder-git": FolderGit,
   code: Code,

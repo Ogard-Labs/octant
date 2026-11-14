@@ -11,7 +11,7 @@ import {
   type ConnectorCatalogEntry,
   type ConnectorCategory,
 } from "@octant/domain";
-import { Search } from "lucide-react";
+import { Search } from "../ui/icons";
 import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { SettingsSection } from "../settings/primitives";
 import { OctantAlert } from "../ui/base/OctantAlert";

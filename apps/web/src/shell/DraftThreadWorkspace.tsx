@@ -79,7 +79,7 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, Network, ShieldCheck } from "lucide-react";
+import { FolderOpen, GitBranch, Network, ShieldCheck } from "../ui/icons";
 import {
   useCallback,
   useContext,

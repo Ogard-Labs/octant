@@ -1,4 +1,4 @@
-import { Check, CircleDashed, CircleX } from "lucide-react";
+import { Check, CircleDashed, CircleX } from "../ui/icons";
 import { useId } from "react";
 import { thisComputerName, useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";

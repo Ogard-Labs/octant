@@ -4,7 +4,7 @@ import { decodeCodeTerminalId, type CodeTerminalId } from "@octant/contracts/cod
 import type { HostId } from "@octant/contracts/host";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MIN_ZEN_RESEARCH_DOCK_WIDTH } from "@octant/contracts/zen";
-import { ArrowLeft, Globe, SquareTerminal, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Globe, SquareTerminal, type IconComponent } from "../ui/icons";
 import {
   createContext,
   Suspense,
@@ -261,7 +261,7 @@ export function StartQuickTools(props: { readonly projectId: ProjectId }) {
 }
 
 function QuickToolRow(props: {
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly label: string;
   readonly disabled: boolean;
   readonly onSelect: () => void;

@@ -1,5 +1,5 @@
 import type { FirstRunOnboardingStatus } from "@octant/contracts/shell";
-import { X } from "lucide-react";
+import { X } from "../ui/icons";
 import {
   useEffect,
   useId,

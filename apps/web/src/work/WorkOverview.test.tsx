@@ -48,7 +48,7 @@ describe("WorkOverview Project icon", () => {
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(container.querySelector(".work-overview__context-item img.project-icon")).toBeNull();
     expect(
-      container.querySelector(".work-overview__context-item svg.lucide-folder-open"),
+      container.querySelector(".work-overview__context-item svg.octant-icon-folder-open"),
     ).not.toBeNull();
   });
 });

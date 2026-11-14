@@ -6,8 +6,8 @@ import {
   GitPullRequestDraft,
   MessageSquare,
   Server,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -26,7 +26,7 @@ import "./home-list.css";
 /** How long the list waits for a slow source before it shows what it has. */
 export const HOME_LIST_PATIENCE_MS = 1500;
 
-const GLYPHS: Readonly<Record<HomeListGlyph, LucideIcon>> = {
+const GLYPHS: Readonly<Record<HomeListGlyph, IconComponent>> = {
   "pull-request": GitPullRequest,
   "pull-request-draft": GitPullRequestDraft,
   issue: CircleDot,

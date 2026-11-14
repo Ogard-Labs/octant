@@ -1,5 +1,5 @@
 import type { ThreadRoutineReceipt } from "@octant/contracts";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock } from "../ui/icons";
 import { createContext, useContext } from "react";
 import { routineScheduleLabel } from "../automation/routinePresentation";
 import { OctantButton } from "../ui/base/OctantButton";

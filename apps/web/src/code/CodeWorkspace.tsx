@@ -25,7 +25,7 @@ import {
   presentAppleSimulatorLiveFrame,
   type AppleSimulatorLiveFrameAttach,
 } from "@octant/domain";
-import { FolderGit2, LoaderCircle } from "lucide-react";
+import { FolderGit2, LoaderCircle } from "../ui/icons";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTabActivatedThisSession } from "../shell/TabActivation";

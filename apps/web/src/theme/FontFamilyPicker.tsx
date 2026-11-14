@@ -1,5 +1,5 @@
 import { GEIST_UI_FAMILY, SYSTEM_UI_FAMILY, savedUiFamily } from "@octant/theme";
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronsUpDown } from "../ui/icons";
 import {
   OctantCombobox,
   OctantComboboxEmpty,

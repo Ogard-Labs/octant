@@ -1,4 +1,4 @@
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, X } from "../ui/icons";
 import { useRef, type ReactNode } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";

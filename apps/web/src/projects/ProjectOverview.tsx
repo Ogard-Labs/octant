@@ -15,7 +15,7 @@ import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
-import { ChevronDown, Ellipsis, SquarePen } from "lucide-react";
+import { ChevronDown, Ellipsis, SquarePen } from "../ui/icons";
 import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { homeRelativePath } from "../lib/homeRelativePath";

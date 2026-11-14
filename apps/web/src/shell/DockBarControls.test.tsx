@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw } from "../ui/icons";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { StrictMode, useState, type ReactNode } from "react";

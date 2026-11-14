@@ -7,7 +7,7 @@ import type {
   ProviderObservedState,
 } from "@octant/contracts";
 import { modelCarriesAppManagedTools, subscriptionDescriptorIdOf } from "@octant/domain";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft } from "../../ui/icons";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AnthropicConfigurationForm,

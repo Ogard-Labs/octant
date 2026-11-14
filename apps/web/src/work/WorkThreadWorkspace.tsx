@@ -69,7 +69,7 @@ import type {
   ThreadMentionClient,
 } from "@octant/client-runtime";
 import { announceShellSettingsWritten } from "../shell/shellSettingsNotifications";
-import { Check, CirclePause, FileText, FolderOpen } from "lucide-react";
+import { Check, CirclePause, FileText, FolderOpen } from "../ui/icons";
 import {
   useCallback,
   useEffect,

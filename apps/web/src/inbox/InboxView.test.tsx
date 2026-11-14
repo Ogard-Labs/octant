@@ -160,7 +160,7 @@ describe("InboxView Project icon", () => {
     const { container } = inbox(source);
     await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
     expect(container.querySelector(".inbox-group__head img.project-icon")).toBeNull();
-    expect(container.querySelector(".inbox-group__head svg.lucide-folder")).not.toBeNull();
+    expect(container.querySelector(".inbox-group__head svg.octant-icon-folder")).not.toBeNull();
   });
 });
 

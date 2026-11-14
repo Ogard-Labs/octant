@@ -9,7 +9,7 @@ import type {
   TerminalBrowserGrantOutcome,
   TerminalBrowserGrantRefusalReason,
 } from "@octant/contracts/terminal-browser-grants";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantMenu } from "../ui/base/OctantMenu";

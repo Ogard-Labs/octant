@@ -47,7 +47,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, Network } from "lucide-react";
+import { FolderOpen, Network } from "../../ui/icons";
 import { serverCodeSelectionRefusal, serverCodeThreadProviderGroups } from "./serverCodeComposer";
 import {
   useCallback,

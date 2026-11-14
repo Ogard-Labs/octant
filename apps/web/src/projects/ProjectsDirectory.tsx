@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "lucide-react";
+import { Folder, FolderPlus, PanelLeftClose, Plus, Search } from "../ui/icons";
 import { useDeferredValue, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";

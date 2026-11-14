@@ -3,7 +3,7 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AutomationClient } from "@octant/client-runtime";
 import type { AutomationSummary } from "@octant/contracts";
 import type { CodeProjectPullRequestView } from "@octant/contracts";
-import { CircleX } from "lucide-react";
+import { CircleX } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import { absoluteTimeFormatter, relativeTimeLabel } from "../lib/relativeTime";
 import { OctantButton } from "../ui/base/OctantButton";

@@ -20,7 +20,7 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
-} from "lucide-react";
+} from "../ui/icons";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ThreadBoardCardLive,

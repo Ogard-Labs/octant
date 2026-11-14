@@ -1,6 +1,6 @@
 import type { LocalServerClient } from "@octant/client-runtime";
 import type { LocalServerOpenTarget, RunningService } from "@octant/contracts";
-import { CircleAlert, CircleHelp, ExternalLink, Globe2, Server, Square } from "lucide-react";
+import { CircleAlert, CircleHelp, ExternalLink, Globe2, Server, Square } from "../ui/icons";
 import { useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";

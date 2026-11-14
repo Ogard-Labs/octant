@@ -1,7 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { OctantMode } from "@octant/contracts/modes";
-import { Archive } from "lucide-react";
+import { Archive } from "../ui/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";

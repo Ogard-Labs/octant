@@ -8,7 +8,7 @@ import type {
   ImageJobThreadKind,
 } from "@octant/contracts";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
-import { Image as ImageIcon } from "lucide-react";
+import { Image as ImageIcon } from "../ui/icons";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ImageGenerationSheet, type ImageGenerationDraft } from "./ImageGenerationSheet";

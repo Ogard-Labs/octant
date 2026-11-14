@@ -916,7 +916,7 @@ describe("CodeThreadWorkspace", () => {
     expect(alert).toHaveTextContent("This provider cannot carry Octant's Browser tool.");
     // The mark says warning without reading the colour: an icon sits with the
     // sentence, and the sentence keeps the secondary body role the recipe owns.
-    expect(alert.querySelector("svg.lucide-circle-alert")).not.toBeNull();
+    expect(alert.querySelector("svg.octant-icon-circle-alert")).not.toBeNull();
     // A tinted ground plus hairline is the system's warning language; the
     // saturated stripe on the left edge made this read as a generic AI chat
     // warning box instead of one of the thread's own notices.

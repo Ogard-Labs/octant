@@ -1,7 +1,7 @@
 import type { HomeCardCustomization } from "@octant/contracts/shell";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Activity, GitPullRequest } from "lucide-react";
+import { Activity, GitPullRequest } from "../ui/icons";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";

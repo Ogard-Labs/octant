@@ -1,4 +1,4 @@
-import { GitPullRequest, Plus } from "lucide-react";
+import { GitPullRequest, Plus } from "../ui/icons";
 import { DockToolIcon } from "./dockToolIcons";
 import { groupDockTools } from "./dockToolGroups";
 import {

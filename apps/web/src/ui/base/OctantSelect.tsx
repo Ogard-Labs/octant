@@ -12,7 +12,7 @@ import {
 } from "../shadcn/select";
 import { fieldPaint } from "../shadcn/field-paint";
 import { cn } from "../shadcn/utils";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../icons";
 import {
   OctantMenuRoot,
   OctantMenuTrigger,

@@ -2,7 +2,7 @@ import type {
   WorkspacePreset,
   WorkspacePresetSkillReport,
 } from "@octant/contracts/workspace-presets";
-import { LayoutTemplate } from "lucide-react";
+import { LayoutTemplate } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 

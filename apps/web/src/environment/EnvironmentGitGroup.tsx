@@ -1,5 +1,5 @@
 import type { CodeEnvironmentObservation } from "@octant/contracts";
-import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
+import { ChevronRight, FileDiff, Files, GitBranch } from "../ui/icons";
 import type { Ref } from "react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 import { OctantButton } from "../ui/base/OctantButton";

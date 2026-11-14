@@ -12,8 +12,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   ShieldQuestionMark,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import { useId } from "react";
 import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -87,7 +87,7 @@ export const PERMISSION_MODE_LABEL: Readonly<Record<PermissionMode, string>> = {
 };
 
 /** One icon per mode, so the row's icon-only control says the mode at a glance. */
-const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, LucideIcon>> = {
+const PERMISSION_MODE_ICON: Readonly<Record<PermissionMode, IconComponent>> = {
   auto: ShieldCheck,
   "ask-first": ShieldQuestionMark,
   "accept-edits": PencilLine,

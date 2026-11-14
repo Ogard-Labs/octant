@@ -9,7 +9,7 @@ import { useId, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
-import { Folder } from "lucide-react";
+import { Folder } from "../ui/icons";
 import { ProjectIcon } from "./ProjectIcon";
 
 export type MoveThreadOutcome =

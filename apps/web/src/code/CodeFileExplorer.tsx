@@ -1,7 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRight, File, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { ChevronRight, File, Folder, FolderOpen, RefreshCw, Search, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,

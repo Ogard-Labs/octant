@@ -15,8 +15,8 @@ import {
   Route,
   Settings,
   Sparkles,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "../ui/icons";
 import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
 import { openGuidedTour } from "../tour/guidedTourState";
@@ -57,7 +57,7 @@ export interface SidebarProfileProps {
   readonly secondaryActions?: ReadonlyArray<SidebarSecondaryAction>;
 }
 
-export const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
+export const secondaryIcons: Record<SidebarAppMenuDescriptorId, IconComponent> = {
   agents: Bot,
   automations: CalendarClock,
   "artifact-library": Layers,

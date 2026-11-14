@@ -6,7 +6,7 @@ import type {
   ExtensionCommandFailure,
   ExtensionPackagePreview,
 } from "@octant/contracts/extension-rpc";
-import { BookOpen, Check, Puzzle, Search, Server, X } from "lucide-react";
+import { BookOpen, Check, Puzzle, Search, Server, X } from "../ui/icons";
 import {
   useId,
   useMemo,

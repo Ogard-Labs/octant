@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react";
+import type { IconComponent } from "../ui/icons";
 import {
   ChevronDown,
   ChevronUp,
@@ -7,7 +7,7 @@ import {
   Palette,
   Plus,
   Sparkles,
-} from "lucide-react";
+} from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 
@@ -60,7 +60,7 @@ export function ZenBar(props: ZenBarProps) {
  * disappearing: the bar keeps its shape whichever surface hosts it.
  */
 function BarControl(props: {
-  readonly icon: LucideIcon;
+  readonly icon: IconComponent;
   readonly label: string;
   readonly onClick?: (() => void) | undefined;
   readonly deferrable?: boolean;

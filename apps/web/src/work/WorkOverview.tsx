@@ -14,7 +14,7 @@ import type {
 } from "@octant/contracts";
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
-import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
+import { CalendarClock, FolderOpen, ShieldCheck } from "../ui/icons";
 import { useContext, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";

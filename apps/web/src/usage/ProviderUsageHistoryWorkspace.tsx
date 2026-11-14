@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "../ui/icons";
 import {
   decodeLocalUsageHistoryRequest,
   type LocalUsageHistoryResponse,

@@ -6,7 +6,7 @@ import type {
   ArtifactLibraryTab,
 } from "@octant/contracts/artifact-library";
 import type { CanvasId, OctantMode, ProjectId } from "@octant/contracts";
-import { Layers, LayoutGrid, List, Plus, Search } from "lucide-react";
+import { Layers, LayoutGrid, List, Plus, Search } from "../ui/icons";
 import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";

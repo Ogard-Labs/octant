@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, TriangleAlert } from "../icons";
 import type { ReactNode } from "react";
 import { cn } from "../shadcn/utils";
 

@@ -6,7 +6,7 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
-import { Check, Image as ImageIcon, Upload, X } from "lucide-react";
+import { Check, Image as ImageIcon, Upload, X } from "../ui/icons";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";

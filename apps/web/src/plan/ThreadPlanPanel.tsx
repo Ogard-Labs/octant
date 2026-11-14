@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, CloudOff, ListChecks, Loader, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CloudOff, ListChecks, Loader, ShieldAlert } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";

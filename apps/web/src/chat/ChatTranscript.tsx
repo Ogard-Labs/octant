@@ -32,7 +32,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { CircleCheck } from "lucide-react";
+import { CircleCheck } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";

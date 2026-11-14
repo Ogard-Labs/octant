@@ -4,7 +4,7 @@ import type {
   AutomationSummary,
   AutomationThreadRoutineRequest,
 } from "@octant/contracts/automation";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock } from "../ui/icons";
 import { useCallback, useState } from "react";
 import { automationLifecycleLabel } from "../automation/automationCenterModel";
 import { followUpWhenLabel, routineScheduleLine } from "../automation/routinePresentation";

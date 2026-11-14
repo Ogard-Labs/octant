@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X } from "../../ui/icons";
 import { useState } from "react";
 import { ImagePreviewDialog } from "../../composer/ImagePreviewDialog";
 import type { WorkComposerImages } from "./useWorkComposerImages";

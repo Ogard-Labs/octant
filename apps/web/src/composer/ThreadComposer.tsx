@@ -19,7 +19,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square } from "../ui/icons";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";

@@ -6,7 +6,7 @@ import {
   type ProjectAction,
   type ProjectSummary,
 } from "@octant/contracts/projects";
-import { Plus, X } from "lucide-react";
+import { Plus, X } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantFieldError } from "../ui/base/OctantField";

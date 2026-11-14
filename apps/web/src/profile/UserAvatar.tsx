@@ -1,6 +1,6 @@
 import type { UserProfile } from "@octant/contracts/user-profile";
 import { avatarInitials } from "@octant/domain";
-import { UserRound } from "lucide-react";
+import { UserRound } from "../ui/icons";
 import "./profile.css";
 
 export interface UserAvatarProps {

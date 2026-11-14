@@ -12,7 +12,7 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
-import { Bot, Search } from "lucide-react";
+import { Bot, Search } from "../ui/icons";
 import { useCallback, useMemo, useState } from "react";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";

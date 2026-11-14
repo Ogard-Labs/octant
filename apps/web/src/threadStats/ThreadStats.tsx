@@ -1,5 +1,5 @@
 import { threadStats, threadStatsInputOf } from "@octant/domain";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight } from "../ui/icons";
 import { useMemo } from "react";
 import { useComposerContextMeterScope } from "../context/composerContextMeterScope";
 import { OctantButton } from "../ui/base/OctantButton";

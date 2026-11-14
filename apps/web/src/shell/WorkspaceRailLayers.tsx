@@ -63,7 +63,7 @@ const CodeProjectPullRequests = lazy(() =>
   })),
 );
 import type { RepositoryIssueRow } from "../github/readIssuesAcrossRepositories";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "../ui/icons";
 
 const GitHubIssueBrowser = lazy(() =>
   import("../github/GitHubIssueBrowser").then((module) => ({

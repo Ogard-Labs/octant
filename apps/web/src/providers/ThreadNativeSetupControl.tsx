@@ -4,7 +4,7 @@ import {
   type ProviderInstance,
   type ThreadNativeSetupChoice,
 } from "@octant/contracts";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../ui/icons";
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {

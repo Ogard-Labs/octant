@@ -1,4 +1,4 @@
-import { LucideProvider } from "lucide-react";
+import { IconProvider } from "./icons";
 import type { ReactNode } from "react";
 
 /**
@@ -19,5 +19,5 @@ export const MARK_TICK_STROKE_WIDTH = 2.5;
 
 /** Mount once above every rendered surface, portals included. */
 export function IconDefaults(props: { readonly children: ReactNode }) {
-  return <LucideProvider strokeWidth={ICON_STROKE_WIDTH}>{props.children}</LucideProvider>;
+  return <IconProvider strokeWidth={ICON_STROKE_WIDTH}>{props.children}</IconProvider>;
 }

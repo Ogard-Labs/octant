@@ -1,6 +1,6 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasDefinition, CanvasId } from "@octant/contracts/canvas";
-import { RotateCw } from "lucide-react";
+import { RotateCw } from "../ui/icons";
 import { useEffect, useState } from "react";
 import { CanvasDocument } from "../canvas/CanvasDocument";
 import { OctantButton } from "../ui/base/OctantButton";
