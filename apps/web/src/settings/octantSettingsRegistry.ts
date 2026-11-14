@@ -414,12 +414,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "background show behind start screens every page everywhere",
         },
         {
-          id: settingId("app-background-sidebar"),
-          label: "Background under the sidebar",
-          scope: "app",
-          keywords: "background cover sidebar under",
-        },
-        {
           id: settingId("appearance.typography.ui.size"),
           label: "Interface text size",
           scope: "app",

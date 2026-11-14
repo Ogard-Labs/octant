@@ -33,7 +33,7 @@ describe("window glass", () => {
     expect(rule).toContain("--octant-float-blur: none;");
   });
 
-  it("draws the composer, a person's message and a glass card near opaque with no blur in the desktop app", () => {
+  it("draws a person's message and a glass card near opaque with no blur in the desktop app, and the composer only while Glass is off", () => {
     const css = read("styles/octant.css");
     const rule =
       /html\[data-octant-native-host="true"\]\s*:is\([\s\S]*?\)\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
@@ -41,13 +41,23 @@ describe("window glass", () => {
     expect(rule).toContain("backdrop-filter: none;");
     const selectors =
       /html\[data-octant-native-host="true"\]\s*:is\(([\s\S]*?)\)\s*\{/.exec(css)?.[1] ?? "";
-    for (const surface of [
-      ".thread-composer__surface",
-      ".turn-user .bubble",
-      '[data-variant="glass"]',
-    ]) {
+    for (const surface of [".turn-user .bubble", '[data-variant="glass"]']) {
       expect(selectors).toContain(surface);
     }
+    // The composer is dense only on a window with no Glass; under Glass it is an
+    // ink wash on the coat that follows the glass level.
+    expect(selectors).toMatch(
+      /\.shell--app-backdrop:not\(\.shell--material-translucent\)\s*:is\(\.thread-composer__surface/,
+    );
+    expect(selectors).not.toMatch(/\.shell--app-backdrop\s*:is\(\.thread-composer__surface/);
+    const wash =
+      /\.shell--material-translucent\s*:is\(\.thread-composer__surface, \.composer:not\(\.composer--carded\)\) \{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
+    expect(wash).toContain("background: var(--octant-control);");
+    expect(read("styles/octant-bridge.css")).toMatch(
+      /--octant-control: color-mix\(in srgb, var\(--octant-text-primary\) 7%, transparent\);/,
+    );
   });
 
   it("draws a card over the ground at least 92% opaque under Glass in the desktop app", () => {

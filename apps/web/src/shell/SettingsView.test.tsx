@@ -1225,14 +1225,13 @@ describe("SettingsView", () => {
     expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeDisabled();
     expect(screen.getByLabelText("Sidebar overlay color")).toBeDisabled();
     expect(screen.getByRole("slider", { name: "Sidebar overlay opacity" })).toBeDisabled();
-    expect(screen.getByText(/Workspace background covers the sidebar/)).toBeVisible();
+    expect(screen.getByText(/background is behind everything, the sidebar included/)).toBeVisible();
     expect(applyPatch).not.toHaveBeenCalled();
   });
 
   it.each([
     { kind: "none", scope: "everywhere", coversSidebar: true, increasedContrast: false },
     { kind: "theme", scope: "welcome", coversSidebar: true, increasedContrast: false },
-    { kind: "theme", scope: "everywhere", coversSidebar: false, increasedContrast: false },
     { kind: "theme", scope: "everywhere", coversSidebar: true, increasedContrast: true },
   ])(
     "keeps separate sidebar controls available when no effective background covers it: %j",
@@ -1249,7 +1248,9 @@ describe("SettingsView", () => {
       });
       navigateTo("Sidebar");
       expect(screen.getByRole("combobox", { name: "Sidebar background type" })).toBeEnabled();
-      expect(screen.queryByText(/Workspace background covers the sidebar/)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/background is behind everything, the sidebar included/),
+      ).not.toBeInTheDocument();
     },
   );
 

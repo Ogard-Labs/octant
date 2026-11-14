@@ -509,22 +509,6 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               value={background.scope}
             />
           </SettingRow>
-          {background.scope === "everywhere" ? (
-            <SettingRow
-              description="Let the background run under the sidebar too."
-              label="Cover the sidebar"
-              scope="app"
-              settingId="app-background-sidebar"
-            >
-              <OctantSwitch
-                checked={background.coversSidebar}
-                label="Cover the sidebar"
-                onCheckedChange={(coversSidebar) =>
-                  props.onChange({ ...background, coversSidebar })
-                }
-              />
-            </SettingRow>
-          ) : null}
           {picture || field ? (
             <SettingRow
               description={

@@ -498,7 +498,7 @@ describe("application background policy", () => {
     expect(dithered.effect).toEqual({ kind: "dither", cell: 6, levels: 4 });
   });
 
-  it("runs under the sidebar only when the ground is everywhere and a person asked for it", () => {
+  it("runs under the sidebar whenever the ground is behind everything, and not otherwise", () => {
     const everywhere = resolveAppBackground({
       ...baseSettings,
       appBackground: { ...baseSettings.appBackground, scope: "everywhere", coversSidebar: true },
