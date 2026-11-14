@@ -551,6 +551,12 @@ notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the
 quiet line.
+A notice card is a small floating glass card in the box's width, a few pixels
+above it: the float fill and corner, a faint hairline, a 16px tone icon on a
+round tinted dot as its only colour, the message in the primary ink with a second
+part (a reset time) in the secondary ink, a small secondary action at the
+trailing edge, and a fade and a 4px rise on entry (none under reduced motion).
+Its look is [DESIGN.md: OctantAlert](../../DESIGN.md#octantalert).
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.

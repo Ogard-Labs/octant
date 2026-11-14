@@ -910,7 +910,9 @@ describe("the public-block visual language", () => {
     // thread alike, and no surface or presentation sizes it again.
     // One line is a whole-pixel line (`--oct-composer-line`) and 12px above and
     // under it, so the box lands on whole pixels.
-    expect(prompt).toMatch(/min-height:\s*calc\(var\(--oct-composer-line\) \+ 24px\)/);
+    expect(prompt).toMatch(
+      /min-height:\s*calc\(var\(--oct-composer-line\) \+ 2 \* var\(--oct-composer-prompt-pad, 12px\)\)/,
+    );
     expect(system).not.toMatch(/\.composer--follow-up \.composer-input \{/);
     expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {

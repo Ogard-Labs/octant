@@ -156,6 +156,12 @@ in named disclosures. Host data inventory lives under Stored data. Installed
 skills and collision diagnostics scroll within a bounded collection while
 search, counts, and Show all remain outside that scroller.
 
+Appearance also offers density (Comfortable or Compact), a Custom preset per mode
+built from Ground, Ink, Accent and a Contrast step (Soft, Standard, Firm; a seed
+set whose text cannot stay readable is refused with the failing role named), and
+a Smooth text switch for grayscale smoothing, shown only on a Mac. The values are
+in [DESIGN.md: Appearance](../../DESIGN.md#appearance).
+
 ## Models, providers, and skills
 
 Chat and Navigator defaults use the same compact model chooser as composers,

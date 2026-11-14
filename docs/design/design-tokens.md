@@ -217,14 +217,14 @@ inset shadow or drop shadow; pointing at it or pressing it changes its fill.
 Only what floats casts a shadow. A surface consumes the tokens and never writes
 its own colour.
 
-| Level      | What it is                                                     | Tokens                                                                         |
-| ---------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| 0 Ground   | The rail, the title band and the sidebar's rows                | `--octant-sidebar-opaque`; no shadow                                           |
-| 1 Pane     | The stage and other panes: flat, sharing edges                 | `--octant-workspace` fill, one 1px line (`--oct-hairline`) on its top and left |
-| 2 Card     | An object on a pane: a tool or decision card, a Settings group | `--octant-card` and one hairline                                               |
-| 3 Control  | A filled button, a chip, the selected row, a segmented thumb   | `--octant-control`: a flat fill                                                |
-| 3 Well     | A segmented track, a capsule of buttons, a stepper, a search   | `--octant-well` or the field fill, one hairline at most                        |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet | `--octant-float-glass` over `--octant-float-blur`, `--octant-shadow-pop`       |
+| Level      | What it is                                                                  | Tokens                                                                         |
+| ---------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 0 Ground   | The rail, the title band and the sidebar's rows                             | `--octant-sidebar-opaque`; no shadow                                           |
+| 1 Pane     | The stage and other panes: flat, sharing edges                              | `--octant-workspace` fill, one 1px line (`--oct-hairline`) on its top and left |
+| 2 Card     | An object on a pane: a tool or decision card, a Settings group              | `--octant-card` and one hairline                                               |
+| 3 Control  | A filled button, a chip, the selected row, a segmented thumb                | `--octant-control`: a flat fill                                                |
+| 3 Well     | A segmented track, a capsule of buttons, a stepper, a search                | `--octant-well` or the field fill, one hairline at most                        |
+| 4 Floating | A menu, popover, hover card, toast, notice card, dialog, the Settings sheet | `--octant-float-glass` over `--octant-float-blur`, `--octant-shadow-pop`       |
 
 - **The resting shadow tokens are `none`** (`--octant-shadow-xs`, `-sm`, `-md`,
   `-lg`, `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`), kept
@@ -234,10 +234,13 @@ its own colour.
   inner shadow.
 - **A card is for one object a person acts on as a whole**, not for a plain list,
   an empty state or a header.
-- **Floating surfaces are frosted.** In dark the fill is the float colour at 66%
-  over a blur that also lifts saturation to 180% and dims what is behind it
-  (`--octant-float-blur`); in light the fill is 78% and the blur draws what is
-  behind toward a pale grey. The pop shadow draws one outer hairline and the
+- **Floating surfaces are frosted on an opaque window and dense on glass.** In
+  dark the fill is the float colour at 66% over a blur that also lifts saturation
+  to 180% and dims what is behind it (`--octant-float-blur`); in light the fill is
+  78% and the blur draws what is behind toward a pale grey. Under window glass
+  (`html[data-octant-host-vibrancy="active"]`) the fill is 96% and the blur is
+  `none`: the packaged window's material is not re-blurred, so a blur cannot hide
+  sharp text behind a translucent float. The pop shadow draws one outer hairline and the
   lift, so a floating surface sets no border. A reduced-transparency or
   increased-contrast preference puts the opaque `--octant-float` back. What sits
   on a floating surface steps up from it (`--octant-float-control`, `-hover`,
@@ -391,9 +394,11 @@ regression.
 
 - The export carries each token's default value. The app overrides some of them
   by context, and the export does not:
-  - Glass (`.shell.shell--material-translucent`,
-    `apps/web/src/styles/shell.css:80`) replaces the card fill with a tint of the
-    ink, and makes each panel a tint over the window's native material;
+  - Glass (`.shell.shell--material-translucent`, `apps/web/src/styles/shell.css`)
+    replaces the card fill with a tint of the ink and lays one coat of the
+    workspace colour on the window, with every pane clear over it;
+  - `--oct-contrast-scale` (1 unless a Custom preset sets a step) scales the
+    washes and the hairline;
   - some layers repoint `--oct-surface` (`apps/web/src/styles/surface.css:994`
     to the card fill, `:1009` to the floating surface under reduced
     transparency);

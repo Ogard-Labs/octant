@@ -27,5 +27,7 @@
    part of the composer and not a page banner. */
 .composer-start > .composer-usage-warning {
   flex: 1 1 100%;
-  margin: 0 0 var(--oct-space-2);
+  /* The row's own 4px and the frame's 4px are taken back, so the card stands
+     on the box's edges like the notices that sit directly above it. */
+  margin: 0 calc(var(--oct-space-1) * -2) var(--oct-space-2);
 }
