@@ -8,7 +8,13 @@ import {
   rippleBrightness,
   type Ripple,
 } from "./appBackdropCharacters";
-import { columnShare, readContentColumns, readSidebarColumns } from "./appBackdropColumn";
+import {
+  columnFloor,
+  columnShare,
+  isDarkPage,
+  readContentColumns,
+  readSidebarColumns,
+} from "./appBackdropColumn";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 import { createScene, type SceneKind, type SceneSample } from "./appBackdropScenes";
 
@@ -291,11 +297,6 @@ export interface MovingPrintSource {
   readonly seed?: number;
 }
 
-/** Whether the ink is light, which is how the print tells a dark page from a pale one. */
-function isDarkPage(color: readonly [number, number, number]): boolean {
-  return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] > 140;
-}
-
 /**
  * Draws the print into `canvas` and, when `animated`, keeps it answering
  * clicks (and, for a scene, drifting) until the returned stop is called.
@@ -403,7 +404,7 @@ export function runMovingPrint(
     shares = new Float32Array(columns * rows);
     const contentColumn = readContentColumns(canvas, columns * cell);
     const sidebarColumn = readSidebarColumns(canvas);
-    const floor = source.scene === "ridges" ? RIDGES_CALM_FLOOR : CALM_FLOOR;
+    const floor = source.scene === "ridges" ? RIDGES_CALM_FLOOR : columnFloor(isDarkPage(ink));
     const calmed = scene !== undefined || twoTone !== undefined;
     for (let column = 0; column < columns; column += 1) {
       const x = (column + 0.5) * cell;
@@ -576,8 +577,8 @@ export function runMovingPrint(
   const begin = () => {
     idle = undefined;
     begun = true;
-    fit();
     readTheme();
+    fit();
     lastDrawn = performance.now();
     draw(lastDrawn);
     canvas.dataset["ready"] = "true";

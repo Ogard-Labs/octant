@@ -1436,6 +1436,13 @@
   background: color-mix(in srgb, var(--octant-scrim) 34%, transparent);
 }
 
+/* In light the window behind a sheet is pale, so the same share of a dark scrim
+   turned it into one flat grey block over the ground; a fifth keeps the ground
+   and the frame readable through it. */
+:root[data-octant-theme-mode="light"] .octant-sheet__backdrop {
+  background: color-mix(in srgb, var(--octant-scrim) 20%, transparent);
+}
+
 .octant-sheet__viewport {
   position: fixed;
   z-index: var(--oct-z-floating);

@@ -6,7 +6,13 @@ import {
   patchStrength,
   runAsciiField,
 } from "./appBackdropAscii";
-import { COLUMN_MARGIN, columnShare, readContentColumns } from "./appBackdropColumn";
+import {
+  COLUMN_MARGIN,
+  columnFloor,
+  columnShare,
+  isDarkPage,
+  readContentColumns,
+} from "./appBackdropColumn";
 
 /**
  * Canvases that record what a frame does. Each frame copies the glyph layer
@@ -179,6 +185,16 @@ describe("character ground", () => {
     expect(columnShare(column.right - 60 + COLUMN_MARGIN / 2, [column])).toBeGreaterThan(
       CENTRE_SHARE,
     );
+  });
+
+  it("dims the ground behind the content column to a quarter on a light page, where dark ink reads louder", () => {
+    const column = { left: 300, right: 700 };
+    expect(isDarkPage([240, 240, 240])).toBe(true);
+    expect(isDarkPage([20, 20, 20])).toBe(false);
+    expect(columnFloor(true)).toBeCloseTo(CENTRE_SHARE, 5);
+    expect(columnFloor(false)).toBe(0.25);
+    expect(columnShare(500, [column], columnFloor(false))).toBeCloseTo(0.25, 5);
+    expect(columnShare(0, [column], columnFloor(false))).toBe(1);
   });
 
   it("measures the content column from the start screen it lies behind", () => {

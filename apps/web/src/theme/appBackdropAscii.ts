@@ -9,12 +9,15 @@ import {
 } from "./appBackdropCharacters";
 import {
   COLUMN_SHARE,
+  columnFloor,
+  isDarkPage,
   columnShare,
   readContentColumns,
   readSidebarColumns,
   type ContentColumn,
 } from "./appBackdropColumn";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
+import { parseColor } from "./appBackdropPrint";
 
 /**
  * The character ground: a field of small monospace letters and digits in the
@@ -202,13 +205,14 @@ function createSurface(
   if (maskContext === null) return undefined;
   const glyphs = new Uint8Array(columns * rows);
   const shares = new Float32Array(columns * rows);
+  const floor = columnFloor(isDarkPage(parseColor(ink) ?? [255, 255, 255]));
   // The column's text and cards run the field's full height, so every row is
   // dimmed alike; only the distance from the column's edges varies.
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const index = row * columns + column;
       glyphs[index] = Math.floor(Math.random() * GLYPHS.length);
-      shares[index] = columnShare((column + 0.5) * CELL_WIDTH, contentColumn);
+      shares[index] = columnShare((column + 0.5) * CELL_WIDTH, contentColumn, floor);
     }
   }
   return {
@@ -434,8 +438,15 @@ export function runAsciiField(
     if (surface !== undefined && frames % INK_CHECK_FRAMES === 0) {
       const ink = readInk();
       if (ink !== surface.ink) {
-        surface.ink = ink;
-        paintLayer(surface, surface.layer, ink);
+        // A flip between a dark and a pale page changes how far the column calms.
+        const flipped =
+          isDarkPage(parseColor(ink) ?? [255, 255, 255]) !==
+          isDarkPage(parseColor(surface.ink) ?? [255, 255, 255]);
+        if (flipped) build();
+        else {
+          surface.ink = ink;
+          paintLayer(surface, surface.layer, ink);
+        }
       }
     }
     draw((performance.now() - started) / 1000);

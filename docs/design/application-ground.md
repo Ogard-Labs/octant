@@ -41,7 +41,7 @@ without a photo draws Drift too. Every scene is generated in code from a fixed
 seed, so it looks the same each time, and none ships an image. Each scene is laid
 out for what the window shows (a start screen that scrolls makes the ground as
 tall as its content) and dimmed behind the start screen's content column, across its
-full width and height, to a third of its strength, back to full 140px past the
+full width and height, to a third of its strength (a quarter on a light page, where dark ink reads louder), back to full 140px past the
 column's edge, so the brightest cells stay away from text. Ridges is the bold scene, so
 it runs at full strength outside the text: its own sky is empty behind the heading and
 subtitle, and the column calms it (to a fifth) only at the foot of the window, where the
@@ -90,7 +90,7 @@ theme's primary ink, at most 15% opaque, that shows only inside slowly drifting
 patches and leaves the rest empty. Three patterns (round blotches, long
 horizontal currents, rings) take turns every twenty seconds and cross-fade over
 the last four. Behind the start screen's content column, across its full width and height, the field is dimmed to a third of its
-strength (and under the sidebar where it runs there), and comes back to full strength 140px past the column's
+strength (a quarter on a light page; and under the sidebar where it runs there), and comes back to full strength 140px past the column's
 edge, so the heading, the cards and the composer stay on a calm page. The glyphs are painted once into a layer (a few per cent swap each
 frame), and a frame only rewrites one alpha value per cell, so the cost does not
 grow with the number of glyphs. It runs at about fifteen frames a second, and

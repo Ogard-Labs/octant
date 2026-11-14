@@ -7,6 +7,11 @@
 
 /** Behind the column a drawn ground keeps about a third of its strength. */
 export const COLUMN_SHARE = 1 / 3;
+/**
+ * On a light page the ground's dark ink reads louder against small text than
+ * light ink on a dark page does, so behind the column it keeps a quarter.
+ */
+export const LIGHT_PAGE_COLUMN_SHARE = 1 / 4;
 /** Past the column's edge the ground is back at full strength after this many pixels. */
 export const COLUMN_MARGIN = 140;
 /** A page whose column cannot be measured is taken to have one this wide, centred. */
@@ -16,6 +21,16 @@ const FALLBACK_COLUMN_WIDTH = 720;
 export interface ContentColumn {
   readonly left: number;
   readonly right: number;
+}
+
+/** Whether the ink is light, which is how a ground tells a dark page from a pale one. */
+export function isDarkPage(ink: readonly [number, number, number]): boolean {
+  return 0.2126 * ink[0] + 0.7152 * ink[1] + 0.0722 * ink[2] > 140;
+}
+
+/** How much of its strength a ground keeps behind the content column, by the page it sits on. */
+export function columnFloor(darkPage: boolean): number {
+  return darkPage ? COLUMN_SHARE : LIGHT_PAGE_COLUMN_SHARE;
 }
 
 function smoothstep(low: number, high: number, value: number): number {
