@@ -75,7 +75,7 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { threadAccessOf } from "@octant/domain/guardrail-policy";
 import { PermissionModePicker } from "../PermissionModePicker";
-import { CodeWorkspaceSelector } from "./CodeWorkspaceSelector";
+import { CodeWhereControl, type CodeWhereControlProps } from "./CodeWhereControl";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
@@ -167,6 +167,12 @@ export interface CodeComposerAdapterProps {
   readonly createDisabledReason?: string;
   readonly onCancelFirstTurn?: () => void;
   readonly folderControl?: ReactNode;
+  /** The working-folder fields, drawn as the "Subfolder" row of the Where panel. */
+  readonly subfolderControl?: ReactNode;
+  readonly subfolderName?: string;
+  readonly subfolderValid?: boolean;
+  /** The Project's remembered workspace and how to change it; absent where it cannot be recorded. */
+  readonly rememberedWorkspace?: CodeWhereControlProps["remembered"];
   readonly projectSetup?: ReactNode;
   /**
    * Optional GitHub repository selection slot rendered on the context tray.
@@ -802,23 +808,40 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
         <span>{server.location}</span>
       </span>
     ) : null;
+  const branchPicker = hasProject ? (
+    <CodeBranchSelector
+      key={String(props.projectId)}
+      branch={resolvedBaseBranch ?? "Default branch"}
+      loading={refsLoading}
+      onOpen={loadWorktreeRefs}
+      onSelectRef={handleSelectRef}
+      onStartFromOriginChange={setStartFromOriginOverride}
+      remoteName={resolvedWorktreeRemote}
+      startFromOrigin={startFromOrigin}
+      startFromOriginAvailable={
+        preferredRemote.status === "selected" || worktreeRemote !== undefined
+      }
+      {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+      {...(props.creating === true ? { disabled: true } : {})}
+    />
+  ) : null;
   const branchControl = hasProject ? (
     <>
       {serverLocation}
-      <CodeBranchSelector
-        key={String(props.projectId)}
+      <CodeWhereControl
+        baseBranchPicker={branchPicker}
         branch={resolvedBaseBranch ?? "Default branch"}
-        loading={refsLoading}
-        onOpen={loadWorktreeRefs}
-        onSelectRef={handleSelectRef}
-        onStartFromOriginChange={setStartFromOriginOverride}
-        remoteName={resolvedWorktreeRemote}
-        startFromOrigin={startFromOrigin}
-        startFromOriginAvailable={
-          preferredRemote.status === "selected" || worktreeRemote !== undefined
-        }
-        {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+        onWorkspaceChange={setWorkspaceOverride}
+        worktreeBranch={defaultDeliveryBranchIntent(resolvedBaseBranch ?? "", shortId)}
+        workspace={workspace}
         {...(props.creating === true ? { disabled: true } : {})}
+        {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+        {...(props.subfolderControl === undefined ? {} : { subfolder: props.subfolderControl })}
+        {...(props.subfolderName === undefined ? {} : { subfolderName: props.subfolderName })}
+        {...(props.subfolderValid === undefined ? {} : { subfolderValid: props.subfolderValid })}
+        {...(props.rememberedWorkspace === undefined || isServer
+          ? {}
+          : { remembered: props.rememberedWorkspace })}
       />
     </>
   ) : null;
@@ -934,15 +957,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 project={projectControl}
                 branch={branchControl}
                 environment={environmentControl}
-                trailing={
-                  hasProject ? (
-                    <CodeWorkspaceSelector
-                      onChange={setWorkspaceOverride}
-                      value={workspace}
-                      {...(props.creating === true ? { disabled: true } : {})}
-                    />
-                  ) : null
-                }
                 createFrom={props.createFromControl}
               />
             }

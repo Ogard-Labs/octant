@@ -14,6 +14,8 @@ import {
   NewTaskDraftScopeContext,
 } from "../../composer/useNewTaskPrompt";
 
+const whereChip = () => screen.getByRole("button", { name: /^Where this thread works/ });
+
 const twoHosts = [
   {
     hostId: LOCAL_HOST_ID,
@@ -331,7 +333,7 @@ describe("CodeComposerAdapter", () => {
     expect(dock?.textContent).toContain("My Repo");
     expect(dock?.querySelector(".host-selector")).not.toBeNull();
     expect(dock?.querySelector(".host-selector--environment")).not.toBeNull();
-    expect(dock?.textContent).toContain("Current checkout");
+    expect(dock?.textContent).toContain("This checkout");
     expect(dock?.textContent).toContain("development");
     const text = dock?.textContent ?? "";
     expect(text.indexOf("My Repo")).toBeLessThan(text.indexOf("development"));
@@ -443,9 +445,25 @@ describe("CodeComposerAdapter", () => {
     expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
   });
 
-  it("shows the branch selector once a Project is chosen", () => {
+  it("names the branch and the checkout on one chip once a Project is chosen", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("development");
+    expect(whereChip()).toHaveTextContent("development · This checkout");
+    expect(screen.queryByRole("button", { name: "Base branch" })).toBeNull();
+  });
+
+  it("creates nothing when New worktree is chosen and sends that choice with the thread", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(<CodeComposerAdapter {...defaultProps} onCreateThread={onCreateThread} />);
+    await user.click(whereChip());
+    await user.click(screen.getByRole("radio", { name: /New worktree/ }));
+    expect(whereChip()).toHaveTextContent("New worktree");
+    expect(onCreateThread).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the login bug");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));
+    expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({ workspace: "managed-worktree" });
   });
 
   it("keeps repository context on the context row above the composer", () => {
@@ -835,13 +853,17 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           onCreateThread={onCreateThread}
           worktreeRemoteFacts={{ remotes: ["origin", "upstream"] }}
         />,
       );
     });
 
-    const trigger = container.querySelector('button[aria-label="Base branch"]');
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    const trigger = document.querySelector('button[aria-label="Base branch"]');
     expect(trigger).not.toBeNull();
     await act(async () => {
       trigger!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -933,9 +955,9 @@ describe("CodeComposerAdapter interactions", () => {
 
     // The tray states where a new task starts from, so it has to read the
     // checkout rather than assume a branch name that many repositories lack.
-    const trigger = container.querySelector('button[aria-label="Base branch"]');
-    expect(trigger?.textContent).toContain("main");
-    expect(trigger?.textContent).not.toContain("development");
+    const chip = container.querySelector('button[aria-label^="Where this thread works"]');
+    expect(chip?.textContent).toContain("main");
+    expect(chip?.textContent).not.toContain("development");
     root.unmount();
     container.remove();
   });
@@ -978,7 +1000,9 @@ describe("CodeComposerAdapter interactions", () => {
     );
     await waitFor(() => expect(execute).toHaveBeenCalled());
 
+    await user.click(whereChip());
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/parser");
+    await user.keyboard("{Escape}");
     await user.type(screen.getByLabelText("First message"), "Fix the failing parser check");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     await waitFor(() =>
@@ -1013,11 +1037,15 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           projectId={firstProject as never}
         />,
       );
     });
-    const trigger = () => container.querySelector('button[aria-label="Base branch"]');
+    const trigger = () => document.querySelector('button[aria-label="Base branch"]');
+    await act(async () => {
+      whereChip().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
     await act(async () => {
       trigger()!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
@@ -1031,6 +1059,7 @@ describe("CodeComposerAdapter interactions", () => {
         <CodeComposerAdapter
           {...defaultProps}
           execute={execute as never}
+          newThreadWorkspace="managed-worktree"
           projectId={secondProject as never}
           projectName="Other Repo"
         />,
@@ -1122,8 +1151,7 @@ describe("CodeComposerAdapter interactions", () => {
       </NewTaskDraftsContext.Provider>
     );
     const rendered = render(view);
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(whereChip()).toHaveTextContent("New worktree");
     expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -1132,14 +1160,14 @@ describe("CodeComposerAdapter interactions", () => {
     rendered.unmount();
     render(view);
 
-    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(whereChip()).toHaveTextContent("New worktree");
     expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    await user.click(screen.getByRole("button", { name: "Workspace" }));
-    expect(await screen.findByRole("menuitemradio", { name: /Managed worktree/ })).toHaveAttribute(
+    await user.click(whereChip());
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
+    expect(await screen.findByRole("radio", { name: /New worktree/ })).toHaveAttribute(
       "aria-checked",
       "true",
     );
@@ -1257,12 +1285,8 @@ describe("CodeComposerAdapter interactions", () => {
 
       expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
       // A habit remembered on this host does not choose a worktree on a server.
-      expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent(
-        "Current checkout",
-      );
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("main"),
-      );
+      expect(whereChip()).toHaveTextContent("This checkout");
+      await waitFor(() => expect(whereChip()).toHaveTextContent("main · This checkout"));
       expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName(
         "Mode: Full access",
       );
@@ -1289,8 +1313,9 @@ describe("CodeComposerAdapter interactions", () => {
       const onCreateThread = vi.fn();
       render(<CodeComposerAdapter {...serverProps} onCreateThread={onCreateThread} />);
 
-      await user.click(screen.getByRole("button", { name: "Workspace" }));
-      await user.click(await screen.findByRole("menuitemradio", { name: /Managed worktree/ }));
+      await user.click(whereChip());
+      await user.click(await screen.findByRole("radio", { name: /New worktree/ }));
+      await user.keyboard("{Escape}");
       await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix the build");
       await user.click(screen.getByRole("button", { name: "Create thread" }));
       await waitFor(() => expect(onCreateThread).toHaveBeenCalledTimes(1));

@@ -662,7 +662,9 @@ describe("CodeOverview", () => {
     // composer preselects the same habit rather than a second truth.
     const habit = await screen.findByRole("combobox", { name: "New threads start in" });
     expect(habit).toHaveTextContent("This Project's current checkout");
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
+      "This checkout",
+    );
 
     await chooseSelectFieldOption(user, habit, "A managed worktree Octant creates");
     await waitFor(() =>
@@ -685,7 +687,9 @@ describe("CodeOverview", () => {
     expect(screen.getByRole("combobox", { name: "New threads start in" })).toHaveTextContent(
       "A managed worktree Octant creates",
     );
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
+      "New worktree",
+    );
   });
 
   it("does not tell the person to start a thread below when quick start is hidden", async () => {

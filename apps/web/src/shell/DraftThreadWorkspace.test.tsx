@@ -606,7 +606,8 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateCodeThread.mock.calls[0]?.[0]).not.toHaveProperty("issueContext");
   });
 
-  it("shows project context in the context strip", () => {
+  it("shows project context in the context strip", async () => {
+    const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
         {...baseProps}
@@ -621,8 +622,10 @@ describe("DraftThreadWorkspace", () => {
     expect(
       screen.getByRole("heading", { name: "What should we work on in my-repo?" }),
     ).toBeVisible();
-    // The branch context now lives on the branch selector trigger.
+    // A draft opened for a branch starts a worktree from it, and the Where chip says so.
+    await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
     expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("feature/test");
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Ask first");
   });
 
@@ -780,7 +783,9 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Project: Service" })).toBeVisible();
     expect(screen.getByText("devbox:/home/build/service")).toBeVisible();
     // A server thread starts in its folder unless the person picks a worktree there.
-    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Current checkout");
+    expect(screen.getByRole("button", { name: /^Where this thread works/ })).toHaveTextContent(
+      "This checkout",
+    );
     expect(
       screen.queryByText("The selected Project is unavailable. Choose another Project."),
     ).toBeNull();
@@ -1146,10 +1151,11 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
-    const workspace = screen.getByRole("button", { name: "Workspace" });
-    expect(workspace).toHaveTextContent("Managed worktree");
+    const workspace = screen.getByRole("button", { name: /^Where this thread works/ });
+    expect(workspace).toHaveTextContent("New worktree");
     await user.click(workspace);
-    await user.click(await screen.findByRole("menuitemradio", { name: "Current checkout" }));
+    await user.click(await screen.findByRole("radio", { name: /This checkout/ }));
+    await user.keyboard("{Escape}");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
@@ -1184,8 +1190,8 @@ describe("DraftThreadWorkspace", () => {
     );
     const draft = screen.getByRole("textbox", { name: "First message" });
     await user.type(draft, "Fix search without losing this draft");
-    await user.click(screen.getByRole("button", { name: /^Working folder:/ }));
-    const subfolder = await screen.findByLabelText("Subfolder within working folder");
+    await user.click(screen.getByRole("button", { name: /^Where this thread works/ }));
+    const subfolder = await screen.findByLabelText("Subfolder");
     await user.clear(subfolder);
     await user.type(subfolder, "src");
     await user.clear(subfolder);
@@ -1198,14 +1204,15 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateCodeThread).not.toHaveBeenCalled();
     expect(onCreateThread).not.toHaveBeenCalled();
     expect(draft).toHaveValue("Fix search without losing this draft");
-    // The chip keeps saying what was typed, and the field still holds it.
-    const chip = screen.getByRole("button", { name: /^Working folder:.*not a usable subfolder$/ });
-    expect(chip).toHaveTextContent("../outside · not usable");
-    // Pressing send closed the popup; the rejected entry is still there when
+    // The chip says in words that the subfolder is refused, and the field
+    // still holds what was typed.
+    const chip = screen.getByRole("button", { name: /^Where this thread works/ });
+    expect(chip).toHaveTextContent("subfolder not usable");
+    // Pressing send closed the panel; the rejected entry is still there when
     // it opens again.
-    expect(screen.queryByLabelText("Subfolder within working folder")).toBeNull();
+    expect(chip).toHaveAttribute("aria-expanded", "false");
     await user.click(chip);
-    const reopened = await screen.findByLabelText("Subfolder within working folder");
+    const reopened = await screen.findByLabelText("Subfolder");
     expect(reopened).toHaveValue("../outside");
 
     await user.clear(reopened);

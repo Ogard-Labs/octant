@@ -19,6 +19,11 @@ export interface OctantPopoverProps {
   /** Keeps a tall picker on its preferred axis instead of falling back to a side rail. */
   readonly collisionAvoidance?: ComponentProps<typeof PopoverPositioner>["collisionAvoidance"];
   readonly description?: string;
+  /**
+   * Keeps the popup's content mounted while it is closed, for a popup whose
+   * fields hold unsaved input that closing must not discard.
+   */
+  readonly keepMounted?: boolean;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly side?: "top" | "bottom";
@@ -108,7 +113,7 @@ export function OctantPopover(props: OctantPopoverProps) {
       ) : (
         <OctantTooltip label={props.triggerTooltip}>{triggerButton}</OctantTooltip>
       )}
-      <PopoverPortal>
+      <PopoverPortal {...(props.keepMounted === true ? { keepMounted: true } : {})}>
         <PopoverPositioner
           align={props.align ?? "start"}
           className="z-[var(--oct-z-popup)] window-no-drag"

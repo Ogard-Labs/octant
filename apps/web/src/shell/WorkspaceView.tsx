@@ -1810,6 +1810,9 @@ function renderNonCodeTab(
           key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
+          {...(props.onChangeCodeNewThreadWorkspace === undefined
+            ? {}
+            : { onChangeCodeNewThreadWorkspace: props.onChangeCodeNewThreadWorkspace })}
           startPresentation={startPresentation}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined

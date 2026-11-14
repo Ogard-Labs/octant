@@ -2828,3 +2828,115 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     height: auto;
   }
 }
+
+/* The Where panel: one place to say where a new Code thread works. The chip's
+   width follows the choice; nothing beside it moves when the panel opens. */
+.code-where__trigger {
+  max-width: min(22rem, 60vw);
+}
+
+.code-where__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.code-where__trigger[data-invalid="true"] {
+  color: var(--oct-danger-fg);
+}
+
+.code-where__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  width: min(380px, calc(100vw - 32px));
+  padding: var(--oct-space-3);
+}
+
+.code-where__title {
+  margin: 0;
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-medium);
+  color: var(--octant-text-primary);
+}
+
+.code-where__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+}
+
+.code-where__radio {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  column-gap: var(--oct-space-2);
+  align-items: start;
+  width: 100%;
+  height: auto;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  text-align: start;
+  white-space: normal;
+}
+
+.code-where__dot {
+  grid-row: 1 / span 2;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 50%;
+}
+
+.code-where__choice[data-selected="true"] .code-where__dot {
+  border: 4px solid var(--octant-text-primary);
+}
+
+.code-where__name {
+  font-size: var(--oct-text-detail);
+  color: var(--octant-text-primary);
+}
+
+.code-where__meta {
+  grid-column: 2;
+  overflow-wrap: anywhere;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-muted);
+}
+
+.code-where__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2) var(--oct-space-1)
+    calc(var(--oct-space-2) + 14px + var(--oct-space-2));
+}
+
+.code-where__line {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+
+.code-where__line code {
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-primary);
+}
+
+.code-where__subfolder {
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.code-where__subfolder .working-directory-control {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.code-where__remember {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--oct-text-detail);
+  color: var(--octant-text-secondary);
+}

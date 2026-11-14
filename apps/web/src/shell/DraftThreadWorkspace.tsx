@@ -39,6 +39,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ContinueCards } from "../code/useContinueCards";
 import {
   decodeProjectId,
+  type CodeNewThreadWorkspace,
   type ProjectAvailability,
   type ProjectId,
   type ProjectSummary,
@@ -170,6 +171,11 @@ export type DraftStartPresentation = "home" | "new-task";
 
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
+  /** Records a Code Project's remembered new-thread workspace; absent where it cannot be recorded. */
+  readonly onChangeCodeNewThreadWorkspace?: (
+    projectId: ProjectId,
+    workspace: CodeNewThreadWorkspace,
+  ) => Promise<boolean>;
   readonly startPresentation?: DraftStartPresentation;
   /**
    * What this mode already has open, shown under the composer. A start screen
@@ -865,6 +871,31 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     />
   );
 
+  const workingFolderChip =
+    workingFolder === undefined ? null : (
+      <ApprovedWorkingFolderControl
+        key={String(selectedProjectId)}
+        onValidityChange={setWorkingFolderValid}
+        folders={workingFolders}
+        value={workingFolder}
+        onChange={(choice) => setFolderChoice({ projectId: String(selectedProjectId), choice })}
+        code={props.mode === "code"}
+      />
+    );
+  // Code draws the folder as the "Subfolder" row of its Where panel, not as a
+  // chip of its own, and keeps it mounted so a typed path survives closing.
+  const subfolderRow =
+    workingFolder === undefined ? null : (
+      <ApprovedWorkingFolderControl
+        key={String(selectedProjectId)}
+        onValidityChange={setWorkingFolderValid}
+        folders={workingFolders}
+        value={workingFolder}
+        onChange={(choice) => setFolderChoice({ projectId: String(selectedProjectId), choice })}
+        code
+        inline
+      />
+    );
   const folderControl =
     props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
       <>
@@ -893,16 +924,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(projectSelection === undefined ? {} : { selection: projectSelection })}
           {...(githubProjectSource === undefined ? {} : { github: githubProjectSource })}
         />
-        {workingFolder === undefined ? null : (
-          <ApprovedWorkingFolderControl
-            key={String(selectedProjectId)}
-            onValidityChange={setWorkingFolderValid}
-            folders={workingFolders}
-            value={workingFolder}
-            onChange={(choice) => setFolderChoice({ projectId: String(selectedProjectId), choice })}
-            code={props.mode === "code"}
-          />
-        )}
+        {props.mode === "code" ? null : workingFolderChip}
       </>
     ) : null;
   const addFolderDialog = (
@@ -1001,6 +1023,25 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ) : undefined
         }
         folderControl={folderControl}
+        {...(subfolderRow === null
+          ? {}
+          : {
+              subfolderControl: subfolderRow,
+              subfolderName: String(workingFolder?.workingDirectory ?? "."),
+              subfolderValid: workingFolderValid,
+            })}
+        {...(props.onChangeCodeNewThreadWorkspace === undefined ||
+        selectedProjectId === undefined ||
+        selectedProject?.type !== "code"
+          ? {}
+          : {
+              rememberedWorkspace: {
+                value: newThreadWorkspace,
+                onChange: (next: CodeNewThreadWorkspace) => {
+                  void props.onChangeCodeNewThreadWorkspace?.(selectedProjectId, next);
+                },
+              },
+            })}
         {...(createFromControl === null ? {} : { createFromControl })}
         {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
         providerGroups={props.providerGroups}
