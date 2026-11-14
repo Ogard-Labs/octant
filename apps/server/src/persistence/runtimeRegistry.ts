@@ -338,6 +338,7 @@ import {
   DeviceRegisteredV1,
   DeviceRevokedV1,
   DeviceCredentialExpiredV1,
+  DeviceRegistrationDeadlineChangedV1,
   HostKeyRotatedV1,
   RemoteCommandReceiptRecordedV1,
   RemoteSessionInvalidatedV1,
@@ -760,6 +761,11 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRevoked, 1, DeviceRevokedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceCredentialExpired, 1, DeviceCredentialExpiredV1)
+    .register(
+      REMOTE_ACCESS_EVENT_NAMES.deviceRegistrationDeadlineChanged,
+      1,
+      DeviceRegistrationDeadlineChangedV1,
+    )
     .register(REMOTE_ACCESS_EVENT_NAMES.hostKeyRotated, 1, HostKeyRotatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)

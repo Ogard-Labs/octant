@@ -244,6 +244,7 @@ describe("shell settings policy", () => {
       browserUploadFileCountLimit: 5,
       rememberedBrowserTransfers: [],
       persistentBrowserOwner: false,
+      pairedDeviceLifetime: "30-days",
     });
     expect(replaceShellSettings(current, replacement)).toEqual({
       ...replacement,

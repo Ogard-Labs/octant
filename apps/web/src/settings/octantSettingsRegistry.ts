@@ -1697,6 +1697,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "pairing code pair phone device single use",
         },
         {
+          id: settingId("remote-paired-device-lifetime"),
+          label: "Keep devices paired for",
+          scope: "host",
+          keywords:
+            "pairing length lifetime expiry expire paired device registration days year never revoke",
+        },
+        {
           id: settingId("hub-role"),
           label: "Act as hub",
           scope: "host",

@@ -3,6 +3,7 @@ import {
   MAX_BROWSER_HELD_DOWNLOADS,
   MAX_BROWSER_UPLOAD_FILES,
 } from "@octant/contracts/browser-automation";
+import { DEFAULT_PAIRED_DEVICE_LIFETIME } from "@octant/contracts/remote-access";
 import {
   DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT,
   DEFAULT_COMPLETED_THREAD_ARCHIVE_AFTER_DAYS,
@@ -221,6 +222,7 @@ export function defaultShellSettings(): ShellSettings {
     browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,
     rememberedBrowserTransfers: [],
     persistentBrowserOwner: false,
+    pairedDeviceLifetime: DEFAULT_PAIRED_DEVICE_LIFETIME,
   };
 }
 

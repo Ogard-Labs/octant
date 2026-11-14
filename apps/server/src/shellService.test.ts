@@ -19,8 +19,18 @@ import {
   defaultWindowWorkspace,
   resolveSurfaceDescriptors,
 } from "@octant/domain";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasProjection } from "./canvas/canvasProjection";
+import { Journal } from "./persistence/journal";
+import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
+import { readDeviceRegistrations } from "./persistence/remoteAccessProjection";
+import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
+import { readShellSettings } from "./persistence/shellProjection";
+import { openSqlite } from "./persistence/sqlitePort";
+import { retimeDeviceRegistrations } from "./remote/deviceRegistrationLifetime";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
@@ -1694,6 +1704,112 @@ describe("ShellService", () => {
     );
   });
 
+  it("keeps the paired-device length and every device deadline together when retiming fails part way, so setting it again applies it", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-shell-pairing-length-"));
+    try {
+      const connection = openSqlite(join(directory, "store.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const runtime = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: runtime.events,
+        projections: runtime.projections,
+        clock: () => now,
+      });
+      const hostId = "11111111-1111-4111-8111-111111111111";
+      const system = { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID };
+      const deviceIds = [
+        "66666666-6666-4666-8666-000000000001",
+        "66666666-6666-4666-8666-000000000002",
+      ];
+      for (const [index, deviceId] of deviceIds.entries()) {
+        journal.append({
+          aggregate: { aggregateType: "remote-device", aggregateId: deviceId },
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: `77777777-7777-4777-8777-00000000000${index}`,
+              eventName: "remote.device-registered@1",
+              eventVersion: 1,
+              correlationId: `88888888-8888-4888-8888-00000000000${index}`,
+              actor: system,
+              occurredAt: now,
+              payload: {
+                device: {
+                  hostId,
+                  deviceId,
+                  deviceKeyFingerprint: String(index).repeat(64),
+                  devicePublicKey: "public-key",
+                  deviceLabel: "Safari",
+                  origin: "https://mac.example.test",
+                  protocolFloor: 1,
+                  credentialGeneration: 1,
+                  createdAt: now,
+                  expiresAt: "2026-08-12T12:00:00.000Z",
+                  lastSeenAt: now,
+                  state: "active",
+                },
+              },
+            },
+          ],
+        });
+      }
+      const persistence = {
+        journal,
+        readShellSettings: () => readShellSettings(connection),
+        readWindowWorkspaces: () => [],
+        status: () => ({ state: "current", integrity: "ok" }),
+      } as unknown as PersistenceService;
+      const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+      let uuid = 0;
+      let stopAfterOneDevice = true;
+      service.onSettingsReplaced(({ previous, settings, actor }) => {
+        if (previous.pairedDeviceLifetime === settings.pairedDeviceLifetime) return undefined;
+        let appended = 0;
+        const stopping = {
+          append: (input: Parameters<Journal["append"]>[0]) => {
+            if (stopAfterOneDevice && appended === 1) throw new Error("the host stopped");
+            appended += 1;
+            return journal.append(input);
+          },
+        } as unknown as Journal;
+        retimeDeviceRegistrations({
+          journal: stopping,
+          connection,
+          lifetime: settings.pairedDeviceLifetime,
+          actor,
+          now: Date.parse(now),
+          uuid: () => `99999999-9999-4999-8999-${String(++uuid).padStart(12, "0")}`,
+        });
+        return undefined;
+      });
+      const deadlines = () =>
+        readDeviceRegistrations(connection).map((device) => device.expires_at);
+      const sevenDays = decodeShellSettings({
+        ...defaultShellSettings(),
+        pairedDeviceLifetime: "7-days",
+      });
+
+      expect(() =>
+        service.replaceSettings({
+          settings: sevenDays,
+          expectedVersion: 0 as never,
+          actor: system,
+        }),
+      ).toThrow();
+      expect(service.readSettings().settings.pairedDeviceLifetime).toBe("30-days");
+      expect(deadlines()).toEqual(["2026-08-12T12:00:00.000Z", "2026-08-12T12:00:00.000Z"]);
+
+      stopAfterOneDevice = false;
+      service.replaceSettings({ settings: sevenDays, expectedVersion: 0 as never, actor: system });
+      expect(service.readSettings().settings.pairedDeviceLifetime).toBe("7-days");
+      expect(deadlines()).toEqual(["2026-07-20T12:00:00.000Z", "2026-07-20T12:00:00.000Z"]);
+      connection.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("forgets the reply detail of erased threads and leaves every other thread's", () => {
     const kept = { mode: "chat" as const, threadId: "kept", level: "high" as const };
     const settings = {
@@ -2768,7 +2884,7 @@ function persistenceStub(
     return { aggregateVersion: request.expectedVersion + 1 };
   });
   const persistence = {
-    journal: { append },
+    journal: { append, transaction: <A>(body: () => A): A => body() },
     readShellSettings: () => options.settings,
     readEnvironmentPresentation: () => options.presentation,
     readWindowWorkspace: (windowId: Parameters<PersistenceService["readWindowWorkspace"]>[0]) =>
