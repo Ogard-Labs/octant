@@ -818,7 +818,9 @@ are tokens too. One value with one meaning has one token: a duration, a weight
 or a space is never defined twice under two names. There is no decorative
 entrance animation and no ambient motion behind the work by default. The one exception is
 the default ground, the Pulsing characters, which drifts only behind a start
-screen, at about fifteen frames a second, and stops while the window is hidden.
+screen, at about fifteen frames a second, and stops while the window is hidden;
+a click on empty ground sends a ring (now and then a heart) through it for under
+two seconds, at about forty frames a second while it lives.
 An animated built-in picture, Dithered pixels, and Flowing grounds, and a printed
 picture set to Wave are the other moving grounds a person may choose, and reduced
 motion holds each on a still frame. Running state has a textual or shape

@@ -1,16 +1,18 @@
 /**
  * A click's wave: an uneven ring (now and then a heart) that spreads from where
- * a person clicked and fades. The moving print lights its cells with it; the
- * character ground draws its own patches and answers no click.
+ * a person clicked and fades. The moving print and the character ground both
+ * light their cells with it.
  */
 
 /** How fast a click's ring spreads, how wide it is, and how long it lasts. */
 export const RIPPLE_SPEED = 320;
 export const RIPPLE_BAND = 40;
-const RIPPLE_SECONDS = 1.6;
+export const RIPPLE_SECONDS = 1.6;
 /** A fainter echo follows each ring this many seconds behind, at this strength. */
 export const ECHO_DELAY = 0.22;
 const ECHO_GAIN = 0.45;
+/** A ring's brightest cell, as an alpha: meant to be seen, so above the field's ink. */
+export const RING_MAX_ALPHA = 0.9;
 /** About one click in this many draws a heart instead of a ring. */
 const HEART_ODDS = 6;
 

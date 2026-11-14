@@ -54,7 +54,15 @@ is capped at twice the display ratio and at about five million pixels, and its
 setup waits for idle time. It fades in over 1.2 seconds once it has
 drawn, sits behind the content with no pointer events and is hidden from
 assistive technology. Reduced motion, or Motion Still, holds it on one still
-frame. It answers no click. A saved choice always wins: only a fresh install and Reset take this default. Behind a
+frame and takes no rings. A click on empty ground (not on a control, a menu or a
+dialog, and not the end of a drag or of a text selection) sends an uneven ring of
+glyphs out across the field in the theme's accent, whose edge wobbles as it
+grows, trailed by a fainter echo; about one click in six draws a heart instead.
+The cells a ring crosses take the accent at the ring's strength (up to 90%
+opaque) and scramble their glyphs faster, and the ring fades within two seconds.
+Under the whole shell the field answers only a click on a start screen, never one
+in a thread or a list. While a ring is alive the field runs at about forty frames
+a second, and falls back to fifteen once it is gone. A saved choice always wins: only a fresh install and Reset take this default. Behind a
 start screen every other ground is masked away behind the composer and fades out
 below it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has

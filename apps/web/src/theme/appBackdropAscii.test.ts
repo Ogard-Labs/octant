@@ -9,19 +9,41 @@ import {
 } from "./appBackdropAscii";
 
 /**
- * A canvas that records what a frame does. A frame writes the cell mask once,
- * so the number of mask writes is the number of frames drawn.
+ * Canvases that record what a frame does. Each frame copies the glyph layer
+ * onto the field once, so the number of copies is the number of frames drawn.
+ * Every cell mask written to the screen is kept, so a test can see which cells
+ * a ring lit and how strongly.
  */
+interface MaskWrite {
+  readonly width: number;
+  readonly alphas: ReadonlyArray<number>;
+}
+
 function recordingCanvases() {
-  const writes = { frames: 0 };
+  const writes = { frames: 0, masks: [] as MaskWrite[], ringMasks: [] as MaskWrite[] };
+  const maskCanvases: HTMLCanvasElement[] = [];
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
     function (this: HTMLCanvasElement) {
+      // Cell masks are one pixel per cell: the first is the field's, the second a ring's.
+      if (this.width === 100 && !maskCanvases.includes(this)) maskCanvases.push(this);
       return {
         createImageData: (width: number, height: number) => ({
+          width,
           data: new Uint8ClampedArray(width * height * 4),
         }),
-        putImageData: () => {
-          writes.frames += 1;
+        putImageData: (
+          (owner: HTMLCanvasElement) => (image: { width: number; data: Uint8ClampedArray }) => {
+            const alphas: number[] = [];
+            for (let index = 3; index < image.data.length; index += 4) {
+              alphas.push(image.data[index] ?? 0);
+            }
+            const write = { width: image.width, alphas };
+            if (owner === maskCanvases[0]) writes.masks.push(write);
+            else writes.ringMasks.push(write);
+          }
+        )(this),
+        set globalCompositeOperation(value: string) {
+          if (value === "copy") writes.frames += 1;
         },
         drawImage: () => undefined,
         clearRect: () => undefined,
@@ -159,5 +181,179 @@ describe("character ground", () => {
     const ratio = fieldPixelRatio(3840, 2160, 2);
     expect(ratio).toBeLessThan(1);
     expect(3840 * ratio * (2160 * ratio)).toBeLessThanOrEqual(5_000_001);
+  });
+});
+
+describe("character ground click rings", () => {
+  const COLUMNS = 100;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestIdleCallback", undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  const click = (x: number, y: number, target: Element = document.body) =>
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: x, clientY: y }));
+
+  /** The rows a ring lit in the newest ring mask, as [first, last], or undefined. */
+  function litRows(writes: ReturnType<typeof recordingCanvases>) {
+    const latest = writes.ringMasks[writes.ringMasks.length - 1];
+    if (latest === undefined) return undefined;
+    const rows: number[] = [];
+    latest.alphas.forEach((alpha, index) => {
+      if (alpha > 0) rows.push(Math.floor(index / COLUMNS));
+    });
+    return rows.length === 0 ? undefined : ([Math.min(...rows), Math.max(...rows)] as const);
+  }
+
+  it("sends a ring out from a click on empty ground that grows and then fades away", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(300);
+    expect(writes.ringMasks).toHaveLength(0);
+    click(350, 200);
+    vi.advanceTimersByTime(300);
+    const early = litRows(writes);
+    vi.advanceTimersByTime(500);
+    const later = litRows(writes);
+    expect(early).toBeDefined();
+    expect(later).toBeDefined();
+    // The ring grew: its lit rows reach further from the click's row (15).
+    expect((later?.[1] ?? 0) - (later?.[0] ?? 0)).toBeGreaterThan(
+      (early?.[1] ?? 0) - (early?.[0] ?? 0),
+    );
+    const strongest = Math.max(...(writes.ringMasks.flatMap((write) => write.alphas) ?? [0]));
+    expect(strongest).toBeGreaterThan(0.5 * 255);
+    expect(strongest).toBeLessThanOrEqual(Math.round(0.9 * 255));
+    vi.advanceTimersByTime(2500);
+    const settled = writes.ringMasks.length;
+    vi.advanceTimersByTime(1000);
+    expect(writes.ringMasks).toHaveLength(settled);
+    stop();
+  });
+
+  it("draws a heart now and then, whose point runs further below the click than a round ring would", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.05);
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(300);
+    click(350, 80);
+    vi.advanceTimersByTime(500);
+    const rows = litRows(writes);
+    // Row 6 holds the click. Half a second on, a round ring would reach about
+    // row 22; a heart's point is already near the bottom of the field.
+    expect(rows?.[1] ?? 0).toBeGreaterThan(25);
+    stop();
+  });
+
+  it("draws a round ring, reaching above the click, when the roll is not a heart", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.9);
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(300);
+    click(350, 200);
+    vi.advanceTimersByTime(500);
+    const rows = litRows(writes);
+    expect(rows?.[0] ?? 99).toBeLessThan(8);
+    stop();
+  });
+
+  it("answers no click on a control, a menu, a drag or a text selection", () => {
+    const writes = recordingCanvases();
+    const button = document.createElement("button");
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    const item = document.createElement("span");
+    menu.append(item);
+    document.body.append(button, menu);
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(300);
+    click(300, 200, button);
+    click(300, 200, item);
+    expect(writes.ringMasks).toHaveLength(0);
+
+    document.body.dispatchEvent(
+      new MouseEvent("pointerdown", { bubbles: true, clientX: 10, clientY: 10 }),
+    );
+    click(200, 200);
+    expect(writes.ringMasks).toHaveLength(0);
+
+    vi.spyOn(window, "getSelection").mockReturnValue({ isCollapsed: false } as Selection);
+    click(300, 200);
+    vi.advanceTimersByTime(500);
+    expect(writes.ringMasks).toHaveLength(0);
+    stop();
+  });
+
+  it("answers a click only inside the area it is restricted to", () => {
+    const writes = recordingCanvases();
+    const start = document.createElement("div");
+    start.className = "start-screen";
+    const thread = document.createElement("div");
+    document.body.append(start, thread);
+    const stop = runAsciiField(sizedCanvas(), true, ".start-screen");
+    vi.advanceTimersByTime(300);
+    click(300, 200, thread);
+    vi.advanceTimersByTime(300);
+    expect(writes.ringMasks).toHaveLength(0);
+    click(300, 200, start);
+    vi.advanceTimersByTime(300);
+    expect(writes.ringMasks.length).toBeGreaterThan(0);
+    stop();
+  });
+
+  it("runs at about forty frames a second only while a ring is alive", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(500);
+    const framesIn = (ms: number) => {
+      const before = writes.frames;
+      vi.advanceTimersByTime(ms);
+      return writes.frames - before;
+    };
+    const idle = framesIn(2000);
+    expect(idle).toBeGreaterThanOrEqual(28);
+    expect(idle).toBeLessThanOrEqual(32);
+    click(350, 200);
+    const alive = framesIn(1500);
+    expect(alive).toBeGreaterThanOrEqual(55);
+    expect(alive).toBeLessThanOrEqual(62);
+    vi.advanceTimersByTime(1000);
+    const after = framesIn(2000);
+    expect(after).toBeGreaterThanOrEqual(28);
+    expect(after).toBeLessThanOrEqual(32);
+    stop();
+  });
+
+  it("takes no rings, and schedules nothing, when motion is not wanted", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), false);
+    click(350, 200);
+    vi.advanceTimersByTime(3000);
+    expect(writes.frames).toBe(1);
+    expect(writes.ringMasks).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    stop();
+  });
+
+  it("leaves nothing scheduled and ignores clicks once stopped", () => {
+    const writes = recordingCanvases();
+    const stop = runAsciiField(sizedCanvas(), true);
+    vi.advanceTimersByTime(300);
+    click(350, 200);
+    vi.advanceTimersByTime(200);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+    click(350, 200);
+    vi.advanceTimersByTime(1000);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(writes.ringMasks.length).toBeGreaterThan(0);
   });
 });

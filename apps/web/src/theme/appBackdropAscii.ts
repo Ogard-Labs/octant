@@ -1,3 +1,12 @@
+import {
+  ECHO_DELAY,
+  RING_MAX_ALPHA,
+  RIPPLE_SECONDS,
+  acceptsRipple,
+  createRipple,
+  rippleBrightness,
+  type Ripple,
+} from "./appBackdropCharacters";
 import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
 
 /**
@@ -11,6 +20,11 @@ import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
  * the number of glyphs drawn. It runs at about fifteen frames a second, stops
  * while the document is hidden or the field is off screen, and holds one still
  * frame when motion is not wanted.
+ *
+ * A click on empty ground sends a wobbling ring (now and then a heart) out
+ * across it in the theme's accent. The cells the ring crosses take the accent
+ * at the ring's strength and scramble their glyphs faster, and the field runs
+ * at about forty frames a second only while a ring is alive.
  */
 
 const GLYPHS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -35,6 +49,47 @@ export const FADE_SECONDS = 4;
 /** Share of cells that take a new glyph each frame. */
 const SWAP_SHARE = 0.025;
 const FRAME_MS = 1000 / 15;
+/** The pace while a click's ring is alive, so its edge moves smoothly. */
+export const RING_FRAME_MS = 1000 / 40;
+/** Share of the cells a ring crosses that take a new glyph each frame. */
+const RING_SWAP_SHARE = 0.3;
+/** At most this many rings are drawn at once; the newest win. */
+const MAX_RINGS = 8;
+/** A click further than this from where it went down is a drag, not a click. */
+const DRAG_SLOP = 6;
+/** Elements a click on which belongs to the control, not to the ground. */
+const CONTROL_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "textarea",
+  "select",
+  "summary",
+  "label",
+  "[contenteditable]:not([contenteditable='false'])",
+  "[role='button']",
+  "[role='link']",
+  "[role='tab']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[role='checkbox']",
+  "[role='switch']",
+  "[role='slider']",
+  "[role='dialog']",
+  "[role='listbox']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(", ");
+
+/**
+ * Whether a click on `target` is a click on empty ground: not on a control
+ * (or inside a menu or dialog), and not the end of a text selection.
+ */
+export function isEmptyGroundClick(target: EventTarget | null, selection: Selection | null) {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(CONTROL_SELECTOR) !== null) return false;
+  return selection === null || selection.isCollapsed;
+}
 /** The backing store never exceeds this many device pixels or this ratio. */
 const MAX_RATIO = 2;
 const MAX_PIXELS = 5_000_000;
@@ -186,11 +241,11 @@ function paintCell(context: CanvasRenderingContext2D, surface: Surface, index: n
   context.fillText(glyph, x, y + CELL_HEIGHT * surface.ratio * 0.5);
 }
 
-function paintLayer(surface: Surface) {
-  const context = surface.layer.getContext("2d");
+function paintLayer(surface: Surface, layer: HTMLCanvasElement, ink: string) {
+  const context = layer.getContext("2d");
   if (context === null) return;
-  context.clearRect(0, 0, surface.layer.width, surface.layer.height);
-  context.fillStyle = surface.ink;
+  context.clearRect(0, 0, layer.width, layer.height);
+  context.fillStyle = ink;
   context.font = `${FONT_SIZE * surface.ratio}px ${FONT_FAMILY}`;
   context.textBaseline = "middle";
   for (let index = 0; index < surface.glyphs.length; index += 1) {
@@ -200,11 +255,16 @@ function paintLayer(surface: Surface) {
 
 /**
  * Draws the field into `canvas` and, when `animated`, keeps it moving until
- * the returned stop is called. A still field draws one frame and nothing more.
- * Nothing is drawn or scheduled while the document is hidden or the canvas is
- * off screen.
+ * the returned stop is called. A still field draws one frame and nothing more,
+ * and takes no rings. With `ripplesWithin`, only a click inside a matching
+ * element sends a ring. Nothing is drawn or scheduled while the document is
+ * hidden or the canvas is off screen.
  */
-export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () => void {
+export function runAsciiField(
+  canvas: HTMLCanvasElement,
+  animated: boolean,
+  ripplesWithin?: string,
+): () => void {
   const context = canvas.getContext("2d");
   if (context === null) return () => undefined;
   let surface: Surface | undefined;
@@ -214,8 +274,48 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
   let onScreen = true;
   let started = 0;
   let frames = 0;
+  let rings: ReadonlyArray<Ripple> = [];
+  // The accent glyphs a ring is shown through. They exist only while a ring
+  // does, so an idle field carries one layer, not two.
+  let accentLayer: HTMLCanvasElement | undefined;
+  let accentInk = "";
+  let ringMask: HTMLCanvasElement | undefined;
+  let ringImage: ImageData | undefined;
+  let scratch: HTMLCanvasElement | undefined;
+  // The field's own alpha per cell moves slowly, so the faster ring frames
+  // reuse it and only the ring is worked out again.
+  let fieldAlpha = new Float32Array(0);
+  let fieldAt = Number.NEGATIVE_INFINITY;
+  const crossed: number[] = [];
 
   const readInk = () => getComputedStyle(canvas).color;
+  const readAccent = () => {
+    const accent = getComputedStyle(canvas).getPropertyValue("--octant-accent").trim();
+    return accent === "" ? readInk() : accent;
+  };
+
+  const releaseAccent = () => {
+    accentLayer = undefined;
+    ringMask = undefined;
+    ringImage = undefined;
+    scratch = undefined;
+  };
+
+  const createAccent = () => {
+    if (surface === undefined) return;
+    accentInk = readAccent();
+    accentLayer = document.createElement("canvas");
+    accentLayer.width = surface.layer.width;
+    accentLayer.height = surface.layer.height;
+    paintLayer(surface, accentLayer, accentInk);
+    scratch = document.createElement("canvas");
+    scratch.width = surface.layer.width;
+    scratch.height = surface.layer.height;
+    ringMask = document.createElement("canvas");
+    ringMask.width = surface.columns;
+    ringMask.height = surface.rows;
+    ringImage = ringMask.getContext("2d")?.createImageData(surface.columns, surface.rows);
+  };
 
   const build = () => {
     const rect = canvas.getBoundingClientRect();
@@ -224,17 +324,52 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
       return;
     }
     surface = createSurface(canvas, rect.width, rect.height, readInk());
-    if (surface !== undefined) paintLayer(surface);
+    if (surface !== undefined) paintLayer(surface, surface.layer, surface.ink);
+    fieldAlpha = new Float32Array(surface === undefined ? 0 : surface.columns * surface.rows);
+    fieldAt = Number.NEGATIVE_INFINITY;
+    releaseAccent();
+    if (rings.length > 0) createAccent();
   };
 
   const draw = (seconds: number) => {
     if (surface === undefined) return;
+    const current = surface;
     const { columns, rows, maskImage, shares, glyphs } = surface;
     const bytes = maskImage.data;
+    // The patches drift slowly, so a ring's faster frames keep the last ones.
+    if (seconds - fieldAt >= FRAME_MS / 1000 - 0.005 || seconds < fieldAt) {
+      fieldAt = seconds;
+      for (let row = 0; row < rows; row += 1) {
+        for (let column = 0; column < columns; column += 1) {
+          const index = row * columns + column;
+          fieldAlpha[index] =
+            patchStrength(column, row, seconds) * (shares[index] ?? 1) * PEAK_ALPHA;
+        }
+      }
+    }
+    rings = rings.filter((ring) => seconds - ring.start <= RIPPLE_SECONDS + ECHO_DELAY);
+    const shown = rings.slice(-MAX_RINGS);
+    const ringBytes = shown.length > 0 ? ringImage?.data : undefined;
+    crossed.length = 0;
     for (let row = 0; row < rows; row += 1) {
       for (let column = 0; column < columns; column += 1) {
         const index = row * columns + column;
-        const alpha = patchStrength(column, row, seconds) * (shares[index] ?? 1) * PEAK_ALPHA;
+        let alpha = fieldAlpha[index] ?? 0;
+        if (ringBytes !== undefined) {
+          const x = (column + 0.5) * CELL_WIDTH;
+          const y = (row + 0.5) * CELL_HEIGHT;
+          let lit = 0;
+          for (const ring of shown) lit = Math.max(lit, rippleBrightness(ring, x, y, seconds));
+          const ringAlpha = lit * RING_MAX_ALPHA;
+          // Where the ring is stronger than the field it takes the cell over.
+          if (ringAlpha > alpha) {
+            ringBytes[index * 4 + 3] = Math.round(ringAlpha * 255);
+            crossed.push(index);
+            alpha = 0;
+          } else {
+            ringBytes[index * 4 + 3] = 0;
+          }
+        }
         bytes[index * 4 + 3] = Math.round(alpha * 255);
       }
     }
@@ -242,16 +377,30 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
     const layerContext = surface.layer.getContext("2d");
     if (maskContext === null || layerContext === null) return;
     maskContext.putImageData(maskImage, 0, 0);
-    // A few cells take a new glyph, so the field shimmers where it shows.
+    // A few cells take a new glyph, so the field shimmers where it shows, and
+    // many of those a ring crosses do, so the ring seems to stir the field.
     if (animated) {
+      const accentContext = accentLayer?.getContext("2d") ?? null;
+      const font = `${FONT_SIZE * surface.ratio}px ${FONT_FAMILY}`;
       layerContext.fillStyle = surface.ink;
-      layerContext.font = `${FONT_SIZE * surface.ratio}px ${FONT_FAMILY}`;
+      layerContext.font = font;
       layerContext.textBaseline = "middle";
-      const swaps = Math.ceil(glyphs.length * SWAP_SHARE);
-      for (let swap = 0; swap < swaps; swap += 1) {
-        const index = Math.floor(Math.random() * glyphs.length);
+      if (accentContext !== null) {
+        accentContext.fillStyle = accentInk;
+        accentContext.font = font;
+        accentContext.textBaseline = "middle";
+      }
+      const swap = (index: number) => {
         glyphs[index] = Math.floor(Math.random() * GLYPHS.length);
-        paintCell(layerContext, surface, index);
+        paintCell(layerContext, current, index);
+        if (accentContext !== null) paintCell(accentContext, current, index);
+      };
+      const swaps = Math.ceil(glyphs.length * SWAP_SHARE);
+      for (let count = 0; count < swaps; count += 1) {
+        swap(Math.floor(Math.random() * glyphs.length));
+      }
+      for (const index of crossed) {
+        if (Math.random() < RING_SWAP_SHARE) swap(index);
       }
     }
     context.globalCompositeOperation = "copy";
@@ -260,6 +409,24 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
     context.imageSmoothingEnabled = false;
     context.drawImage(surface.mask, 0, 0, canvas.width, canvas.height);
     context.globalCompositeOperation = "source-over";
+    if (ringBytes !== undefined && ringMask !== undefined && ringImage !== undefined) {
+      const scratchContext = scratch?.getContext("2d") ?? null;
+      const ringContext = ringMask.getContext("2d");
+      if (scratch !== undefined && accentLayer !== undefined) {
+        if (scratchContext !== null && ringContext !== null) {
+          ringContext.putImageData(ringImage, 0, 0);
+          scratchContext.clearRect(0, 0, scratch.width, scratch.height);
+          scratchContext.globalCompositeOperation = "source-over";
+          scratchContext.drawImage(accentLayer, 0, 0);
+          scratchContext.globalCompositeOperation = "destination-in";
+          scratchContext.imageSmoothingEnabled = false;
+          scratchContext.drawImage(ringMask, 0, 0, scratch.width, scratch.height);
+          context.drawImage(scratch, 0, 0);
+        }
+      }
+    } else if (accentLayer !== undefined) {
+      releaseAccent();
+    }
   };
 
   const running = () => animated && !stopped && onScreen && document.visibilityState !== "hidden";
@@ -272,11 +439,11 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
       const ink = readInk();
       if (ink !== surface.ink) {
         surface.ink = ink;
-        paintLayer(surface);
+        paintLayer(surface, surface.layer, ink);
       }
     }
     draw((performance.now() - started) / 1000);
-    timer = setTimeout(frame, FRAME_MS);
+    timer = setTimeout(frame, rings.length > 0 ? RING_FRAME_MS : FRAME_MS);
   };
 
   const schedule = () => {
@@ -305,6 +472,38 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
     else schedule();
   };
   document.addEventListener("visibilitychange", onVisibility);
+
+  // The canvas takes no pointer events, so clicks are read on the window. A
+  // press that travelled is a drag, and one that ended a text selection is not
+  // a click on the ground either.
+  let pressed: { readonly x: number; readonly y: number } | undefined;
+  const onPress = (event: PointerEvent) => {
+    pressed = { x: event.clientX, y: event.clientY };
+  };
+  const onClick = (event: MouseEvent) => {
+    if (!running() || surface === undefined || event.button !== 0) return;
+    if (
+      pressed !== undefined &&
+      Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > DRAG_SLOP
+    ) {
+      return;
+    }
+    if (!isEmptyGroundClick(event.target, window.getSelection())) return;
+    if (!acceptsRipple(event.target, ripplesWithin)) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+    rings = [...rings, createRipple(x, y, (performance.now() - started) / 1000)].slice(-MAX_RINGS);
+    if (accentLayer === undefined) createAccent();
+    // The next frame is due at the ring's pace, not after an idle wait.
+    halt();
+    schedule();
+  };
+  if (animated) {
+    window.addEventListener("pointerdown", onPress, { capture: true, passive: true });
+    window.addEventListener("click", onClick, { capture: true, passive: true });
+  }
 
   const observer =
     typeof IntersectionObserver === "undefined"
@@ -351,6 +550,8 @@ export function runAsciiField(canvas: HTMLCanvasElement, animated: boolean): () 
       else window.clearTimeout(idle);
     }
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("pointerdown", onPress, { capture: true });
+    window.removeEventListener("click", onClick, { capture: true });
     observer?.disconnect();
     resizeObserver?.disconnect();
     stopPixelRatio();

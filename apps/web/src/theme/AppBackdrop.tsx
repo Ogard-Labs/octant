@@ -123,8 +123,8 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   useEffect(() => {
     const canvas = charactersCanvas.current;
     if (!characters || canvas === null) return;
-    return runAsciiField(canvas, resolved.backgroundAnimated);
-  }, [characters, resolved.backgroundAnimated]);
+    return runAsciiField(canvas, resolved.backgroundAnimated, wavesWithin);
+  }, [characters, wavesWithin, resolved.backgroundAnimated]);
 
   const pixels = resolved.kind === "pixels";
   useEffect(() => {
