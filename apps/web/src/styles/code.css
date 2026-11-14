@@ -1827,8 +1827,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-3);
 }
 
-/* Section labels follow Settings: sentence case, 14px, medium weight, the
-   primary ink, and a count at the far end where there is one. */
+/* Section labels are the page's one section label role (`oct-section-label`):
+   sentence case, 14px, strong weight, the secondary ink, and a count at the
+   far end where there is one. */
 .code-project-overview__section-header {
   display: flex;
   align-items: baseline;
@@ -1838,11 +1839,11 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-overview__section-header h2 {
   margin: 0;
-  color: var(--oct-fg);
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-sf-14);
 }
 
 .code-project-overview__count,
@@ -2274,8 +2275,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 /* The action is the last thing on the line, so the facts read first. */
 .code-checkout-bar__action {
   margin-inline-start: auto;
-  height: 26px;
-  min-height: 26px;
+  height: 24px;
+  min-height: 24px;
   padding-inline: 8px;
 }
 
@@ -2568,10 +2569,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-pull-requests__search-clear {
   position: absolute;
   right: 4px;
-  width: 26px;
-  min-width: 26px;
-  height: 26px;
-  min-height: 26px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
 }
 

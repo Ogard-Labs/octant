@@ -368,7 +368,7 @@ function AgentsCenterListBody(props: {
                     onClick={props.onStartThread}
                     size="sm"
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                   >
                     Start a thread
                   </OctantButton>
@@ -377,7 +377,7 @@ function AgentsCenterListBody(props: {
         detail={
           hasActiveFilters
             ? "Clear or adjust the active filters to see other runs."
-            : "Agents are the helpers a thread starts for a part of its work. Each one lists here with its task, its status and its result."
+            : "Helpers a thread starts for part of its work list here."
         }
         icon={<Bot size={20} />}
         title={hasActiveFilters ? "No agent runs match these filters" : "No agent runs yet"}

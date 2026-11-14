@@ -492,7 +492,7 @@ export function ReviewPage(props: ReviewPageProps) {
                       onClick={props.onStartThread}
                       size="sm"
                       type="button"
-                      variant="ghost"
+                      variant="outline"
                     >
                       Start a thread
                     </OctantButton>

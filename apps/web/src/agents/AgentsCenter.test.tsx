@@ -241,7 +241,7 @@ describe("AgentsCenter", () => {
     render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
     const title = await screen.findByText("No agent runs yet");
     expect(title.closest("[role='status']")).toHaveClass("surface-empty");
-    expect(screen.getByText(/Agents are the helpers a thread starts/)).toBeVisible();
+    expect(screen.getByText(/Helpers a thread starts for part of its work/)).toBeVisible();
   });
 
   it("opens a parent thread without creating another hierarchy", async () => {

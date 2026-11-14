@@ -139,6 +139,9 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 .project-overview[data-project-type] :is(.project-overview__repo, .code-project-planner) {
   display: grid;
+  /* One column that may shrink under its content: a planner thread's long
+     title must not widen the card past the side column. */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--oct-space-2);
   padding: var(--oct-space-4);
@@ -149,11 +152,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 .project-overview[data-project-type] .project-overview__card-title {
   margin: 0;
-  color: var(--oct-fg);
+  color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  letter-spacing: 0;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-sf-14);
 }
 
 .project-overview[data-project-type] .project-overview__repo {

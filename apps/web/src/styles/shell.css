@@ -1807,7 +1807,7 @@ html[data-octant-density="compact"]
 
 .thread-lineage__entry {
   width: 100%;
-  min-height: 26px;
+  min-height: 28px;
   padding-inline: var(--oct-space-2);
   text-align: left;
 }
