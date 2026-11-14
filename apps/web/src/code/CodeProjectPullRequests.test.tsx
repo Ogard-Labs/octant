@@ -337,7 +337,7 @@ describe("CodeProjectPullRequests", () => {
     expect(titlesInOrder()).toEqual(["Newest in octant", "Middle in aurora", "Oldest in octant"]);
 
     await openMenu(user, "Sort pull requests");
-    expect(screen.getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+    expect((await screen.findAllByRole("menuitemradio")).map((item) => item.textContent)).toEqual([
       "Recently updated",
       "Least recently updated",
       "Repository",
