@@ -109,11 +109,10 @@
   --oct-danger: var(--octant-danger-text);
 
   /* ─── depth ─────────────────────────────────────────────────────────
-     Octant draws elevation as a ring and no shadow; the app has real
-     shadows. Inside the app the app wins, because a flat card in a
-     shadowed shell reads as a rendering bug rather than as restraint. */
+     A surface at rest is flat: a hairline and no shadow. What floats keeps the
+     one restrained overlay shadow. */
   --oct-elev-ring: var(--octant-shadow-hairline);
-  --oct-elev-subtle: var(--octant-shadow-sm);
+  --oct-elev-subtle: none;
   --oct-elev-raised: var(--octant-shadow-overlay);
 
   /* The glass floor is the theme's page colour at the floor's measured 66%.

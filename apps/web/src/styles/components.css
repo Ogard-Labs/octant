@@ -34,7 +34,8 @@
   background: var(--octant-surface-raised);
   border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 .octant-card--flat {
@@ -131,7 +132,7 @@
 .thread-info__panel,
 .palette,
 .toast {
-  background: var(--octant-float-sheen), var(--octant-float-glass);
+  background: var(--octant-float-glass);
   border: 0;
   box-shadow: var(--octant-shadow-pop);
   backdrop-filter: var(--octant-float-blur);
@@ -211,7 +212,8 @@ html[data-octant-increased-contrast="true"]
 .provider-question-card {
   border: 0;
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 /* Level 3, a well: a place cut into the surface (a segmented switch's track,
@@ -222,7 +224,6 @@ html[data-octant-increased-contrast="true"]
 .browser-workspace__history,
 .approval-cmd {
   background: var(--octant-well);
-  box-shadow: var(--octant-shadow-well);
 }
 
 .modeswitch__tray > .mode[aria-current="page"] {
@@ -234,7 +235,6 @@ html[data-octant-increased-contrast="true"]
 .octant-chip {
   background: var(--octant-control);
   border: 0;
-  box-shadow: var(--octant-shadow-control);
 }
 
 .octant-chip:hover {
@@ -244,7 +244,6 @@ html[data-octant-increased-contrast="true"]
 .octant-chip[aria-pressed="true"],
 .octant-chip[data-active="true"] {
   background: var(--octant-control-pressed);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 /* Edges that do not depend on a shadow. The rim is a shadow, and forced colours
@@ -310,11 +309,9 @@ html[data-octant-increased-contrast="true"]
   border: 1px solid var(--octant-border-strong);
 }
 
-/* A pending approval keeps its warning edge: the colour is its meaning. It
-   takes the card's depth, not its rim. */
+/* A pending approval keeps its warning edge: the colour is its meaning. */
 .approval {
   background: var(--octant-card);
-  box-shadow: var(--octant-card-drop);
 }
 
 /* ── Overlay motion ────────────────────────────────────────────────── */
@@ -2254,7 +2251,6 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   background: var(--background);
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
-  box-shadow: var(--octant-shadow-xs);
 }
 
 .octant-number-stepper:focus-within {

@@ -28,26 +28,28 @@ describe("shared control paint ownership", () => {
     expect(controlRules).not.toMatch(/rgb\(/);
   });
 
-  it("keeps composer depth while a preference group is a raised card", () => {
+  it("keeps the composer and a preference group flat, one fill step above the page with one hairline", () => {
     const composerRules = between(
       systemStyles,
-      "/* The composer is a raised object, not a field ruled onto the page:",
+      "/* The composer is a flat box, one step from the surface behind it,",
       ".composer-chips {",
     );
     const settingsGroupRules = between(settingsStyles, ".setgroup {", "/* Rows inside a group");
 
-    expect(composerRules).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
+    expect(composerRules).toMatch(/box-shadow:\s*none/);
+    expect(composerRules).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
     expect(composerRules).toMatch(/--octant-(?:card|floating|workspace)/);
     expect(composerRules).not.toMatch(/rgb\(/);
     expect(settingsGroupRules).toMatch(/background:\s*transparent/);
     expect(settingsGroupRules).toMatch(/box-shadow:\s*none/);
     expect(settingsGroupRules).not.toMatch(/rgb\(/);
-    // Inside Settings the group is a card one step above the page: raised by
-    // its fill and by the card shadow, which carries its rim and its seat.
+    // Inside Settings the group is a card one step above the page: its fill
+    // and one hairline, with no shadow.
     const card = settingsStyles
       .replace(/\s+/g, " ")
       .match(/\.settings-view \.settings-card-section--open > :is\([^)]*\) \{([^}]*)\}/)?.[1];
-    expect(card).toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
+    expect(card).not.toMatch(/box-shadow/);
+    expect(card).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
     expect(card).not.toMatch(/rgb\(/);
   });
 

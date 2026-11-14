@@ -847,7 +847,7 @@ wording, and reads are specified in [Start screen](start-screen.md).
 
 ### Inbox page
 
-The Inbox opens as a few raised cards in one readable column, not as sections
+The Inbox opens as a few flat cards in one readable column, not as sections
 under rules.
 
 - **Title line.** "Inbox" as a display title (`--oct-text-2xl` at the strong weight, a modifier on the page title), and on
@@ -909,15 +909,16 @@ alone, Hide from view, and for the Browser and Terminal Minimise to card) and Cl
 trailing edge; a tool that is open but not shown is marked on its button in the title band's
 tool row (a minimised tool is not a tile: its card stands for it, and its button says so).
 Stacked, a page showed four bars and named the tool
-three times. Every tile is a square pane that shares its edges with its neighbours and
-with the stage: no gap and no corner, one 1px line between two panes
-([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material), and one
-under the title band along the top. The divider's hit area is 8px wide,
+three times. Every tile is a flat pane that shares its edges with its neighbours and
+with the stage: no gap, no corner of its own and no shadow, one 1px line between
+two panes ([DESIGN.md](../../DESIGN.md#depth-and-material) owns the material),
+and the framed panel's outline along the top and right, which clips the tiles to
+its rounded corners. The divider's hit area is 8px wide,
 centred on that line; it is empty at rest, shows the strong border while hovered
 and the meta ink while grabbed, and keeps no accent line after a click. At 960px and below the dock is a
 sheet over the page (a floating container with its own 12px corner) that holds
-one tool, so its tile is the same square pane with no neighbour: a tile is square
-and flat at every width, and no width gives one a corner, a rim or a gap. Columns stand side by side only when the tile area can give each 280px and
+one tool, so its tile is the same flat pane with no neighbour: a tile is flat
+at every width, and no width gives one a corner of its own, a shadow or a gap. Columns stand side by side only when the tile area can give each 280px and
 otherwise stack. The thread keeps 440px beside two columns (560px beside one,
 from a 1100px window up), because at 560px two tools could never stand side by
 side in a 1440px window: with the sidebar open a second column widens the dock to
@@ -2199,7 +2200,9 @@ window and cut the last destination through its icon at the window's edge.
 **Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
 rail stands in its own column in front of the open sidebar. It is exactly as
 wide as the title band is tall (44px), open or collapsed, so the frame's two
-arms match. In the desktop app the traffic lights sit in the title band above
+arms match. It stands on the window's own ground with no fill and no line of its
+own; the framed panel (the sidebar and the stage, one outline) begins at its
+right edge. In the desktop app the traffic lights sit in the title band above
 it, and the sidebar's head, or with the sidebar hidden the window chrome,
 keeps the rest of their width clear. Beside the sidebar it
 carries the places: the count tiles as icons with badges (under Colour the
@@ -2597,7 +2600,7 @@ none is, Waiting a filled dot, Done a check. Under the Colour style the marks
 take palette colours (Ready stays grey, In Progress orange, Waiting purple,
 Done green). A Board/List toggle leads the toolbar, and every control on it
 (the segmented choices, search, Filters, Refresh, View) is one rail control
-(`--oct-rail-button-h`). A card is a raised object inside its well: the card fill, a hairline,
+(`--oct-rail-button-h`). A card is a flat object inside its well: the card fill, a hairline,
 `--oct-radius-inset`, and 12px of padding. It carries the Project as an
 eyebrow, the title, and, while the thread is executing, a live line under the
 title (a small turning arc and the latest sub-agent line in the mono meta voice,
@@ -2746,7 +2749,7 @@ stores a layout for that thread.
 ### What's new card and announcement
 
 After an update the person chose finishes applying, the full sidebar shows one
-small raised card above the profile row. A 64px band carries the Octant
+small flat card above the profile row. A 64px band carries the Octant
 aperture on a soft wash of the theme's ink with a hint of the accent, so the
 card is depth and not an accent banner. Under it sit a "New · v{version}" line,
 the notes' first line as a one-line strong headline, the next paragraph as a

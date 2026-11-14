@@ -1090,7 +1090,6 @@
   gap: 0;
   border-radius: var(--oct-radius-sm);
   background: var(--octant-well);
-  box-shadow: var(--octant-shadow-well);
 }
 
 .dock-bar-switch__option {
@@ -1109,7 +1108,6 @@
 
 .dock-bar-switch__option[data-pressed] {
   background: var(--octant-control);
-  box-shadow: var(--octant-shadow-control);
   color: var(--oct-fg);
 }
 
@@ -1155,7 +1153,6 @@
   border: 0;
   border-radius: var(--oct-radius-sm);
   background: var(--octant-control);
-  box-shadow: var(--octant-shadow-control);
   color: var(--oct-fg);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
@@ -1242,7 +1239,6 @@
    toggles are, and not the pointed-at wash. */
 .dock-tile__control[aria-expanded="true"] {
   background: var(--octant-control);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 /* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark

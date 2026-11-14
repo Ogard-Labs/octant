@@ -85,8 +85,7 @@ when the original was an expression.
   cannot express is not a token. That covers a length in `em` or `%` (the
   tracking steps, the glass saturation), a `clamp()` that depends on the
   viewport (the display sizes), `none`, and relative colour syntax
-  (`oklch(from ...)`, used by `octant-accent-away` and `octant-accent-sheen`),
-  which the format cannot express. Each is listed with its CSS value and
+  (`oklch(from ...)`), which the format cannot express. Each is listed with its CSS value and
   the reason under the root `$extensions["com.octant"].cssOnly`, and stays in
   `tokens.css`.
 
@@ -202,58 +201,50 @@ in the export; the recipes write `1.5` for it.
 
 ## The app feel
 
-The system is meant to read as an app's controls, dense and with real material,
-not as a flat website. Each rule names the section that owns it. Where a rule is
+The system is meant to read as an app's controls: dense, soft and flat. Each rule names the section that owns it. Where a rule is
 in the stylesheets and not in DESIGN.md, it is marked **implemented, not
 specified** with its `file:line` at the time this page was written.
 
-### Depth comes from material, not flat fills and outlines
+### The interface is soft and flat
 
 Source: [Depth and material](../../DESIGN.md#depth-and-material).
 
-Depth is one material in five levels. Every surface takes a fill one step
-lighter than what it sits on, a rim brighter along its top edge, and a shadow
-that seats it, so an object is never told from the surface under it by an
-outline alone. A surface consumes the tokens and never writes its own colour.
+A surface at rest has a flat fill one step from what it sits on and, where it
+needs an edge, one 1px hairline. It has no bevel, inner highlight, gradient,
+inset shadow or drop shadow; pointing at it or pressing it changes its fill.
+Only what floats casts a shadow. A surface consumes the tokens and never writes
+its own colour.
 
-| Level      | What it is                                                     | Tokens                                                                                              |
-| ---------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 0 Ground   | The title band and the sidebar; rows sit on it with no panel   | `--octant-sidebar-opaque`; no shadow                                                                |
-| 1 Pane     | The stage and other panes: square, flat, sharing edges         | `--octant-workspace` fill, one 1px line (`--oct-hairline`) on its top and left edges                |
-| 2 Card     | An object on a pane: a tool or decision card, a Settings group | `--octant-card`, `--octant-shadow-xs` and `-sm`                                                     |
-| 3 Control  | A filled button, a chip, the selected row, a segmented thumb   | `--octant-control`, `--octant-shadow-control`, `-selected`; pressed `-control-pressed`              |
-| 3 Well     | A segmented track, a capsule of buttons, a command block       | `--octant-well`, `--octant-shadow-well`                                                             |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet | `--octant-float-glass` and `--octant-float-sheen` over `--octant-float-blur`, `--octant-shadow-pop` |
+| Level      | What it is                                                     | Tokens                                                                         |
+| ---------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| 0 Ground   | The rail, the title band and the sidebar's rows                | `--octant-sidebar-opaque`; no shadow                                           |
+| 1 Pane     | The stage and other panes: flat, sharing edges                 | `--octant-workspace` fill, one 1px line (`--oct-hairline`) on its top and left |
+| 2 Card     | An object on a pane: a tool or decision card, a Settings group | `--octant-card` and one hairline                                               |
+| 3 Control  | A filled button, a chip, the selected row, a segmented thumb   | `--octant-control`: a flat fill                                                |
+| 3 Well     | A segmented track, a capsule of buttons, a stepper, a search   | `--octant-well` or the field fill, one hairline at most                        |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet | `--octant-float-glass` over `--octant-float-blur`, `--octant-shadow-pop`       |
 
-- **A control is a raised tile.** A lighter top, a light line along it, a dark
-  line under the bottom edge, a ring and a short drop, all in
-  `--octant-shadow-control` (its parts are `--octant-control-top`, `-low`, `-rim`,
-  `-lift`, `-drop`). Pressing inverts it and sinks the shadow
-  (`--octant-shadow-control-pressed`); the fill darkens and nothing moves. The
-  primary button is the accent as a gradient with a soft glow
-  (`--octant-accent-sheen`, `--octant-shadow-primary`). Ghost, link and bare
-  controls draw no tile and stay flat until pointed at.
-- **A well is cut in**: darker than what it is in (`--octant-well`), an inner top
-  shadow and a light line under its bottom edge (`--octant-shadow-well`). What is
-  chosen in a well is a raised control again.
+- **The resting shadow tokens are `none`** (`--octant-shadow-xs`, `-sm`, `-md`,
+  `-lg`, `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`), kept
+  as names so a recipe reads what a surface is. The primary button is the accent
+  as one flat fill.
+- **A well is a flat fill**: darker than what it is in (`--octant-well`), no
+  inner shadow.
 - **A card is for one object a person acts on as a whole**, not for a plain list,
   an empty state or a header.
 - **Floating surfaces are frosted.** In dark the fill is the float colour at 66%
   over a blur that also lifts saturation to 180% and dims what is behind it
   (`--octant-float-blur`); in light the fill is 78% and the blur draws what is
-  behind toward a pale grey. The pop shadow draws the brightest rim, a low rim,
-  one outer hairline and the lift, so a floating surface sets no border. A
-  reduced-transparency or increased-contrast preference puts the opaque
-  `--octant-float` back. What sits on a floating surface steps up from it
-  (`--octant-float-control`, `-hover`, `-pressed`, `-line`).
-- **Panes are flat and square.** They share edges, so a pane has no rim and no
-  seat shadow (a shadow would fall on its neighbour); only the one line divides
-  it from the ground. A shadow or rim never decorates a flat row.
-- **The row being shown is a raised control** (`--octant-shadow-selected`); the
-  row under the pointer is a flat wash. Here and pointed-at are two states.
-- In dark a shadow cannot be seen on a near-black page, so the fill and the rim
-  carry the lift; in light the top line is white and the shadows carry it. Both
-  are in the tokens; do not tune them per theme.
+  behind toward a pale grey. The pop shadow draws one outer hairline and the
+  lift, so a floating surface sets no border. A reduced-transparency or
+  increased-contrast preference puts the opaque `--octant-float` back. What sits
+  on a floating surface steps up from it (`--octant-float-control`, `-hover`,
+  `-pressed`, `-line`).
+- **Panes are flat.** They share edges and sit in one framed panel, so a pane has
+  no shadow (it would fall on its neighbour); only the one line divides it from
+  the next.
+- **The row being shown is a flat fill**; the row under the pointer is a lighter
+  wash. Here and pointed-at are two states.
 - Forced colours drops every shadow, so a popup, card or chip takes a 1px
   system-colour border there; increased contrast takes the strong border.
 
@@ -348,16 +339,16 @@ Source: [Motion](../../DESIGN.md#motion),
 or shadow of its own; a few tints are mixed from exported colour tokens. A test
 refuses a raw colour or a token the export does not define. Add `class="oct-root"` to the page and use:
 
-| Recipe      | Classes                                                                                               | Built from                                                                                |
-| ----------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Button      | `oct-button`, `--primary`, `--ghost`                                                                  | `--octant-control`, `--octant-shadow-control`, `--octant-accent-sheen`, `--oct-radius-sm` |
-| Icon button | `oct-icon-button` with an `svg`                                                                       | `--oct-rail-button-h`, `--oct-icon-md`                                                    |
-| Field       | `oct-field`                                                                                           | `--octant-border-strong`, `--octant-control-hover`                                        |
-| Card        | `oct-card`, `oct-card__row`                                                                           | `--octant-card`, `--octant-shadow-sm`, `--oct-radius-md`                                  |
-| Well        | `oct-well`, `oct-segmented`, `oct-segmented__item`                                                    | `--octant-well`, `--octant-shadow-well`, `--octant-shadow-control`                        |
-| Menu        | `oct-menu`, `oct-menu__row`, `oct-menu__rule`                                                         | `--octant-float-glass`, `--octant-float-blur`, `--octant-shadow-pop`, `--oct-menu-row-h`  |
-| Pane layout | `oct-panes`, `__sidebar`, `__stage`, `__band`, `__body`, `oct-nav-row`                                | `--oct-hairline`, `--oct-sidebar-w`, `--oct-title-rail-h`, `--oct-nav-row-h`              |
-| Type roles  | `oct-type-title`, `-page-title`, `-section-label`, `-row-label`, `-row-detail`, `-meta`, `-meta-mono` | `--oct-role-*`                                                                            |
+| Recipe      | Classes                                                                                               | Built from                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Button      | `oct-button`, `--primary`, `--ghost`                                                                  | `--octant-control`, `--octant-accent`, `--oct-radius-sm`                                 |
+| Icon button | `oct-icon-button` with an `svg`                                                                       | `--oct-rail-button-h`, `--oct-icon-md`                                                   |
+| Field       | `oct-field`                                                                                           | `--octant-border-strong`, `--octant-control-hover`                                       |
+| Card        | `oct-card`, `oct-card__row`                                                                           | `--octant-card`, `--oct-hairline`, `--oct-radius-md`                                     |
+| Well        | `oct-well`, `oct-segmented`, `oct-segmented__item`                                                    | `--octant-well`, `--octant-shadow-well`, `--octant-shadow-control`                       |
+| Menu        | `oct-menu`, `oct-menu__row`, `oct-menu__rule`                                                         | `--octant-float-glass`, `--octant-float-blur`, `--octant-shadow-pop`, `--oct-menu-row-h` |
+| Pane layout | `oct-panes`, `__sidebar`, `__stage`, `__band`, `__body`, `oct-nav-row`                                | `--oct-hairline`, `--oct-sidebar-w`, `--oct-title-rail-h`, `--oct-nav-row-h`             |
+| Type roles  | `oct-type-title`, `-page-title`, `-section-label`, `-row-label`, `-row-detail`, `-meta`, `-meta-mono` | `--oct-role-*`                                                                           |
 
 The button, in full, as the template for the others:
 
@@ -390,8 +381,9 @@ The button, in full, as the template for the others:
 
 `demo.html` renders all of them in dark and, with `#light` on the address, in
 light. It links only `tokens.css` and `recipes.css` and needs no network. Open it
-after a token change: raised, lit, dense controls are the pass condition; a
-button that reads as a flat web button is a regression.
+after a token change: soft corners, flat fills and hairlines are the pass
+condition; a bevel, a gradient or a drop shadow on a resting control is a
+regression.
 
 ## Known limits
 
@@ -399,13 +391,12 @@ button that reads as a flat web button is a regression.
   by context, and the export does not:
   - Glass (`.shell.shell--material-translucent`,
     `apps/web/src/styles/shell.css:80`) replaces the card fill with a tint of the
-    ink and the xs, sm and md shadows with the glass-raised shadow, and makes
-    each panel a tint over the window's native material;
+    ink, and makes each panel a tint over the window's native material;
   - some layers repoint `--oct-surface` (`apps/web/src/styles/surface.css:994`
     to the card fill, `:1009` to the floating surface under reduced
     transparency);
   - increased contrast swaps the three text roles for their high-contrast values
-    and drops the control and card lift (`apps/web/src/styles.css:4835`);
+    (`apps/web/src/styles.css:4835`);
   - at 680px and narrower the hero title's size is replaced by `--oct-text-2xl`
     (`apps/web/src/styles/surface.css:665`).
 - The icon stroke (1.5) is a TypeScript constant in

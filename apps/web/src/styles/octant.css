@@ -187,13 +187,16 @@
   --oct-section-y-desktop: 80px;
   --oct-section-y-tablet: 48px;
   --oct-section-y-phone: 32px;
-  /* Two numbers and the round exception. A control's outline (a button, a
+  /* Three numbers and the round exception. A control's outline (a button, a
      field, a tab, a menu row, a chip, a track that groups controls) is the
-     small token; a container (a card, a menu, a dialog, the composer) is the
-     medium one. Any two neighbours therefore agree. A part inside a control
-     takes the small radius less the padding between them, never below 2px. */
-  --oct-radius-sm: 4px;
+     small token; a container (a card, a menu, a dialog) is the medium one; the
+     composer's box is the large one. A control inside a container at the medium
+     radius stands in by 4px, so the two corners are concentric. A part inside a
+     control takes the small radius less the padding between them, never below
+     2px. */
+  --oct-radius-sm: 8px;
   --oct-radius-md: 12px;
+  --oct-radius-lg: 16px;
   /* An object resting inside a 12px well: a board card in its column. One
      step under the well keeps the gap between the two corners even. */
   --oct-radius-inset: 8px;
@@ -858,7 +861,8 @@ html {
   background: var(--oct-surface);
   border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   padding: var(--oct-space-8);
 }
 .card-flat {
@@ -4086,7 +4090,6 @@ input.switch:checked::after {
 }
 .sidebar-item[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -4190,7 +4193,6 @@ input.switch:checked::after {
 }
 .mode[aria-current="page"] {
   background: var(--oct-selection);
-  box-shadow: var(--octant-shadow-selected);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -4568,25 +4570,24 @@ input.switch:checked::after {
    The message input. The textarea grows with its content via field-sizing
    where supported, and the row underneath carries the pickers rather than
    floating them over the text. */
-/* The composer is a raised object, not a field ruled onto the page: it sits a
-   step above the surface behind it and carries its hairline as an inset ring
-   so the ring never joins layout or escapes the rounded corners. */
+/* The composer is a flat box, one step from the surface behind it, with one
+   hairline. The hairline is an inset outline: it follows the rounded corner,
+   stays out of layout, and leaves the box without a shadow. */
 .composer {
   border: 0;
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   /* The card role is white on the light well and the floating step in
-     dark, so the composer is the one raised object in both modes. */
+     dark, so the composer is the one object a step above the page in both
+     modes. */
   background: var(--octant-card);
-  /* The box's own rim is part of the shadow token, so a second ring here
-     would draw two lines on one edge. */
-  box-shadow: var(--octant-shadow-md);
+  box-shadow: none;
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   transition: box-shadow var(--oct-motion-fast) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] .thread-composer__surface {
   position: relative;
-  box-shadow:
-    var(--octant-shadow-md),
-    0 0 0 2px var(--octant-focus-ring);
+  box-shadow: 0 0 0 2px var(--octant-focus-ring);
 }
 .composer-thread-drop-cue {
   position: absolute;
@@ -4599,7 +4600,7 @@ input.switch:checked::after {
   background: color-mix(in srgb, var(--octant-focus-ring) 13%, var(--octant-card));
   border: 1px solid color-mix(in srgb, var(--octant-focus-ring) 65%, var(--octant-border-strong));
   /* The composer's corner less the cue's 8px inset. */
-  border-radius: calc(var(--oct-radius-md) - 8px);
+  border-radius: calc(var(--oct-radius-lg) - 8px);
 }
 .composer-thread-drop-cue > span {
   padding: var(--oct-space-1) var(--oct-space-2);
@@ -5072,6 +5073,7 @@ input.switch:checked::after {
   background: transparent;
   border-radius: var(--oct-radius-md);
   box-shadow: none;
+  outline: 0;
 }
 /* The frame groups the start row, the box and the line under it, and
    draws nothing: the box is the one raised thing, and the rows are quiet
@@ -5091,16 +5093,17 @@ input.switch:checked::after {
 .composer-frame:not(.composer-frame--held) > :is(.composer-start, .composer-under) {
   padding-inline: var(--oct-composer-inset);
 }
-/* The composer's one raised surface: a container, so its corner is the
-   container token at one line and at four. */
+/* The composer's one flat surface: the large radius at one line and at four.
+   Its attach and send buttons are controls at the control radius, 8px in from
+   the corner, so each is concentric with it to within a pixel. */
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
   border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow:
-    var(--octant-shadow-md),
-    inset 0 0 0 1px var(--oct-border);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: none;
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 /* The notice card: what the composer has to say about its thread or about
    sending, as the system's callout directly above the box, in the box's
@@ -6901,7 +6904,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
     html:not([data-octant-reduced-transparency="true"])
       :is(.shell--app-backdrop, .shell--material-translucent)
       .composer:not(.composer--carded) {
-      box-shadow: var(--octant-shadow-md);
+      box-shadow: none;
     }
     /* Over a ground or under Glass the box is the glass surface: floor,
        thick tint, blur, and the glass stroke as its ring. The opaque border
@@ -6913,7 +6916,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
       backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
       -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
-      box-shadow: var(--octant-shadow-md);
+      box-shadow: none;
     }
     /* The notice card above the box is the same glass: an opaque callout
        ground beside a translucent box read as a block. A tone is its tint
@@ -8047,7 +8050,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 .extcard > .icon-mark {
   grid-row: span 3;
@@ -8186,8 +8190,7 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
    the workspace sidebar. The selection role carries the theme's hue, and on
    Onyx the open page read as a green slab on the glass. */
 .setnav-item[aria-current="page"] {
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
-  box-shadow: var(--octant-shadow-selected);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
   color: var(--oct-fg);
 }
 
@@ -8216,7 +8219,8 @@ html[data-octant-reduced-transparency="true"] .code-home__card {
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   overflow: hidden;
 }
 .setgroup + .setgroup {

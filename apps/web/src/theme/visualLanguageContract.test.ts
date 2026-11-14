@@ -64,7 +64,7 @@ describe("the public-block visual language", () => {
       /^(?:0|50%|inherit|[1-4]px|var\(--(?:oct-radius-[a-z-]+|radius-(?:sm|md|lg|xl))\))$/;
     // A part inside a control or a container is that radius less the gap
     // between them, written as one calc(), never below 2px for a control.
-    const derived = /(?:max\(2px,\s*)?calc\(var\(--oct-radius-(?:sm|md)\) - \d+px\)\)?/g;
+    const derived = /(?:max\(2px,\s*)?calc\(var\(--oct-radius-(?:sm|md|lg)\) - \d+px\)\)?/g;
     const declaration = /border(?:-[a-z]+-[a-z]+)?-radius:\s*([^;]+);/g;
     const strays = cssFiles(webRoot).flatMap((path) =>
       [...readFileSync(path, "utf8").matchAll(declaration)]
@@ -82,9 +82,9 @@ describe("the public-block visual language", () => {
     expect(strays).toEqual([]);
   });
 
-  it("leaves no sheet inset or concentric sheet corner in the wide window, where panes are square", () => {
-    // Panes reach the window's right and bottom edges and are square, so the
-    // window's curve is the native window's and there is no inset to carry it by.
+  it("leaves no sheet inset or concentric sheet corner in the wide window, where one panel carries the corners", () => {
+    // The panel's gap to the window's edges is one token and its corners are
+    // the container radius; the old sheet inset and window-radius maths are gone.
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8");
     const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
     for (const sheet of [shell, surface]) {
@@ -187,23 +187,25 @@ describe("the public-block visual language", () => {
   });
 
   it("gives every control one outline and every container another", () => {
-    // Two numbers: a control's outline is the small token and a container's the
-    // medium one. The recipes' control steps (`rounded-md`, `rounded-lg`) both
-    // land on the control token and their `rounded-xl` on the container token,
-    // so a menu and a popover share a corner and no recipe class is rewritten.
+    // Three numbers: a control's outline is the small token (8px), a container's
+    // the medium one (12px), and the composer's box the large one (16px). The
+    // recipes' control steps (`rounded-md`, `rounded-lg`) both land on the
+    // control token and their `rounded-xl` on the container token, so a menu
+    // and a popover share a corner and no recipe class is rewritten.
     const px = (source: string, pattern: RegExp) => Number(source.match(pattern)?.[1]);
     const tailwind = readFileSync(join(webRoot, "styles/tailwind.css"), "utf8");
     const theme = readFileSync(join(webRoot, "styles/shadcn-theme.css"), "utf8");
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    expect(px(system, /--oct-radius-sm:\s*(\d+)px;/)).toBe(4);
+    expect(px(system, /--oct-radius-sm:\s*(\d+)px;/)).toBe(8);
     expect(px(system, /--oct-radius-md:\s*(\d+)px;/)).toBe(12);
+    expect(px(system, /--oct-radius-lg:\s*(\d+)px;/)).toBe(16);
     expect(theme).toMatch(/--radius:\s*var\(--oct-radius-sm\);/);
     expect(tailwind).toMatch(/--radius-md:\s*var\(--radius\);/);
     expect(tailwind).toMatch(/--radius-lg:\s*var\(--radius\);/);
     expect(tailwind).toMatch(/--radius-xl:\s*var\(--oct-radius-md\);/);
-    // The dialog and the composer are containers; the third and fourth
-    // container radii (14px and 22px) are gone with their tokens.
-    expect(system).not.toMatch(/--oct-radius-(?:lg|composer):/);
+    // The dialog is a container; the old 14px and 22px container radii and the
+    // composer's own token are gone.
+    expect(system).not.toMatch(/--oct-radius-composer:/);
     // The radius scale has one definition; the second, unread set is gone.
     const styles = readFileSync(join(webRoot, "styles.css"), "utf8");
     expect(styles).not.toMatch(/--octant-radius-[a-z]+:/);
@@ -302,7 +304,7 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
-  it("draws the thread, each tool tile and the bottom panel as square panes that share one line, with the sidebar on the ground", () => {
+  it("draws the sidebar and the stage as one framed panel on the window's ground, split by lines that meet its outline", () => {
     const shell = readFileSync(join(webRoot, "styles/shell.css"), "utf8").replace(/\s+/g, " ");
     const panel = (selector: string) => {
       const start = shell.indexOf(`${selector} {`);
@@ -318,9 +320,7 @@ describe("the public-block visual language", () => {
     expect(panel(".shell-frame .bottom-utility-panel")).toMatch(
       /background:\s*var\(--octant-pane-fill\)/,
     );
-    // A pane is square and flat: no corner, no seat shadow, no rim, and no gap
-    // between it and the window's edges or its neighbours.
-    const framed = shell.indexOf("The frame and its panes.");
+    const framed = shell.indexOf("One framed panel.");
     expect(framed).toBeGreaterThanOrEqual(0);
     const frame = shell.slice(framed);
     const inFrame = (selector: string) => {
@@ -328,12 +328,33 @@ describe("the public-block visual language", () => {
       expect(start, `${selector} has a wide rule`).toBeGreaterThanOrEqual(0);
       return frame.slice(start, frame.indexOf("}", start));
     };
+    // The outline is one hairline all the way round at the container radius,
+    // under the title band and one gap from the window's right and bottom
+    // edges. It draws no fill and no shadow.
+    const outline = inFrame(".shell-frame::after");
+    expect(outline).toMatch(/top:\s*var\(--oct-title-rail-h\)/);
+    expect(outline).toMatch(/right:\s*var\(--octant-panel-gap\)/);
+    expect(outline).toMatch(/bottom:\s*var\(--octant-panel-gap\)/);
+    expect(outline).toMatch(/left:\s*var\(--octant-panel-left\)/);
+    expect(outline).toMatch(/border:\s*1px solid var\(--octant-pane-line\)/);
+    expect(outline).toMatch(/border-radius:\s*var\(--oct-radius-md\)/);
+    expect(outline).not.toMatch(/box-shadow|background/);
+    expect(inFrame(".shell.shell-frame")).toMatch(/--octant-panel-gap:\s*var\(--oct-space-1\)/);
+    // The stage clips to the outline's inside: below its top line, a pixel in
+    // from the right and bottom, with the inner radius, so no pane paints over
+    // a rounded corner or doubles the outline.
+    const stage = inFrame(".shell-frame > .workspace-layer");
+    expect(stage).toMatch(/clip-path:\s*inset\(/);
+    expect(stage).toMatch(/calc\(var\(--oct-title-rail-h\) \+ 1px\) 1px 1px/);
+    expect(stage).toMatch(/calc\(var\(--oct-radius-md\) - 1px\)/);
+    expect(stage).toMatch(/margin:\s*0 var\(--octant-panel-gap\) var\(--octant-panel-gap\)/);
+    // A pane has no corner, shadow or gap of its own.
     const panes = frame.slice(0, frame.indexOf("The window controls float"));
-    expect(panes).not.toMatch(/border-radius/);
     expect(panes).not.toMatch(/box-shadow/);
     expect(panes).not.toMatch(/row-gap|sheet-inset/);
-    // The one line is drawn above the content on a pane's top and left edges
-    // only, so two neighbours never show two lines.
+    // A divider is drawn above the content on a pane's top and left edges
+    // only: the top one lies under the outline and is clipped away, so the
+    // left one runs the panel's full height and meets the outline at both ends.
     for (const selector of [
       ".shell-frame > .workspace-layer::after",
       ".shell-frame .bottom-utility-panel::after",
@@ -346,11 +367,24 @@ describe("the public-block visual language", () => {
     }
     // The line is a share of the ink, so it shows on a near-black preset and
     // on a glass tint alike, and the strong border under increased contrast.
-    expect(inFrame(".shell.shell-frame")).toMatch(
-      /--octant-pane-line:\s*color-mix\(in srgb, var\(--octant-text-primary\) \d+%, transparent\)/,
+    expect(shell).toMatch(
+      /\.shell\.shell-frame \{ --octant-pane-line: color-mix\(in srgb, var\(--octant-text-primary\) \d+%, transparent\)/,
     );
-    expect(inFrame('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
+    expect(panel('html[data-octant-increased-contrast="true"] .shell.shell-frame')).toMatch(
       /--octant-pane-line:\s*var\(--octant-border-strong\)/,
+    );
+    // The rail and the band draw no line or fill of their own: the sidebar
+    // stands on the ground, and nothing is drawn across the rail.
+    expect(shell).not.toContain(".shell-frame::before {");
+    expect(shell).not.toContain(".sidebar-rail::after");
+    expect(shell).not.toContain(".shell-frame > .sidebar::before {");
+    // Collapsed, the stage is the panel's left side: it keeps the outline's
+    // inset and rounded corners, and draws no left line of its own.
+    expect(inFrame(".shell--sidebar-collapsed.shell-frame")).toMatch(
+      /--octant-stage-clip-left:\s*1px/,
+    );
+    expect(shell).toMatch(
+      /\.shell--sidebar-collapsed\.shell-frame:not\(\.shell--sidebar-rail\) > \.workspace-layer::after,[^{]*\.bottom-utility-panel::after \{ border-left: 0/,
     );
     // The edge between the thread and the dock has an 8px hit area centred on
     // the line, and the dock has no column of its own for it.
@@ -359,20 +393,13 @@ describe("the public-block visual language", () => {
     );
     expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/width:\s*8px/);
     expect(panel(".shell-frame .right-utility-dock__resize")).toMatch(/margin-left:\s*-4px/);
-    // With the sidebar collapsed and no rail, the stage's left edge is the
-    // window's, which takes no line.
-    expect(shell).toMatch(
-      /\.shell--sidebar-collapsed\.shell-frame:not\(\.shell--sidebar-rail\) > \.workspace-layer::after,[^{]*\.bottom-utility-panel::after \{ border-left: 0/,
-    );
-    // The sidebar's rows sit on the ground: it draws no panel of its own.
-    expect(shell).not.toContain(".shell-frame > .sidebar::before {");
   });
 
   it("keeps every edge a surface needs when forced colours drop the shadows, and the strong border under increased contrast", () => {
     const components = readFileSync(join(webRoot, "styles/components.css"), "utf8");
     const forced =
       components.match(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}\n/)?.[1] ?? "";
-    // The rim is a shadow, so each surface that lost its border to the rim gets
+    // A floating surface's edge is a shadow, so each one that has no border gets
     // one back here, and a chip that is pressed is told by the system highlight.
     for (const selector of [
       ".octant-menu__popup",
@@ -395,56 +422,59 @@ describe("the public-block visual language", () => {
     const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     const contrast =
       runtime.match(/:root\[data-octant-increased-contrast="true"\] \{([^}]*)\}/)?.[1] ?? "";
-    expect(contrast).toMatch(/--octant-rim:\s*var\(--octant-border-strong\)/);
-    expect(contrast).toMatch(/--octant-rim-float:\s*var\(--octant-border-strong\)/);
+    expect(contrast).not.toMatch(/--octant-rim/);
   });
 
-  it("moves the primary button's fill away from its label for any accent, and never lowers the label's legibility", () => {
+  it("draws no sheen, bevel or glow on a button, a card or a panel at rest", () => {
     const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
-    // The direction comes from the label the theme publishes, not from the mode.
-    expect(runtime).toMatch(
-      /--octant-accent-away:\s*oklch\(from var\(--octant-primary-foreground\)/,
-    );
-    expect(runtime).toMatch(
-      /--octant-accent-sheen:\s*linear-gradient\([^;]*var\(--octant-accent-away\)/,
-    );
-    const light =
-      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-    expect(light).not.toContain("--octant-accent-sheen");
-  });
-
-  it("keeps a floating surface's sheen above its first line of text and a narrow window's panel seat shadow inside its gap", () => {
-    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
-    for (const match of runtime.matchAll(
-      /--octant-float-sheen:\s*linear-gradient\([^;]*transparent (\d+)px\)/g,
-    )) {
-      expect(Number(match[1])).toBeLessThanOrEqual(10);
+    for (const token of [
+      "--octant-accent-sheen",
+      "--octant-shadow-primary",
+      "--octant-shadow-control",
+      "--octant-shadow-control-pressed",
+      "--octant-shadow-selected",
+      "--octant-shadow-well",
+      "--octant-shadow-xs",
+      "--octant-shadow-sm",
+      "--octant-shadow-md",
+      "--octant-shadow-lg",
+    ]) {
+      expect(runtime, token).toMatch(new RegExp(`${token}:\\s*none;`));
     }
-    const seats = [...runtime.matchAll(/--octant-shadow-panel-seat:([^;]*);/g)].map(
-      (m) => m[1] ?? "",
-    );
-    expect(seats.length).toBe(2);
-    for (const seat of seats) {
-      // The longest shadow: how far past the box its blurred edge ends is its
-      // offset plus its blur, less what its negative spread pulled in.
-      const long = [...seat.matchAll(/0 (\d+)px (\d+)px (-?\d+)px/g)].map(
-        (m) => Number(m[1]) + Number(m[2]) + Number(m[3]),
-      );
-      expect(Math.max(...long)).toBeLessThanOrEqual(8);
+    for (const gone of [
+      "--octant-accent-away",
+      "--octant-rim",
+      "--octant-sheen",
+      "--octant-edge-light",
+      "--octant-control-top",
+      "--octant-control-lift",
+      "--octant-card-lift",
+      "--octant-card-drop",
+      "--octant-float-sheen",
+      "--octant-panel-band",
+      "--octant-panel-sheen",
+      "--octant-shadow-panel",
+    ]) {
+      expect(runtime, gone).not.toContain(gone);
+    }
+    const button = readFileSync(join(webRoot, "ui/shadcn/button.tsx"), "utf8");
+    expect(button).not.toMatch(/shadow-\(--octant|--octant-accent-sheen/);
+  });
+
+  it("gives a floating surface one hairline and one soft drop, and dims what shows through a dark menu", () => {
+    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
+    // A float is the only thing that casts a shadow: one ring outside its edge
+    // and one soft drop, with no inset rim or sheen.
+    for (const token of ["--octant-shadow-overlay", "--octant-shadow-pop"]) {
+      for (const match of runtime.matchAll(new RegExp(`${token}:\\s*([^;]*);`, "g"))) {
+        const value = match[1] ?? "";
+        expect(value, token).not.toContain("inset");
+        expect(value.split("),").length, token).toBeLessThanOrEqual(2);
+      }
     }
     // The bottom panel's row has nothing of the frame's to subtract any more.
     expect(runtime).toMatch(/max\(0px, calc\(100% - 320px\)\)/);
     expect(runtime).not.toContain("sheet-inset");
-  });
-
-  it("ends a panel's bright edge band above its first line of text, and dims what shows through a dark menu", () => {
-    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
-    // The band is a fill under the panel's content: a tile's name starts 8px
-    // down, and a band that reached it lowered the meta ink there to 4.17:1.
-    const band = runtime.match(
-      /--octant-panel-band:\s*linear-gradient\(180deg, var\(--octant-edge-light\), transparent (\d+)px\)/,
-    );
-    expect(Number(band?.[1])).toBeLessThanOrEqual(8);
     // A clearer fill is only legible because the blur dims the page behind it.
     const dark = runtime.match(/--octant-float-blur:\s*([^;]*);/)?.[1] ?? "";
     expect(Number(dark.match(/brightness\(([\d.]+)\)/)?.[1])).toBeLessThan(0.5);
@@ -466,20 +496,20 @@ describe("the public-block visual language", () => {
     expect(styles).not.toMatch(/\.code-thread-workspace__composer\s*\{[^}]*box-shadow:\s*none/);
   });
 
-  it("lifts the composer with the mid shadow, not the hairline-only small shadow", () => {
+  it("draws the composer as one flat pill with a hairline and no shadow", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const runtime = readFileSync(join(webRoot, "styles.css"), "utf8");
     const frame = system.match(/^\.composer \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const darkShadow = runtime.match(/--octant-shadow-md:\s*[^;]+;/s)?.[0] ?? "";
-    const lightTheme =
-      runtime.match(/html\[data-octant-theme-mode="light"\]\s*\{[^}]+\}/s)?.[0] ?? "";
+    const surface = system.match(/^\.thread-composer__surface \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
 
-    expect(frame).toMatch(/box-shadow:\s*var\(--octant-shadow-md\)/);
-    expect(frame).not.toMatch(/box-shadow:\s*var\(--octant-shadow-sm\)/);
-    // A raised step is light on its top edge, then the shadow that lifts it.
-    expect(darkShadow).toMatch(/inset 0 1px 0 var\(--octant-control-top\)/);
-    expect(darkShadow).toMatch(/0 14px 30px -14px/);
-    expect(lightTheme).toMatch(/--octant-shadow-md:[^;]*0 14px 28px -16px/s);
+    for (const box of [frame, surface]) {
+      expect(box).toMatch(/border-radius:\s*var\(--oct-radius-lg\)/);
+      expect(box).toMatch(/box-shadow:\s*none/);
+      expect(box).toMatch(/outline:\s*1px solid var\(--oct-border\)/);
+      expect(box).toMatch(/outline-offset:\s*-1px/);
+    }
+    // A carded composer's box is the surface inside it: the frame draws no
+    // second line around it.
+    expect(system).toMatch(/\.composer\.composer--carded \{[^}]*outline:\s*0;/);
   });
 
   it("keeps the composer prompt frameless so the shadcn textarea cannot paint a second field", () => {

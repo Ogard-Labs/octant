@@ -1610,7 +1610,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   background: var(--octant-surface-raised);
   border: 0;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 .code-overview__card--delivery {

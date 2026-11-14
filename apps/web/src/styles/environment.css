@@ -1280,10 +1280,10 @@ details.thread-move-sheet__section > summary {
   gap: var(--oct-space-3);
   padding: var(--oct-space-4);
   background: var(--octant-card);
-  border-radius: var(--oct-radius-md);
-  box-shadow:
-    var(--octant-shadow-md),
-    inset 0 0 0 1px var(--oct-border);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: none;
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 .thread-move-frozen__progress {

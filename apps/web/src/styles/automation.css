@@ -78,7 +78,8 @@
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   text-align: left;
   white-space: normal;
 }
@@ -130,7 +131,8 @@
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   text-align: left;
   white-space: normal;
 }

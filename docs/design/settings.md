@@ -231,8 +231,8 @@ title.
 ## Extension, skill, and Usage cards
 
 Usage totals sit in the Settings kit's card inside Settings. Provider create
-forms, individual extension objects, and artifact cards use the same raised
-recipe; in Settings, the extension and skill collections are kit cards too, and
+forms, individual extension objects, and artifact cards use the same flat
+card recipe; in Settings, the extension and skill collections are kit cards too, and
 the Installed and Marketplace switch rides the first section's label line.
 
 ## Permissions

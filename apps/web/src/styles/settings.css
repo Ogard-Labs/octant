@@ -3064,16 +3064,13 @@ html[data-octant-increased-contrast="true"]
   > :is(.setgroup, .settings-fact-list, .settings-panel__body) {
   overflow: visible;
   background: var(--oct-settings-card-fill);
-  /* A raised card: its edge, the light its top catches and a short shadow
-     come from the one token. The edge is a clear outline drawn inside the
-     box, and stays, because forced colours drop every shadow and would leave
-     the card with no edge. It is an outline and not a border so it takes no
-     room: a border put the rows' 16px inset at 17px from the card's edge. */
+  /* A flat card: one hairline drawn inside the box, so it survives forced
+     colours. It is an outline and not a border so it takes no room: a border
+     put the rows' 16px inset at 17px from the card's edge. */
   border: 0;
-  outline: 1px solid transparent;
-  outline-offset: -1px;
   border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 html[data-octant-increased-contrast="true"]

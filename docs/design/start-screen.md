@@ -501,7 +501,7 @@ composer `/` list never carries it.
 ## Welcome screen
 
 Chat, Work, and Code open on the same screen: one question in the middle of
-the page and one raised composer docked at its foot, where it stays once the
+the page and one soft composer docked at its foot, where it stays once the
 thread starts, so the first message is typed where every later one is. Above
 the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
 drawn in the primary ink and set 2px closer to the question than the

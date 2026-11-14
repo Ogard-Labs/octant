@@ -25,7 +25,7 @@ const cardVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-card shadow-(--octant-shadow-xs) forced-colors:outline forced-colors:outline-1 [html[data-octant-increased-contrast=true]_&]:ring-1 [html[data-octant-increased-contrast=true]_&]:ring-(--octant-border-strong)",
+          "bg-card outline outline-1 -outline-offset-1 outline-border [html[data-octant-increased-contrast=true]_&]:outline-(--octant-border-strong)",
         glass: "",
       },
     },

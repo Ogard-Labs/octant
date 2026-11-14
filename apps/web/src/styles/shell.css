@@ -55,12 +55,10 @@
   );
   --octant-panel-surface: var(--octant-panel-opaque);
   /* Every pane (the thread, a tool tile, the bottom panel, the dock's
-     overview) is the pane fill, so the glass reads as one material. A narrow
-     window's tile panel keeps the edge band over it. */
-  --octant-pane-fill:
-    var(--octant-panel-sheen),
-    linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
-  --octant-panel-fill: var(--octant-panel-band), var(--octant-pane-fill);
+     overview) is the pane fill, so the glass reads as one material. It is one
+     flat colour, drawn as a layer so a recipe can stack a tint over it. */
+  --octant-pane-fill: linear-gradient(var(--octant-panel-surface), var(--octant-panel-surface));
+  --octant-panel-fill: var(--octant-pane-fill);
 }
 
 /* Under Glass a card is one step of ink over the sheet rather than the
@@ -90,12 +88,6 @@ html[data-octant-theme-mode="light"] .shell {
   --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
   --card: var(--octant-card);
   --octant-outline-rest: var(--octant-card);
-  /* A raised card's shadow goes with its tint. A shadow token is resolved
-     where it is declared, with the opaque border in it, and that border is
-     near black on the grey a desktop shows through. */
-  --octant-shadow-xs: var(--octant-shadow-raised-glass);
-  --octant-shadow-sm: var(--octant-shadow-raised-glass);
-  --octant-shadow-md: var(--octant-shadow-raised-glass);
 }
 
 .shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
@@ -124,18 +116,12 @@ html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sid
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
-  --octant-shadow-xs: inherit;
-  --octant-shadow-sm: inherit;
-  --octant-shadow-md: inherit;
 }
 
 html[data-octant-increased-contrast="true"] .shell {
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
-  --octant-shadow-xs: inherit;
-  --octant-shadow-sm: inherit;
-  --octant-shadow-md: inherit;
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -147,9 +133,6 @@ html[data-octant-increased-contrast="true"] .shell {
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
-    --octant-shadow-xs: inherit;
-    --octant-shadow-sm: inherit;
-    --octant-shadow-md: inherit;
   }
 }
 
@@ -724,7 +707,6 @@ html[data-octant-native-host="true"]
   color: var(--oct-fg);
   background: var(--octant-control);
   border-color: transparent;
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .window-chrome__button[aria-expanded="true"]:hover,
@@ -738,7 +720,6 @@ html[data-octant-native-host="true"]
 .window-chrome__button[aria-pressed="true"]:active,
 .window-chrome__button[data-dock-tools-shown="true"]:active {
   background: var(--octant-control-pressed);
-  box-shadow: var(--octant-shadow-control-pressed);
 }
 
 .window-chrome__button[aria-disabled="true"] {
@@ -1177,12 +1158,7 @@ html[data-octant-native-host="true"]
 
 :root[data-octant-style="colour"][data-octant-theme-mode="light"] .sidebar-tile__face {
   border-color: color-mix(in oklab, var(--sidebar-tile-hue) 70%, transparent);
-  background: linear-gradient(
-    155deg,
-    color-mix(in oklab, var(--sidebar-tile-hue) 72%, var(--octant-primary-foreground)) 0%,
-    var(--sidebar-tile-hue) 78%
-  );
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--sidebar-tile-hue) 24%, transparent);
+  background: var(--sidebar-tile-hue);
   color: var(--octant-primary-foreground);
 }
 
@@ -1393,8 +1369,7 @@ html[data-octant-native-host="true"]
    a green slab, louder than anything else in the list. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
-  box-shadow: var(--octant-shadow-selected);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -2104,17 +2079,19 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* The frame and its panes. The title band and the sidebar are the frame: the
-   window's ground, painted once, with the sidebar's rows sitting on it. The
-   thread stage, each tool tile in the dock, and the bottom panel are square
-   panes (level 1 of the material) that share their edges: no gap, no corner,
-   and one 1px line between two neighbours, drawn by whichever pane lies below
-   or to the right of the edge. The first row of panes starts under the title
-   band with that line along its top, and the panes reach the window's right
-   and bottom edges. Each pane paints below the title band from a
-   pseudo-element or its own box, so headers and dock tabs keep sitting in the
-   band. The ground lies over the stage's paint and under everything else. A
-   narrow window keeps its overlay drawer. */
+/* The frame and its panes. The rail, the title band and the sidebar's rows sit
+   on the window's ground, painted once. Under the band, the sidebar and the
+   stage sit in one framed panel (see "One framed panel" below). The thread
+   stage, each tool tile in the dock, and the bottom panel are flat panes
+   (level 1 of the material) that share their edges with no gap and one 1px
+   line between two neighbours, drawn by whichever pane lies below or to the
+   right of the edge. The panes start under the title band, and the stage
+   clips to the panel's inside, so the first row's top line and the last
+   column's right edge are the panel's outline and nothing is drawn twice. Each
+   pane paints below the title band from a pseudo-element or its own box, so
+   headers and dock tabs keep sitting in the band. The ground lies over the
+   stage's paint and under everything else. A narrow window keeps its overlay
+   drawer and has no panel. */
 @media (min-width: 681px) {
   /* The sheet's stage piece sits at a negative level so the ground can lie
      over it; the shell has to hold that level itself; without a ground the
@@ -2133,16 +2110,81 @@ html[data-octant-native-host="true"]
     --octant-pane-line: var(--octant-border-strong);
   }
 
-  /* The sidebar sits on the ground with no panel of its own. */
+  /* One framed panel. The rail and the title band sit on the window's ground
+     with no fill or line of their own. The sidebar and the stage (the thread,
+     its dock and the bottom panel) sit together in one panel under the band:
+     one hairline all the way round, the container radius at every corner, and
+     the same small gap to the window's right and bottom edges. The outline is
+     this frame's pseudo-element, drawn above the content so a pane never
+     covers it; the stage clips to the outline's inside (see the stage rule
+     below), so no pane paints over the rounded corners or doubles the line. */
+  .shell.shell-frame {
+    --octant-panel-gap: var(--oct-space-1);
+    --octant-panel-left: 0px;
+    --octant-stage-clip-left: 0px;
+    --octant-stage-corner-left: 0px;
+    --octant-stage-gap-left: 0px;
+  }
+
+  .shell--rail-beside.shell-frame {
+    --octant-panel-left: var(--octant-rail-offset);
+  }
+
+  /* Without the sidebar the stage is the panel's left side, so it takes the
+     outline's inset and its rounded corners, and keeps the gap from the
+     window's edge (beside the rail, the rail is that gap). */
+  .shell--sidebar-collapsed.shell-frame {
+    --octant-stage-clip-left: 1px;
+    --octant-stage-corner-left: calc(var(--oct-radius-md) - 1px);
+  }
+
+  .shell--sidebar-collapsed.shell-frame:not(.shell--sidebar-rail) {
+    --octant-panel-left: var(--octant-panel-gap);
+    --octant-stage-gap-left: var(--octant-panel-gap);
+  }
+
+  .shell--sidebar-rail.shell-frame {
+    --octant-panel-left: var(--octant-rendered-sidebar-width);
+  }
+
+  .shell-frame::after {
+    position: absolute;
+    z-index: 6;
+    top: var(--oct-title-rail-h);
+    right: var(--octant-panel-gap);
+    bottom: var(--octant-panel-gap);
+    left: var(--octant-panel-left);
+    border: 1px solid var(--octant-pane-line);
+    border-radius: var(--oct-radius-md);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* The sidebar sits on the ground with no panel of its own, and ends where
+     the panel does. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
+    margin-bottom: var(--octant-panel-gap);
     padding-bottom: var(--oct-space-2);
     border-right: 0;
   }
 
+  /* The stage is the panel's right part. It keeps the gap to the window's
+     edges and clips to the outline's inside: below the band's line, a pixel
+     in from the outline, and with the outline's inner radius (the corner
+     beside the sidebar stays square). Its pane lines run along its top and
+     left edges, so the top one lies under the outline and is clipped away,
+     while the left one is the full-height line between the sidebar and the
+     stage and meets the outline at both ends. */
   .shell-frame > .workspace-layer {
     position: relative;
+    margin: 0 var(--octant-panel-gap) var(--octant-panel-gap) var(--octant-stage-gap-left);
+    clip-path: inset(
+      calc(var(--oct-title-rail-h) + 1px) 1px 1px var(--octant-stage-clip-left) round
+        var(--octant-stage-corner-left) calc(var(--oct-radius-md) - 1px)
+        calc(var(--oct-radius-md) - 1px) var(--octant-stage-corner-left)
+    );
   }
 
   /* The thread's pane. It is a grid item rather than an absolute piece, so it
@@ -2231,6 +2273,7 @@ html[data-octant-native-host="true"]
      grabbed, and only along the panes. */
   .shell-frame__sidebar-resize::before {
     top: var(--oct-title-rail-h);
+    bottom: var(--octant-panel-gap);
     background: transparent;
   }
 
@@ -3903,7 +3946,6 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .draft-thread__intent-cards > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-xs);
 }
 
 .draft-thread__intent-label {
@@ -4521,7 +4563,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   overflow: hidden;
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
 }
 
 /* The fill and shadow are the card's only edge, and forced colours drops both.

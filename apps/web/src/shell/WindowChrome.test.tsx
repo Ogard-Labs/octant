@@ -339,7 +339,7 @@ describe("WindowChrome", () => {
     // one rule, so the two cannot drift into two looks.
     const pressed = cssRule('.window-chrome__button[data-dock-tools-shown="true"]');
     expect(pressed).toContain("background: var(--octant-control);");
-    expect(pressed).toContain("box-shadow: var(--octant-shadow-control-pressed);");
+    expect(pressed).not.toContain("box-shadow");
     expect(shellStyles).toMatch(
       /\.window-chrome__button\[aria-expanded="true"\],\s*\.window-chrome__button\[aria-pressed="true"\],\s*\.window-chrome__button\[data-dock-tools-shown="true"\] \{/,
     );
@@ -415,12 +415,10 @@ describe("WindowChrome", () => {
     // where .mode[aria-current="page"] uses the shadcn-projected neutral fill.
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
     const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
-    // The current mode wears the selection fill and a hairline edge, the same
-    // two marks the thread tab strip gives the tab in front; the hover state
+    // The current mode wears the selection fill alone, flat; the hover state
     // is the softer ink wash, so pointing never looks like being there.
     expect(activeMode).toContain("var(--oct-selection)");
-    // The edge is the raised tile's lit rim, still without a hue.
-    expect(activeMode).toContain("box-shadow: var(--octant-shadow-selected);");
+    expect(activeMode).not.toContain("box-shadow");
     expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
     // carried by ink alone rather than a filled chip.
@@ -648,17 +646,17 @@ describe("WindowChrome", () => {
   });
 
   it("gives every popup one lit edge and the floating fill", () => {
-    // The overlay shadow carries the popup's whole edge in both themes: the
-    // brightest rim along its top, then one hairline outside it. A popup that
-    // also set a border showed two edges, and the strong border made a menu's
-    // heavier than a dialog's.
+    // The overlay shadow carries the popup's whole edge in both themes: one
+    // hairline outside it and one soft drop. A popup that also set a border
+    // showed two edges, and the strong border made a menu's heavier than a
+    // dialog's.
     const overlays = [...styles.matchAll(/--octant-shadow-overlay:\s*([^;]+);/g)].map(
       (match) => match[1] ?? "",
     );
     expect(overlays.length).toBeGreaterThanOrEqual(2);
     for (const overlay of overlays) {
-      expect(overlay).toContain("inset 0 1px 0 var(--octant-rim-float)");
-      expect(overlay).toMatch(/(^|,)\s*0 0 0 0\.5px rgb\(/);
+      expect(overlay).not.toContain("inset");
+      expect(overlay).toMatch(/^0 0 0 1px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
     expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
@@ -893,7 +891,7 @@ describe("WindowChrome", () => {
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
-    expect(surface).toContain("box-shadow: var(--octant-shadow-md);");
+    expect(surface).toContain("box-shadow: none;");
     expect(surface).not.toContain("--oct-glass-stroke");
     expect(systemStyles).not.toMatch(/\.composer-frame[^{]*\{[^}]*(background|box-shadow)/);
     // Under Window glass the box is a step lighter than the glass around

@@ -291,16 +291,17 @@
   border: 0;
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
-  box-shadow: var(--octant-shadow-sm);
+  outline: 1px solid var(--oct-border);
+  outline-offset: -1px;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: default;
-  transition: box-shadow var(--oct-motion-fast) var(--oct-ease-standard);
+  transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .artifact-card__button:hover {
-  box-shadow: var(--octant-shadow-md);
+  background: color-mix(in oklab, var(--oct-surface) 94%, var(--oct-fg));
 }
 
 @media (prefers-reduced-motion: reduce) {

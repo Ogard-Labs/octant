@@ -74,7 +74,7 @@ Avoid dashboard walls (counts belong in a few tiles, not a grid of them), neon
 developer styling, permanent low-frequency controls, oversized setup cards,
 pill-shaped everything, and invented data. Gradients and depth are ordinary
 tools used with judgment: the application ground, a count tile's face, a
-Project's letter tile, and a raised card are fine; a gradient that carries no
+Project's letter tile, and a flat card are fine; a gradient that carries no
 meaning, or decoration on a control that already reads, is not. A feature that
 is not available explains why and offers the next useful action, or stays out
 of the primary layout. The one thing allowed to be decorative is the
@@ -315,7 +315,7 @@ them exactly; `Dark` and `Light` are the same values pinned to one mode.
 | Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#101010` | `#fafaf9` | Navigation surface, on the page ground                     |
 | Workspace              | `--octant-workspace`                                | `#1a1a1a` | `#ffffff` | Reading surface: transcript, editor                        |
 | Floating               | `--octant-floating` / `--octant-surface-raised`     | `#232323` | `#fdfdfc` | Menus, popovers, dialogs                                   |
-| Card                   | `--octant-card` (derived)                           | floating  | workspace | Raised objects: composer, setup, profiles                  |
+| Card                   | `--octant-card` (derived)                           | floating  | workspace | Objects a step above the page: composer, setup, profiles   |
 | Control                | `--octant-control` / `--octant-surface-muted`       | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary buttons                      |
 | Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#333333` | `#e2e2e1` | Hover and highlighted rows                                 |
 | Control pressed        | `--octant-control-pressed`                          | `#3b3b3b` | `#d3d3d2` | Pressed state                                              |
@@ -469,18 +469,20 @@ than larger.
 
 ### Radii
 
-Radius is two numbers and a round exception: a control's outline is
-`--oct-radius-sm`, a container's is `--oct-radius-md`, and a thing that is
-inherently round stays round. One number for a control and one for a container
-make any two neighbours agree. This table is the one statement; elsewhere this
-document names the token, not the number.
+Radius is three numbers and a round exception: a control's outline is
+`--oct-radius-sm`, a container's is `--oct-radius-md`, the composer's pill is
+`--oct-radius-lg`, and a thing that is inherently round stays round. Corners are
+soft: one number for a control and one for a container make any two neighbours
+agree. This table is the one statement; elsewhere this document names the token,
+not the number.
 
-| Token                | Value  | Role                                                                                                                                                                                                                                                                                         |
-| -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--oct-radius-sm`    | 4px    | A control: every button of every size and variant, field, tab and segmented item, menu and option row, filled list or navigation row, chip and tag, and a capsule or track that only groups controls (the Browser's history capsule, a toggle group). The composer's attach and send buttons |
-| `--oct-radius-md`    | 12px   | A container: a card, panel, or well; a menu, popover, tooltip card, and toast; a dialog and the Settings sheet; the composer; a bubble; a Settings section card; the window-frame cards                                                                                                      |
-| `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                             |
-| `--oct-radius-pill`  | 9999px | Only what is inherently round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round colour swatch, a meter or progress bar, a slider's thumb. Never a control                                                                                     |
+| Token                | Value  | Role                                                                                                                                                                                                                                                                                                |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--oct-radius-sm`    | 8px    | A control: every button of every size and variant, field, tab and segmented item, menu and option row, filled list or navigation row, chip and tag (the start screen's suggestion chips included), and a capsule or track that only groups controls (the Browser's history capsule, a toggle group) |
+| `--oct-radius-md`    | 12px   | A container: a card, panel, or well; the framed panel; a menu, popover, tooltip card, and toast; a dialog and the Settings sheet; a bubble; a Settings section card; the window-frame cards                                                                                                         |
+| `--oct-radius-lg`    | 16px   | The composer's box, a soft pill at one line and at four                                                                                                                                                                                                                                             |
+| `--oct-radius-inset` | 8px    | An object resting inside a container: a board card in its column                                                                                                                                                                                                                                    |
+| `--oct-radius-pill`  | 9999px | Only what is inherently round: a switch's track and thumb, an avatar, a status dot, a count badge, a spinner, a radio, a round colour swatch, a meter or progress bar, a slider's thumb. Never a control                                                                                            |
 
 A one-line tooltip (`.octant-tooltip`, `.tooltip > .tip`) and a drag preview
 (`.workspace-drag-preview`) take the control radius, because they are about 24px
@@ -490,19 +492,21 @@ disclosure and filter menu are containers at 12px, with their rows at the
 control radius, inset from the popup's corner.
 
 A part inside a control takes the control radius less the padding between them,
-never below 2px, so the outline of every control is 4px and the inner part is
+never below 2px, so the outline of every control is 8px and the inner part is
 concentric: a segmented switch's thumb inside its track, an item inside a toggle
 group's padded track, a clear button inside a field. A control that sits inside a
 container takes the control radius whatever the container's: the composer's
-attach and send buttons sit 8px inside its 12px corner. An object that rests
+attach and send buttons sit 8px inside its 16px corner, a control at the
+container radius less its inset to within a pixel. An object that rests
 inside a container takes the container's radius less the gap
 (`--oct-radius-inset`). A corner that sits within one radius of a rounded
 parent's corner is concentric with it: the parent's radius less the gap between
 them, or square when the gap is at least the radius, never the same token again,
 because two equal radii one inset apart leave a frame that swells at the corner.
 The rule governs an object inside a rounded container (a card in a card, a tile
-in a round end) and the narrow layout; from 681px up the panes are square and
-have no corner to nest (see [Depth and material](#depth-and-material)).
+in a round end), and the stage inside the framed panel: its content clips to the
+outline's inner radius (the container radius less the line's 1px), so no pane
+paints over a rounded corner (see [Depth and material](#depth-and-material)).
 
 Product chrome uses those tokens and nothing else: a `border-radius` is a token,
 `0`, `50%`, or the 1–4px of a chart bar, mark, or status dot, never a rem or a
@@ -510,7 +514,7 @@ bare pixel literal. A rem corner also shrinks with the interface font size,
 which a token does not. `bun run ui:check` refuses a new corner off this list ([Enforcement](#enforcement)). The `--oct-radius-*` tokens live in `octant.css`. The
 shadcn recipes derive their scale in `tailwind.css` from `--radius`, which
 `shadcn-theme.css` sets to `--oct-radius-sm`: `rounded-md` and `rounded-lg` both
-land on the control's 4px, `rounded-xl` on the container's 12px, and
+land on the control's 8px, `rounded-xl` on the container's 12px, and
 `rounded-sm` on the step for a part inside a control (the control radius less
 2px, never below 2px), so a menu shares a corner with the popover beside it and
 no recipe class needs rewriting. Phone-only surfaces in the web renderer use the
@@ -586,55 +590,39 @@ Settings, model pickers, and thread metadata.
 
 ### Depth and material
 
-Depth is one material in five levels. Every surface takes a fill one step
-lighter than what it sits on, a rim that is brighter along its top edge (two
-inset shadows: a line along the top, then a ring around), and a shadow that
-seats it, so an object is never told from the surface under it by an outline
-alone. Each level has its tokens in `styles.css`; a surface consumes them and
-never writes its own colour.
+The interface is soft and flat: one tone, told apart by fills and hairlines, with
+shadow kept for what floats. A surface at rest has no bevel, inner highlight,
+gradient, inset shadow or drop shadow. It is a flat fill one step from what it
+sits on and, where an edge is needed, one 1px hairline. Pointing at it or
+pressing it changes its fill, nothing else. Only a surface that floats over
+content casts a shadow, and that shadow is restrained. Each level has its tokens
+in `styles.css`; a surface consumes them and never writes its own colour.
 
-| Level      | What it is                                                                                            | Fill                                                                       | Rim and shadow                                                                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 Ground   | The window frame: the title band and the sidebar's area. Sidebar rows sit on it, with no panel behind | the sidebar colour (the ground; in light a step darker than a panel)       | none                                                                                                                                                                    |
-| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: square, sharing edges   | `--octant-panel-surface`, with `--octant-panel-sheen`: a sheen across 96px | one 1px line (`--octant-pane-line`) on its top and left edges; no rim, no seat shadow, no corner at any width (a narrow window's sheet holds one square tile)           |
-| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group      | `--octant-card`                                                            | `--octant-shadow-xs` (the card recipe), `-sm` (a Settings group, an empty state): top rim, low rim, ring, a sheen at the top, a short drop (`--octant-card-drop`)       |
-| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button         | `--octant-control` and the control lift (lighter on top)                   | `--octant-shadow-control`, `-md` (the composer's box, with a longer shadow), `-selected`: light top line, dark low line, ring, a short drop; a press deepens the shadow |
-| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block                             | `--octant-well`                                                            | `--octant-shadow-well`: an inner top shadow and a light line under the bottom edge                                                                                      |
-| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                        | `--octant-float-glass` over a blur, with `--octant-float-sheen`            | `--octant-shadow-overlay`, `-pop`: the brightest rim, a low rim, a hairline outside it, a short shadow that seats it and a long one that lifts it                       |
+| Level      | What it is                                                                                           | Fill                                                                | Edge and shadow                                                                                         |
+| ---------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 0 Ground   | The window frame: the icon rail, the title band, and the sidebar's rows. Nothing has a panel here    | the sidebar colour (the ground; in light a step darker than a pane) | none                                                                                                    |
+| 1 Pane     | The thread stage, each dock tool tile, the bottom panel, the dock's overview: flat, sharing edges    | `--octant-panel-surface` (`--octant-pane-fill`), one flat colour    | one 1px line (`--octant-pane-line`) on its top and left edges, clipped into the framed panel; no shadow |
+| 2 Card     | An object on a panel: a tool card, an approval or decision card, a user bubble, a Settings group     | `--octant-card`                                                     | one 1px hairline (`--oct-border`) drawn as an inset outline; no shadow                                  |
+| 3 Control  | A filled button, a chip, the selected list row, a segmented switch's thumb, a composer button        | `--octant-control`, a flat fill; hover and press are one step each  | none; an outline button or a field is one hairline border                                               |
+| 3 Well     | A segmented switch's track, a capsule of history buttons, a command block, a stepper, a search field | `--octant-well` or the field fill                                   | one hairline at most; no inner shadow                                                                   |
+| 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet                                       | `--octant-float-glass` over a blur                                  | `--octant-shadow-overlay`, `-pop`: one hairline outside the edge and one soft drop that lifts it        |
 
-- **The light an edge catches is the rim** (`--octant-rim`, `--octant-rim-top`,
-  `--octant-rim-low`, `--octant-rim-float`, and the control's
-  `--octant-control-top`, `-low`, `-rim`). A card and a floating surface carry a
-  fainter line inside the bottom (`--octant-rim-low`; none in light, where it
-  cannot show on a white fill). A pane carries none of it: it is flat, and its
-  edge is the one line it shares with its neighbour. In dark a shadow cannot be
-  seen on a near-black page, so the fill and the rim carry the lift (on an OLED
-  preset the panel is a step toward the ink and the sheen lifts its top) and the
-  shadow helps only where the surface crosses something lighter; in light the
-  top line is white and the shadows carry it. A narrow window's panel content
-  paints over an inset shadow on its box, so its rim is drawn by a
-  pseudo-element above the content and the box keeps only the seat shadow. The
-  rim is in the shadow token and a surface draws no border or second ring on the
-  same edge, which would show two lines.
-- **A control is a raised tile.** A filled button (default, solid, outline,
-  secondary), a chip, the selected row and a switch's thumb take
-  `--octant-shadow-control`: a lighter top, a light line along it, a dark line
-  under the bottom edge, a ring, and a short drop; pressing inverts it
-  (`--octant-shadow-control-pressed`). The gradient is drawn as an inset shadow
-  (`--octant-control-lift`), so a recipe that sets its own fill still gets it.
-  The primary button is the accent as a gradient with a soft accent glow under
-  it (`--octant-accent-sheen`, `--octant-shadow-primary`). The gradient moves the
-  fill away from the label's colour for any accent: the direction is taken from
-  the published `--octant-primary-foreground` (`--octant-accent-away`), not from
-  the mode, so no stop is less legible than the flat accent. Ghost, link, bare
-  and the suggestion chip stay flat until pointed at, as do the quiet controls
-  of a row (the line under a composer, the microphone). A toggle that is on (the
-  dock and bottom-panel buttons in the title band, a tile's open menu) is a
-  control pressed in: a filled tile with the sunk shadow, told apart from the
-  pointed-at wash and from the deeper press.
-- **A well is cut in**: darker than what it is in, an inner top shadow, and a
-  light line under its bottom edge. What is chosen in a well is a raised control
-  again (the thumb of the Work and Code switch).
+- **Resting shadow tokens are `none`.** `--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
+  `-control`, `-control-pressed`, `-selected`, `-well`, `-primary` and
+  `-raised-glass` stay as names so a recipe reads what a surface is, and each is
+  `none`. The primary button is the accent as one flat fill. A surface that needs
+  an edge draws it as a 1px `outline` with a negative offset (a card, the
+  composer, a Settings group, a stepper's box), so the line follows the rounded
+  corner, takes no room and survives forced colours.
+- **The row a list is showing is a flat fill** (the thread list, the sidebar and
+  the Settings rail): a neutral wash of the ink one step above the page, with no
+  border highlight, gradient or shadow. The row under the pointer is a lighter
+  wash, so "here" and "pointed at" are two states.
+- **A toggle that is on** (the dock and bottom-panel buttons in the title band, a
+  tile's open menu) is a filled control, told apart from the pointed-at wash by
+  its fill.
+- **The composer is a flat soft pill**: `--octant-card` over its page, one hairline,
+  the large radius, and no shadow in any material.
 - **Floating surfaces are frosted.** In dark the fill is the float colour at 66%
   over a blur that also lifts saturation and dims what is behind it to under
   half (`--octant-float-blur`), so the meta ink on a menu reads at 4.54:1 over the
@@ -644,34 +632,19 @@ never writes its own colour.
   over the app's own page and 4.11:1 with a black page behind it. A packaged
   window's native material is not re-blurred by a backdrop filter, so Glass tints
   the panels instead (see [Glass](#glass)). Reduced transparency and increased
-  contrast take the opaque float. The sheen is a strip along the lit top edge
-  only (8px), above the first line of anything a surface holds, so the meta ink
-  on a menu's top row or a dialog's title band sits on the plain fill.
+  contrast take the opaque float. A floating surface has no sheen strip.
 - **What sits on a floating surface is based on that surface.** Its control
   fills, its pointed-at row and its hairlines step up from `--octant-float`
   (`--octant-float-control`, `-hover`, `-pressed`, `-line`); the page's own
   control fills are darker than a lifted menu and show there as dents.
-- **The row a list is showing is a raised control** (`--octant-shadow-selected`,
-  the control's shadow), on the thread list, the sidebar and the Settings rail.
-  The row under the pointer stays a flat wash, so "here" and "pointed at" are two
-  states.
-- **The inverse tooltip takes no bevel.** It is the primary text as a fill, and
-  the raised elevation's white top line draws as a light seam on it in light, so
-  it takes the two shadows alone in both modes.
 - **Edges that do not depend on a shadow.** Forced colours drops every shadow, so
   a popup, a card (user bubble, approval row, provider question) and a chip take
-  a 1px system-colour border there, and a pressed chip the system highlight.
-  Increased contrast takes the strong border and sets every rim to it, drops the
-  lift and the sheen, and keeps the rims; Mono keeps the same material.
-- **A shadow explains depth, never decoration.** Shadow tokens are
-  `--octant-shadow-hairline`, `-xs`, `-sm`, `-md`, `-lg`, `-overlay`, `-pop`,
-  `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`, and
-  `-raised-glass`. Use the smallest level that establishes a genuine layer:
-  navigation panes, plain lists, empty states in a page, headers, and open form
-  layouts stay unshadowed; the card recipe uses `-xs`; a Settings group and the
-  `OctantEmpty` box `-sm`; a filled button `-control`; welcome and follow-up
-  composers `-md` over a hairline ring; focused or promoted raised objects may use
-  `-lg`; overlays use only their overlay or pop token.
+  a 1px system-colour border there, and a pressed chip the system highlight; an
+  outline survives on its own. Increased contrast takes the strong border.
+  Mono keeps the same material.
+- **A shadow explains a float, never decoration.** The shadow tokens in use are
+  `--octant-shadow-hairline`, `-overlay` and `-pop`. Navigation panes, plain
+  lists, cards, empty states, headers, controls and open form layouts carry none.
 
 A card is for a discrete object a person acts on as a whole: a count tile, a live
 running-thread card, an action tile, a board card, a provider, a Settings group of
@@ -682,36 +655,45 @@ the overlay shadow carries it for menus and popovers, and the shared dialog draw
 it as a border. A feature stylesheet sizes and places a popup and never sets its
 fill, border, or shadow.
 
-**The window frame and its panes.** The window is a frame and a grid of panes.
-The title band and the sidebar are the frame (level 0): the window surface,
-painted once, with the sidebar's rows sitting on it and no panel behind them. The
-thread stage, each tool tile in the dock, the bottom panel and the dock's overview
-are square panes (level 1) under the title band that touch each other and the
-window's right and bottom edges: no gap, no corner, no shadow. Between two
-neighbours there is one 1px line (`--octant-pane-line`: a tenth of the ink, so it
-shows on a near-black preset and on a glass tint as it does on the stock page;
-the strong border under increased contrast, and a system-colour border in forced
-colours), and one under the title band along the panes' top. Each pane draws only
-its own top and left edge, so a shared edge is never drawn twice. The window's
-own outer corners are the native window's; no pane rounds a corner. A tile is
-told apart by its name, not by a ring that would double a divider. Pane headers
-and the tool row stay in the title band; a pane header shares the title rail
-(`--oct-title-rail-h`) with the tool row, and the dock's own header is an empty
-spacer under the band, so the first tile's top line is the only line there. A
-native Browser page inside a tile is placed by the tile's measured rectangle and
-is square; the corner of the page inside the tile belongs to the web renderer
-only. A dock tile is square with no seat shadow in a narrow window too: there the
-dock is a floating sheet (12px corner) holding one tool, and the tile fills it
-with no gap or corner of its own. Behind every page the application ground lies
-on the thread's pane, under the content, square like the pane. At 680px and
-below the workspace sidebar is an overlay drawer and the frame stays flat, with
-no panels, and a scrim (`--octant-scrim`) dims the page behind it. The drawer
-starts closed on every load, closes on Escape, on a tap outside it, and on
-choosing somewhere to go, and never changes the saved wide-window choice.
-Settings keeps its own narrow layout, a drawer with a flat page, at 960px and
-below (see [Breakpoints](#breakpoints)). _Rationale._ Panes in a grid that is
-dragged, aligned and resized share edges, and a corner and a gap on each one made
-the grid read as loose cards.
+**The window frame and the framed panel.** The icon rail, the title band and the
+sidebar's rows sit on the window's own ground (level 0), which is painted once;
+the rail has no fill or line of its own. Under the band, the sidebar and the
+stage (the thread, its dock and the bottom panel) sit together in ONE panel: a
+single 1px outline (`--octant-pane-line`: a tenth of the ink, so it shows on a
+near-black preset and on a glass tint as it does on the stock page; the strong
+border under increased contrast) all the way round, at the container radius on
+every corner, flush under the title band's line at the top and one space token
+(`--oct-space-1`, 4px) from the window's right and bottom edges. The outline is
+drawn above the content, and the top edge is the band's line, so the border
+closes: it starts and ends on itself, with no open end at the rail or the edge.
+Inside the panel the sidebar, the stage and the dock are split by full-height
+1px lines that meet the outline at both ends, and the first tile row and the
+stage clip to the outline's inside, so nothing is drawn twice and no pane paints
+over a rounded corner. With the sidebar collapsed the stage is the panel's left
+side: it keeps the outline's rounded corners and, with no rail, the same gap from
+the window's left edge. With the sidebar open and no rail beside it, the panel
+meets the window's left edge. The thread stage, each tool tile in the dock, the
+bottom panel and the dock's overview are flat panes (level 1) that touch each
+other: no gap, no corner of their own, no shadow, and between two neighbours one
+1px line, drawn on a pane's top and left edge only, so a shared edge is never
+drawn twice. A tile is told apart by its name, not by a ring that would double a
+divider. Pane headers and the tool row stay in the title band; a pane header
+shares the title rail (`--oct-title-rail-h`) with the tool row, and the dock's own
+header is an empty spacer under the band. A native Browser page inside a tile is
+placed by the tile's measured rectangle and is square; the corner of the page
+inside the tile belongs to the web renderer only. A dock tile is flat in a narrow
+window too: there the dock is a floating sheet (12px corner) holding one tool,
+and the tile fills it with no gap or corner of its own. Behind every page the
+application ground lies on the thread's pane, under the content, clipped to the
+panel's corners. At 680px and below the workspace sidebar is an overlay drawer
+and the frame stays flat, with no panel and no outline, and a scrim
+(`--octant-scrim`) dims the page behind it. The drawer starts closed on every
+load, closes on Escape, on a tap outside it, and on choosing somewhere to go, and
+never changes the saved wide-window choice. Settings keeps its own narrow layout,
+a drawer with a flat page, at 960px and below (see [Breakpoints](#breakpoints)).
+_Rationale._ One outline that closes reads as one object; separate hard blocks
+read as a stack of rectangles with an open edge. The native window's corners are
+unchanged: the panel's curve sits inside them.
 
 **Dividers.** A divider handle (the sidebar's, the dock's, the bottom panel's, a
 pane split's, a tile's) is a hairline in the border at rest, the strong border
@@ -777,10 +759,8 @@ panel, the thread's included), defined once on every shell in `shell.css`:
   cards drawn with the raised step (`--oct-surface`) take the card step (see
   [Workspace: Inbox page](docs/design/workspace.md#inbox-page)).
 - **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over the
-  panel: the primary text at 4%. On Window glass a card takes a light rim and a
-  shadow that can be seen on the desktop behind it
-  (`--octant-shadow-raised-glass`); the opaque border is near black and would draw a
-  heavy outline there.
+  panel: the primary text at 4%, with one hairline and no shadow, on Window glass
+  too.
 - **An outline button** rests on that card step instead of the page colour
   (`--octant-outline-rest`); its hover and pressed fills stay the control fills.
 - **Quick tools** for a Code start screen are clear in the body of the dock.
@@ -1022,20 +1002,18 @@ required `label` (its accessible name and title) and is the ghost `icon` size.
 **Sizes and tokens.** `xs` 20, `sm` 24, `default` 28, `lg` 32; `icon-xs` 20,
 `icon-sm` 24, `icon` 28 square. Corner `--oct-radius-sm`; 8px inline padding
 (4px on the side of a `data-icon` glyph), 4px gap; label 14/500, 12px on `xs` and
-`sm`; icons 12 on `xs`, 14 on `sm`, 16 otherwise. `default` is the accent with
-`--octant-accent-sheen` and `--octant-shadow-primary`; `solid` is the primary
+`sm`; icons 12 on `xs`, 14 on `sm`, 16 otherwise. `default` is the accent as one flat fill; `solid` is the primary
 text as a fill with the page colour on it, for the one action a surface is for
 where the accent would compete with the content beside it; `secondary` is the
 control fill; `outline` rests on `--octant-outline-rest` (the page colour unless
-the shell names another) with the border; all four take
-`--octant-shadow-control`. `destructive` is a tonal fill (the danger role at
+the shell names another) with the border; none takes a
+shadow, a gradient or a bevel. `destructive` is a tonal fill (the danger role at
 10%), not a solid one: a red slab reads as the page's subject rather than one
 action on it. `chip` is a 24px outlined chip in the muted ink. `bare` and `rail`
 draw nothing; `rail` also has no border, so the icon rail's button is exactly its
 32px face.
 **States.** Hover lightens or fills (`ghost` and `outline` take the control
-hover fill); a press darkens the fill and sinks the shadow to
-`--octant-shadow-control-pressed`, and moves nothing. `aria-expanded` and keyboard
+hover fill); a press darkens the fill, and moves nothing. `aria-expanded` and keyboard
 focus fill `ghost` and `outline`. Disabled is 0.75 opacity with no pointer events;
 `aria-invalid` takes the danger border.
 **Keyboard and accessibility.** A native button. An icon-only button always has
@@ -1074,7 +1052,7 @@ alone.
 `OctantCardDescription`, `OctantCardContent`, `OctantCardFooter`; variant
 `default` or `glass` (the glass material is defined in `octant.css`).
 **Sizes and tokens.** Corner `--oct-radius-md`, 12px vertical and inline padding,
-12px between parts; `bg-card` with `--octant-shadow-xs`. Title 15/500, snug;
+12px between parts; `bg-card` with one 1px hairline outline and no shadow. Title 15/500, snug;
 description 14px muted.
 **States.** Forced colours draw a 1px outline; increased contrast a ring in the
 strong border.
@@ -1227,7 +1205,7 @@ command they ran from it, moved it in the meantime.
 (`alert` or `status`); parts Root, Header, Content, Description, Eyebrow, Media,
 Title.
 **Sizes and tokens.** At most 480px wide, 16px padding, 8px gaps,
-`--oct-radius-md`, the card fill and `--octant-shadow-sm`. The mark is a 24px
+`--oct-radius-md`, the card fill and one 1px hairline outline. The mark is a 24px
 neutral tile; eyebrow 12px muted; title 15/600; message 13px muted.
 **States.** One tone: the mark is neutral whatever went wrong.
 **Keyboard and accessibility.** The title is a level-2 heading; the caller sets
@@ -1312,7 +1290,7 @@ icon, so a menu where any row has an icon keeps one text edge.
 **Anatomy.** Props `label`, `value`, `min`, `max`, `step` (1), `suffix`,
 `onChange`.
 **Sizes and tokens.** 28px with the field paint, `--oct-radius-sm`, and
-`--octant-shadow-xs`; 30px ghost buttons at both ends with 14px glyphs; the
+one 1px border with no inner shadow; 30px ghost buttons at both ends with 14px glyphs; the
 middle input is `unstyled`, 14px, centred, with the value and its suffix (12px
 muted) in one column so steppers with and without a unit are one width.
 **States.** The whole stepper takes the control hover fill while focus is inside
@@ -1909,9 +1887,8 @@ Settings holds, its groups and pages, its sheet, and its search are in
 - **Section.** A section label in the Section label role (14/600, secondary ink),
   an optional one-line description in the secondary ink below it, then one
   grouped card: `--oct-radius-md`, the raised card's fill
-  (`--oct-settings-card-fill`) and `--octant-shadow-sm`, which carries the edge,
-  with a clear 1px outline inside the box that forced colours and increased
-  contrast draw. The card never clips: a section keeps `overflow: visible` because
+  (`--oct-settings-card-fill`) and one 1px hairline outline inside the box, which
+  forced colours and increased contrast also draw; no bevel, sheen or shadow. The card never clips: a section keeps `overflow: visible` because
   its rows hold menus and popovers, so the first and last row round themselves
   instead. Rows are divided by a hairline inset 16px from the card's edges, and
   everything inside takes the card's 16px inset, including content that is not a
@@ -1989,8 +1966,8 @@ Settings holds, its groups and pages, its sheet, and its search are in
 ### Composer row
 
 Every composer has one shape, on a start screen or under a thread, in Chat, Work,
-and Code: the same width, corner (`--oct-radius-md`), hairline ring and mid
-shadow (`--octant-shadow-md`), the same insets, and the transcript's own type
+and Code: the same width, corner (`--oct-radius-lg`), one hairline outline and no
+shadow, the same insets, and the transcript's own type
 size, so a message looks the same in the box as in the bubble it becomes. Its
 width is the reading measure; in a split every composer takes the narrowest
 pane's room, so composers side by side match instead of each filling its own
@@ -1999,13 +1976,14 @@ thread's sits, so the two line up across a split; a start screen's card is the
 same box, with its row of where-it-runs chips above it. Nothing about the box
 changes while a turn runs. A held thread has no box.
 
-**The box.** The composer is a box and two quiet lines. The box is the one raised
-surface: the raised card's fill, the hairline ring and the mid shadow. In light
-the card is workspace white on the `--octant-app-background` well, not the grey
-floating fill, which reads as a sunken field. Over an application ground the box
+**The box.** The composer is a box and two quiet lines. The box is the one
+surface a step above its page: the card's fill and one hairline, as a soft pill
+with no shadow. In light the card is workspace white on the
+`--octant-app-background` well, not the grey floating fill, which reads as a
+sunken field. Over an application ground the box
 is the glass surface (floor, thick tint, blur, and the glass stroke as its ring);
 under Window glass it keeps the blur and the stroke and takes the control tint in
-place of the floor, which made it a well where a raised surface should be. The
+place of the floor, which made it a well where a lifted surface should be. The
 empty prompt is one line everywhere and grows as the person types: one line with
 12px above and under it is a 44px box, and a longer message keeps the same corner.
 The prompt is frameless (`OctantTextarea` with `composer-input`).
