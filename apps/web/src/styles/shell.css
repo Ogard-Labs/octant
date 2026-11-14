@@ -1368,15 +1368,18 @@ html[data-octant-native-host="true"]
      left edges: titles at 42px, destinations at 45px, feed rows at 14px. */
   gap: var(--oct-space-2);
   /* The lines of a row and its padding sit on the 4px grid: a two-line row is
-     44px (16 for the top line, 20 for the title, 4 above and below), a
-     three-line row 60. Compact takes two pixels off each of those lines. The
-     button recipe's fixed height would let a third line overlap the next
-     thread instead of growing this row. */
+     48px (16 for the top line, 20 for the title, 6 above and below), a
+     three-line row 64. Compact takes two pixels off each of those lines, so
+     44 and 60. The text block is centred in the row. The button recipe's fixed
+     height would let a third line overlap the next thread instead of growing
+     this row. */
   --thread-line-context: 16px;
   --thread-line-title: 20px;
   height: auto;
   min-height: var(--oct-nav-row-h);
-  padding-block: 4px;
+  /* 6px: one grid step and half of another, so the text block of a 48px row
+     (44 compact) is centred with the same room above and below. */
+  padding-block: calc(var(--oct-space-1) * 1.5);
   padding-inline: var(--oct-nav-inset);
   color: var(--oct-muted);
   background: transparent;
@@ -1451,7 +1454,7 @@ html[data-octant-density="compact"] .sidebar-navigation__thread {
   --thread-line-title: 18px;
 }
 
-/* Compact: the mark steps down to the top line's 14px so the row stays 40px. */
+/* Compact: the mark steps down to the top line's 14px so the row stays 44px. */
 html[data-octant-density="compact"]
   .sidebar-navigation__thread-context
   :is(.project-mark, .project-icon) {

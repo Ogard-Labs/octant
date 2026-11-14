@@ -127,6 +127,21 @@ describe("the shell's edges and gaps", () => {
     expect(rule(projectThreads, ".move-thread__title")).toContain("var(--oct-line-label)");
   });
 
+  it("gives a two-line thread row 48px (44 compact) with 6px above and below, and a heading 8px of clearance", () => {
+    // 6 + 16 + 20 + 6 = 48; compact lines of 14 and 18 make 6 + 14 + 18 + 6 = 44.
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain(
+      "padding-block: calc(var(--oct-space-1) * 1.5);",
+    );
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain("--thread-line-context: 16px;");
+    expect(rule(shell, ".sidebar-navigation__thread")).toContain("--thread-line-title: 20px;");
+    expect(
+      rule(shell, 'html[data-octant-density="compact"] .sidebar-navigation__thread'),
+    ).toContain("--thread-line-title: 18px;");
+    expect(root).toMatch(
+      /\.activity-nav__group:not\(:first-child\) > h2 \{\s*margin-top: var\(--oct-space-2\);/,
+    );
+  });
+
   it("gives the Move to Project list one icon box, whether the Project has a picture or not", () => {
     const mark = rule(projectThreads, ".move-thread__title > :is(svg, .project-icon)");
     expect(mark).toContain("width: var(--oct-icon-md)");

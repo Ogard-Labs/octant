@@ -667,8 +667,9 @@ request, status or time"):
   last line the row has. Colour is spent on the state word and the Project's
   mark only; the row's other facts keep the ink roles.
 
-A two-line row is 44px (4 + 16 + 20 + 4) and a three-line row 60px; Compact
-density takes the lines to 14 and 18, so a two-line row is 40px. A thread
+A two-line row is 48px (6 + 16 + 20 + 6) and a three-line row 64px, the text
+block centred; Compact density takes the lines to 14 and 18, so a two-line row
+is 44px. A group heading stands 8px clear of the rows above it. A thread
 with no top line and no detail is the title alone at the row height. The open thread takes
 `--oct-wash-selected` and the primary ink; a pointed-at row takes
 `--oct-wash-hover`. A thread open in another pane

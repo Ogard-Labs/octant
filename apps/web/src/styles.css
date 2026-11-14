@@ -963,6 +963,11 @@ strong {
   color: var(--octant-text-secondary);
 }
 
+/* A status group's heading stands 8px clear of the rows above it. */
+.activity-nav__group:not(:first-child) > h2 {
+  margin-top: var(--oct-space-2);
+}
+
 .activity-nav__group {
   display: grid;
   gap: 2px;
