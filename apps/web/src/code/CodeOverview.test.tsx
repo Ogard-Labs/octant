@@ -213,7 +213,7 @@ describe("CodeOverview", () => {
         showQuickStart={false}
       />,
     );
-    expect(await screen.findByRole("heading", { name: "Project planner" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Planner" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Designate planner" }));
     await waitFor(() =>
       expect(executePlanner).toHaveBeenCalledWith({
@@ -397,19 +397,22 @@ describe("CodeOverview", () => {
     expect(screen.getAllByText("Controller foundation")).toHaveLength(1);
     expect(screen.queryByText("Another Project")).not.toBeInTheDocument();
     expect(screen.getByText("feature/controller")).toBeVisible();
+    // The row's quiet line holds the size of the change; the staged and
+    // committed-ahead counts wait behind Details.
+    expect(screen.getByText("+12 −3 · stale")).toBeVisible();
+    expect(screen.getByText("In progress")).toBeVisible();
+    expect(screen.getByText("Follow-up")).toBeVisible();
+    // Rarely-glanced facts stay reachable behind the per-thread disclosure.
+    fireEvent.click(screen.getByText("Details"));
     expect(
       screen.getByText("3 changed files · +12 −3 · 1 staged · 2 committed ahead · stale"),
     ).toBeVisible();
     expect(screen.getByText("Passing")).toBeVisible();
     expect(screen.getByText("#806 · open")).toBeVisible();
     expect(screen.getByText("1 active · 2 completed")).toBeVisible();
-    expect(screen.getByText("In progress")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Controller foundation" }).closest("article"),
     ).toHaveTextContent("Ask for approvals");
-    expect(screen.getByText("Follow-up")).toBeVisible();
-    // Rarely-glanced facts stay reachable behind the per-thread disclosure.
-    fireEvent.click(screen.getByText("Details"));
     expect(screen.getByText("/opaque/worktree")).toBeVisible();
     expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
     expect(screen.getByText("Reviewing the checkout")).toBeVisible();
@@ -425,6 +428,28 @@ describe("CodeOverview", () => {
     expect(value.pinThread).toHaveBeenCalledWith(ids.thread, true);
     fireEvent.click(screen.getByRole("button", { name: "Controller foundation" }));
     expect(onOpenThread).toHaveBeenCalledWith(ids.thread);
+  });
+
+  it("offers New thread from an empty Project page that has no quick start", async () => {
+    const onNewThread = vi.fn();
+    const value = {
+      ...controller(),
+      navigation: [],
+      client: { queryBoard: vi.fn(async () => boardView([])) },
+    } as unknown as CodeController;
+    render(
+      <CodeOverview
+        controller={value}
+        onNewThread={onNewThread}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        showQuickStart={false}
+      />,
+    );
+
+    expect(await screen.findByText("No threads yet.")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "New thread" }));
+    expect(onNewThread).toHaveBeenCalledOnce();
   });
 
   it("shows a thread's branch fact only when the host reported one", async () => {
@@ -465,8 +490,8 @@ describe("CodeOverview", () => {
     );
 
     expect(await screen.findByText("feature/controller")).toBeVisible();
-    // Exactly one Branch row: the thread whose worktree the host reported.
-    expect(screen.getAllByText("Branch")).toHaveLength(1);
+    // Exactly one branch: the thread whose worktree the host reported.
+    expect(screen.getAllByText("feature/controller")).toHaveLength(1);
     expect(screen.getByText("Worktree pending")).toBeVisible();
     rerender(
       <CodeOverview
@@ -521,7 +546,7 @@ describe("CodeOverview", () => {
     expect(screen.queryByText("Changed files unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText(/no mutation is authorized/)).not.toBeInTheDocument();
     expect(screen.queryByText("No linked pull request reported.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Branch")).not.toBeInTheDocument();
+    expect(screen.queryByText("feature/controller")).not.toBeInTheDocument();
     expect(screen.queryByText("Changes")).not.toBeInTheDocument();
     expect(screen.queryByText("Checks")).not.toBeInTheDocument();
     expect(screen.queryByText("Pull request")).not.toBeInTheDocument();

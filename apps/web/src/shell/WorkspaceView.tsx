@@ -2438,6 +2438,9 @@ function renderNonCodeTab(
                   projectName={project.name}
                   projectRoot={project.binding.canonicalRoot}
                   showQuickStart={false}
+                  {...(props.onNewThreadInProject === undefined || project.lifecycle !== "active"
+                    ? {}
+                    : { onNewThread: () => props.onNewThreadInProject?.(project.id) })}
                   {...(project.connectedRepository === undefined
                     ? {}
                     : {

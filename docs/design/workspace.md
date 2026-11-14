@@ -248,20 +248,32 @@ The icon source belongs to the window's current host and credential. Replacing
 either or unmounting its provider cancels pending icon requests and revokes its
 object URLs; a late answer cannot retain a blob after that lifetime ends.
 
-The Project overview is one reading column in the 880px measure, starting
-below the title band. The header sits on the page: the Project tile at 40px
-(the colour picker), the name as the editable title with the kind ("Code
-Project") as its subtitle, and the actions at the right edge, New thread in
-the neutral secondary paint beside the ghost Relink folder and Archive
-Project. Everything else reads on cards in the Settings section recipe: one
-card for the Project's folders (the main folder first, labelled Main directory
+The Project overview starts below the title band. The header sits on the
+page: the Project's own icon, or its colour tile where the folder has none, at 24px (the colour picker), the name as the editable
+title, and one quiet line under it, the kind ("Code Project") then the folder
+read from home as `~/…`. The one visible action is **New thread** in the
+neutral solid paint; **Relink folder** and **Archive Project** (Archive on a
+Chat Project) wait in a **More Project actions** menu at its right, and
+Archive keeps its confirmation. When the Project's folder is unavailable,
+**Choose new root** stays beside New thread, because it is then the remedy.
+At 880px of page width and up the page has two columns: the main column holds
+Threads, then Context, then Access and limits, and a 300px side column holds
+the Repository card (Folders on a Work Project), then Planner and Starting
+workers. Below that it is one column in the order Threads, Context, Access and
+limits, Repository, Planner, Starting workers. The side cards float beside the
+main column rather than sharing rows with it, so a short card never stretches
+to the list's height and Context follows Threads whatever the side's height;
+in the source the planner cards therefore precede the list. Cards are the
+Settings family: a 12px radius, a 2% ink fill, a hairline. The Repository card
+holds the project's folders (the main folder first, labelled Main directory
 or Main repository, in mono, read from home as `~/…` with the full path on
-hover and for screen readers, and its availability on the first row; then
-each extra folder as an Extra folder row with Remove; then one line saying
-extra folders get the main folder's access while checkouts and Git stay in
-the main folder (a terminal or saved action can start in any folder), and **Add folder…**, which opens the native folder
-picker on desktop and the host folder browser elsewhere; then what the
-binding grants), then labelled groups. A refused folder (the home folder or
+hover and for screen readers; then each extra folder as an Extra folder row
+with Remove; then one line saying extra folders get the main folder's access
+while checkouts and Git stay in the main folder (a terminal or saved action
+can start in any folder), and **Add folder…**, which opens the native folder
+picker on desktop and the host folder browser elsewhere), then the folder's
+availability as a dot and a word, then one line on what the binding grants
+(said once; the Git sentence is not repeated). A refused folder (the home folder or
 above it, a system or credential folder, one inside or around another folder
 of the Project) shows the host's reason on the card. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
@@ -270,10 +282,18 @@ files after the main folder's, each file by its own name with its folder's
 full path beside the size (in Code, each extra folder is a tree of its own beneath the checkout's, headed by its last component, and its files open in the editor), and the Overview's folder list adds each extra
 folder's top level labelled with the folder's name. Rules for what an extra folder grants are
 in [Architecture: Projects with several folders](../architecture.md#projects-with-several-folders). Threads are rows
-in one card: the title alone on its line, then the state chip, the approval
-posture as quiet text (it is a standing setting, not a state or a control, so
-it takes no chip), and facts on one line beneath it, then Details. A Work
-Project's thread list takes the same labelled card. Settings
+in one card. A row holds the title, the status as a small dot and a word in
+a column of its own (the dot is filled for in progress, hollow for ready, warm
+for waiting, cool-grey for done, red for interrupted; the word always says it),
+and under the title one quiet line of branch, change size (`+6 −0`) and age,
+with the New activity, Follow-up and Pinned tags. **Details** holds the rest:
+approval posture, the full change count with staged and committed-ahead, checks,
+review, pull request, agents, recovery, why the thread is blocked, the
+worktree, delivery and last activity. An empty list says so and offers **New
+thread**. A Work Project's thread list takes the same labelled card. Settings
+rows keep a 13px label, a one-line 12px description (a longer explanation is the
+description's tooltip and its accessible description, never a paragraph) and the
+control at the right, with switches in neutral ink. Settings
 rows split into **Context** (Memory, Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
@@ -1975,7 +1995,7 @@ Project browsing context rule in the same section.
 
 ## Project planner
 
-The Code Project overview's **Project planner** section designates an existing
+The Code Project overview's **Planner** card designates an existing
 thread of that Project, shows its current proposals and offers versioned
 approve/decline decisions. Proposal review keeps the exact intent and Project
 fixed while reusing the ordinary provider/model, checkout and access controls.

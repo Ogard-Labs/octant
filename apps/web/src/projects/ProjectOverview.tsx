@@ -15,12 +15,13 @@ import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
-import { ChevronDown, SquarePen } from "lucide-react";
+import { ChevronDown, Ellipsis, SquarePen } from "lucide-react";
 import { Children, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { homeRelativePath } from "../lib/homeRelativePath";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantMenu } from "../ui/base/OctantMenu";
+import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { ProjectIcon } from "./ProjectIcon";
 import { FolderPicker } from "./FolderPicker";
@@ -163,6 +164,15 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const { onAddExtraFolder, onRemoveExtraFolder } = props;
   const unavailable = props.project.type !== "chat" && props.availability?.status === "unavailable";
   const boundMode = props.project.type === "code" ? "code" : "work";
+  const canRelink =
+    props.project.type !== "chat" && !archived && !connectionStale && allowRootRelink;
+  // Relink and Archive are occasional; New thread is the page's one action.
+  // An unavailable root is the exception: choosing a new one is then the
+  // remedy, so it stays beside New thread instead of waiting in the menu.
+  const overflowItems: ReadonlyArray<OctantMenuItem> = [
+    ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
+    { label: props.project.type === "chat" ? "Archive" : "Archive Project", value: "archive" },
+  ];
   // A base URL the client refuses (a remote host over plain HTTP) leaves the
   // recipe editor unable to ask, which it says, rather than broken.
   const { serverUrl, windowCapability } = props;
@@ -266,7 +276,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
 
   return (
     <section className="projects-workspace--detail-only">
-      <section className="project-overview">
+      <section className="project-overview" data-project-type={props.project.type}>
         {connectionStale ? (
           <div className="project-overview__warning" role="status">
             <div className="project-overview__warning-copy">
@@ -318,7 +328,13 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 </h1>
               </form>
               {props.project.type === "chat" ? null : (
-                <span className="project-overview__type">{label(props.project.type)} Project</span>
+                <p className="project-overview__type">
+                  <span>{label(props.project.type)} Project</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="project-overview__root">
+                    {homeRelativePath(props.project.binding.canonicalRoot)}
+                  </span>
+                </p>
               )}
             </div>
           </div>
@@ -331,14 +347,14 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               {relinkStatus}
             </p>
             {props.onNewThread === undefined || archived || connectionStale ? null : (
-              <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="secondary">
+              <OctantButton onClick={props.onNewThread} size="sm" type="button" variant="solid">
                 <SquarePen aria-hidden="true" size={14} />
                 {props.project.type === "chat" ? "New chat" : "New thread"}
               </OctantButton>
             )}
-            {props.project.type !== "chat" && !archived && !connectionStale && allowRootRelink ? (
-              <OctantButton onClick={() => void relink()} size="sm" type="button" variant="ghost">
-                {unavailable ? "Choose new root" : "Relink folder"}
+            {canRelink && unavailable ? (
+              <OctantButton onClick={() => void relink()} size="sm" type="button" variant="secondary">
+                Choose new root
               </OctantButton>
             ) : null}
             {archived || connectionStale ? (
@@ -346,20 +362,29 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 {archived ? "Archived Project · read-only" : "Stale snapshot · read-only"}
               </span>
             ) : (
-              <OctantButton
-                className="project-overview__archive"
-                onClick={() => props.onArchive(props.project.id)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                {props.project.type === "chat" ? "Archive" : "Archive Project"}
-              </OctantButton>
+              <OctantMenu
+                items={overflowItems}
+                onValueChange={(value) => {
+                  if (value === "relink") void relink();
+                  else if (value === "archive") props.onArchive(props.project.id);
+                }}
+                selectionMode="action"
+                trigger={<Ellipsis aria-hidden="true" size={16} />}
+                triggerClassName={`${octantButtonClassName({ size: "icon-sm", variant: "ghost" })} project-overview__more`}
+                triggerLabel="More Project actions"
+                value=""
+              />
             )}
           </div>
         </header>
         {props.project.type !== "chat" ? (
-          <section className="project-overview__context" aria-label="Project binding">
+          <section
+            className="project-overview__context project-overview__repo"
+            aria-label="Project binding"
+          >
+            <h2 className="project-overview__card-title">
+              {props.project.type === "code" ? "Repository" : "Folders"}
+            </h2>
             <ProjectFoldersSection
               key={String(props.project.id)}
               disabled={archived || connectionStale}
@@ -389,7 +414,13 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 </div>
               </OctantAlert>
             ) : (
-              <span className="project-overview__availability">
+              <span
+                className="project-overview__availability"
+                data-state={
+                  archived ? "quiet" : props.availability?.status === "unverified" ? "quiet" : "ok"
+                }
+              >
+                <span aria-hidden="true" className="project-overview__availability-dot" />
                 {archived
                   ? "Archived · read-only"
                   : props.availability?.status === "unverified"
@@ -434,10 +465,10 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           ) : props.project.type === "code" && props.codeOverview !== undefined ? (
             props.codeOverview
           ) : props.project.type === "work" && props.workOverview !== undefined ? (
-            <>
+            <div className="project-overview__stack">
               {props.workOverview}
               {props.workPromotion}
-            </>
+            </div>
           ) : props.project.type === "work" && props.workPromotion !== undefined ? (
             props.workPromotion
           ) : (
@@ -683,6 +714,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   );
 }
 
+const STATUS_FILE_RULE =
+  "Keep a STATUS.md in this folder. Every task reads it and updates where the work stands, and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing into the folder.";
+
+const DEVELOPER_TOOLS_RULE =
+  "Show this Project's terminal and its Run, Test and Dev actions. Tasks here can run commands and Git at their mode either way; this only changes what you see.";
+
 /**
  * The opt-in for the STATUS.md Octant keeps in a Work folder. Not offered for
  * the default folder, which the host refuses: it holds what nobody gave a
@@ -702,11 +739,10 @@ function WorkStatusFileSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Status file</h3>
-          <p id={descriptionId}>
-            Keep a STATUS.md in this folder. Every task reads it and updates where the work stands,
-            and its dated follow-ups and deadlines become reminders. When off, Octant writes nothing
-            into the folder.
-          </p>
+          <p title={STATUS_FILE_RULE}>Keep a STATUS.md in this folder.</p>
+          <span className="sr-only" id={descriptionId}>
+            {STATUS_FILE_RULE}
+          </span>
         </div>
         <OctantSwitch
           checked={props.enabled}
@@ -861,10 +897,10 @@ function WorkDeveloperToolsSetting(props: {
       <div className="project-overview-inspector__row">
         <div>
           <h3>Developer tools</h3>
-          <p id={descriptionId}>
-            Show this Project&apos;s terminal and its Run, Test and Dev actions. Tasks here can run
-            commands and Git at their mode either way; this only changes what you see.
-          </p>
+          <p title={DEVELOPER_TOOLS_RULE}>Show this Project&apos;s terminal and actions.</p>
+          <span className="sr-only" id={descriptionId}>
+            {DEVELOPER_TOOLS_RULE}
+          </span>
         </div>
         <OctantSwitch
           checked={props.enabled}
@@ -938,5 +974,5 @@ function authorityCopy(type: ProjectSummary["type"]): string {
     return "Virtual organization with approved memory and no implicit host access.";
   if (type === "work")
     return "Confined to the Project's folders. Knowledge-work stays inside them.";
-  return "Checkouts and Git stay in the main repository. New Code work starts approval-gated.";
+  return "New Code work starts approval-gated.";
 }

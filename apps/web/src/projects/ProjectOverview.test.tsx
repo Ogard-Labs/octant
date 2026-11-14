@@ -342,6 +342,43 @@ describe("ProjectOverview", () => {
     expect(onDismiss).toHaveBeenCalledOnce();
   });
 
+  it("keeps New thread as the one visible action and holds Relink and Archive in a menu", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    const onNewThread = vi.fn();
+    const project = {
+      id: "20000000-0000-4000-8000-000000000010",
+      name: "Octant",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-21T12:00:00.000Z",
+      updatedAt: "2026-07-21T12:00:00.000Z",
+      type: "code",
+      binding: { canonicalRoot: "/opaque/repository" },
+      codeAccessPersistence: "current-session",
+    } as unknown as ProjectSummary;
+    render(
+      <ProjectOverview
+        onArchive={onArchive}
+        onNewThread={onNewThread}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Relink folder" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Project" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    expect(await screen.findByRole("menuitem", { name: "Relink folder" })).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Archive Project" }));
+    expect(onArchive).toHaveBeenCalledExactlyOnceWith(project.id);
+  });
+
   it("composes the Chat overview into a virtual Chat Project", () => {
     render(
       <ProjectOverview
@@ -373,7 +410,7 @@ describe("ProjectOverview", () => {
     expect(
       screen.queryByText(/Virtual organization with approved memory/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Archive" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "More Project actions" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
   });
 
@@ -598,7 +635,8 @@ describe("ProjectOverview", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Relink folder" }));
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Relink folder" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
     await waitFor(() => expect(onRelink).toHaveBeenCalledWith(project.id, "R".repeat(43)));
   });
@@ -650,7 +688,8 @@ describe("ProjectOverview", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Relink folder" }));
+    await user.click(screen.getByRole("button", { name: "More Project actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Relink folder" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -716,6 +755,7 @@ describe("ProjectOverview", () => {
     expect(screen.getByText(/Stale Project snapshot/i)).toBeInTheDocument();
     expect(screen.getByText(/Stale snapshot · read-only/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /relink/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "More Project actions" })).not.toBeInTheDocument();
   });
 
   it("offers no relink while the snapshot is stale, even where relinking is otherwise allowed", () => {
