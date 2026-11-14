@@ -63,6 +63,16 @@ function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrom
   return { ...render(<WindowChrome {...props} />), props };
 }
 
+it("keeps every control of the trailing cluster no-drag on its own box", () => {
+  const { container } = renderChrome({ dockAvailable: true });
+  const cluster = container.querySelector(".window-chrome__trailing");
+  const buttons = [...(cluster?.querySelectorAll("button") ?? [])];
+  expect(buttons.length).toBeGreaterThan(1);
+  // The dock header's drag rectangles come later in the document and would
+  // outrank a no-drag rectangle that only an ancestor supplied.
+  for (const button of buttons) expect(button.closest(".window-no-drag")).not.toBeNull();
+});
+
 const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
   .replace('@import "./styles/shell.css";', "")
   .replace('@import "./styles/chat.css";', "")

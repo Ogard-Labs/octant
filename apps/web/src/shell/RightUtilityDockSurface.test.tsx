@@ -510,11 +510,14 @@ describe("tool tiles in the right sidebar", () => {
     expect(screen.queryByRole("button", { name: "Show another tool" })).toBeNull();
   });
 
-  it("lets the dock header's empty space drag the window under the title band", () => {
+  it("lets the dock header's empty space drag the window without covering a control", () => {
     render(<TiledDock initial={rowState()} />);
-    const space = document.querySelector(".right-utility-dock__toolbar > .window-drag-region");
-    expect(space).not.toBeNull();
-    expect(space).toHaveAttribute("aria-hidden", "true");
+    const spaces = document.querySelectorAll(".right-utility-dock__toolbar > .window-drag-region");
+    expect(spaces.length).toBeGreaterThan(0);
+    for (const space of spaces) {
+      expect(space).toHaveAttribute("aria-hidden", "true");
+      expect(space.querySelector("button, a, input")).toBeNull();
+    }
   });
 
   it("keeps the drawer's tool buttons and close button out of the drag region", () => {
