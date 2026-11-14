@@ -6985,15 +6985,6 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   }
 }
 
-/* Code Home's Up next and Continue cards are buttons, not the card recipe,
-   so they paint the same flat card by name: the card fill and one inset
-   hairline, no shadow and no material. */
-.code-home__card {
-  background: var(--octant-card);
-  box-shadow: none;
-  outline: 0;
-}
-
 /* Input surfaces over the application ground on an opaque window keep the glass
    material: a floor, a thick tint and a blur, so typed text never sits on a
    photo. Under window glass they are ink washes with no blur (the composer 7%,
