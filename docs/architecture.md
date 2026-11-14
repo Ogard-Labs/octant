@@ -17055,7 +17055,11 @@ cards; general Azure CLI credentials remain unavailable by design.
     resolves to. A share, device (`\\?\`), drive-relative, or driveless
     rooted path is refused rather than judged, every path is refused when the
     home folder is not drive-absolute, and a search is refused when its root
-    is at or above any protected location, whether or not the file exists.
+    is at or above any protected location, or inside a pattern entry's folder
+    with levels of it left (a browser profile folder), whether or not the
+    file exists. On macOS and Linux a search rooted inside a pattern entry's
+    folder is checked by walking from the root, and a walk that passes 4,096
+    entries refuses the search rather than answer that nothing was found.
     An absolute path a person added is a POSIX path and names nothing on
     Windows; only `~/` additions apply there.
 - **The person can add paths and remove built-ins.** Settings › Permissions
