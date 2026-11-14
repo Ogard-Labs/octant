@@ -90,7 +90,7 @@ complete follow-up), and image attach upload. PDF/text attach remains a follow-u
 Settings:
 
 - **Theme:** System / Light / Dark
-- **Surfaces:** Glass (frosted, default) or Flat (solid)
+- **Surfaces:** Glass (translucent tint, default; native draws no blur view) or Flat (solid)
 - **Background:** Octant canvas (default), atmosphere photo, or custom photo
 
 ## Principles

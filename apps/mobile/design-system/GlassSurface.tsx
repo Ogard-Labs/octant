@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
-import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
-import { BlurView } from "expo-blur";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { glassChromeStyle } from "./materials";
 import { radii, type GlassMaterial } from "./tokens";
 import { useTheme } from "./theme";
@@ -32,8 +31,14 @@ function flatFillFor(
 }
 
 /**
- * Panel surface. In glass mode: frosted blur. In flat mode: solid Distilled fill
- * with a hairline border — no blur.
+ * Panel surface. In glass mode: a translucent tinted fill over the ground (web
+ * adds a backdrop blur). In flat mode: solid Distilled fill with a hairline
+ * border.
+ *
+ * Native glass draws no blur view: expo-blur sets its intensity through a
+ * paused UIViewPropertyAnimator in every view, so with glass on by default the
+ * iOS acceptance run never saw the app go idle and timed out typing into the
+ * composer. The desktop's glass tints its panes rather than blurring too.
  */
 export function GlassSurface(props: GlassSurfaceProps) {
   const { scheme, materials, colors, surfaceStyle } = useTheme();
@@ -56,13 +61,6 @@ export function GlassSurface(props: GlassSurfaceProps) {
 
   return (
     <View style={[chrome, props.style]} testID={props.testID}>
-      {!flat && Platform.OS !== "web" ? (
-        <BlurView
-          intensity={recipe.blurIntensity}
-          style={StyleSheet.absoluteFill}
-          tint={recipe.blurTint}
-        />
-      ) : null}
       {/* The outer chrome already carries the fill; painting it again here
           stacked two translucent layers and read as a solid panel. */}
       <View style={[styles.fill, flat ? { backgroundColor: fill } : null, props.contentStyle]}>
