@@ -1873,6 +1873,7 @@ export function startOctantServer(
       hubAdministrationRoutes,
       localDeviceAdministrationRoutes,
       agentAccessAdministrationRoutes,
+      agentAccessLoopbackRoutes,
       privateListenerAdministrationRoutes,
       privateListenerController,
       privateListenerSetting,
@@ -2055,6 +2056,7 @@ export function startOctantServer(
                 (await commandRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await agentAccessAdministrationRoutes(request)) ??
+                (await agentAccessLoopbackRoutes(request)) ??
                 (await personQuitRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await supportBundleRoutes(request)) ??
