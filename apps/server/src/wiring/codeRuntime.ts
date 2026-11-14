@@ -822,8 +822,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           currentProjectAccess: (windowId, projectId) =>
-            codeProjectAccess.standingAuthority(() => canAccessCodeProject(windowId, projectId)),
-          standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
+            codeProjectAccess.standingAuthority(projectId, () =>
+              canAccessCodeProject(windowId, projectId),
+            ),
+          standingAuthority: (turnProjectId, run) =>
+            codeProjectAccess.standingAuthority(turnProjectId, run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {

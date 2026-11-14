@@ -1,13 +1,12 @@
 # Threads from several Projects in one window
 
-Status: Draft. A maintainer answered the open questions on 2026-11-14; the
-design waits for approval. Nothing here is a current rule, and the current rule
-(one visible tree belongs to one authority context) stays in force until a
-maintainer approves this design.
+Status: Building (slice 1 of 3). Approved by a maintainer on 2026-11-14. The
+current rule (one visible tree belongs to one authority context) stays in force
+until slice 2 lands and rewrites it in the owning specifications.
 Size: Full: it changes what a window's authority is, which every server check
 that reads a window's Project consumes, plus the workspace contract, domain
 policy, and the pane presentation.
-Owner: a maintainer · Started: 2026-11-14 · Approved: not yet
+Owner: a maintainer · Started: 2026-11-14 · Approved: 2026-11-14, a maintainer
 Working assumptions: Q-1's answer, "all modes at once", is read as: Chat, Work
 and Code each mix Projects inside their own layout, all built together; mixing
 modes in one layout stays refused.
@@ -457,6 +456,38 @@ since is found where it is now.
 Slices 2 and 3 should land together or 3 directly after 2, because a mixed window
 without the Project marks is the R4 risk. Slice 1 is safe to land alone.
 
+### Detailed design: slice 1
+
+Written 2026-11-14 against `188c6977f`, after tracing every turn path that asks
+whether a window may reach a Project.
+
+- **Code turns.** `CodeProjectAccess.standingAuthority(turnProjectId, read)`
+  stores the turn's Project in its async context. Inside it,
+  `canAccessProject(scope, P)` refuses when `P` is not the turn's Project,
+  before it reads the window's binding. The Code
+  runtime passes `active.thread.projectId` at its three call sites (both tool
+  set wrappers and the capture-root proof); the Code wiring's
+  `currentProjectAccess` and the provider cloud session check pass the Project
+  they already judge. Example: a window whose Code binding is B runs a turn of
+  A; `standingAuthority(A, () => canAccessProject(w, B))` is `false`, and
+  `standingAuthority(B, () => canAccessProject(w, B))` stays `true`.
+- **Work turns and Browser need no change.** A Work turn's terminal and files
+  are fixed to the thread's Project at turn start with no window check, and the
+  sibling `threads` tool requires the caller's own Project. The Browser
+  resolver derives the Project from the thread and compares it with the
+  window; once slice 2 turns that comparison into admission, it still names
+  the thread's own Project.
+- **Chat Side Chat file reads** call the Code read outside standing authority,
+  so after the request ends they refuse. That fails closed and is left alone.
+- **Composer attach** waits on Q-6.
+- **Failure modes.** A turn whose thread moves Project keeps its old
+  `projectId` until it ends, so its calls refuse for the new Project, as a
+  rebind refuses today. No persisted data changes; no migration.
+- **Tests.** `codeProjectAccess.test.ts` "reaches only the turn's own Project,
+  even when the window reaches another" (red without the narrowing, green with
+  it); the existing standing, routine, queued-device and Code runtime suites
+  prove FR-10.
+
 ### Acceptance tests
 
 | Test                                                                                                                                                | Level                                    | Slice |
@@ -481,7 +512,11 @@ without the Project marks is the R4 risk. Slice 1 is safe to land alone.
 
 ## 8. Open questions
 
-All five were answered by a maintainer on 2026-11-14.
+| ID  | Question                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Blocks                              |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Q-6 | Today a `#` mention or a dropped thread may name any thread this window can Open, which already crosses Projects (a Chat thread mentioning a Work thread, a Work thread mentioning another Work Project's thread). Does FR-12 mean (a) a mixed window adds no reach beyond that, so another pane's Project never becomes mentionable through the mix, or (b) every composer may attach only threads of its own Project, which removes today's cross-Project mentions? | FR-12, the composer part of slice 1 |
+
+Q-1 to Q-5 were answered by a maintainer on 2026-11-14.
 
 | ID  | Question                                                                 | Answer                                                                 | Now in            |
 | --- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ----------------- |
@@ -495,14 +530,15 @@ All five were answered by a maintainer on 2026-11-14.
 
 ### Codebase deltas
 
-| Where code and this design differ                                                                 | Ruling                                                                    |
-| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `resolveWorkspaceContext` refuses another Project of the same mode                                | Code migrates in slice 2                                                  |
-| `restoreDestinationLayout` finds a stowed layout only by its lead context                         | Code migrates in slice 2 (D-3)                                            |
-| Renderer `refuseCrossAuthority` and the sidebar drag reroute refuse or switch for another Project | Code migrates in slice 2; mode and host refusals stay                     |
-| Server sites compare `contextByMode[mode].projectId` for equality                                 | Code migrates to `windowAdmitsProject` in slice 2                         |
-| `standingAuthority` judges only the window                                                        | Code migrates in slice 1                                                  |
-| Workspace and Decisions state "one visible tree belongs to one authority context"                 | Specs change with slice 2; this doc stays a Draft proposal until approved |
+| Where code and this design differ                                                                              | Ruling                                                                    |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `resolveWorkspaceContext` refuses another Project of the same mode                                             | Code migrates in slice 2                                                  |
+| `restoreDestinationLayout` finds a stowed layout only by its lead context                                      | Code migrates in slice 2 (D-3)                                            |
+| Renderer `refuseCrossAuthority` and the sidebar drag reroute refuse or switch for another Project              | Code migrates in slice 2; mode and host refusals stay                     |
+| Server sites compare `contextByMode[mode].projectId` for equality                                              | Code migrates to `windowAdmitsProject` in slice 2                         |
+| `standingAuthority` judges only the window                                                                     | Migrated in slice 1                                                       |
+| A Work `#thread` read and the Work mention directory list every active Work Project, whatever the window binds | Found in slice 1; outside this design, recorded as a follow-up            |
+| Workspace and Decisions state "one visible tree belongs to one authority context"                              | Specs change with slice 2; this doc stays a Draft proposal until approved |
 
 ### Change log
 
@@ -511,3 +547,6 @@ All five were answered by a maintainer on 2026-11-14.
   server Projects in one build, no cross-Project context attach, click-back
   restores a mixed view (D-3 rewritten), no Project count limit. Build plan
   shrank from four slices to three.
+- 2026-11-14: Approved by a maintainer. Slice 1 detailed design written; the
+  Code turn narrowing built. Q-6 raised: what FR-12 means for today's
+  cross-Project mentions.
