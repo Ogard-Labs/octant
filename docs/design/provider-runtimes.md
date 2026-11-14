@@ -832,7 +832,13 @@ read-only commands in the foreground: `run_in_background` is refused there.
 Rationale: holding the person's turn keeps one journaled turn per send and
 reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
 host-side runner for turns that start on an idle thread would add a second
-turn lifecycle the thread model does not have.
+turn lifecycle the thread model does not have. Decided and not built yet
+(maintainer decision, 2026-11-14): the person's turn completes when the
+model's reply is done while background tasks keep running and show as tasks
+in the thread, and a task's end opens a new runtime-started turn rather than
+reopening the old one; stopping the thread still ends every background task.
+It needs the session to outlive the person's turn and that host-side runner,
+so the hold above stays until both exist.
 
 #### Workflows
 
