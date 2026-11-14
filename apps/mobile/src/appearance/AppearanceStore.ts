@@ -26,7 +26,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   picture: "soft-glow",
   effect: DEFAULT_EFFECT,
   colorSchemePreference: "system",
-  surfaceStyle: "flat",
+  surfaceStyle: "glass",
 };
 
 const PICTURES: ReadonlyArray<GroundPicture> = [
@@ -45,7 +45,7 @@ function parseColorSchemePreference(value: unknown): ColorSchemePreference {
 
 function parseSurfaceStyle(value: unknown): SurfaceStylePreference {
   if (value === "flat" || value === "glass") return value;
-  return "flat";
+  return "glass";
 }
 
 function isPicture(value: unknown): value is GroundPicture {

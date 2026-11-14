@@ -63,7 +63,7 @@ function isResearchRole(role: string): boolean {
  * user = control-fill bubble; assistant = reasoning and tool rows, then bare prose.
  */
 export function MessageBubble(props: MessageBubbleProps) {
-  const { colors } = useTheme();
+  const { colors, surfaceStyle } = useTheme();
   const user = isUserRole(props.role);
   const research = isResearchRole(props.role);
   const showActions = props.showActions !== false && !user && !research;
@@ -97,16 +97,18 @@ export function MessageBubble(props: MessageBubbleProps) {
         // A person's message: the control fill and a hairline, no accent
         // (docs/design/thread-view.md › Transcript); the reply beside it is bare prose.
         bubbleUser: {
-          backgroundColor: colors.userBubble,
+          // On glass the bubble takes the thin glass fill so the ground shows
+          // through it like every other panel; flat keeps the control fill.
+          backgroundColor: surfaceStyle === "glass" ? colors.glassFillRegular : colors.userBubble,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.hairline,
+          borderColor: surfaceStyle === "glass" ? colors.glassStrokeStrong : colors.hairline,
         },
         assistantStack: {
           width: "100%",
           gap: space.xs,
         },
       }),
-    [colors],
+    [colors, surfaceStyle],
   );
 
   if (user) {

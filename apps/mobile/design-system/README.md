@@ -27,10 +27,11 @@ distinctive implementation structures.
    Work and Code threads that need the person first under Recent, then
    Computers. A tile is a solid hue face with white ink in light and a tint
    with a coloured count in dark, as on the desktop.
-4. **Surfaces** — flat opaque panels (default, desktop-consistent) or Apple
-   liquid-glass; user-selectable.
+4. **Surfaces** — translucent glass panels over the ground (default; one fill
+   per panel, so the picture shows through cards, lists, bubbles and the
+   composer) or flat opaque panels; user-selectable.
 5. **Conversation-first thread** — bare prose replies, a person's message in a
-   control-fill bubble with a hairline, reasoning and tool calls as compact
+   glass (or, on Flat, control-fill) bubble with a hairline, reasoning and tool calls as compact
    rows, plain glyph message actions, and a floating composer with arrow-up
    send.
 
@@ -89,12 +90,12 @@ complete follow-up), and image attach upload. PDF/text attach remains a follow-u
 Settings:
 
 - **Theme:** System / Light / Dark
-- **Surfaces:** Flat (solid, default) or Glass (frosted)
+- **Surfaces:** Glass (frosted, default) or Flat (solid)
 - **Background:** Octant canvas (default), atmosphere photo, or custom photo
 
 ## Principles
 
-1. **Ground first** — flat workspace colour; material stays quiet unless opted in.
+1. **Ground first** — panels are thin glass over the ground by default, so the picture shows through; Flat makes them solid.
 2. **Soft idle** — danger color only after a failed mutation.
 3. **Product radii** — control 8, card 12, composer 14; pills only for compact
    chips and circular controls.
