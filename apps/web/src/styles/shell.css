@@ -692,9 +692,11 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   background: var(--oct-fg-soft);
 }
 
-/* The open Code thread's diff size. It is the first control of the trailing
-   cluster, so a longer number grows leftward; the floor keeps the common
-   "+12 −3" from nudging the title while the counts tick. */
+/* The checkout's diff size, always shown on a Code thread and the Code start
+   screen. It is the first control of the trailing cluster, so a longer number
+   grows leftward; the floor keeps the common "+12 −3", "+0 −0" and the dash
+   that holds the place before a first reading from nudging the title while the
+   counts arrive or tick. */
 .window-chrome__changes {
   display: inline-flex;
   flex: 0 0 auto;
@@ -724,6 +726,14 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 
 .window-chrome__changes-removed {
   color: var(--oct-danger-fg);
+}
+
+/* A zero count, a reading that may be out of date and the dash before any
+   reading are meta ink: colour says "this changed", and only a current,
+   non-zero count may say it. */
+.window-chrome__changes :is([data-zero="true"], .window-chrome__changes-none),
+.window-chrome__changes[data-updating="true"] span {
+  color: var(--oct-meta);
 }
 
 .window-chrome__button:hover {

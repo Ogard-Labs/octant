@@ -1,11 +1,14 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts";
-import { memo, useMemo } from "react";
+import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
+import { memo, useCallback, useMemo } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBridge";
 import { WindowChrome } from "../shell/WindowChrome";
+import type { TitleBandChangesFacts } from "../shell/TitleBandChanges";
 import type { WindowHistory } from "../shell/windowHistory";
 import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
 import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
+import { useProjectCheckoutChanges } from "../shell/useProjectCheckoutChanges";
 import { useThreadBoardCard } from "../shell/useThreadBoardCard";
 import type { ShellActions } from "./shellActions";
 
@@ -26,6 +29,16 @@ export interface WindowChromeContainerProps {
   /** The Code thread on screen, whose checkout the band measures; absent for a draft or another mode. */
   readonly activeCodeThreadId?: string;
   readonly activeProjectId?: ProjectId;
+  /**
+   * The window is on the Code start screen or a draft, where the band reads the
+   * Project's own checkout because no thread has one yet.
+   */
+  readonly codeDraft?: boolean;
+  /** A Code Project's reading is wanted only when the Project is one. */
+  readonly activeProjectIsCode?: boolean;
+  readonly projectClient?: ProjectClient;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   /** Moves when the host says the Code board changed, so the count is read again. */
   readonly codeBoardRevision: number;
   readonly bottomPanelAvailable: boolean;
@@ -84,24 +97,64 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     enabled: codeThreadId !== undefined && codeProjectId !== undefined,
     changeRevision: props.codeBoardRevision,
   });
-  const observed = card?.changedFiles;
-  // A stale observation may describe a tree the thread has since changed, so
-  // the band says nothing rather than a number that could be wrong.
-  const insertions =
-    observed?.kind === "observed" && observed.freshness === "fresh"
-      ? observed.insertions
-      : undefined;
-  const deletions =
-    observed?.kind === "observed" && observed.freshness === "fresh"
-      ? observed.deletions
-      : undefined;
-  const changes = useMemo(
+  const draftChanges = props.codeDraft === true && codeThreadId === undefined;
+  const projectClient = useMemo(
     () =>
-      insertions === undefined || deletions === undefined
+      props.projectClient ??
+      (props.serverUrl === undefined || props.windowCapability === undefined
         ? undefined
-        : { insertions, deletions, onOpen: () => actions.addDockTab("review") },
-    [insertions, deletions, actions],
+        : createProjectClient({
+            baseUrl: props.serverUrl,
+            fetch: globalThis.fetch,
+            windowCapability: props.windowCapability,
+          })),
+    [props.projectClient, props.serverUrl, props.windowCapability],
   );
+  const projectChanges = useProjectCheckoutChanges({
+    client: projectClient,
+    projectId: codeProjectId,
+    enabled: draftChanges && activeMode === "code" && props.activeProjectIsCode === true,
+    revision: props.codeBoardRevision,
+  });
+  const observed = card?.changedFiles;
+  const onOpenChanges = useCallback(() => actions.addDockTab("review"), [actions]);
+  // A stale observation stays on screen in meta ink rather than vanishing, and
+  // a checkout not read yet holds its place with a dash, so the band never
+  // gains, loses or resizes a control as the reading arrives. A thread whose
+  // checkout cannot be observed keeps the dash, so the band does not drop out
+  // from under the pointer once the board answers; only a Project with no Git
+  // checkout shows nothing.
+  const changes = useMemo((): TitleBandChangesFacts | undefined => {
+    if (activeMode !== "code") return undefined;
+    if (codeThreadId !== undefined && codeProjectId !== undefined) {
+      if (observed === undefined) return { updating: true, onOpen: onOpenChanges };
+      if (observed.kind !== "observed") return { updating: false, onOpen: onOpenChanges };
+      return {
+        insertions: observed.insertions,
+        deletions: observed.deletions,
+        updating: observed.freshness !== "fresh",
+        onOpen: onOpenChanges,
+      };
+    }
+    if (!draftChanges || props.activeProjectIsCode !== true) return undefined;
+    if (projectChanges.status === "none") return undefined;
+    if (projectChanges.status === "reading") return { updating: true, onOpen: onOpenChanges };
+    return {
+      ...(projectChanges.insertions === undefined ? {} : { insertions: projectChanges.insertions }),
+      ...(projectChanges.deletions === undefined ? {} : { deletions: projectChanges.deletions }),
+      updating: projectChanges.updating,
+      onOpen: onOpenChanges,
+    };
+  }, [
+    activeMode,
+    codeThreadId,
+    codeProjectId,
+    observed,
+    draftChanges,
+    props.activeProjectIsCode,
+    projectChanges,
+    onOpenChanges,
+  ]);
   return (
     <WindowChrome
       {...(changes === undefined ? {} : { changes })}

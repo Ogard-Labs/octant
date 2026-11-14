@@ -2516,6 +2516,7 @@ The sidebar speaks about what a thread is doing now with one fixed vocabulary, a
 
 - The vocabulary is Working, Needs attention, Snooze ended and New activity, owned by the domain package. Nothing to report is no status, and a failure is never inferred from silence.
 - The jump goes by strength of reason (approval, then question, then unreviewed finished turn), wraps, and adds no host read.
+- The Code title band shows the checkout's uncommitted changes whenever the window is on a Code Project with a Git checkout (a thread's own checkout; the Project's checkout on the start screen and draft), "+0 −0" included: green and red only for a count above zero, meta ink for zero or a stale reading (tooltip "Updating…"), and an em dash in the same slot before a first reading (maintainer request, 2026-11-15).
 - A start screen's ground is at full strength down to 55% of the stage and fades smoothly to the stage's own colour over the lower 45%, in both modes; the dim behind the content column stays (maintainer request, 2026-11-15).
 - Every sidebar view shows a short age by default (now, 12m, 3d, 52w, 2y; never past three characters), 12px meta ink, right-aligned in a fixed slot at one edge on every row. The end of a row is fixed in order and width: title, the slot (age, state in words, or the hover actions fading in over it), provider mark. Hover, focus and an open menu never move the mark or the title's truncation (maintainer request, 2026-11-15). A saved record equal to the old Activity default is read as never chosen and moves to the new default once.
 

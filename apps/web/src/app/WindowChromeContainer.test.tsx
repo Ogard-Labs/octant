@@ -117,14 +117,101 @@ describe("the window chrome's uncommitted changes", () => {
     ).toHaveTextContent("+0−0");
   });
 
-  it("shows nothing without a Code thread, a checkout reading, or a current one", () => {
+  it("shows nothing outside Code", () => {
     chrome();
     expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
   });
 
-  it("leaves out a count the host marked stale", () => {
+  it("keeps the dash for a thread whose checkout cannot be observed, so the band does not drop out when the board answers", () => {
+    vi.mocked(useThreadBoardCard).mockReturnValue({
+      changedFiles: { kind: "unavailable" },
+    } as unknown as CodeBoardCard);
+    chrome(codeThread);
+    const button = screen.getByRole("button", { name: "Uncommitted changes: not read" });
+    expect(button).toHaveTextContent("—");
+    expect(button).toHaveAttribute("title", "No changes could be read");
+  });
+
+  it("holds its place with a dash until the thread's checkout has been read", () => {
+    chrome(codeThread);
+    const button = screen.getByRole("button", { name: "Uncommitted changes: not read" });
+    expect(button).toHaveTextContent("—");
+    expect(button).toHaveAttribute("title", "Updating…");
+  });
+
+  it("keeps a stale count on screen in meta ink with Updating… as its tooltip", () => {
     vi.mocked(useThreadBoardCard).mockReturnValue(observed(12, 3, "stale"));
     chrome(codeThread);
+    const button = screen.getByRole("button", {
+      name: "Uncommitted changes: 12 lines added, 3 removed",
+    });
+    expect(button).toHaveTextContent("+12−3");
+    expect(button).toHaveAttribute("title", "Updating…");
+    expect(button).toHaveAttribute("data-updating", "true");
+  });
+
+  it("marks a zero count so it is drawn in meta ink rather than green or red", () => {
+    vi.mocked(useThreadBoardCard).mockReturnValue(observed(5, 0));
+    chrome(codeThread);
+    const button = screen.getByRole("button", { name: /Uncommitted changes/ });
+    expect(button.querySelector(".window-chrome__changes-added")).not.toHaveAttribute("data-zero");
+    expect(button.querySelector(".window-chrome__changes-removed")).toHaveAttribute(
+      "data-zero",
+      "true",
+    );
+  });
+});
+
+describe("the window chrome's uncommitted changes on the Code start screen", () => {
+  function readyEnvironment(insertions: number, deletions: number) {
+    return {
+      status: "ready",
+      insertions,
+      deletions,
+    };
+  }
+  const draft = {
+    activeProjectId: codeThread.activeProjectId,
+    activeProjectIsCode: true,
+    codeDraft: true,
+    activeSurface: "New task",
+  };
+
+  it("reads the Project's own checkout and shows +0 −0 for a clean one", async () => {
+    const environment = vi.fn().mockResolvedValue(readyEnvironment(0, 0));
+    chrome({ ...draft, projectClient: { environment } as never });
+    expect(
+      await screen.findByRole("button", { name: "Uncommitted changes: 0 lines added, 0 removed" }),
+    ).toHaveTextContent("+0−0");
+    expect(environment).toHaveBeenCalledWith(draft.activeProjectId, expect.anything(), true);
+  });
+
+  it("holds a dash in the same slot until the reading lands", async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    const environment = vi.fn().mockReturnValue(new Promise((done) => (resolve = done)));
+    chrome({ ...draft, projectClient: { environment } as never });
+    expect(screen.getByRole("button", { name: "Uncommitted changes: not read" })).toHaveTextContent(
+      "—",
+    );
+    resolve(readyEnvironment(4, 1));
+    expect(
+      await screen.findByRole("button", { name: "Uncommitted changes: 4 lines added, 1 removed" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows nothing for a Project with no Git checkout", async () => {
+    const environment = vi.fn().mockResolvedValue({ status: "unavailable" });
+    chrome({ ...draft, projectClient: { environment } as never });
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull(),
+    );
+    expect(environment).toHaveBeenCalled();
+  });
+
+  it("shows nothing when the Project is not a Code Project", () => {
+    const environment = vi.fn();
+    chrome({ ...draft, activeProjectIsCode: false, projectClient: { environment } as never });
+    expect(environment).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: /Uncommitted changes/ })).toBeNull();
   });
 });

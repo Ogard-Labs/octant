@@ -7908,6 +7908,15 @@ function LaunchedShell(
               ? {}
               : { activeCodeThreadId: String(activeCodeThreadId) })}
             {...(activeProjectId === undefined ? {} : { activeProjectId })}
+            activeProjectIsCode={
+              projectController.allProjects.find(
+                (project) => String(project.id) === String(activeProjectId),
+              )?.type === "code"
+            }
+            codeDraft={activeMode === "code" && activeDraftKey !== undefined}
+            {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+            serverUrl={props.launch.serverUrl}
+            windowCapability={props.projectWindowCapability}
             codeBoardRevision={machineChanges.codeNavigation}
             bottomPanelAvailable={bottomPanelAvailable}
             bottomPanelPresentedOpen={bottomPanelPresentedOpen}
