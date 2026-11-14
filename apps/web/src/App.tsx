@@ -7099,6 +7099,13 @@ function LaunchedShell(
             });
             attachmentIds.push(attachmentId);
           }
+          // Each upload journals an attachment event on the thread and moves
+          // its version on, so the send expects the version the host now
+          // holds; the pre-upload version was refused as stale.
+          const expectedVersion =
+            attachmentIds.length === 0 || chatClient === undefined
+              ? thread.version
+              : (await chatClient.thread(thread.id)).thread.version;
           const sent = await chatController.execute({
             kind: "send-chat-turn",
             ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
@@ -7106,7 +7113,7 @@ function LaunchedShell(
               ? {}
               : { extensionSelections: draftExtensionSelections }),
             threadId: thread.id,
-            expectedVersion: thread.version,
+            expectedVersion,
             prompt,
           });
           if (sent === undefined) {
