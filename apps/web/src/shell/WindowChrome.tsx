@@ -5,6 +5,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { useActionShortcut } from "../keybindings/useActionShortcut";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { IconButton } from "./IconButton";
+import { TitleBandChanges, type TitleBandChangesFacts } from "./TitleBandChanges";
 import { DockToolButtons } from "./DockToolButtons";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import type { DockToolButtonsModel } from "./dockToolButtonsModel";
@@ -43,6 +44,8 @@ export interface WindowChromeProps {
   readonly onNewThread?: () => void;
   readonly newThreadLabel?: string;
   readonly zenRecoveryNeeded?: boolean;
+  /** The open Code thread's uncommitted changes; absent when it has no checkout to measure. */
+  readonly changes?: TitleBandChangesFacts;
   /** Back and forward, shown beside Show sidebar while the sidebar is hidden. */
   readonly history?: WindowHistory;
 }
@@ -167,6 +170,7 @@ export function WindowChrome(props: WindowChromeProps) {
           />
         ) : (
           <>
+            {props.changes === undefined ? null : <TitleBandChanges changes={props.changes} />}
             {props.dockTools === undefined || props.onToggleDockTool === undefined ? null : (
               <DockToolButtons
                 {...(props.dockReferences === undefined

@@ -1,15 +1,19 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { memo } from "react";
+import type { ProjectId } from "@octant/contracts";
+import { memo, useMemo } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBridge";
 import { WindowChrome } from "../shell/WindowChrome";
 import type { WindowHistory } from "../shell/windowHistory";
 import type { DockToolButtonsModel } from "../shell/dockToolButtonsModel";
 import type { DockUtilityLauncherReference } from "../shell/DockUtilityLauncher";
+import { useThreadBoardCard } from "../shell/useThreadBoardCard";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
   readonly actions: Pick<
     ShellActions,
+    | "addDockTab"
+    | "loadCodeBoard"
     | "recoverZen"
     | "startNewThreadDraft"
     | "toggleBottomPanel"
@@ -19,6 +23,10 @@ export interface WindowChromeContainerProps {
   >;
   readonly activeMode: OctantMode;
   readonly activeSurface: string;
+  /** The Code thread on screen, whose checkout the band measures; absent for a draft or another mode. */
+  readonly activeCodeThread?: { readonly threadId: string; readonly projectId: ProjectId };
+  /** Moves when the host says the Code board changed, so the count is read again. */
+  readonly codeBoardRevision: number;
   readonly bottomPanelAvailable: boolean;
   readonly bottomPanelPresentedOpen: boolean;
   readonly dockAvailable: boolean;
@@ -66,8 +74,35 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
     sidebarRail,
     zenRecoveryNeeded,
   } = props;
+  const codeThread = props.activeCodeThread;
+  const card = useThreadBoardCard({
+    loadBoard: actions.loadCodeBoard,
+    projectId: codeThread?.projectId,
+    threadId: codeThread?.threadId ?? "",
+    enabled: codeThread !== undefined,
+    changeRevision: props.codeBoardRevision,
+  });
+  const observed = card?.changedFiles;
+  // A stale observation may describe a tree the thread has since changed, so
+  // the band says nothing rather than a number that could be wrong.
+  const insertions =
+    observed?.kind === "observed" && observed.freshness === "fresh"
+      ? observed.insertions
+      : undefined;
+  const deletions =
+    observed?.kind === "observed" && observed.freshness === "fresh"
+      ? observed.deletions
+      : undefined;
+  const changes = useMemo(
+    () =>
+      insertions === undefined || deletions === undefined
+        ? undefined
+        : { insertions, deletions, onOpen: () => actions.addDockTab("review") },
+    [insertions, deletions, actions],
+  );
   return (
     <WindowChrome
+      {...(changes === undefined ? {} : { changes })}
       activeSurface={activeSurface}
       bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
       bottomPanelExpanded={bottomPanelPresentedOpen}
