@@ -1269,12 +1269,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 props.selectedProviderInstanceId === undefined
                   ? undefined
                   : String(props.selectedProviderInstanceId),
-              alternatives: {
-                groups: props.providerGroups,
-                onSelect: props.onSelectProvider,
-                selectedModelId:
-                  props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
-              },
+              groups: props.providerGroups,
             }}
             startContext={
               <div className="composer-tray composer-tray--start" aria-label="Thread context">

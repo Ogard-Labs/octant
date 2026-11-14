@@ -23,7 +23,7 @@ import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadPlanWindows } from "../threadStats/ThreadStats";
-import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import type { PickerGroup } from "@octant/domain";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import { ComposerUsageWarning } from "../usage/ComposerUsageWarning";
 import "./composer-plan-usage.css";
@@ -161,15 +161,11 @@ export interface ThreadComposerProps {
   readonly planUsage?: {
     readonly providerInstanceId: string | undefined;
     /**
-     * The accounts a new thread could use instead. With them, a chosen
-     * account at its limit shows a warning with a button for each account
-     * that has room; without them, the meters stand alone.
+     * The accounts a new thread can use, for the chosen one's name. With them,
+     * a chosen account near or at its limit shows a warning; without them, the
+     * meters stand alone.
      */
-    readonly alternatives?: {
-      readonly groups: ReadonlyArray<PickerGroup>;
-      readonly selectedModelId?: string | undefined;
-      readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
-    };
+    readonly groups?: ReadonlyArray<PickerGroup>;
   };
   readonly queue?: ReactNode;
   /**
@@ -269,11 +265,9 @@ function ComposerSurface(props: ThreadComposerProps & { readonly held: boolean }
   const startRow =
     props.startContext === undefined ? null : (
       <div className="composer-start">
-        {props.planUsage?.alternatives === undefined ? null : (
+        {props.planUsage?.groups === undefined ? null : (
           <ComposerUsageWarning
-            groups={props.planUsage.alternatives.groups}
-            onSelect={props.planUsage.alternatives.onSelect}
-            selectedModelId={props.planUsage.alternatives.selectedModelId}
+            groups={props.planUsage.groups}
             selectedProviderInstanceId={props.planUsage.providerInstanceId}
           />
         )}

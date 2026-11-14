@@ -147,33 +147,31 @@ describe("ComposerModelPicker", () => {
     ]);
   });
 
-  it("warns that the chosen account is at its limit and switches only when the person picks another", async () => {
-    const onSelect = vi.fn();
+  it("warns that the chosen account is at its limit by its spoken name and offers no other account", async () => {
+    const named = groups().map((group) =>
+      String(group.instance.id) === String(providerA)
+        ? { ...group, instance: { ...group.instance, displayName: "Codex CLI" } }
+        : group,
+    );
     render(
       <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning
-          groups={groups()}
-          onSelect={onSelect}
-          selectedProviderInstanceId={String(providerA)}
-        />
+        <ComposerUsageWarning groups={named} selectedProviderInstanceId={String(providerA)} />
       </PlanUsageProvider>,
     );
     const warning = await screen.findByRole("alert");
-    expect(warning).toHaveTextContent("Local OpenCode has reached its usage limit.");
+    expect(warning).toHaveTextContent("Codex has reached its usage limit.");
     expect(warning).toHaveTextContent(/Resets in 3h/);
-    expect(onSelect).not.toHaveBeenCalled();
-    await userEvent.click(screen.getByRole("button", { name: "Use Remote Claude" }));
-    expect(onSelect).toHaveBeenCalledWith({ providerInstanceId: providerB, modelId: modelThree });
+    expect(
+      within(warning)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Dismiss"]);
   });
 
   it("stays quiet when the chosen account has room", async () => {
     render(
       <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning
-          groups={groups()}
-          onSelect={vi.fn()}
-          selectedProviderInstanceId={String(providerB)}
-        />
+        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerB)} />
       </PlanUsageProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -183,11 +181,7 @@ describe("ComposerModelPicker", () => {
   it("marks a reached limit red and keeps a dismissed warning away when the composer comes back", async () => {
     const warningFor = () => (
       <PlanUsageProvider barStyle="smooth" client={usageClient()}>
-        <ComposerUsageWarning
-          groups={groups()}
-          onSelect={vi.fn()}
-          selectedProviderInstanceId={String(providerA)}
-        />
+        <ComposerUsageWarning groups={groups()} selectedProviderInstanceId={String(providerA)} />
       </PlanUsageProvider>
     );
     const first = render(warningFor());

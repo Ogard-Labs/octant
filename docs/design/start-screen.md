@@ -581,16 +581,15 @@ image is a composer affordance and is available here.
 ## Usage-limit warning
 
 **Usage-limit warning.** On a start screen, when the chosen account has a window
-that is spent or at 80% used (the same levels the meters colour), a warning
-callout takes the full row above the context chips, in the row above the
-card: which account, that it has
-reached or is close to its usage limit, and the reset time the provider gave.
-For each other ready account that has room (an observed window below the near
-level; an account with no observed window is never offered as having room) up to
-three `Use <account>` buttons follow, each choosing that account and its model
-(the current model when it lists it) exactly as the model menu would. Nothing
-switches on its own and the warning never blocks sending: the provider's own
-limit decides whether a turn runs. The model menu's rail lists accounts with
+that is spent or at 80% used (the same levels the meters colour), a small
+notice floats above the context chips: which account by its spoken name
+("Codex", not "Codex CLI"), that it has reached or is close to its usage limit,
+and the reset time the provider gave. It is amber while close and red once
+reached ([OctantAlert](../../DESIGN.md#octantalert)). It only tells: it offers
+no other account to switch to, since which account runs is the person's choice
+in the model menu. A dismiss button puts it away until its reset time passes or
+the account reaches its limit. The warning never blocks sending: the provider's
+own limit decides whether a turn runs. The model menu's rail lists accounts with
 room first and the ones at their limit last, in the person's own order within
 each, and marks a limited account with the danger dot and "Usage limit reached"
 (a near one with the warning dot and "Near usage limit"); a readiness problem
