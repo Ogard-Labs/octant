@@ -207,9 +207,9 @@
   --oct-role-meta-mono-tracking: 0;
   --oct-role-meta-size: var(--oct-text-xs);
   --oct-role-page-title-family: var(--oct-font-display);
-  --oct-role-page-title-leading: var(--oct-leading-label);
-  --oct-role-page-title-size: var(--oct-text-sm);
-  --oct-role-page-title-tracking: var(--oct-tracking-snug);
+  --oct-role-page-title-leading: 1.15;
+  --oct-role-page-title-size: var(--oct-text-2xl);
+  --oct-role-page-title-tracking: var(--oct-tracking-tight);
   --oct-role-page-title-weight: var(--oct-weight-strong);
   --oct-role-row-detail-leading: var(--oct-leading-detail);
   --oct-role-row-detail-size: var(--oct-text-detail);
@@ -374,7 +374,7 @@
   --octant-surface-muted: #f0f0ef;
   --octant-surface-raised: #fdfdfc;
   --octant-surface-selected: #ebebea;
-  --octant-well: rgb(16 24 40 / 5%);
+  --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
   --octant-workspace: #ffffff;
   --octant-primary-foreground: #ffffff;
   --octant-text-muted: #666666;
@@ -461,7 +461,7 @@
     --octant-surface-muted: #f0f0ef;
     --octant-surface-raised: #fdfdfc;
     --octant-surface-selected: #ebebea;
-    --octant-well: rgb(16 24 40 / 5%);
+    --octant-well: color-mix(in srgb, var(--octant-text-primary) 5%, transparent);
     --octant-workspace: #ffffff;
     --octant-primary-foreground: #ffffff;
     --octant-text-muted: #666666;
