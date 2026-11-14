@@ -25,12 +25,18 @@ export function OctantSwitch(props: OctantSwitchProps) {
       onCheckedChange={(checked) => props.onCheckedChange(checked)}
     />
   );
-  if (disabledReason === undefined) return control;
   // A disabled switch takes no pointer events, so a title on it never showed.
-  // The wrapper carries the hover explanation; the switch still speaks it.
+  // A layer over it carries the hover explanation while the switch still
+  // speaks it. The switch keeps one place in the tree either way: swapping
+  // wrappers when it became enabled remounted it and dropped the click.
   return (
-    <OctantTooltip label={disabledReason}>
-      <span className="octant-switch__disabled-reason">{control}</span>
-    </OctantTooltip>
+    <span className="octant-switch__frame">
+      {control}
+      {disabledReason === undefined ? null : (
+        <OctantTooltip label={disabledReason}>
+          <span aria-hidden="true" className="octant-switch__disabled-reason" />
+        </OctantTooltip>
+      )}
+    </span>
   );
 }

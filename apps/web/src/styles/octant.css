@@ -9947,6 +9947,12 @@ html[data-octant-reduced-motion="true"] .skeleton::after {
 
 /* Holds a disabled switch's hover explanation; the switch itself takes no
    pointer events while disabled. */
-.octant-switch__disabled-reason {
+.octant-switch__frame {
   display: inline-flex;
+  position: relative;
+}
+
+.octant-switch__disabled-reason {
+  position: absolute;
+  inset: 0;
 }

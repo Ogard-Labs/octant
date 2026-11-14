@@ -69,10 +69,11 @@ describe("OctantSwitch", () => {
 
     const control = screen.getByRole("switch", { name: "Enable Existing CLI" });
     expect(control).toHaveAccessibleDescription(reason);
-    // The disabled switch takes no pointer events; its wrapper shows the reason.
-    const wrapper = control.parentElement;
-    if (wrapper === null) throw new Error("expected the disabled reason wrapper");
-    await user.hover(wrapper);
+    // The disabled switch takes no pointer events; the layer over it shows the reason.
+    const layer = control.parentElement?.querySelector(".octant-switch__disabled-reason");
+    if (layer === null || layer === undefined)
+      throw new Error("expected the disabled reason layer");
+    await user.hover(layer);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(reason);
   });
 });

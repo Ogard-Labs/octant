@@ -206,6 +206,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import "./styles.css";
 import "./styles/shell.css";
@@ -368,7 +369,10 @@ import {
   type ProjectActionTarget,
 } from "./projects/ProjectActionRunDialog";
 import { ProjectIconProvider } from "./projects/ProjectIcon";
-import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
+import {
+  type ProjectThreadsAccess,
+  ProjectThreadsProvider,
+} from "./projects/ProjectThreadsSection";
 import {
   ServerCodeProjectsContext,
   serverCodeProjectFor,
@@ -6124,70 +6128,36 @@ function LaunchedShell(
   // through props. It carries the same list the sidebar nests, so neither can
   // claim a Project has threads the other cannot see. `errorMessage` is read
   // only from a disconnected bootstrap, never from a failed command.
-  // Memoized on the data it carries. The callbacks are recreated on every
-  // shell render, so the provider reaches them through a ref; otherwise every
-  // unrelated shell render handed the Project Overview a new value.
-  const projectThreadsActions = useRef({
-    retryChat: () => void chatController.retry(),
-    retryCode: () => void codeController.retry(),
-    refreshWork: () => void workNavigation.refresh(),
-    selectChatThread,
-    selectCodeThread,
-    selectWorkThread,
+  const projectThreadsAccess = projectThreadsAccessForMode({
+    activeMode,
+    chat: {
+      status: chatController.status,
+      ...(chatController.errorMessage === undefined
+        ? {}
+        : { errorMessage: chatController.errorMessage }),
+      onRetry: () => void chatController.retry(),
+      onSelectThread: selectChatThread,
+      threads: markedChatNavigation,
+    },
+    code: {
+      status: codeController.status,
+      ...(codeController.errorMessage === undefined
+        ? {}
+        : { errorMessage: codeController.errorMessage }),
+      onRetry: () => void codeController.retry(),
+      onSelectThread: selectCodeThread,
+      threads: codeProjectThreads,
+    },
+    work: {
+      status: workNavigation.status,
+      ...(workNavigation.errorMessage === undefined
+        ? {}
+        : { errorMessage: workNavigation.errorMessage }),
+      onRetry: () => void workNavigation.refresh(),
+      onSelectThread: selectWorkThread,
+      threads: workProjectThreads,
+    },
   });
-  projectThreadsActions.current = {
-    retryChat: () => void chatController.retry(),
-    retryCode: () => void codeController.retry(),
-    refreshWork: () => void workNavigation.refresh(),
-    selectChatThread,
-    selectCodeThread,
-    selectWorkThread,
-  };
-  const chatStatus = chatController.status;
-  const codeStatus = codeController.status;
-  const workStatus = workNavigation.status;
-  const chatErrorMessage = chatController.errorMessage;
-  const codeErrorMessage = codeController.errorMessage;
-  const workErrorMessage = workNavigation.errorMessage;
-  const projectThreadsAccess = useMemo(
-    () =>
-      projectThreadsAccessForMode({
-        activeMode,
-        chat: {
-          status: chatStatus,
-          ...(chatErrorMessage === undefined ? {} : { errorMessage: chatErrorMessage }),
-          onRetry: () => projectThreadsActions.current.retryChat(),
-          onSelectThread: (threadId) => projectThreadsActions.current.selectChatThread(threadId),
-          threads: markedChatNavigation,
-        },
-        code: {
-          status: codeStatus,
-          ...(codeErrorMessage === undefined ? {} : { errorMessage: codeErrorMessage }),
-          onRetry: () => projectThreadsActions.current.retryCode(),
-          onSelectThread: (threadId) => projectThreadsActions.current.selectCodeThread(threadId),
-          threads: codeProjectThreads,
-        },
-        work: {
-          status: workStatus,
-          ...(workErrorMessage === undefined ? {} : { errorMessage: workErrorMessage }),
-          onRetry: () => projectThreadsActions.current.refreshWork(),
-          onSelectThread: (threadId) => projectThreadsActions.current.selectWorkThread(threadId),
-          threads: workProjectThreads,
-        },
-      }),
-    [
-      activeMode,
-      chatStatus,
-      chatErrorMessage,
-      markedChatNavigation,
-      codeStatus,
-      codeErrorMessage,
-      codeProjectThreads,
-      workStatus,
-      workErrorMessage,
-      workProjectThreads,
-    ],
-  );
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();
@@ -8596,7 +8566,7 @@ function LaunchedShell(
                             serverUrl={props.launch.serverUrl}
                             windowCapability={props.projectWindowCapability}
                           >
-                            <ProjectThreadsProvider value={projectThreadsAccess}>
+                            <StableProjectThreadsProvider value={projectThreadsAccess}>
                               <NewTaskDraftsContext.Provider value={newTaskDrafts}>
                                 <StreamRepliesContext.Provider
                                   value={controller.settings?.streamReplies !== false}
@@ -8650,7 +8620,7 @@ function LaunchedShell(
                                   </ReplyDetailSourceContext.Provider>
                                 </StreamRepliesContext.Provider>
                               </NewTaskDraftsContext.Provider>
-                            </ProjectThreadsProvider>
+                            </StableProjectThreadsProvider>
                           </ProjectIconProvider>
                         </SidebarThreadTabsContext.Provider>
                       </SidebarThreadDragContext.Provider>
@@ -8672,4 +8642,30 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
+}
+
+/**
+ * The shell rebuilds `projectThreadsAccess` on every render, and the Project
+ * Overview below it re-rendered with each new object. This keeps the provided
+ * value's identity until the data it carries changes; callbacks are reached
+ * through a ref because the shell recreates them every render. It lives in its
+ * own component because the shell returns early while loading, so the hooks
+ * cannot sit there.
+ */
+function StableProjectThreadsProvider(props: {
+  readonly value: ProjectThreadsAccess;
+  readonly children: ReactNode;
+}) {
+  const latest = useRef(props.value);
+  latest.current = props.value;
+  const { status, errorMessage, threads } = props.value;
+  const value = useMemo<ProjectThreadsAccess>(
+    () => ({
+      ...latest.current,
+      onRetry: () => latest.current.onRetry?.(),
+      onSelectThread: (navigationId: string) => latest.current.onSelectThread(navigationId),
+    }),
+    [status, errorMessage, threads],
+  );
+  return <ProjectThreadsProvider value={value}>{props.children}</ProjectThreadsProvider>;
 }
