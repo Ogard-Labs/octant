@@ -1706,6 +1706,7 @@ function ActiveSectionContent({
                 settingId="browser-captures-per-thread"
               >
                 <OctantNumberStepper
+                  field
                   label="Captures kept per thread"
                   max={MAX_BROWSER_CAPTURES_PER_THREAD}
                   min={1}
@@ -1744,6 +1745,7 @@ function ActiveSectionContent({
                 settingId="tool-steps-per-turn"
               >
                 <OctantNumberStepper
+                  field
                   label="Tool steps kept per turn"
                   max={MAX_THREAD_TOOL_STEPS_SETTING}
                   min={1}
@@ -1759,6 +1761,7 @@ function ActiveSectionContent({
                 settingId="tool-steps-per-turn-full-access"
               >
                 <OctantNumberStepper
+                  field
                   label="Tool steps kept per turn at Full access"
                   max={MAX_THREAD_TOOL_STEPS_SETTING}
                   min={0}

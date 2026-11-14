@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentRunSettingsClientFailure } from "@octant/client-runtime/agent-run-settings-client";
@@ -74,7 +74,9 @@ describe("AgentRunSettingsPanel", () => {
     expect(screen.getByRole("spinbutton", { name: "At once in one thread" })).toHaveValue(4);
     expect(screen.getByRole("spinbutton", { name: "At once across Octant" })).toHaveValue(8);
 
-    await user.click(screen.getByRole("button", { name: "Increase At once in one thread" }));
+    const perThread = screen.getByRole("spinbutton", { name: "At once in one thread" });
+    await user.clear(perThread);
+    await user.type(perThread, "5");
 
     expect(update).toHaveBeenCalledWith({
       creationPosture: "automatic",
@@ -130,9 +132,9 @@ describe("AgentRunSettingsPanel", () => {
       screen.getByRole("spinbutton", { name: "Minutes to wait for a full provider" });
     expect(wait()).toHaveValue(30);
 
-    await user.click(
-      screen.getByRole("button", { name: "Increase Minutes to wait for a full provider" }),
-    );
+    // One change event, so the saved version the mock hands back is not
+    // consumed by a half-typed "3" first.
+    fireEvent.change(wait(), { target: { value: "31" } });
 
     expect(update).toHaveBeenCalledWith({
       creationPosture: "automatic",

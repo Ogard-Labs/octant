@@ -1993,9 +1993,10 @@ describe("SettingsView", () => {
     navigateTo("Permissions");
     expect(screen.getByRole("heading", { name: "Browser captures" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Captures kept per thread" })).toHaveValue(200);
-    await userEvent
-      .setup()
-      .click(screen.getByRole("button", { name: "Decrease Captures kept per thread" }));
+    const captures = screen.getByRole("spinbutton", { name: "Captures kept per thread" });
+    const typing = userEvent.setup();
+    await typing.clear(captures);
+    await typing.type(captures, "199");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ browserCapturesPerThread: 199 });
   });
 
@@ -2027,11 +2028,12 @@ describe("SettingsView", () => {
       screen.getByText(/still stops after 4,096 runtime events, whatever this is set to/),
     ).toBeVisible();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Decrease Tool steps kept per turn" }));
+    const belowFull = screen.getByRole("spinbutton", { name: "Tool steps kept per turn" });
+    await user.clear(belowFull);
+    await user.type(belowFull, "63");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ toolStepsPerTurn: 63 });
-    await user.click(
-      screen.getByRole("button", { name: "Increase Tool steps kept per turn at Full access" }),
-    );
+    await user.clear(fullAccess);
+    await user.type(fullAccess, "1");
     expect(onSettingsChange).toHaveBeenLastCalledWith({ fullAccessToolStepsPerTurn: 1 });
   });
 

@@ -149,18 +149,21 @@ export function ThemeAppearanceEditor(props: {
             settingId="appearance.scheme.light-preset"
             focused={focusedSetting === "appearance.scheme.light-preset"}
           >
-            <OctantSelectField
-              aria-label="Light preset"
-              className="settings-view__select"
-              onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
-              options={[
-                ...availablePresets
-                  .filter((preset) => preset.supportedModes.includes("light"))
-                  .map((preset) => ({ id: preset.id, label: preset.displayName })),
-                { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
-              ]}
-              value={draft.lightPresetId ?? "system"}
-            />
+            <span className="settings-preset-choice">
+              <PresetSwatch mode="light" presetId={draft.lightPresetId ?? "system"} />
+              <OctantSelectField
+                aria-label="Light preset"
+                className="settings-view__select"
+                onValueChange={(value) => void theme.applyPatch({ lightPresetId: value as never })}
+                options={[
+                  ...availablePresets
+                    .filter((preset) => preset.supportedModes.includes("light"))
+                    .map((preset) => ({ id: preset.id, label: preset.displayName })),
+                  { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
+                ]}
+                value={draft.lightPresetId ?? "system"}
+              />
+            </span>
           </SettingRow>
           <SettingRow
             label="Dark preset"
@@ -168,18 +171,21 @@ export function ThemeAppearanceEditor(props: {
             settingId="appearance.scheme.dark-preset"
             focused={focusedSetting === "appearance.scheme.dark-preset"}
           >
-            <OctantSelectField
-              aria-label="Dark preset"
-              className="settings-view__select"
-              onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
-              options={[
-                ...availablePresets
-                  .filter((preset) => preset.supportedModes.includes("dark"))
-                  .map((preset) => ({ id: preset.id, label: preset.displayName })),
-                { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
-              ]}
-              value={draft.darkPresetId ?? "system"}
-            />
+            <span className="settings-preset-choice">
+              <PresetSwatch mode="dark" presetId={draft.darkPresetId ?? "system"} />
+              <OctantSelectField
+                aria-label="Dark preset"
+                className="settings-view__select"
+                onValueChange={(value) => void theme.applyPatch({ darkPresetId: value as never })}
+                options={[
+                  ...availablePresets
+                    .filter((preset) => preset.supportedModes.includes("dark"))
+                    .map((preset) => ({ id: preset.id, label: preset.displayName })),
+                  { id: CUSTOM_THEME_PRESET_ID, label: "Custom" },
+                ]}
+                value={draft.darkPresetId ?? "system"}
+              />
+            </span>
           </SettingRow>
           {draft.lightPresetId === CUSTOM_THEME_PRESET_ID ? (
             <CustomSeedsEditor
@@ -580,6 +586,7 @@ function TypographyControl(props: {
         focused={props.focusedSetting === rowId("size")}
       >
         <OctantNumberStepper
+          field
           label={`${props.label} font size`}
           max={32}
           min={8}
@@ -597,6 +604,7 @@ function TypographyControl(props: {
             focused={props.focusedSetting === rowId("line-height")}
           >
             <OctantNumberStepper
+              field
               label={`${props.label} line height`}
               max={2.5}
               min={1}
@@ -704,3 +712,32 @@ import { useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useMediaQueryMatches } from "./useMediaQueryMatches";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+
+/**
+ * A small window drawn from a preset's own tokens (the band, the sidebar, the
+ * page, one card and the accent), so a theme choice can be seen before the
+ * sheet closes. System and Custom have no fixed palette of their own: they are
+ * drawn from the theme the window is wearing now.
+ */
+function PresetSwatch(props: { readonly mode: "light" | "dark"; readonly presetId: string }) {
+  const tokens = THEME_PRESETS.find((preset) => String(preset.id) === props.presetId)?.tokens[
+    props.mode
+  ];
+  const pick = (role: string, live: string) => tokens?.[role] ?? `var(${live})`;
+  const style: Record<string, string> = {
+    "--swatch-band": pick("chrome", "--octant-chrome"),
+    "--swatch-sidebar": pick("sidebar", "--octant-sidebar"),
+    "--swatch-page": pick("workspace", "--octant-workspace"),
+    "--swatch-card": pick("control", "--octant-control"),
+    "--swatch-accent": pick("accent", "--oct-accent"),
+    "--swatch-edge": pick("border", "--oct-border"),
+  };
+  return (
+    <span aria-hidden="true" className="settings-preset-swatch" style={style}>
+      <span className="settings-preset-swatch__band" />
+      <span className="settings-preset-swatch__sidebar" />
+      <span className="settings-preset-swatch__card" />
+      <span className="settings-preset-swatch__accent" />
+    </span>
+  );
+}

@@ -157,6 +157,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-concurrency-per-thread"
           >
             <OctantNumberStepper
+              field
               label="At once in one thread"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
@@ -171,6 +172,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-concurrency-on-host"
           >
             <OctantNumberStepper
+              field
               label="At once across Octant"
               max={MAX_AGENT_RUN_CONCURRENCY}
               min={1}
@@ -185,6 +187,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-working-minutes"
           >
             <OctantNumberStepper
+              field
               label="Working minutes per attempt"
               min={1}
               max={MAX_AGENT_RUN_WORKING_TIME_MINUTES}
@@ -216,6 +219,7 @@ export function AgentRunSettingsPanel(props: {
             settingId="subagent-provider-wait-minutes"
           >
             <OctantNumberStepper
+              field
               label="Minutes to wait for a full provider"
               min={1}
               max={MAX_AGENT_RUN_PROVIDER_SLOT_WAIT_MINUTES}

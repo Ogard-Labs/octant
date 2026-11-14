@@ -121,7 +121,13 @@ previews and confirmation dialogs retain their discrete boundaries. A
 destructive group is its own section at the end of its page, marked by that
 placement and by its confirm control, not by heading colour. Labels and
 descriptions align left, controls align right, and compound editors may expand
-below. A row's "more" (a custom font stack, network details, what an update
+below. A row's description is one short line in the meta ink at 12px. A number
+is a plain right-aligned field with its unit inside it (the arrow keys step it;
+there is no minus and plus). A switch is on in the primary ink, never the
+accent: colour stays on status dots. A preset choice leads with a small swatch
+window drawn from the preset's own tokens, so a theme can be seen before the
+sheet closes. An error or a scan finding under a provider's name is its own 12px
+line in the name's column. A row's "more" (a custom font stack, network details, what an update
 check sends) sits behind one `.settings-disclosure` recipe: a 12px summary with
 the app's chevron, never the browser's marker. Loading and status lines are one
 quiet sentence; only an error keeps a box. Essential labels and explanatory

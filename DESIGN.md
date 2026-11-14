@@ -977,7 +977,10 @@ float follows [Translucency](#translucency).
 
 ### OctantNumberStepper
 
-- **Purpose.** A number with minus and plus.
+- **Purpose.** A number with minus and plus. With `field` it is a plain
+  right-aligned number field instead (28px, 88px wide, the unit inside it, no
+  buttons, the arrow keys step it, blur commits and clamps): every numeric
+  Settings row uses it.
 - **Anatomy.** `label`, `value`, `min`, `max`, `step`, `suffix`, `onChange`.
 - **Tokens.** 28px with the field paint, `--oct-radius-sm`, one border; ghost
   end buttons with 14px glyphs; the middle input `unstyled`, 14px, centred, the
@@ -1061,9 +1064,10 @@ float follows [Translucency](#translucency).
   `disabled`, `disabledReason`.
 - **Tokens.** A 38 by 22px round track in the control fill with a 1px
   strong-divider edge; a 16px round thumb in the page colour travelling over
-  `--oct-motion-base`; on, the track and edge take the accent.
+  `--oct-motion-base`; on, the track and edge take the primary ink, never the
+  accent: colour is for status dots.
 - **States.** Unchecked under keyboard focus takes the control hover fill;
-  checked takes the on-accent edge; disabled names its reason. Glass: the track
+  checked takes the ink edge; disabled names its reason. Glass: the track
   is ink 15% and the off thumb ink 62%.
 - **Accessibility.** `role="switch"`; Space toggles. A switch that sends
   something off this computer carries that fact as its section's description,

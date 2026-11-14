@@ -1138,7 +1138,8 @@ describe("the public-block visual language", () => {
     expect(settings).not.toMatch(
       /\.settings-navigation__group \+ \.settings-navigation__group\s*\{[^}]*border-top/,
     );
-    expect(hint).toMatch(/font-size:\s*var\(--oct-text-detail\)/);
+    expect(hint).toMatch(/font-size:\s*var\(--oct-text-xs\)/);
+    expect(hint).toMatch(/color:\s*var\(--oct-meta\)/);
   });
 
   it("gives every single-line Settings control one height", () => {

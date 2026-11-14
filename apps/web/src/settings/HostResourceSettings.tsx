@@ -186,9 +186,13 @@ export function HostResourceSettings({
             focused={focusedSetting === `resource-${key}`}
           >
             <OctantNumberStepper
+              field
               label={label}
               min={min}
               max={max}
+              suffix={
+                key === "cpuTargetPercent" || key === "memoryReservePercent" ? "%" : undefined
+              }
               value={draft[key]}
               onChange={(value) => setDraft({ ...draft, [key]: value })}
             />
