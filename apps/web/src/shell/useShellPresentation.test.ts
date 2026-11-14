@@ -169,10 +169,12 @@ describe("saying why Glass is off", () => {
       "Glass is off because macOS Increase contrast is on.",
     );
     expect(glassOffNote("thermal-pressure", true)).toMatch(/^Glass is off because this Mac is/);
-    expect(glassOffNote("unsupported-platform", true)).toMatch(/^Glass is off because this system/);
+    expect(glassOffNote("unsupported-platform", true)).toMatch(
+      /^Glass is off because this system has/,
+    );
     expect(glassOffNote(null, true)).toMatch(/^Glass is off because the desktop app has not/);
     expect(glassOffNote("reduced-transparency", false)).toMatch(
-      /^Glass is off because this is a browser/,
+      /^Glass is off because a browser window/,
     );
   });
 
