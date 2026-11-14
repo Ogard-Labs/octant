@@ -384,10 +384,18 @@ export type ClaudeDecodedMessage =
       readonly subtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
       readonly taskId: string;
       readonly toolUseId?: string;
+      /** A command or watch the runtime runs in the background (`local_bash`). */
+      readonly background?: true;
       readonly status?: string;
       readonly description?: string;
       readonly summary?: string;
       readonly usage?: ClaudeTaskUsage;
+    }
+  | {
+      /** Whether the runtime is running a turn, as it reports it. */
+      readonly kind: "session-state";
+      readonly sessionId: string;
+      readonly state: "idle" | "running" | "requires_action";
     }
   | {
       readonly kind: "rate-limit";
@@ -961,17 +969,38 @@ function claudeToolSetOptions(
   };
 }
 
-function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): boolean {
+/**
+ * Why a call asks for background work Octant cannot hold, or undefined. A
+ * background command (`Bash` with `run_in_background`) and a command watch
+ * (`Monitor`) run as background tasks the driver holds inside the turn that
+ * started them (maintainer decision, 2026-11-14), so neither is refused in
+ * general. Plan keeps the tool set and behaviour it had, so its read-only
+ * commands still run in the foreground. A watch that lasts the whole session
+ * would hold its turn open with nothing to end it but a stop, and a WebSocket
+ * watch is opened by the runtime process itself, outside the command sandbox
+ * and its network rules.
+ */
+function unavailableBackgroundWork(
+  toolName: unknown,
+  input: unknown,
+  executionPolicy: ClaudeOpenQueryInput["executionPolicy"],
+): string | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const fields = input as Readonly<Record<string, unknown>>;
   if (
-    toolName !== "Bash" ||
-    typeof input !== "object" ||
-    input === null ||
-    Array.isArray(input) ||
-    !Object.hasOwn(input, "run_in_background")
+    toolName === "Bash" &&
+    executionPolicy === "plan" &&
+    fields.run_in_background !== undefined &&
+    fields.run_in_background !== false
   ) {
-    return false;
+    return "Claude background commands are unavailable in Plan.";
   }
-  return (input as Readonly<Record<string, unknown>>).run_in_background !== false;
+  if (toolName !== "Monitor") return undefined;
+  if (fields.ws !== undefined) return "Claude's Monitor may watch a command, not a WebSocket.";
+  if (fields.persistent !== undefined && fields.persistent !== false) {
+    return "Claude's Monitor may not keep a watch for the whole session.";
+  }
+  return undefined;
 }
 
 function liveBridge(): ClaudeAgentSdkBridge {
@@ -1187,12 +1216,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               if (callback.agentID !== undefined && input.nativeSetup?.subagents !== true) {
                 return { behavior: "deny", message: "Claude subagent tool use is unavailable." };
               }
-              if (requestsUnavailableBackgroundTool(toolName, toolInput)) {
-                return {
-                  behavior: "deny",
-                  message: "Claude background tool use is unavailable.",
-                };
-              }
+              const backgroundRefusal = unavailableBackgroundWork(
+                toolName,
+                toolInput,
+                input.executionPolicy,
+              );
+              if (backgroundRefusal !== undefined)
+                return { behavior: "deny", message: backgroundRefusal };
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
@@ -1259,12 +1289,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
-                if (requestsUnavailableBackgroundTool(hookInput.tool_name, hookInput.tool_input)) {
+                const backgroundRefusal = unavailableBackgroundWork(
+                  hookInput.tool_name,
+                  hookInput.tool_input,
+                  input.executionPolicy,
+                );
+                if (backgroundRefusal !== undefined) {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "deny",
-                      permissionDecisionReason: "Claude background tool use is unavailable.",
+                      permissionDecisionReason: backgroundRefusal,
                     },
                   };
                 }
@@ -1351,6 +1386,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               cwd: input.projectRoot,
               env: {
                 ...input.authEnvironment,
+                // The runtime says when it goes idle, so the driver can tell a
+                // turn it starts by itself from a queued notice from the end
+                // of the person's turn.
+                CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
                 MCP_TOOL_TIMEOUT: "660000",
                 // Claude Code 2.1.211 replaces its `TodoWrite` checklist with
                 // `TaskCreate`/`TaskUpdate` unless this is off (observed

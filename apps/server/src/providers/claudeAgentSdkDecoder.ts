@@ -1213,6 +1213,22 @@ function decodeStatus(
   };
 }
 
+/**
+ * The runtime's own word on whether it is running a turn. It sends these only
+ * when `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS` is set; `idle` follows the
+ * last result of a run of turns, so a turn the runtime starts by itself from
+ * a queued notice comes before it.
+ */
+function decodeSessionState(message: Record<string, unknown>): ClaudeDecodedMessage {
+  if (
+    typeof message.session_id !== "string" ||
+    (message.state !== "idle" && message.state !== "running" && message.state !== "requires_action")
+  ) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return { kind: "session-state", sessionId: message.session_id, state: message.state };
+}
+
 export type ClaudeDecodePhase =
   | {
       readonly kind: "initializing";
@@ -1289,6 +1305,11 @@ export function decodeMessage(
       return decodeStatus(message, input);
     }
     if (message.type === "rate_limit_event") return decodeRateLimit(message);
+    // The session's state before it initializes says nothing about a turn.
+    if (message.type === "system" && message.subtype === "session_state_changed") {
+      decodeSessionState(message);
+      return { kind: "ignored" };
+    }
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (
@@ -1460,6 +1481,9 @@ export function decodeMessage(
       ...(postTokens === undefined ? {} : { postTokens }),
     };
   }
+  if (message.type === "system" && message.subtype === "session_state_changed") {
+    return decodeSessionState(message);
+  }
   if (
     message.type === "system" &&
     (message.subtype === "task_started" ||
@@ -1486,16 +1510,27 @@ export function decodeMessage(
     const subagentTask = (value: Record<string, unknown>) =>
       input.nativeSetup?.subagents === true &&
       (value.subagent_type === undefined || typeof value.subagent_type === "string");
+    let background = false;
     if (message.subtype === "task_started") {
       const ownSubagent =
         subagentTask(message) &&
         (message.task_type === undefined || message.task_type === "local_agent") &&
         (message.prompt === undefined || typeof message.prompt === "string") &&
         (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      // A command Claude runs in the background, and a watch its Monitor
+      // tool keeps, are `local_bash` tasks (Claude Code 2.1.211). Each wakes
+      // the model when it finishes or reports, which the driver holds inside
+      // the turn that started it (maintainer decision, 2026-11-14).
+      background =
+        message.task_type === "local_bash" &&
+        message.subagent_type === undefined &&
+        message.prompt === undefined &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
       if (
         typeof message.description !== "string" ||
         message.workflow_name !== undefined ||
         (!ownSubagent &&
+          !background &&
           (message.subagent_type !== undefined ||
             message.task_type !== undefined ||
             message.prompt !== undefined ||
@@ -1522,9 +1557,9 @@ export function decodeMessage(
         !TASK_NOTIFICATION_STATUSES.has(message.status) ||
         typeof message.output_file !== "string" ||
         typeof message.summary !== "string" ||
-        (message.skip_transcript !== undefined &&
-          message.skip_transcript !== false &&
-          !(subagentTask(message) && typeof message.skip_transcript === "boolean"))
+        // Only a display hint; a background command's housekeeping notice
+        // carries it as a subagent's does.
+        (message.skip_transcript !== undefined && typeof message.skip_transcript !== "boolean")
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1556,6 +1591,7 @@ export function decodeMessage(
       subtype: message.subtype,
       taskId: message.task_id,
       ...(typeof message.tool_use_id === "string" ? { toolUseId: message.tool_use_id } : {}),
+      ...(background ? { background: true } : {}),
       ...(status === undefined ? {} : { status }),
       ...(description === undefined ? {} : { description }),
       ...(summary === undefined ? {} : { summary }),

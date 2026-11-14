@@ -158,6 +158,9 @@ export function applyActivityEvent(
     if (written.includes(path)) return activity;
     return { ...activity, writtenPaths: [...written, path] };
   }
+  if (event.kind === "runtime-turn-started") {
+    return { ...activity, runtimeTurns: (activity.runtimeTurns ?? 0) + 1 };
+  }
   if (event.kind === "provider-retry") {
     return {
       ...activity,
