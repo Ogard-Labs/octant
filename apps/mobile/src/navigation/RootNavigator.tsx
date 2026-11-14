@@ -6,6 +6,7 @@ import { LargeTitle, ListRow, ListSection, NavBar } from "../ui/NativeChrome";
 import { TabBar, type MobileTabId } from "../ui/TabBar";
 import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
+import { TodosScreen } from "../todos/TodosScreen";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
@@ -502,6 +503,7 @@ export function RootNavigator(props: RootNavigatorProps) {
             setAgentListView(view);
             props.onSelectRoute("agents");
           }}
+          onOpenTodos={() => props.onSelectRoute("todos")}
           onAddWorkspace={() => {
             setHostEntryMode("add");
             props.onSelectRoute("hosts");
@@ -521,6 +523,9 @@ export function RootNavigator(props: RootNavigatorProps) {
             props.onSelectRoute("thread");
           }}
         />
+      ) : null}
+      {props.activeRoute === "todos" ? (
+        <TodosScreen onBack={() => props.onSelectRoute("home")} />
       ) : null}
       {props.activeRoute === "agents" ? (
         <AgentsListScreen

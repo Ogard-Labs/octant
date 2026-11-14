@@ -1,3 +1,11 @@
+import { decodeUtcTimestamp } from "@octant/contracts";
+import { decodeTodoCommand, decodeTodoListView } from "@octant/contracts/todos";
+import {
+  applyTodoEvent,
+  decideTodoCommand,
+  todosInOrder,
+  type TodoRecord,
+} from "@octant/domain/todo-policy";
 import {
   decodeChatBootstrap,
   decodeChatThread,
@@ -515,6 +523,8 @@ function pullRequestReview(operationId: string) {
   } as const;
 }
 
+const MOCK_TODO_HOST_ID = "00000000-0000-4000-8000-0000000007ff";
+
 /** React Native's Response constructor has no static JSON factory. */
 function mockJsonResponse(value: unknown, init?: ResponseInit): Response {
   const headers = new Headers(init?.headers);
@@ -542,6 +552,44 @@ function createMockTransport(input: {
   readonly codeThreads: ReadonlyArray<CodeThread>;
 }): MobileRemoteTransport {
   const chatThreads = [...input.chatThreads];
+  // A sample to-do list, decided by the list host's own rules, so the phone's
+  // To-dos screen shows and changes something without a computer.
+  const todos = new Map<string, TodoRecord>(
+    [
+      { title: "Book the venue for the launch", tags: ["errand"] },
+      { title: "Draft the release notes", tags: [] },
+    ].map((seed, index) => {
+      const id = `00000000-0000-4000-8000-0000000007${String(index).padStart(2, "0")}`;
+      const [todo] = decodeTodoListView({
+        kind: "todo-list",
+        hostId: MOCK_TODO_HOST_ID,
+        todos: [
+          {
+            id,
+            title: seed.title,
+            notes: "",
+            projects: [],
+            tags: seed.tags,
+            state: "open",
+            threads: [],
+            rank: index,
+            version: 1,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        ],
+      }).todos;
+      if (todo === undefined) throw new Error("The sample to-do did not decode.");
+      return [id, { textVersion: 1, todo }] as const;
+    }),
+  );
+  const deletedTodos = new Set<string>();
+  const todoView = () =>
+    decodeTodoListView({
+      kind: "todo-list",
+      hostId: MOCK_TODO_HOST_ID,
+      todos: todosInOrder([...todos.values()].map((record) => record.todo)),
+    });
   const chatViews = new Map(input.chatViews.map((view) => [String(view.thread.id), view]));
   const workThreads = [...input.workThreads];
   const codeThreads = [...input.codeThreads];
@@ -572,6 +620,34 @@ function createMockTransport(input: {
   return {
     hostId: input.hostId,
     async authenticatedFetch(request) {
+      if (request.method === "GET" && request.path === "/api/todos") {
+        return mockJsonResponse(todoView());
+      }
+      if (request.method === "POST" && request.path === "/api/todos/commands") {
+        const command = decodeTodoCommand(JSON.parse(String(request.body)));
+        const decision = decideTodoCommand({ todos, deleted: deletedTodos }, command);
+        if (decision.kind === "refused") {
+          return mockJsonResponse(
+            { kind: "todo-refused", reason: decision.reason, message: decision.message },
+            { status: 409 },
+          );
+        }
+        if (decision.kind === "append") {
+          for (const { todoId, event } of decision.appends) {
+            const id = String(todoId);
+            const record = todos.get(id);
+            const next = applyTodoEvent(record, event, {
+              version: (record?.todo.version ?? 0) + 1,
+              occurredAt: decodeUtcTimestamp(NOW),
+            });
+            if (next === undefined) {
+              todos.delete(id);
+              deletedTodos.add(id);
+            } else todos.set(id, next);
+          }
+        }
+        return mockJsonResponse(todoView());
+      }
       if (request.method === "GET" && request.path === "/api/chat/bootstrap") {
         return mockJsonResponse(
           decodeChatBootstrap({ settings: chatSettings, threads: chatThreads }),

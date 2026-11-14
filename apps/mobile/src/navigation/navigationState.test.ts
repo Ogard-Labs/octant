@@ -26,6 +26,7 @@ describe("mobile navigation state", () => {
     expect(backMobileRoute("thread", "home")).toBe("home");
     expect(backMobileRoute("thread", "agents")).toBe("agents");
     expect(backMobileRoute("agents")).toBe("home");
+    expect(backMobileRoute("todos")).toBe("home");
     expect(backMobileRoute("hosts")).toBe("home");
     expect(backMobileRoute("home")).toBeUndefined();
   });
