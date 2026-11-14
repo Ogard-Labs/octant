@@ -117,6 +117,19 @@ function sdkSandboxNetwork(
     : { allowedDomains: [...network.allowedDomains] };
 }
 
+/**
+ * Claude Code's own system prompt, with Octant's additions only appended.
+ * Every launch sends it: agent-sdk 0.3.211 reads a missing `systemPrompt` as
+ * the custom prompt `""`, and the runtime then replaces its default prompt
+ * (output styles, commit and pull-request guidance, environment details)
+ * with that empty one, so Claude ran without its own prompt.
+ */
+export interface ClaudeSystemPrompt {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+  readonly append?: string;
+}
+
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 
@@ -176,10 +189,8 @@ export interface ClaudeOpenQueryInput {
   readonly nativeSetup?: ProviderNativeSetup;
   /**
    * Instruction files Octant read for this session because its setting
-   * sources do not load them (`claudeSessionInstructions`), sent as the
-   * session's system prompt. The SDK's own default is an empty custom prompt
-   * (`systemPrompt` absent reads as `""` in agent-sdk 0.3.211), so this adds
-   * the files and replaces nothing.
+   * sources do not load them (`claudeSessionInstructions`), appended to
+   * Claude Code's own system prompt and never in place of it.
    */
   readonly instructions?: string;
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
@@ -749,7 +760,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly model: string;
   readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
-  readonly systemPrompt?: string;
+  readonly systemPrompt: ClaudeSystemPrompt;
   readonly resume?: string;
   readonly sessionId?: string;
   readonly persistSession?: false;
@@ -1100,6 +1111,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
         invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
+        systemPrompt: { ...invocation.options.systemPrompt },
         ...(settings === undefined
           ? {}
           : {
@@ -1495,7 +1507,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
-              ...(input.instructions === undefined ? {} : { systemPrompt: input.instructions }),
+              systemPrompt: {
+                type: "preset",
+                preset: "claude_code",
+                ...(input.instructions === undefined ? {} : { append: input.instructions }),
+              },
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
               ...(input.resumeSessionId === undefined && input.sessionId !== undefined
                 ? { sessionId: input.sessionId }

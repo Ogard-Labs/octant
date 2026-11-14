@@ -154,8 +154,14 @@ decision, 2026-11-14). Claude Code loads them only through the `user` and
 settings and hooks, so it still waits for trust. Where a source is off,
 Octant reads the files itself (`claudeSessionInstructions` in
 `apps/server/src/providers/claudeDriver.ts`), as text with no authority,
-and sends them as the session's system prompt; the Agent SDK's own default
-is an empty custom prompt, so nothing is replaced. The account's file is
+and appends them to Claude Code's own system prompt. Every Claude launch
+sends `systemPrompt: { type: "preset", preset: "claude_code" }`, with
+Octant's additions only in `append`: agent-sdk 0.3.211 reads a missing
+`systemPrompt` as the custom prompt `""`, which the runtime put in place of
+its default prompt (output styles, commit and pull-request guidance,
+environment details), so until 2026-11-14 Claude ran without its own prompt.
+The appended text is fixed for the session, so it never moves a turn's
+cached prefix. The account's file is
 `CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
 the Project's are the files Claude Code's loader reads at its root
 (`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
