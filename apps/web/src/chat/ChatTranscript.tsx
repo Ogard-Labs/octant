@@ -8,7 +8,6 @@ import type {
   ChatAttemptOutcome,
   ChatAttemptAnsweredQuestion,
   ChatContentBody,
-  ChatContentReference,
   ChatThreadView,
   ChatTurnId,
   ChatTurnRouteDecision,

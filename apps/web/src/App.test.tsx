@@ -255,6 +255,22 @@ function navigatorAssistantClient(
   };
 }
 
+/**
+ * The sidebar header's compose button. The sidebar's New thread row runs the
+ * same action under the same name, so a bare name query finds two.
+ */
+function composeButton(name: string): HTMLElement {
+  const button = screen
+    .getAllByRole("button", { name })
+    .find((candidate) => candidate.classList.contains("sidebar__new-thread"));
+  if (button === undefined) throw new Error(`No header compose button named ${name}`);
+  return button;
+}
+
+async function findComposeButton(name: string): Promise<HTMLElement> {
+  return waitFor(() => composeButton(name));
+}
+
 describe("App", () => {
   it("keeps thread-pane inputs stable when only its parent renders again", async () => {
     paneBoundary.observing = true;
@@ -1268,7 +1284,7 @@ describe("App", () => {
     await user.click(inbox);
     expect(inbox).toHaveAttribute("aria-current", "page");
 
-    await user.click(screen.getByRole("button", { name: "New chat" }));
+    await user.click(composeButton("New chat"));
     expect(inbox).not.toHaveAttribute("aria-current", "page");
   });
 
@@ -1390,7 +1406,7 @@ describe("App", () => {
       await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
     ).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "New chat" }));
+    await user.click(composeButton("New chat"));
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
@@ -4123,11 +4139,11 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.click(await findComposeButton("New task"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(composeButton("New task"));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
@@ -4172,7 +4188,7 @@ describe("App", () => {
     const shown = await screen.findByRole("region", { name: "Continue" }, { timeout: 4000 });
     expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(composeButton("New task"));
 
     expect(
       await screen.findByRole("heading", { name: "What are we building today?" }),
@@ -4195,7 +4211,7 @@ describe("App", () => {
     const modes = () => within(screen.getByRole("group", { name: "Workspace mode" }));
 
     await screen.findByRole("button", { name: "Customize" });
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(composeButton("New task"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
 
     await user.click(modes().getByRole("button", { name: "Work" }));
@@ -4218,7 +4234,7 @@ describe("App", () => {
 
     await screen.findByRole("button", { name: "Customize" });
     expect(screen.getByRole("button", { name: "Home" })).toHaveAttribute("aria-current", "page");
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(composeButton("New task"));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
     expect(screen.getByRole("button", { name: "Home" })).not.toHaveAttribute("aria-current");
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Half a thought");
@@ -4249,7 +4265,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.click(await findComposeButton("New task"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
@@ -4277,7 +4293,7 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New task" }));
+    await user.click(await findComposeButton("New task"));
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(await screen.findByRole("option", { name: /Octant/ }));
     expect(screen.getByRole("button", { name: "Project: Octant" })).toBeVisible();
@@ -4296,7 +4312,7 @@ describe("App", () => {
       }),
     );
     expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "New chat" }));
+    await user.click(composeButton("New chat"));
     await user.click(
       within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
         name: "Code",
@@ -4305,7 +4321,7 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
-    await user.click(screen.getByRole("button", { name: "New task" }));
+    await user.click(composeButton("New task"));
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
@@ -5128,7 +5144,7 @@ describe("App", () => {
     }
     const projectsDestination = await screen.findByRole("button", { name: "Projects" });
     expect(projectsDestination).toBeVisible();
-    expect(screen.getByRole("button", { name: "New task" })).toBeVisible();
+    expect(composeButton("New task")).toBeVisible();
     await user.click(within(sidebar).getByRole("button", { name: "More destinations" }));
     expect(await screen.findByRole("menuitem", { name: "Plugins" })).toBeVisible();
     // The Board's row became the Running tile; the tile goes to the same place.
@@ -5182,7 +5198,7 @@ describe("App", () => {
         name: "Pull requests",
       }),
     ).toBeVisible();
-    expect(await screen.findByRole("button", { name: "New task" })).toBeVisible();
+    expect(await findComposeButton("New task")).toBeVisible();
     await openSidebarProject(user, "Octant");
     const overview = await screen.findByRole("region", { name: "Workspace pane: Octant" });
     expect(overview).toBeVisible();

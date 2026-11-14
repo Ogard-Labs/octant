@@ -20,7 +20,6 @@ import type {
   ProviderModelOptionValues,
 } from "@octant/contracts/providers";
 import {
-  draftThreadModePresentation,
   type CreateHostViewScope,
   type ModelPickerSelection,
   type PickerGroup,
@@ -93,7 +92,6 @@ const starterIdeas = [
 
 export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
-  const presentation = draftThreadModePresentation("chat");
   const [prompt, setPrompt] = useNewTaskPrompt();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   // This composer has no suggestion list, so a capability token typed here can
