@@ -1,8 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { decodeUtcTimestamp, decodeWindowId } from "@octant/contracts";
-import { TODO_AGGREGATE_TYPE, decodeTodoListView } from "@octant/contracts/todos";
+import { EventActor, decodeUtcTimestamp, decodeWindowId } from "@octant/contracts";
+import { Schema } from "effect";
+import {
+  TODO_AGGREGATE_TYPE,
+  decodeTodoCommand,
+  decodeTodoListView,
+} from "@octant/contracts/todos";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyProductAction } from "../authenticatedProductRoutes";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -23,6 +28,10 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000a01");
 const DEVICE = "55000000-0000-4000-8000-000000000a02";
 const TODO_1 = "00000000-0000-4000-8000-000000000001";
 const TODO_2 = "00000000-0000-4000-8000-000000000002";
+const actor = Schema.decodeUnknownSync(EventActor)({
+  kind: "local-user",
+  actorId: "99999999-9999-4999-8999-999999999999",
+});
 
 const directories: string[] = [];
 afterEach(() => {
@@ -41,9 +50,21 @@ function host() {
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
     clock: () => START,
   });
+  // Set to make the journal refuse the append with that index (1 is the first) from now on.
+  const failing = { atAppend: 0, seen: 0 };
   const start = () =>
     new TodoStore({
-      journal,
+      journal: {
+        replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+        transaction: (body) => journal.transaction(body),
+        append: (input) => {
+          failing.seen += 1;
+          if (failing.atAppend !== 0 && failing.seen === failing.atAppend) {
+            throw new Error("disk full");
+          }
+          return journal.append(input);
+        },
+      },
       uuid: () => crypto.randomUUID(),
       clock: () => decodeUtcTimestamp(START),
     });
@@ -92,7 +113,7 @@ function host() {
       .replayAggregateType({ aggregateType: TODO_AGGREGATE_TYPE, afterSequence: 0, limit: 100 })
       .map((envelope) => ({ eventName: envelope.eventName, actor: envelope.actor }));
 
-  return { store, start, fromWindow, fromDevice, actors };
+  return { store, start, fromWindow, fromDevice, actors, failing };
 }
 
 async function list(response: Response | undefined) {
@@ -177,6 +198,42 @@ describe("the person's to-do list", () => {
       });
     }
     expect(h.store.view().todos.map((todo) => todo.title)).toEqual(["Mine"]);
+  });
+
+  it("keeps the old order everywhere when a renumbering move fails partway", () => {
+    const h = host();
+    const ids = [1, 2, 3, 4].map((n) => `00000000-0000-4000-8000-00000000010${String(n)}`);
+    for (const todoId of ids) {
+      h.store.change(decodeTodoCommand({ kind: "add-todo", todoId, title: todoId }), actor);
+    }
+    const [first, second, third] = [ids[0], ids[1], ids[2]].map((todoId) => {
+      if (todoId === undefined) throw new Error("missing id");
+      return todoId;
+    });
+    // Moving two to-dos back and forth before a third halves one gap until a
+    // move has to renumber every to-do.
+    let renumbered = false;
+    for (let round = 0; round < 80 && !renumbered; round += 1) {
+      const before = h.store.view();
+      const moving = round % 2 === 0 ? first : second;
+      const move = decodeTodoCommand({ kind: "move-todo", todoId: moving, beforeTodoId: third });
+      h.failing.seen = 0;
+      h.failing.atAppend = 2;
+      const result = (() => {
+        try {
+          return h.store.change(move, actor);
+        } catch {
+          return undefined;
+        }
+      })();
+      h.failing.atAppend = 0;
+      if (result === undefined) {
+        renumbered = true;
+        expect(h.store.view()).toEqual(before);
+        expect(h.start().view()).toEqual(before);
+      }
+    }
+    expect(renumbered).toBe(true);
   });
 
   it("refuses a request without the window's capability", async () => {

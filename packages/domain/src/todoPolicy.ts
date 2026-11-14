@@ -6,8 +6,10 @@ import {
   TODO_MAX_THREAD_LINKS,
   TODO_NOTES_MAX_CHARACTERS,
   TODO_ORDER_CHANGED,
+  TODO_PROJECT_NAME_MAX_CHARACTERS,
   TODO_PROJECTS_SET,
   TODO_STATE_CHANGED,
+  TODO_TAG_MAX_CHARACTERS,
   TODO_TAGS_SET,
   TODO_THREAD_LINKED,
   TODO_TITLE_MAX_CHARACTERS,
@@ -75,27 +77,43 @@ export function todoTextForJournal(text: string, maxCharacters: number): string 
   return redactSecrets(text).text.slice(0, maxCharacters);
 }
 
+/** A one-line field after redaction: clipping can leave trailing space, which it may not end with. */
+function lineForJournal(text: string, maxCharacters: number): string {
+  return todoTextForJournal(text, maxCharacters).trimEnd();
+}
+
 function todoTitleForJournal(title: string): string {
-  // Clipping can leave trailing space, which a title may not end with.
-  return todoTextForJournal(title, TODO_TITLE_MAX_CHARACTERS).trimEnd();
+  return lineForJournal(title, TODO_TITLE_MAX_CHARACTERS);
 }
 
-/** Tags in the order given, each exact label once. */
+/**
+ * Tags in the order given, redacted as a title is, each exact label once. A
+ * key fits in a tag (an access-key id is 20 characters), so a tag is no less
+ * journal-bound text than the title.
+ */
 export function uniqueTodoTags(tags: ReadonlyArray<TodoTag>): ReadonlyArray<TodoTag> {
-  return [...new Set(tags)];
+  return [...new Set(tags.map((tag) => lineForJournal(tag, TODO_TAG_MAX_CHARACTERS)))];
 }
 
-/** Project links in the order given, each Project on each host once; the first name wins. */
+/**
+ * Project links in the order given, each Project on each host once; the first
+ * name wins. The name is what the client sent, so it is redacted too.
+ */
 export function uniqueTodoProjects(
   projects: ReadonlyArray<TodoProjectLink>,
 ): ReadonlyArray<TodoProjectLink> {
   const seen = new Set<string>();
-  return projects.filter((link) => {
-    const key = `${String(link.hostId)}:${String(link.projectId)}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return projects
+    .filter((link) => {
+      const key = `${String(link.hostId)}:${String(link.projectId)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((link) => ({
+      ...link,
+      name: lineForJournal(link.name, TODO_PROJECT_NAME_MAX_CHARACTERS),
+    }));
 }
 
 function sameProjects(a: ReadonlyArray<TodoProjectLink>, b: ReadonlyArray<TodoProjectLink>) {

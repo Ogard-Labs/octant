@@ -112,6 +112,29 @@ describe("to-do decisions", () => {
     expect(l.get(1)?.title.length).toBeLessThanOrEqual(TODO_TITLE_MAX_CHARACTERS);
   });
 
+  it("replaces secret-shaped tags and Project names before they reach the journal", () => {
+    const l = list();
+    // An access-key id's shape, built here so no key-shaped text sits in the source.
+    const key = `AKIA${"Q".repeat(16)}`;
+    l.run({
+      kind: "add-todo",
+      todoId: id(1),
+      title: "Rotate the key",
+      tags: [key],
+      projects: [{ hostId: HOST, projectId: PROJECT, name: `Ops ${key}` }],
+    });
+    l.run({ kind: "set-todo-tags", todoId: id(1), tags: ["ops", key] });
+    l.run({
+      kind: "set-todo-projects",
+      todoId: id(1),
+      projects: [{ hostId: HOST, projectId: PROJECT, name: `Infra ${key}` }],
+    });
+    const todo = l.get(1);
+    expect(JSON.stringify(todo)).not.toContain(key);
+    expect(todo?.tags[0]).toBe("ops");
+    expect(todo?.projects[0]?.name.startsWith("Infra ")).toBe(true);
+  });
+
   it("keeps each tag and each Project once, in the order given", () => {
     const l = list();
     l.run({

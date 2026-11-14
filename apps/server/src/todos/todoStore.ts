@@ -83,7 +83,7 @@ function todoEventOf(
 }
 
 export interface TodoStoreDependencies {
-  readonly journal: Pick<Journal, "append" | "replayAggregateType">;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "transaction">;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
 }
@@ -130,24 +130,32 @@ export class TodoStore {
       });
     }
     if (decision.kind === "append") {
-      for (const { todoId, expectedVersion, event } of decision.appends) {
-        const occurredAt = this.#dependencies.clock();
-        const committed = this.#dependencies.journal.append({
-          aggregate: { aggregateType: TODO_AGGREGATE_TYPE, aggregateId: String(todoId) },
-          expectedVersion,
-          events: [
-            {
-              eventId: this.#dependencies.uuid(),
-              eventName: event.eventName,
-              eventVersion: 1,
-              correlationId: this.#dependencies.uuid(),
-              actor,
-              occurredAt,
-              payload: event.payload,
-            },
-          ],
-        });
-        this.#apply(event, { version: committed.aggregateVersion, occurredAt });
+      // A renumber touches many to-dos. They commit as one unit, and the list
+      // in memory changes only after that unit committed, so a failure partway
+      // leaves neither the journal nor the list with half a new order.
+      const committed = this.#dependencies.journal.transaction(() =>
+        decision.appends.map(({ todoId, expectedVersion, event }) => {
+          const occurredAt = this.#dependencies.clock();
+          const appended = this.#dependencies.journal.append({
+            aggregate: { aggregateType: TODO_AGGREGATE_TYPE, aggregateId: String(todoId) },
+            expectedVersion,
+            events: [
+              {
+                eventId: this.#dependencies.uuid(),
+                eventName: event.eventName,
+                eventVersion: 1,
+                correlationId: this.#dependencies.uuid(),
+                actor,
+                occurredAt,
+                payload: event.payload,
+              },
+            ],
+          });
+          return { event, version: appended.aggregateVersion, occurredAt };
+        }),
+      );
+      for (const { event, version, occurredAt } of committed) {
+        this.#apply(event, { version, occurredAt });
       }
     }
     return this.view();

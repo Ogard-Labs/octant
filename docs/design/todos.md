@@ -67,13 +67,14 @@ two never meet in one word.
 - **Order:** a rank the person sets by dragging; new to-dos go on top. A
   move takes the rank halfway between its new neighbours; once repeated moves
   into one gap leave no number between them, every to-do is renumbered in
-  the new order.
+  the new order, in one journal transaction.
 
 One list holds at most 5,000 to-dos, done and dropped included; adding past
 that is refused as `list-full`.
 
 To-do text is the person's own typing and is treated like a message they
-type: the journal's secret redaction applies before it is appended, and it is
+type: the journal's secret redaction applies to the title, notes, tags and
+Project names before they are appended, and it is
 never sent to a model except as the prompt of a thread the person starts.
 Person memory does not read to-dos.
 
