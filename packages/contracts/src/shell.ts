@@ -335,10 +335,14 @@ export const SidebarRowProperties = Schema.Struct({
 }).annotations(strict);
 export type SidebarRowProperties = typeof SidebarRowProperties.Type;
 
-/** Each view starts showing exactly what it showed before it could be told otherwise. */
+/**
+ * Each view starts showing a short age beside the title: Activity is the view
+ * that answers what happened lately, so it carries the age too. A saved choice
+ * always wins over these defaults.
+ */
 export const DEFAULT_SIDEBAR_ROW_PROPERTIES: SidebarRowProperties = {
   projects: { project: false, branch: true, pullRequest: true, lastUpdated: true, status: true },
-  activity: { project: true, branch: false, pullRequest: false, lastUpdated: false, status: true },
+  activity: { project: true, branch: false, pullRequest: false, lastUpdated: true, status: true },
 };
 
 /** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */

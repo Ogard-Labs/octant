@@ -169,8 +169,8 @@ describe("shell settings policy", () => {
       showThreadProviderIcons: true,
       showThreadStats: true,
       homeCards: { order: [], visibility: [] },
-      // Each view starts showing exactly what its rows already carried; the
-      // Appearance switches only take facts away when someone asks.
+      // Each view starts with its defaults; the Appearance switches only take
+      // facts away when someone asks.
       sidebarRowProperties: {
         projects: {
           project: false,
@@ -183,7 +183,7 @@ describe("shell settings policy", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: false,
+          lastUpdated: true,
           status: true,
         },
       },

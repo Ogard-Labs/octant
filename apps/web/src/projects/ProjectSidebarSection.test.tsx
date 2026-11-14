@@ -2879,7 +2879,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(onArchiveThread).toHaveBeenCalledWith(codeThread.threadId);
   });
 
-  it("starts each view showing exactly what its rows carried before the choice existed", async () => {
+  it("starts the Activity feed with the Project name and a short age but no branch or pull request", async () => {
     const user = userEvent.setup();
     renderSidebar();
 
@@ -2893,7 +2893,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(within(feedRow).getByText("octant")).toBeVisible();
     expect(within(feedRow).queryByText("#12 open")).toBeNull();
     expect(within(feedRow).queryByText("feature/sidebar")).toBeNull();
-    expect(within(feedRow).queryByText("2h")).toBeNull();
+    expect(within(feedRow).getByText("2h")).toBeVisible();
   });
 
   it("edits only the view the submenu names when the host record changes", async () => {

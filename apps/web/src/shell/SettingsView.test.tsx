@@ -1066,15 +1066,15 @@ describe("SettingsView", () => {
     expect(screen.getByRole("columnheader", { name: "Projects" })).toBeVisible();
     expect(screen.getByRole("columnheader", { name: "Activity" })).toBeVisible();
 
-    // Each view starts with what its rows already carried: the tree shows
-    // branch, pull request, age, and status; the feed shows the Project name
-    // and status alone.
+    // The tree starts with branch, pull request, age, and status; the feed
+    // with the Project name, age, and status.
     for (const name of [
       "Branch on Projects rows",
       "Pull request on Projects rows",
       "Last updated on Projects rows",
       "Status on Projects rows",
       "Project on Activity rows",
+      "Last updated on Activity rows",
       "Status on Activity rows",
     ]) {
       expect(screen.getByRole("checkbox", { name })).toBeChecked();
@@ -1082,7 +1082,6 @@ describe("SettingsView", () => {
     for (const name of [
       "Branch on Activity rows",
       "Pull request on Activity rows",
-      "Last updated on Activity rows",
     ]) {
       expect(screen.getByRole("checkbox", { name })).not.toBeChecked();
     }
@@ -1104,13 +1103,13 @@ describe("SettingsView", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: false,
+          lastUpdated: true,
           status: true,
         },
       },
     });
 
-    // Turning the Activity age on says nothing about the Projects rows.
+    // Turning the Activity age off says nothing about the Projects rows.
     await user.click(screen.getByRole("checkbox", { name: "Last updated on Activity rows" }));
     expect(onSettingsChange).toHaveBeenLastCalledWith({
       sidebarRowProperties: {
@@ -1125,7 +1124,7 @@ describe("SettingsView", () => {
           project: true,
           branch: false,
           pullRequest: false,
-          lastUpdated: true,
+          lastUpdated: false,
           status: true,
         },
       },

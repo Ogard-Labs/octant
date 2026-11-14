@@ -73,7 +73,7 @@ const settings = {
       project: true,
       branch: false,
       pullRequest: false,
-      lastUpdated: false,
+      lastUpdated: true,
       status: true,
     },
   },
@@ -1273,9 +1273,9 @@ describe("environment presentation contracts", () => {
   it("keeps each view's sidebar row defaults for a store that never chose any", () => {
     const { sidebarRowProperties: _omit, ...withoutRowProperties } = settings;
 
-    // A store persisted before the choice shipped decodes to exactly the rows
-    // those views already carried: the Project tree never showed a Project
-    // name, and the Activity feed never showed a branch, pull request, or age.
+    // A store that never chose decodes to each view's defaults: the Project
+    // tree shows no Project name, and the Activity feed shows no branch or pull
+    // request but does carry the short age.
     expect(decodeShellSettings(withoutRowProperties).sidebarRowProperties).toEqual({
       projects: {
         project: false,
@@ -1288,7 +1288,7 @@ describe("environment presentation contracts", () => {
         project: true,
         branch: false,
         pullRequest: false,
-        lastUpdated: false,
+        lastUpdated: true,
         status: true,
       },
     });
