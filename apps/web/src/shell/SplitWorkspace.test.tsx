@@ -1136,3 +1136,54 @@ async function openPaneMenu(
     .querySelector<HTMLElement>(".workspace-pane__header")!;
   await user.pointer({ target: header, keys: "[MouseRight]" });
 }
+
+describe("SplitWorkspace in a window showing several Projects", () => {
+  const workTab = (index: number) => ({
+    kind: "work-thread" as const,
+    id: `00000000-0000-4000-8000-00000000070${String(index)}`,
+    threadId: `00000000-0000-4000-8000-00000000071${String(index)}`,
+    mode: "work" as const,
+    title: `Work thread ${String(index)}`,
+  });
+  const otherProjectId = "00000000-0000-4000-8000-000000000720";
+  const layout = decodeWorkspaceLayoutNode({
+    kind: "split",
+    nodeId: splitNodeId,
+    orientation: "horizontal",
+    ratio: 0.5,
+    first: {
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: workTab(0),
+    },
+    second: {
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000621",
+      paneId: String(secondPaneId),
+      surface: workTab(1),
+      context: { host: "local", mode: "work", projectId: otherProjectId, boundRoot: "/other" },
+    },
+  });
+
+  it("names each pane's own Project, never the lead's for the other pane", () => {
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contextLabel="Lead notes"
+        layout={layout}
+        mode="work"
+        projectNamesById={new Map([[otherProjectId, "Other notes"]])}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    const lead = screen.getByRole("region", { name: "Workspace pane: Lead notes, Work thread 0" });
+    const other = screen.getByRole("region", {
+      name: "Workspace pane: Other notes, Work thread 1",
+    });
+    expect(within(lead).getByText("Lead notes")).toBeInTheDocument();
+    expect(within(other).getByText("Other notes")).toBeInTheDocument();
+    expect(within(other).queryByText("Lead notes")).toBeNull();
+    expect(document.querySelectorAll('[data-mixed-projects="true"]')).toHaveLength(2);
+  });
+});

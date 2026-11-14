@@ -23,7 +23,12 @@ import {
   MAX_WORKSPACE_PANES,
   ShellPolicyRejected,
   WorkspaceContextRejected,
+  activePaneContext,
+  admissionSet,
+  applyResolvedWorkspaceOperation,
   applyWorkspaceOperation,
+  recordPaneContext,
+  windowAdmitsProject,
   buildCompactIdentity,
   defaultEnvironmentPresentationState,
   defaultShellSettings,
@@ -1285,7 +1290,7 @@ describe("workspace context resolution", () => {
     ).toThrow(WorkspaceContextRejected);
   });
 
-  it("rejects opening a Project surface into a context bound to a different Project", () => {
+  it("opens another Project's surface in its own pane and keeps the window's lead", () => {
     const base = defaultWindowWorkspace(ids.window);
     const anchored: WindowWorkspace = {
       ...base,
@@ -1295,26 +1300,36 @@ describe("workspace context resolution", () => {
         code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
       },
     };
-    expect(() =>
-      resolveWorkspaceContext(
-        anchored,
-        {
-          kind: "open-surface",
-          mode: "code",
-          paneId: codePane(base).paneId,
-          surface: projectSurface,
-        },
-        {
-          tabContext: (tab) =>
-            tab.kind === "project"
-              ? { host, mode: "code", projectId: tab.projectId, boundRoot: "/home/repo" }
-              : undefined,
-        },
-      ),
-    ).toThrow(WorkspaceContextRejected);
+    const operation = decodeWorkspaceOperation({
+      kind: "open-surface",
+      mode: "code",
+      paneId: codePane(base).paneId,
+      surface: projectSurface,
+    });
+    const resolves = {
+      tabContext: (tab: WorkspaceTab) =>
+        tab.kind === "project"
+          ? { host, mode: "code" as const, projectId: tab.projectId, boundRoot: "/home/repo" }
+          : undefined,
+    };
+    const resolved = resolveWorkspaceContext(anchored, operation, resolves);
+    expect(resolved.contextByMode.code).toEqual(anchored.contextByMode.code);
+    const placed = recordPaneContext(
+      applyWorkspaceOperation(resolved, operation),
+      operation,
+      resolves,
+    );
+    expect(codePane(placed).context).toEqual({
+      host,
+      mode: "code",
+      projectId: ids.project,
+      boundRoot: "/home/repo",
+    });
+    expect(placed.contextByMode.code.projectId).toBe(otherProject);
+    expect(admissionSet(placed, "code")).toEqual([otherProject, ids.project]);
   });
 
-  it("resolves the context of a surface introduced by an edge drop", () => {
+  it("admits an edge-dropped Project while its pane is open and no longer once it closes", () => {
     const base = defaultWindowWorkspace(ids.window);
     const anchored: WindowWorkspace = {
       ...base,
@@ -1324,31 +1339,45 @@ describe("workspace context resolution", () => {
         code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
       },
     };
-    // A sidebar drag lands as split-pane without passing through open-surface;
-    // a cross-Project surface must still be refused before layout mutation.
-    expect(() =>
-      resolveWorkspaceContext(
-        anchored,
-        {
-          kind: "split-pane",
-          mode: "code",
-          targetPaneId: codePane(base).paneId,
-          surface: projectSurface,
-          splitNodeId: ids.splitA,
-          newPaneNodeId: ids.nodeB,
-          newPaneId: ids.paneB,
-          orientation: "horizontal",
-          placement: "after",
-          ratio: 0.5,
-        },
-        {
-          tabContext: (tab) =>
-            tab.kind === "project"
-              ? { host, mode: "code", projectId: tab.projectId, boundRoot: "/home/repo" }
-              : undefined,
-        },
-      ),
-    ).toThrow(WorkspaceContextRejected);
+    // A sidebar drag lands as split-pane without passing through open-surface,
+    // so the dropped surface's Project must still come from the resolver.
+    const operation = decodeWorkspaceOperation({
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: codePane(base).paneId,
+      surface: projectSurface,
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    const resolves = {
+      tabContext: (tab: WorkspaceTab) =>
+        tab.kind === "project"
+          ? { host, mode: "code" as const, projectId: tab.projectId, boundRoot: "/home/repo" }
+          : undefined,
+    };
+    const split = recordPaneContext(
+      applyWorkspaceOperation(resolveWorkspaceContext(anchored, operation, resolves), operation),
+      operation,
+      resolves,
+    );
+    const third = decodeProjectId("00000000-0000-4000-8000-000000000503");
+    expect(windowAdmitsProject(split, "code", otherProject)).toBe(true);
+    expect(windowAdmitsProject(split, "code", ids.project)).toBe(true);
+    expect(windowAdmitsProject(split, "code", third)).toBe(false);
+    // The Code layout's Project reaches nothing in the Work layout.
+    expect(windowAdmitsProject(split, "work", ids.project)).toBe(false);
+
+    const closed = applyWorkspaceOperation(split, {
+      kind: "close-pane",
+      mode: "code",
+      paneId: ids.paneB,
+    });
+    expect(windowAdmitsProject(closed, "code", ids.project)).toBe(false);
+    expect(windowAdmitsProject(closed, "code", otherProject)).toBe(true);
   });
 
   it("switches the mode context and replaces its layout for an explicit Project switch", () => {
@@ -1395,7 +1424,7 @@ describe("workspace context resolution", () => {
     const targetSurface = decodeWorkspaceTab({
       kind: "chat-thread",
       id: ids.tabC,
-      threadId: ids.thread,
+      threadId: decodeChatThreadId("00000000-0000-4000-8000-000000000611"),
       mode: "chat",
       title: "Unfiled thread",
     });
@@ -1626,41 +1655,38 @@ describe("workspace context resolution", () => {
     expect(() => validateWorkspace(duplicate)).toThrow(ShellPolicyRejected);
   });
 
-  it("rejects re-opening a restored thread surface from a different Project", () => {
+  it("records the Project the host resolves for a surface, never the one the surface names", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codePane(base);
-    const threadSurface = decodeWorkspaceTab({
-      kind: "code-overview",
-      id: ids.tabA,
-      threadId: ids.codeThread,
-      mode: "code",
-      title: "Other Project thread",
-    });
     const anchored: WindowWorkspace = {
-      ...withCodeSurface(base, threadSurface),
+      ...base,
       contextByMode: {
         ...base.contextByMode,
-        code: { host, mode: "code", projectId: ids.project, boundRoot: "/home/repo" },
+        code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
       },
     };
-
-    expect(() =>
-      resolveWorkspaceContext(
-        anchored,
-        {
-          kind: "open-surface",
-          mode: "code",
-          paneId: code.paneId,
-          surface: threadSurface,
-        },
-        {
-          tabContext: (tab) =>
-            tab.kind === "code-overview"
-              ? { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" }
-              : undefined,
-        },
-      ),
-    ).toThrow(WorkspaceContextRejected);
+    const resolvedProject = decodeProjectId("00000000-0000-4000-8000-000000000503");
+    // The surface claims ids.project; the host's record of it says otherwise.
+    const operation = decodeWorkspaceOperation({
+      kind: "open-surface",
+      mode: "code",
+      paneId: codePane(base).paneId,
+      surface: projectSurface,
+    });
+    const resolves = {
+      tabContext: () => ({
+        host,
+        mode: "code" as const,
+        projectId: resolvedProject,
+        boundRoot: "/home/third",
+      }),
+    };
+    const placed = recordPaneContext(
+      applyWorkspaceOperation(resolveWorkspaceContext(anchored, operation, resolves), operation),
+      operation,
+      resolves,
+    );
+    expect(codePane(placed).context?.projectId).toBe(resolvedProject);
+    expect(windowAdmitsProject(placed, "code", ids.project)).toBe(false);
   });
 
   it("rejects Browser and Files surfaces when no root is bound", () => {
@@ -2342,5 +2368,306 @@ describe("work environment projection", () => {
     expect(projection.sections.find((section) => section.id === "confined-root")?.available).toBe(
       false,
     );
+  });
+});
+
+describe("panes of several Projects in one window", () => {
+  const host = baseHost();
+  const projectA = decodeProjectId("00000000-0000-4000-8000-000000000511");
+  const projectB = decodeProjectId("00000000-0000-4000-8000-000000000512");
+  const projectC = decodeProjectId("00000000-0000-4000-8000-000000000513");
+  const contextOf = (projectId: typeof projectA) => ({
+    host,
+    mode: "code" as const,
+    projectId,
+    boundRoot: `/home/${String(projectId).slice(-3)}`,
+  });
+  const thread = (id: string, tab: typeof ids.tabA) =>
+    decodeWorkspaceTab({
+      kind: "code-overview",
+      id: tab,
+      threadId: decodeCodeThreadId(id),
+      mode: "code",
+      title: `Thread ${id.slice(-3)}`,
+    });
+  const threadA = thread("00000000-0000-4000-8000-000000000621", ids.tabA);
+  const threadB = thread("00000000-0000-4000-8000-000000000622", ids.tabB);
+  const threadC = thread("00000000-0000-4000-8000-000000000623", ids.tabC);
+  const projectOf = new Map([
+    [String(threadA.id), projectA],
+    [String(threadB.id), projectB],
+    [String(threadC.id), projectC],
+  ]);
+  const resolves = {
+    tabContext: (tab: WorkspaceTab) => {
+      for (const candidate of [threadA, threadB, threadC]) {
+        if (sameWorkspaceSurface(candidate, tab)) {
+          const project = projectOf.get(String(candidate.id));
+          return project === undefined ? undefined : contextOf(project);
+        }
+      }
+      return undefined;
+    },
+  };
+  const run = (workspace: WindowWorkspace, operation: unknown): WindowWorkspace => {
+    const decoded = decodeWorkspaceOperation(operation);
+    return recordPaneContext(
+      applyWorkspaceOperation(resolveWorkspaceContext(workspace, decoded, resolves), decoded),
+      decoded,
+      resolves,
+    );
+  };
+  const mixedAB = (): WindowWorkspace => {
+    const base = defaultWindowWorkspace(ids.window);
+    const inA = run(
+      { ...base, contextByMode: { ...base.contextByMode, code: contextOf(projectA) } },
+      { kind: "open-surface", mode: "code", paneId: codePane(base).paneId, surface: threadA },
+    );
+    return run(inA, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: codePane(base).paneId,
+      surface: threadB,
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+  };
+
+  it("brings a mixed layout back, with the clicked thread's pane active, when a person clicks one of its threads", () => {
+    const mixed = mixedAB();
+    const inC = run(mixed, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadC, id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000104") },
+    });
+    expect(admissionSet(inC, "code")).toEqual([projectC]);
+    expect(inC.stowedLayouts[0]?.context.projectId).toBe(projectA);
+
+    const back = run(inC, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadB, id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000105") },
+    });
+    expect(back.contextByMode.code.projectId).toBe(projectB);
+    expect(back.activePaneIds.code).toBe(ids.paneB);
+    expect([...admissionSet(back, "code")].map(String).sort()).toEqual(
+      [projectA, projectB].map(String).sort(),
+    );
+    // The panes keep their authority across the lead's move: A's pane now
+    // names A, and B's, being the lead's, names nothing of its own.
+    const layout = back.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected the restored split");
+    const panes = [layout.first, layout.second].map(onlyPane);
+    expect(
+      panes.find((pane) => String(pane.paneId) === String(ids.paneB))?.context,
+    ).toBeUndefined();
+    expect(
+      panes.find((pane) => String(pane.paneId) !== String(ids.paneB))?.context?.projectId,
+    ).toBe(projectA);
+    expect(back.stowedLayouts[0]?.context.projectId).toBe(projectC);
+  });
+
+  it("refuses a pane whose context names another host, and a Browser tab in a pane with no bound root", () => {
+    const mixed = mixedAB();
+    const layout = mixed.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected split");
+    const second = onlyPane(layout.second);
+    const withSecond = (pane: WorkspacePane): WindowWorkspace => ({
+      ...mixed,
+      layouts: { ...mixed.layouts, code: { ...layout, second: pane } },
+    });
+    expect(() =>
+      validateWorkspace(
+        withSecond({ ...second, context: { ...contextOf(projectB), host: "remote" as never } }),
+      ),
+    ).toThrow(ShellPolicyRejected);
+    const browser = decodeWorkspaceTab({
+      kind: "browser",
+      id: ids.tabB,
+      threadId: "00000000-0000-4000-8000-000000000622",
+      mode: "code",
+      title: "Browser",
+    });
+    expect(() =>
+      validateWorkspace(
+        withSecond({
+          ...second,
+          surface: browser,
+          context: { ...contextOf(projectB), boundRoot: null },
+        }),
+      ),
+    ).toThrow(ShellPolicyRejected);
+  });
+
+  it("names the active pane's own Project as the mode's active one, and the lead's for a lead pane", () => {
+    const mixed = mixedAB();
+    expect(activePaneContext(mixed, "code").projectId).toBe(projectB);
+    const leadActive = run(mixed, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: codePane(defaultWindowWorkspace(ids.window)).paneId,
+      surface: threadA,
+    });
+    expect(activePaneContext(leadActive, "code").projectId).toBe(projectA);
+  });
+
+  it("drops a pane's own context when the pane comes to show a surface with none", () => {
+    const mixed = mixedAB();
+    const welcome = welcomeSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000106"));
+    const replaced = run(mixed, {
+      kind: "replace-pane-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: welcome,
+    });
+    expect(windowAdmitsProject(replaced, "code", projectB)).toBe(false);
+  });
+
+  it("reaches nothing through a pane that came to show the welcome while still naming its Project", () => {
+    const mixed = mixedAB();
+    const layout = mixed.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected split");
+    const second = onlyPane(layout.second);
+    // Reconciliation swaps a lost surface for the welcome in place.
+    const emptied: WindowWorkspace = {
+      ...mixed,
+      layouts: {
+        ...mixed.layouts,
+        code: {
+          ...layout,
+          second: {
+            ...second,
+            surface: welcomeSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000107")),
+          },
+        },
+      },
+    };
+    expect(windowAdmitsProject(emptied, "code", projectB)).toBe(false);
+    expect(admissionSet(emptied, "code")).toEqual([projectA]);
+    expect(activePaneContext(emptied, "code").projectId).toBe(projectA);
+  });
+
+  it("keeps the old lead out of reach through a Settings pane once a mixed layout is restored under another lead", () => {
+    const mixed = mixedAB();
+    const layout = mixed.layouts.code;
+    if (layout.kind !== "split") throw new Error("expected split");
+    // The lead's pane shows Settings, which holds no Project of its own.
+    const withSettings: WindowWorkspace = {
+      ...mixed,
+      layouts: {
+        ...mixed.layouts,
+        code: {
+          ...layout,
+          first: {
+            ...onlyPane(layout.first),
+            surface: settingsSurface(decodeWorkspaceTabId("00000000-0000-4000-8000-000000000108")),
+          },
+        },
+      },
+    };
+    const inC = run(withSettings, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadC, id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000109") },
+    });
+    const back = run(inC, {
+      kind: "switch-project-surface",
+      mode: "code",
+      surface: { ...threadB, id: decodeWorkspaceTabId("00000000-0000-4000-8000-00000000010a") },
+    });
+    expect(back.contextByMode.code.projectId).toBe(projectB);
+    expect(windowAdmitsProject(back, "code", projectA)).toBe(false);
+  });
+
+  it("places a Browser pane of a local Project into a window led by a server Project with no bound root", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const serverLed: WindowWorkspace = {
+      ...base,
+      contextByMode: {
+        ...base.contextByMode,
+        code: { host, mode: "code", projectId: projectC, boundRoot: null },
+      },
+    };
+    const browser = decodeWorkspaceTab({
+      kind: "browser",
+      id: "00000000-0000-4000-8000-00000000010b",
+      threadId: "00000000-0000-4000-8000-000000000621",
+      mode: "code",
+      title: "Browser",
+    });
+    const local = {
+      tabContext: (tab: WorkspaceTab) =>
+        tab.kind === "browser" ? contextOf(projectA) : resolves.tabContext(tab),
+    };
+    const operation = decodeWorkspaceOperation({
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: codePane(base).paneId,
+      surface: browser,
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    // Validating before the pane's own context is written held it to the
+    // lead's missing root and refused it.
+    expect(() => applyWorkspaceOperation(serverLed, operation)).toThrow(ShellPolicyRejected);
+    const placed = applyResolvedWorkspaceOperation(
+      resolveWorkspaceContext(serverLed, operation, local),
+      operation,
+      local,
+    );
+    expect(windowAdmitsProject(placed, "code", projectA)).toBe(true);
+    expect(placed.contextByMode.code.projectId).toBe(projectC);
+  });
+
+  it("answers admission over a layout of a different Project in every pane in under 50 microseconds", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const count = MAX_WORKSPACE_PANES - 2;
+    const uuid = (prefix: string, index: number) =>
+      `00000000-0000-4000-${prefix}-${String(index).padStart(12, "0")}`;
+    const pane = (index: number): WorkspaceLayoutNode => ({
+      kind: "pane",
+      nodeId: decodeLayoutNodeId(uuid("8001", index)),
+      paneId: decodePaneId(uuid("8002", index)),
+      surface: decodeWorkspaceTab({
+        kind: "project",
+        id: uuid("8003", index),
+        projectId: uuid("8004", index),
+        mode: "code",
+        title: "Project",
+      }),
+      context: contextOf(decodeProjectId(uuid("8004", index))),
+    });
+    let layout: WorkspaceLayoutNode = pane(0);
+    for (let index = 1; index < count; index += 1) {
+      layout = {
+        kind: "split",
+        nodeId: decodeLayoutNodeId(uuid("8005", index)),
+        orientation: "horizontal",
+        ratio: 0.5 as never,
+        first: pane(index),
+        second: layout,
+      };
+    }
+    const workspace: WindowWorkspace = {
+      ...base,
+      layouts: { ...base.layouts, code: layout },
+      activePaneIds: { ...base.activePaneIds, code: decodePaneId(uuid("8002", 0)) },
+      contextByMode: { ...base.contextByMode, code: contextOf(projectA) },
+    };
+    const missing = decodeProjectId(uuid("8006", 1));
+    expect(admissionSet(workspace, "code")).toHaveLength(count + 1);
+    const rounds = 2000;
+    const started = performance.now();
+    for (let round = 0; round < rounds; round += 1) windowAdmitsProject(workspace, "code", missing);
+    const microseconds = ((performance.now() - started) * 1000) / rounds;
+    expect(microseconds).toBeLessThan(50);
   });
 });

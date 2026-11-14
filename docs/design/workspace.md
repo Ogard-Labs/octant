@@ -696,17 +696,32 @@ keeps the first four and says the rest stayed as tabs. With no selection,
 **Show side by side** puts the right-clicked tab beside the open one. The
 layout is made of ordinary split commands, so closing or resizing a pane
 afterwards works as for any split, and a placement the window's authority
-refuses (another Project, mode, or host) is refused with the usual message.
-Several same-authority threads can be pinned or dropped into
-that tree; pointer activity and keyboard input make exactly one pane active,
+refuses (another mode or host) is refused with the usual message.
+Threads of one mode and host can be pinned or dropped into
+that tree, from any of that mode's Projects; pointer activity and keyboard input make exactly one pane active,
 and the pane's drag handle (its title row) alone marks it visually, with no
 other border, fill, or badge. The pane region carries `aria-current` and its
 accessible name for assistive technology. Increased-contrast mode also fills
 the active pane, as a contrast fallback and the one exception to the handle
 alone. The older plan's separately "marked active pane" is superseded. Completed layout operations go through
-server-authoritative workspace commands. One visible tree belongs to one
-authority context (host, mode, Project, and bound root); a cross-Project,
-cross-mode, or cross-host placement is refused or offered in a new window.
+server-authoritative workspace commands. One visible tree belongs to one host
+and one mode; each pane keeps its own Project's authority (maintainer
+decision, 2026-11-14). The window's context names a lead Project, the one a
+layout is stowed under; a pane of another Project records that Project's
+context, which the host resolves from the pane's surface and never takes from
+the renderer. A turn in a pane reaches only its own Project, the window
+reaches the Projects its visible panes show and no more, and closing a pane
+ends its Project's reach. A cross-mode or cross-host placement is refused or
+offered in a new window, and so is a preview or Canvas of another Project.
+In a window showing several Projects every pane's title row names its Project
+at every width, and its accessible name reads "Project, title"; the dock,
+skills and plugins follow the active pane's Project. A single click on a
+thread the window does not show still moves the window to that thread's
+Project, stowing the current layout; a click on a thread of a stowed layout
+that held several Projects brings that whole layout back with the thread's
+pane active. Server Projects mix with local ones the same way, and their
+root-backed surfaces still fail closed. Design and rationale:
+[Threads from several Projects in one window](mixed-project-panes.md).
 
 Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
 thread as context. The drop uses the same mention path as typing `#` and
@@ -718,7 +733,10 @@ composer itself is the drop target, not the pane behind it. The row menu's
 or the only composer when one is open. Dropping the composer's own thread,
 a thread already attached, something that is not a thread, or a thread this
 window cannot Open leaves the draft unchanged and says so without reading
-the thread. Image and file drops, and dropping a thread on a pane rather
+the thread. Showing several Projects adds no reach here: a Code thread's
+composer attaches Code threads of its own Project only, and any other
+composer the Code threads of the window's lead Project, exactly as in a
+window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
 
 ### Find in a thread, and a new thread from a selection
