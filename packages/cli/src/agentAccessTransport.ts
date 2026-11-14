@@ -52,6 +52,37 @@ export function agentListenerFetch(target: AgentListenerTarget): AgentListenerFe
   };
 }
 
+/**
+ * POSTs to the agent endpoint of the host on this computer, over its loopback
+ * server: the path an MCP client here takes with a key it joined with as a
+ * bridge does. The request carries the same signed proof and nothing else; the
+ * host's local secret is never read or sent. An origin that is not a loopback
+ * address is refused before any request byte leaves.
+ */
+export function agentLoopbackFetch(origin: string): AgentListenerFetch {
+  const target = new URL(origin);
+  const loopback =
+    target.protocol === "http:" &&
+    (target.hostname === "127.0.0.1" ||
+      target.hostname === "localhost" ||
+      target.hostname === "[::1]");
+  return async ({ path, headers, body, signal }) => {
+    if (!loopback) throw new Error("Octant's address on this computer is not a loopback address.");
+    const response = await fetch(new URL(path, target.origin), {
+      method: "POST",
+      headers,
+      body,
+      redirect: "error",
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type") ?? "",
+      body: await boundedText(response),
+    };
+  };
+}
+
 async function boundedText(response: Response): Promise<string> {
   if (response.body === null) return "";
   const reader = response.body.getReader();
