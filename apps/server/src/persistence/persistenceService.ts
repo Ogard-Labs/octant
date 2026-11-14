@@ -555,12 +555,12 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     ) {
       rebuildProjectionsOnce();
       status = databaseStatus({
-      connection,
-      journal,
-      projections,
-      compatibility,
-      verifiedThrough: statusVerifiedThrough,
-    });
+        connection,
+        journal,
+        projections,
+        compatibility,
+        verifiedThrough: statusVerifiedThrough,
+      });
     } else if (status.heldDerivedViews !== undefined && status.integrity === "ok") {
       // A held view that catch-up brought to the head (a fixed build applied
       // the event it failed on) still has its quarantine row, which would
@@ -579,12 +579,12 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       }
       if (caughtUp.length > 0) {
         status = databaseStatus({
-      connection,
-      journal,
-      projections,
-      compatibility,
-      verifiedThrough: statusVerifiedThrough,
-    });
+          connection,
+          journal,
+          projections,
+          compatibility,
+          verifiedThrough: statusVerifiedThrough,
+        });
       }
     }
     if (status.heldDerivedViews !== undefined) {

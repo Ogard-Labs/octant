@@ -865,7 +865,10 @@ describe("Code thread history summary", () => {
       [pullRequest(4, "existing"), at(7)],
       [{ kind: "child-activity", childId: "c1", state: "completed", summary: "One done" }, at(8)],
       [pullRequest(3, "merged"), at(10)],
-      [{ kind: "operation-result", result: journaledGitObserved({ omitLineTotals: true }) }, at(11)],
+      [
+        { kind: "operation-result", result: journaledGitObserved({ omitLineTotals: true }) },
+        at(11),
+      ],
       [{ kind: "child-activity", childId: "c2", state: "failed", summary: "Two failed" }, at(9)],
       [
         {
@@ -900,8 +903,10 @@ describe("Code thread history summary", () => {
     );
     const project = async (history: CodeThreadOperationHistory) =>
       (
-        await serviceFixture({ github: () => ({ status: "unavailable" }), history: () => history })
-          .service.project([input({ thread: thread({ outcomeKind: "investigation-result" }) })])
+        await serviceFixture({
+          github: () => ({ status: "unavailable" }),
+          history: () => history,
+        }).service.project([input({ thread: thread({ outcomeKind: "investigation-result" }) })])
       ).threads;
     const whole = await project({ status: "ok", frames });
     expect(await project({ status: "ok", frames: summary })).toEqual(whole);

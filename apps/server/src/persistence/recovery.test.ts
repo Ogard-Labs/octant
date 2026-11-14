@@ -256,9 +256,9 @@ describe("database recovery", () => {
       },
     };
 
-    expect(databaseStatus({ connection: watched, journal, projections, verifiedThrough: 2 })).toEqual(
-      databaseStatus({ connection, journal, projections }),
-    );
+    expect(
+      databaseStatus({ connection: watched, journal, projections, verifiedThrough: 2 }),
+    ).toEqual(databaseStatus({ connection, journal, projections }));
     expect(pragmas).not.toContain("integrity_check");
     connection.close();
   });
@@ -272,16 +272,16 @@ describe("database recovery", () => {
       .prepare("UPDATE event_journal SET aggregate_version = 3 WHERE global_sequence = 2")
       .run();
 
-    expect(
-      databaseStatus({ connection, journal, projections, verifiedThrough: 1 }),
-    ).toMatchObject({ state: "invalid" });
+    expect(databaseStatus({ connection, journal, projections, verifiedThrough: 1 })).toMatchObject({
+      state: "invalid",
+    });
     connection
       .prepare("UPDATE event_journal SET aggregate_version = 2 WHERE global_sequence = 2")
       .run();
     connection.prepare("UPDATE aggregate_heads SET last_sequence = 1, aggregate_version = 1").run();
-    expect(
-      databaseStatus({ connection, journal, projections, verifiedThrough: 1 }),
-    ).toMatchObject({ state: "invalid" });
+    expect(databaseStatus({ connection, journal, projections, verifiedThrough: 1 })).toMatchObject({
+      state: "invalid",
+    });
     connection.close();
   });
 

@@ -80,8 +80,8 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const listeners = new Set<() => void>();
   const threadListeners = new Map<string, Set<() => void>>();
   const announce = (key: string) => {
-    for (const listener of [...(threadListeners.get(key) ?? [])]) listener();
-    for (const listener of [...listeners]) listener();
+    for (const listener of threadListeners.get(key) ?? []) listener();
+    for (const listener of listeners) listener();
   };
   return {
     announceFirstPrompt: (threadId, prompt) => {

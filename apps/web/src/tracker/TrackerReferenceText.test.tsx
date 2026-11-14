@@ -1,7 +1,10 @@
 import { render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { TrackerReferenceProvider, useTrackerReferenceResolutions } from "./TrackerReferenceContext";
+import {
+  TrackerReferenceProvider,
+  useTrackerReferenceResolutions,
+} from "./TrackerReferenceContext";
 import { TrackerReferenceComposerHints } from "./TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "./TrackerReferenceText";
 import type { TrackerReferenceResolvePorts } from "./trackerReferenceResolve";

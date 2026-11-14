@@ -367,12 +367,14 @@ function verifiedTailAggregateCount(
     SELECT aggregate_version, last_sequence FROM aggregate_heads
     WHERE aggregate_type = ? AND aggregate_id = ?
   `);
-  for (let index = 0; index < tail.length; ) {
+  for (let index = 0; index < tail.length;) {
     const first = tail[index];
     if (first === undefined) break;
-    const prior = lastVerifiedVersion.get(first.aggregate_type, first.aggregate_id, verifiedThrough) as
-      | { readonly aggregate_version: number }
-      | undefined;
+    const prior = lastVerifiedVersion.get(
+      first.aggregate_type,
+      first.aggregate_id,
+      verifiedThrough,
+    ) as { readonly aggregate_version: number } | undefined;
     let expectedVersion = (prior?.aggregate_version ?? 0) + 1;
     let newest = first;
     for (; index < tail.length; index += 1) {

@@ -117,37 +117,37 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
 
   return (
     <>
-    <div
-      aria-label={props.accessibleName}
-      aria-orientation={verticalResize(props.edge) ? "horizontal" : "vertical"}
-      aria-valuemax={props.maximum}
-      aria-valuemin={props.minimum}
-      aria-valuenow={props.value}
-      aria-valuetext={`${props.value} px`}
-      className={props.className}
-      data-edge={props.edge}
-      onKeyDown={handleKeyDown}
-      onLostPointerCapture={cancelPointerResize}
-      onPointerCancel={cancelPointerResize}
-      onPointerDown={(event) => {
-        if (event.button !== 0) return;
-        event.preventDefault();
-        activePointer.current = {
-          pointerId: event.pointerId,
-          startValue: props.value,
-          startPoint: verticalResize(props.edge) ? event.clientY : event.clientX,
-          lastValue: props.value,
-          moved: false,
-        };
-        event.currentTarget.setPointerCapture(event.pointerId);
-        setResizing(true);
-      }}
-      onPointerMove={pointerValue}
-      onPointerUp={finishPointerResize}
-      role="separator"
-      tabIndex={0}
-    />
-    {resizing ? <ResizeDragShield axis={verticalResize(props.edge) ? "row" : "column"} /> : null}
+      <div
+        aria-label={props.accessibleName}
+        aria-orientation={verticalResize(props.edge) ? "horizontal" : "vertical"}
+        aria-valuemax={props.maximum}
+        aria-valuemin={props.minimum}
+        aria-valuenow={props.value}
+        aria-valuetext={`${props.value} px`}
+        className={props.className}
+        data-edge={props.edge}
+        onKeyDown={handleKeyDown}
+        onLostPointerCapture={cancelPointerResize}
+        onPointerCancel={cancelPointerResize}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          activePointer.current = {
+            pointerId: event.pointerId,
+            startValue: props.value,
+            startPoint: verticalResize(props.edge) ? event.clientY : event.clientX,
+            lastValue: props.value,
+            moved: false,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          setResizing(true);
+        }}
+        onPointerMove={pointerValue}
+        onPointerUp={finishPointerResize}
+        role="separator"
+        tabIndex={0}
+      />
+      {resizing ? <ResizeDragShield axis={verticalResize(props.edge) ? "row" : "column"} /> : null}
     </>
   );
 }

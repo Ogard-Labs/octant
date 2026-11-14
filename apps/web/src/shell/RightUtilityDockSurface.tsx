@@ -271,15 +271,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         role="tablist"
       >
         {browserTabs.map((page) => (
-          <span
-            className="dock-browser-pages__page content-tab"
-            key={page.id}
-            role="presentation"
-          >
+          <span className="dock-browser-pages__page content-tab" key={page.id} role="presentation">
             <OctantButton
               aria-selected={page.id === selectedId}
               tabIndex={
-                page.id === (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
+                page.id ===
+                (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
                   ? 0
                   : -1
               }

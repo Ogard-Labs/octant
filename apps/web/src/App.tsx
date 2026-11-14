@@ -326,6 +326,7 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useRendererOverlayReport } from "./browser/useRendererOverlayReport";
 import { useHomeShortcut } from "./shell/useHomeShortcut";
 import { useJumpToWaitingShortcut } from "./shell/useJumpToWaitingShortcut";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
@@ -803,6 +804,7 @@ function LaunchedShell(
   // In macOS full screen the titlebar and traffic lights are gone, so the inset
   // is released for as long as the host reports full screen.
   const hostFullScreen = useHostFullScreen(props.hostBridge);
+  useRendererOverlayReport(props.hostBridge);
   const hostReservesTitlebarInset =
     props.hostBridge?.windowChrome === "hidden-inset" && !hostFullScreen;
   useLayoutEffect(() => {

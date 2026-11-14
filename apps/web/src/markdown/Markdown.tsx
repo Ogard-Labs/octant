@@ -79,7 +79,6 @@ export const Markdown = memo(function Markdown(props: MarkdownProps) {
         {blocks.map((block, index) => (
           // Index keys are right here: blocks only ever grow at the end while a
           // reply streams, so an earlier index always names the same block.
-          // eslint-disable-next-line react/no-array-index-key
           <MarkdownBlock body={block} index={index} key={index} skipHtml={props.skipHtml} />
         ))}
       </TextTransform>

@@ -1955,11 +1955,7 @@ function ProjectViewFilterMenu(props: {
           <ListFilter aria-hidden="true" size={14} />
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          <OctantMenuPositioner
-            align="end"
-            className="outline-none window-no-drag"
-            side="bottom"
-          >
+          <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
             <OctantMenuPopup
               aria-label="Project view filters"
               className="min-w-[14rem] max-w-[calc(100vw-24px)]"
