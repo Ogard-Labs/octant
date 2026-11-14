@@ -1184,7 +1184,10 @@ icon button for each of Environment, Terminal, Review, Browser, and Files, in th
 then **More tools**, a menu of every other tool the thread can use, grouped as the
 launcher groups them, each a checked item while that tool is shown, and after the
 tools the pull requests the thread is already about under "Relevant to this thread". A button is present
-only where the thread can use the tool. Pressing one opens the tool as a tile beside the
+only where the thread can use the tool, except **iOS Simulator**, which is always listed in
+Devices so the menu keeps one size: where the Project has no iOS app it is greyed and not
+pressable, and its tooltip says "This Project has no iOS app" ("Choose a Project with an iOS
+app" when no Project is chosen). Pressing one opens the tool as a tile beside the
 focused one (alone when the dock is empty) and widens and shows the dock; pressing it
 again closes the tool (the Browser closes every page), except that a pressed Browser or Terminal button
 minimises its tool to a card on the dock's shelf instead (see **Minimised tools**), so the page or

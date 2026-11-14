@@ -3,6 +3,7 @@ import {
   hasActionableDelivery,
   isAuthorizedCanvasDocument,
   isCurrentPlanArtifact,
+  dockToolUnavailableReason,
   isDockToolLaunchable,
   isDockToolStillOpenable,
 } from "./dockToolAvailability";
@@ -65,7 +66,7 @@ describe("which live tools the dock may offer", () => {
     ).toBe(false);
   });
 
-  it("hides iOS Simulator rather than offering an empty workbench", () => {
+  it("always lists iOS Simulator and says why it cannot be pressed without an iOS app", () => {
     const capabilities = {
       hasPlanArtifact: false,
       hasDelivery: false,
@@ -76,11 +77,23 @@ describe("which live tools the dock may offer", () => {
       addAgentInvoked: false,
       hasExistingThread: false,
     } as const;
-    expect(isDockToolLaunchable("ios-simulator", capabilities)).toBe(false);
+    expect(isDockToolLaunchable("ios-simulator", capabilities)).toBe(true);
+    expect(dockToolUnavailableReason("ios-simulator", capabilities, true)).toBe(
+      "This Project has no iOS app",
+    );
+    expect(dockToolUnavailableReason("ios-simulator", capabilities, false)).toBe(
+      "Choose a Project with an iOS app",
+    );
     expect(
-      isDockToolLaunchable("ios-simulator", { ...capabilities, hasAppleSimulator: true }),
-    ).toBe(true);
-    expect(isDockToolLaunchable("android-emulator", capabilities)).toBe(true);
+      dockToolUnavailableReason(
+        "ios-simulator",
+        { ...capabilities, hasAppleSimulator: true },
+        true,
+      ),
+    ).toBeUndefined();
+    expect(dockToolUnavailableReason("android-emulator", capabilities, true)).toBeUndefined();
+    // An open simulator tab still closes when the Project has no iOS app.
+    expect(isDockToolStillOpenable("ios-simulator", capabilities)).toBe(false);
   });
 
   it("offers Agents for an existing thread even before the first child exists", () => {
