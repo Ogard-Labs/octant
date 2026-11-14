@@ -84,6 +84,7 @@ import { AgentProfileService } from "../agentProfileService";
 import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { createProjectIconReader } from "../projectIcon";
+import { ProjectCustomIconStore } from "../projectIconStore";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
@@ -847,11 +848,15 @@ export function wireCode(deps: CodeDependencies) {
         },
       },
     });
+    const projectCustomIcons = new ProjectCustomIconStore({
+      dataDirectory: persistence.dataDirectory,
+    });
     const projectRoutes = createProjectRouteHandler({
       service: projectService,
       environmentService,
       windowAuthorityStore,
-      icons: createProjectIconReader({ projects: projectService }),
+      icons: createProjectIconReader({ projects: projectService, custom: projectCustomIcons }),
+      customIcons: projectCustomIcons,
       memoryProposals: deps.projectMemoryAccess.proposals,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });

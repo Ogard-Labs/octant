@@ -259,6 +259,7 @@ export function ProjectActionsSection(props: ProjectActionsSectionProps) {
           onClick={() => void save()}
           size="sm"
           type="button"
+          variant="secondary"
         >
           Save actions
         </OctantButton>

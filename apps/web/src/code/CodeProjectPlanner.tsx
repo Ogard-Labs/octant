@@ -12,6 +12,8 @@ import { PlannerProposalReviewDialog, usePlannerState } from "./plannerProposalR
 const PLANNER_RULE =
   "One Code thread may survey this Project and propose tasks. Each proposal waits for your decision; designation grants no right to start work.";
 
+const NO_PROPOSALS_HINT = "Open the designated planner to ask it to survey this Project.";
+
 /** The person reviews one Project's planner; every write retains its server version. */
 export function CodeProjectPlanner(
   props: Extract<CodeOverviewProps, { readonly projectId: ProjectId }>,
@@ -232,8 +234,9 @@ export function CodeProjectPlanner(
         })}
       </ul>
       {view !== undefined && proposals.length === 0 ? (
-        <p className="oct-row-detail">
-          No proposals yet. Open the designated planner to ask it to survey this Project.
+        <p className="oct-row-detail" title={NO_PROPOSALS_HINT}>
+          No proposals yet.
+          <span className="sr-only"> {NO_PROPOSALS_HINT}</span>
         </p>
       ) : null}
       {(view?.proposals.length ?? 0) > 50 ? (

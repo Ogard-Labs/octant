@@ -234,7 +234,18 @@ without such an open find no icon), it is a regular file of at most 256 KB, and 
 its extension (PNG and ICO signatures; an SVG must open as an SVG document). The
 host serves it on the authenticated Project API at `GET /api/projects/{id}/icon`
 with `nosniff`, a content security policy that forbids script, and an ETag, and
-answers a plain 404 when there is none. The renderer draws it as an `<img>` at
+answers a plain 404 when there is none. A person can choose the icon instead: the
+Project page's actions menu offers Change icon… (the desktop's native file
+picker; disabled with its reason in a browser), Use found icon, and Remove
+custom icon. The chosen PNG, SVG or ICO (256 KB at most, same checks) is
+copied into the host's own data folder and served before the folder's icon,
+over `PUT` and `DELETE` on the same path from a window on this host that can
+reach the Project; the original file is never read again, and a refusal's
+reason shows in the page's status line, under the buttons, so New thread does not
+move. The page's cards follow one family: a 14px title row with a one-line status
+or action at its end, 12px one-line descriptions with the full rule in a
+tooltip, one primary button per view, and Manage panels that open as one inset
+section under their row with the row's label not repeated. The renderer draws it as an `<img>` at
 the row's own icon size (a step of the [icon scale](../../DESIGN.md#icons)) with a small radius; it never
 inlines SVG markup. The picture is fetched once per Project per session, not
 per render or per navigation poll. The row's letter tile or folder glyph shows
@@ -2302,9 +2313,10 @@ rounded letter tile: the Project's first letter, white, on the colour the person
 picked from the theme palette, or a neutral tile when none is set. The same tile
 heads the Project overview, where it is the colour picker; the row's actions menu
 offers Colour with a No colour choice, and an archived Project cannot change it.
-A Project whose folder holds a favicon or app icon shows that picture, drawn as
-an image at the same 20px, in place of the tile (and in place of the folder
-glyph in lists); the tile and glyph remain for a Project without one.
+A Project with an icon (one a person chose, else the favicon or app icon in its
+folder) shows that picture, drawn as an image at the same 20px, in place of the
+tile (and in place of the folder glyph in lists); the tile and glyph remain for a
+Project without one.
 The colour is identity, never status: it never stands in for a warning, a
 selection, or an activity mark. One fixed trailing
 status position shows a working spinner, an attention symbol, a clock when a

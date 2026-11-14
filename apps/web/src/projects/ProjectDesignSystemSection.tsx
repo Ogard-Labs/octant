@@ -327,6 +327,7 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
                 onClick={() => void save(document.value, draft, document.value.revision)}
                 size="sm"
                 type="button"
+                variant="secondary"
               >
                 Save
               </OctantButton>
@@ -385,6 +386,7 @@ export function ProjectDesignSystemSection(props: ProjectDesignSystemSectionProp
               onClick={create}
               size="sm"
               type="button"
+              variant="secondary"
             >
               Create DESIGN.md
             </OctantButton>
@@ -473,7 +475,13 @@ function DesignSystemView(props: {
         </div>
       )}
       <div>
-        <OctantButton disabled={props.disabled} onClick={props.onEdit} size="sm" type="button">
+        <OctantButton
+          disabled={props.disabled}
+          onClick={props.onEdit}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
           Edit
         </OctantButton>
         <OctantButton

@@ -87,11 +87,10 @@ export function CodeProjectCoordinatorStarting(props: {
           value={value}
         />
       </div>
-      {refused ? (
-        <p className="oct-row-detail" role="status">
-          This choice could not be saved.
-        </p>
-      ) : null}
+      {/* The line is always there, so a refusal fills it instead of growing the card. */}
+      <p className="oct-row-detail code-project-planner__status" role="status">
+        {refused ? "This choice could not be saved." : ""}
+      </p>
     </section>
   );
 }
