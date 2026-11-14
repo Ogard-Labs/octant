@@ -729,6 +729,17 @@ is refused (maintainer decision, 2026-11-14). Rationale: the port used to
 refuse every hook whose working directory was not the Project root, so one
 `cd` into a subfolder refused every later call of the turn.
 
+Where Octant reads a `CLAUDE.md` itself (a Project the runtime may not read
+because it is not trusted), it expands the file's `@path` imports as Claude
+Code does (maintainer decision, 2026-11-14): a relative import resolves from
+the importing file's folder and `@~/` from the home folder, an import in a
+code span or fenced block stays text, a file is loaded once so a cycle ends,
+and imports stop five hops from the first file, past 32 files, or past
+256 KiB, the cut said as truncated. Only a file inside the Project's folders
+or the account's config folders is read, judged at the path it resolves to,
+so a symbolic link out of them is refused. Not built yet: the reader of an
+untrusted Project's `CLAUDE.md` that calls this expansion.
+
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
 grant are never forgotten. At most four approvals are put to the person at
