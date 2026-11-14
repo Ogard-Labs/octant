@@ -169,6 +169,7 @@ export * from "./threadWindow";
 export * from "./codeConversationUsage";
 export * from "./threadMentionPolicy";
 export * from "./sideChatPolicy";
+export * from "./threadRecap";
 export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
 export * from "./spendCeilingPolicy";

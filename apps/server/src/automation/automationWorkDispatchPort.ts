@@ -78,7 +78,18 @@ export interface CreateAutomationWorkDispatchPortOptions {
     readonly threadId: WorkThreadId;
     readonly contentReference: string;
   }) => boolean;
+  /**
+   * Whether a run's Project on a server can be reached now. A Work thread
+   * there is created on this host alone, so without asking first a server
+   * that cannot be reached would show only as the turn's refused calls.
+   */
+  readonly reachServer?: (run: AutomationRun) => Promise<AutomationServerReach>;
 }
+
+export type AutomationServerReach =
+  | { readonly kind: "not-on-a-server" }
+  | { readonly kind: "reachable" }
+  | { readonly kind: "unreachable"; readonly message: string };
 
 /**
  * Production Work adapter for Automation A4. Creates Project-bound threads
@@ -122,6 +133,10 @@ async function createWorkThread(
       reason: "thread-creation-failed",
       message: "Work Automation binding is missing.",
     };
+  }
+  const reach = await options.reachServer?.(input.run);
+  if (reach?.kind === "unreachable") {
+    return { kind: "failed", reason: "unavailable", message: reach.message };
   }
   const now = options.clock();
   const title = input.title.length > 0 ? input.title : automationThreadTitle(snapshot.displayName);

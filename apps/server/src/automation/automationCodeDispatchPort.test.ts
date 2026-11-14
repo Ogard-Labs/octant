@@ -87,7 +87,7 @@ function port(projectLevel: PermissionMode = "full-access", sourceBranch = "deve
     clock: () => "2026-08-10T12:00:00.000Z" as UtcTimestamp,
     uuid: () => "aa000000-0000-4000-8000-0000000000fa",
     projectLevel: () => projectLevel,
-    sourceBranchForRun: () => sourceBranch,
+    sourceBranchForRun: () => ({ kind: "branch", name: sourceBranch }),
   });
   return { dispatch, execute };
 }
@@ -106,6 +106,34 @@ describe("Code routine threads", () => {
       deliveryTarget: { proposedBaseBranch: "main" },
     });
   });
+  it("creates no thread and says why when the Project's server cannot be reached", async () => {
+    const execute = vi.fn();
+    const dispatch = createAutomationCodeDispatchPort({
+      codeService: { execute, bootstrap: async () => ({ threads: [] }) },
+      operations: { execute: vi.fn() as never },
+      evidence: { put: vi.fn() as never },
+      clock: () => "2026-08-10T12:00:00.000Z" as UtcTimestamp,
+      uuid: () => "aa000000-0000-4000-8000-0000000000fa",
+      sourceBranchForRun: async () => ({
+        kind: "unavailable",
+        message: "web1 could not be reached, so this routine ran nothing.",
+      }),
+    });
+    expect(
+      await dispatch.createApprovalGatedThread({
+        run: codeRun(),
+        threadId,
+        title: "Nightly build check",
+        scopeId,
+      }),
+    ).toEqual({
+      kind: "failed",
+      reason: "unavailable",
+      message: "web1 could not be reached, so this routine ran nothing.",
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("creates a routine's thread asking first unless the person opted it into its Project's level", async () => {
     const asked = port();
     await asked.dispatch.createApprovalGatedThread({

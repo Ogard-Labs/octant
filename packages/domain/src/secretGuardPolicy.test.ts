@@ -12,6 +12,7 @@ import {
   redactSecretsInValue,
   resolveProtectedFiles,
   serverProtectedPathPattern,
+  windowsGuardPath,
 } from "./secretGuardPolicy";
 
 const HOME = "/Users/person";
@@ -161,6 +162,103 @@ describe("secret guard list", () => {
     expect(
       protectedEntryFor(["/home/person/.config/google-chrome/Default/Cookies"], linux)?.ruleId,
     ).toBe("browser-cookies-and-logins");
+  });
+
+  describe("on Windows", () => {
+    const WINDOWS_HOME = "C:\\Users\\Person";
+    const win32 = resolveProtectedFiles(
+      {
+        platform: "win32",
+        home: WINDOWS_HOME,
+        dataDirectory: "C:\\Users\\Person\\AppData\\Local\\Octant",
+      },
+      NO_PROTECTED_FILES_CHANGES,
+    );
+    const windowsRule = (path: string, own: ReadonlyArray<string> = []) =>
+      protectedEntryFor([path], win32, own)?.ruleId;
+
+    it("protects the Windows credential stores, browser profiles, and app sign-ins", () => {
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Roaming\\Microsoft\\Credentials\\A1")).toBe(
+        "keychains-and-vaults",
+      );
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Roaming\\Microsoft\\Protect\\S-1-5\\k")).toBe(
+        "keychains-and-vaults",
+      );
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Local\\Microsoft\\Vault\\x")).toBe(
+        "keychains-and-vaults",
+      );
+      expect(
+        windowsRule(
+          "C:\\Users\\Person\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network\\Cookies",
+        ),
+      ).toBe("browser-cookies-and-logins");
+      expect(
+        windowsRule(
+          "C:\\Users\\Person\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\abc.default\\logins.json",
+        ),
+      ).toBe("browser-cookies-and-logins");
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Roaming\\Slack\\Local Storage\\x")).toBe(
+        "browser-cookies-and-logins",
+      );
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Roaming\\gcloud\\credentials.db")).toBe(
+        "cloud-credentials",
+      );
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Roaming\\GitHub CLI\\hosts.yml")).toBe(
+        "forge-cli-sign-in",
+      );
+      expect(windowsRule("C:\\Users\\Person\\_netrc")).toBe("git-credential-files");
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\id_ed25519")).toBe("ssh-private-keys");
+      expect(windowsRule("C:\\Users\\Person\\AppData\\Local\\Octant\\remote\\key")).toBe(
+        "octant-credentials",
+      );
+    });
+
+    it("matches whatever the letter case and slash direction, as Windows opens the file", () => {
+      expect(windowsRule("c:/users/person/.SSH/ID_RSA")).toBe("ssh-private-keys");
+      expect(windowsRule("C:\\USERS\\PERSON\\.aws\\Credentials")).toBe("cloud-credentials");
+    });
+
+    it("sees through the spellings Windows strips before it opens a file", () => {
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\id_rsa.")).toBe("ssh-private-keys");
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\id_rsa ")).toBe("ssh-private-keys");
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\id_rsa::$DATA")).toBe("ssh-private-keys");
+      expect(windowsRule("C:\\Users\\Person\\project\\..\\.aws\\credentials")).toBe(
+        "cloud-credentials",
+      );
+    });
+
+    it("leaves ordinary files and readable SSH files alone", () => {
+      expect(windowsRule("C:\\Users\\Person\\project\\README.md")).toBeUndefined();
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\id_rsa.pub")).toBeUndefined();
+      expect(windowsRule("C:\\Users\\Person\\.ssh\\config")).toBeUndefined();
+      expect(windowsRule("D:\\Users\\Person\\.aws\\credentials")).toBeUndefined();
+    });
+
+    it("lets a runtime read its own sign-in whatever its spelling", () => {
+      expect(
+        windowsRule("C:\\Users\\Person\\.codex\\auth.json", ["c:/users/person/.codex"]),
+      ).toBeUndefined();
+      expect(windowsRule("C:\\Users\\Person\\.claude\\.credentials.json")).toBe(
+        "provider-sign-ins",
+      );
+    });
+
+    it("shows the person each location home-relative", () => {
+      const entry = protectedEntryFor(["C:\\Users\\Person\\_netrc"], win32);
+      if (entry === undefined) throw new Error("expected _netrc to be protected");
+      expect(protectedEntryDisplay(entry, WINDOWS_HOME)).toBe("~/_netrc");
+    });
+  });
+
+  it("spells only a Windows drive-absolute path for the guard, never a share or device path", () => {
+    expect(windowsGuardPath("C:\\Users\\Person\\.ssh\\id_rsa")).toBe(
+      "/c:/users/person/.ssh/id_rsa",
+    );
+    expect(windowsGuardPath("c:/x/y/../z. ")).toBe("/c:/x/z");
+    expect(windowsGuardPath("\\\\server\\share\\x")).toBeUndefined();
+    expect(windowsGuardPath("\\\\?\\C:\\Users\\Person")).toBeUndefined();
+    expect(windowsGuardPath("C:relative")).toBeUndefined();
+    expect(windowsGuardPath("/home/person")).toBeUndefined();
   });
 
   it("refuses to expand a relative or root path", () => {

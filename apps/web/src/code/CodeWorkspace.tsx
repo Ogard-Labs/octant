@@ -197,6 +197,8 @@ export interface CodeWorkspaceProps {
    */
   /** A coordinator thread's proposed workers, shown above its composer. */
   readonly coordinatorProposals?: ReactNode;
+  /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
+  readonly coordinatorWorkerAsks?: ReactNode;
   readonly onNewThreadInProject?: (
     projectId: import("@octant/contracts/projects").ProjectId,
   ) => void;
@@ -281,6 +283,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.coordinatorProposals === undefined
           ? {}
           : { coordinatorProposals: props.coordinatorProposals })}
+        {...(props.coordinatorWorkerAsks === undefined
+          ? {}
+          : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}
