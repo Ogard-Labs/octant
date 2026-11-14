@@ -762,7 +762,10 @@ A held turn takes messages (maintainer decision, 2026-11-14): a message the
 person sends while a turn is held, through the driver's `send` or `steer`,
 is delivered into it, the runtime answers it in a turn folded in as
 `runtime-turn-started` with `trigger: "person-message"` (never counted), and
-the held completion waits for that answer. `steer` answers `unsupported`
+the held completion waits for that answer. A steered message goes in as text, the turn's
+context inline as on a runtime without the prompt hook; one that carries
+images is refused with a reason (send them once the turn ends) rather than
+sent without them. `steer` answers `unsupported`
 when no turn is held, and the thread's message queue keeps the message for
 the next turn as it does for any running turn. A `Monitor` call that asks for a WebSocket (opened by the
 runtime process, outside the command sandbox and its network rules) or a

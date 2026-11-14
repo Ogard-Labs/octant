@@ -3739,6 +3739,16 @@ function makeConnection(
         if (state.compaction !== undefined) {
           return Effect.fail(failure("unavailable", "Claude is compacting this session."));
         }
+        // A message steered into a held turn goes in as text alone, so one
+        // that carries images is refused rather than sent without them.
+        if (state.heldTurn !== undefined && input.attachments.length > 0) {
+          return Effect.fail(
+            failure(
+              "unavailable",
+              "Claude is still finishing background work in this turn. Send the images once the turn ends.",
+            ),
+          );
+        }
         const observed = options.runtimeRegistry.observedState(options.instanceId);
         const model = observed?.models.find((candidate) => candidate.id === state.modelId);
         const rejected = validateChatTurnInput(
@@ -3754,7 +3764,9 @@ function makeConnection(
           );
         }
         // The runtime may still start turns of its own inside the held one,
-        // so the message is steered into it rather than refused.
+        // so the message is steered into it rather than refused. The turn's
+        // context goes inline in the steered text, as on a runtime too old
+        // for the prompt hook, since a steered message passes no hook.
         if (state.heldTurn !== undefined) {
           return steerHeldTurn(state, state.heldTurn, renderProviderTurnPrompt(input)).pipe(
             Effect.asVoid,

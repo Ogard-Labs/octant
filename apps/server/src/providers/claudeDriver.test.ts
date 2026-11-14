@@ -7591,6 +7591,37 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
+  it("refuses a message with images while the turn is held, rather than dropping its images", async () => {
+    const { acquired, query } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "what is this?",
+          attachments: [
+            {
+              attachmentId: "attachment-1",
+              displayName: "screen.png",
+              mediaType: "image/png",
+              bytes: new Uint8Array([137, 80, 78, 71]),
+            },
+          ] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({
+      category: "unavailable",
+      message: expect.stringContaining("Send the images once the turn ends"),
+    });
+    expect(query.sent).toEqual(["run the tests"]);
+    await acquired.close();
+  });
+
   it("refuses to steer when no turn is held, so the message queue keeps it", async () => {
     const { acquired } = await startTurn();
     expect(
