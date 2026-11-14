@@ -345,7 +345,7 @@ export const AgentGrantView = Schema.Struct({
   pendingClaims: Schema.Array(AgentPendingClaim),
   directKey: Schema.Boolean,
   lastUsedAt: Schema.optional(UtcTimestamp),
-  lastSourceClass: Schema.optional(Schema.Literal("lan-private", "tailscale")),
+  lastSourceClass: Schema.optional(Schema.Literal("loopback", "lan-private", "tailscale")),
   threadsStarted: Schema.Int.pipe(Schema.nonNegative()),
   turnsToday: Schema.Int.pipe(Schema.nonNegative()),
 }).annotations(strict);
