@@ -1315,6 +1315,7 @@ Providers are multi-instance, and a thread stays on its instance until the perso
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
 - Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
+- Adding a provider account is one in-place wizard for every agent runtime, opened from a card's Add account or from Add provider manually: provider, sign-in, details, connect, done, in a fixed 560x520 dialog that never resizes between steps (maintainer request, 2026-11-14). The account is created only by the details step; the connect step shows the host's sign-in command and Check connection result inline. Built. See [Additional CLI accounts](model-endpoints.md#additional-cli-accounts).
 
 Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
