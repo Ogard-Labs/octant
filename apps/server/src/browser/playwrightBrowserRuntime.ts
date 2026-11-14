@@ -24,6 +24,7 @@ import {
   readBrowserPage,
   readBrowserPageTools,
   BROWSER_PAGE_TOOLS_LIST_REQUEST,
+  browserPageToolCallRequest,
   type BrowserPageToolsResult,
   redactedBrowserUrl,
   browserPageCounters,
@@ -726,10 +727,12 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         };
       }
       case "page-tool-call":
-        pageToolCall = await page.evaluate(readBrowserPageTools, {
-          mode: "call",
-          call: required(request.pageTool, "A page tool call names the tool it calls."),
-        });
+        pageToolCall = await page.evaluate(
+          readBrowserPageTools,
+          browserPageToolCallRequest(
+            required(request.pageTool, "A page tool call names the tool it calls."),
+          ),
+        );
         break;
       case "wait":
         if (request.waitFor !== undefined) {

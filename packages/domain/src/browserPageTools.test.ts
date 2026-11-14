@@ -1,6 +1,7 @@
 import { BrowserPageDeclaredTools } from "@octant/contracts";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { BROWSER_CREDENTIAL_HINT_SOURCE, readBrowserPage } from "./browserPageSnapshot";
 import { boundBrowserPageTools, browserPageToolCallPaysBuysOrSends } from "./browserPageTools";
 
 describe("a page's declared tools", () => {
@@ -49,6 +50,12 @@ describe("a page's declared tools", () => {
       withheld: 0,
     });
     expect(boundBrowserPageTools({ mode: "call", status: "submitted" })).toBeUndefined();
+  });
+
+  it("withholds a declared form by the same credential hint the page snapshot uses", () => {
+    // The snapshot reader runs in the page and spells the hint inline; the
+    // declared-tools reader is handed the shared source, so the two must match.
+    expect(readBrowserPage.toString()).toContain(`/${BROWSER_CREDENTIAL_HINT_SOURCE}/`);
   });
 
   it("recognises the Full access list's pay, buy, and send-as-the-person calls and nothing wider", () => {

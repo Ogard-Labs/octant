@@ -22,6 +22,10 @@ import type {
   BrowserPageToolParameter,
 } from "@octant/contracts";
 import {
+  BROWSER_CREDENTIAL_HINT_ATTRIBUTES,
+  BROWSER_CREDENTIAL_HINT_SOURCE,
+} from "./browserPageSnapshot";
+import {
   MAX_BROWSER_PAGE_TOOL_CHOICES,
   MAX_BROWSER_PAGE_TOOL_DESCRIPTION_CHARACTERS,
   MAX_BROWSER_PAGE_TOOL_PARAMETER_DESCRIPTION_CHARACTERS,
@@ -29,14 +33,30 @@ import {
   MAX_BROWSER_PAGE_TOOLS,
 } from "@octant/contracts";
 
-export type BrowserPageToolsRequest =
-  | {
-      readonly mode: "list";
-      readonly maxTools: number;
-      readonly maxParameters: number;
-      readonly maxChoices: number;
-    }
-  | { readonly mode: "call"; readonly call: BrowserPageToolCall };
+/**
+ * The snapshot reader's credential hint, handed in because the reader runs in
+ * the page and cannot import it; one pattern decides for every Browser reader.
+ */
+interface BrowserPageToolsCredentialHint {
+  readonly credentialHint: string;
+  readonly credentialAttributes: ReadonlyArray<string>;
+}
+
+export type BrowserPageToolsRequest = BrowserPageToolsCredentialHint &
+  (
+    | {
+        readonly mode: "list";
+        readonly maxTools: number;
+        readonly maxParameters: number;
+        readonly maxChoices: number;
+      }
+    | { readonly mode: "call"; readonly call: BrowserPageToolCall }
+  );
+
+const CREDENTIAL_HINT: BrowserPageToolsCredentialHint = {
+  credentialHint: BROWSER_CREDENTIAL_HINT_SOURCE,
+  credentialAttributes: BROWSER_CREDENTIAL_HINT_ATTRIBUTES,
+};
 
 export type BrowserPageToolsResult =
   | {
@@ -59,27 +79,32 @@ export type BrowserPageToolRefusal =
 
 /** The bounds both runtimes hand the in-page reader. */
 export const BROWSER_PAGE_TOOLS_LIST_REQUEST: BrowserPageToolsRequest = {
+  ...CREDENTIAL_HINT,
   mode: "list",
   maxTools: MAX_BROWSER_PAGE_TOOLS,
   maxParameters: MAX_BROWSER_PAGE_TOOL_PARAMETERS,
   maxChoices: MAX_BROWSER_PAGE_TOOL_CHOICES,
 };
 
+/** The request both runtimes hand the in-page reader to call one declared tool. */
+export function browserPageToolCallRequest(call: BrowserPageToolCall): BrowserPageToolsRequest {
+  return { ...CREDENTIAL_HINT, mode: "call", call };
+}
+
 /**
  * Runs inside the page. See the module comment: nothing outside this body is
  * reachable once the source is handed to the page.
  */
 export function readBrowserPageTools(request: BrowserPageToolsRequest): BrowserPageToolsResult {
-  // The same hint the snapshot reader uses for a field that holds a secret.
-  const credentialHint =
-    /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|\bcards?\b|ssn|secret|token|api.?key)/;
+  // The snapshot reader's hint for a field that holds a secret, matched
+  // against the same attributes, its accessible label included.
+  const credentialHint = new RegExp(request.credentialHint);
   const skippedTypes = new Set(["hidden", "submit", "button", "reset", "image", "file"]);
   const isCredential = (element: Element): boolean => {
     if (element instanceof HTMLInputElement && element.type === "password") return true;
     const words = [
-      element.getAttribute("autocomplete"),
-      element.getAttribute("name"),
-      element.getAttribute("id"),
+      element.getAttribute("type"),
+      ...request.credentialAttributes.map((attribute) => element.getAttribute(attribute)),
     ]
       .filter((word): word is string => word !== null)
       .join(" ")

@@ -45,6 +45,9 @@ const pages: Record<string, string> = {
     <form toolname="sign_in" tooldescription="Sign in to your account." toolautosubmit>
       <input name="user"><input type="password" name="pw"><button>Go</button>
     </form>
+    <form toolname="save_key" tooldescription="Save a key for later." toolautosubmit>
+      <input name="value" aria-label="API key"><button>Save</button>
+    </form>
     <form id="draft" toolname="draft_note" tooldescription="Draft a note for the person to review.">
       <input name="note"><button>Save</button>
     </form>
@@ -1524,7 +1527,8 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       "send_note",
       "draft_note",
     ]);
-    expect(listed.withheld).toBe(1);
+    // A sign-in form and a form whose field is named a key only by its label.
+    expect(listed.withheld).toBe(2);
     expect(listed.tools[0]).toEqual({
       name: "search_flights",
       description: "Search flights between two airports.",
@@ -1592,11 +1596,21 @@ describe.skipIf(!available)("the agent's Browser tool on a real page", () => {
       outcome: "filled-for-person",
     });
     expect(drafted.result.page?.title).not.toBe("Drafted");
-    // An undeclared tool and a sign-in form are refused before anyone is asked.
+    // An undeclared tool and a form holding a credential field are refused
+    // before anyone is asked.
     const askedNow = tool.asked.length;
     expect(
       (await tool.call({ operation: "page-tool-call", name: "sign_in", arguments: {} })).result
         .error,
+    ).toBe("page-tool-not-declared");
+    expect(
+      (
+        await tool.call({
+          operation: "page-tool-call",
+          name: "save_key",
+          arguments: { value: "sk-live-1" },
+        })
+      ).result.error,
     ).toBe("page-tool-not-declared");
     expect(tool.asked.length).toBe(askedNow);
     await tool.stop();

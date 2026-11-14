@@ -75,6 +75,7 @@ import {
   readBrowserPage,
   readBrowserPageTools,
   BROWSER_PAGE_TOOLS_LIST_REQUEST,
+  browserPageToolCallRequest,
   type BrowserPageToolsRequest,
   type BrowserPageToolsResult,
   readFramedBrowserSnapshot,
@@ -2935,10 +2936,10 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                 if (request.pageTool === undefined) {
                   throw new Error("A page tool call names the tool it calls.");
                 }
-                const called = await readPageTools(contentsView(owned), {
-                  mode: "call",
-                  call: request.pageTool,
-                });
+                const called = await readPageTools(
+                  contentsView(owned),
+                  browserPageToolCallRequest(request.pageTool),
+                );
                 pageToolCall = called.mode === "call" ? called : undefined;
                 break;
               }

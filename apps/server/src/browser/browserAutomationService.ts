@@ -370,6 +370,8 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
   "select",
   "drag",
   "upload",
+  // A declared tool's call fills the page's fields and may submit them.
+  "page-tool-call",
 ]);
 /**
  * The actions that start and end an agent's recording. They read the page as
