@@ -2038,7 +2038,7 @@ function makeConnection(
         ...held.completion,
         sequence: context.sequence++,
         occurredAt: factories.clock() as UtcTimestamp,
-      } as ProviderRuntimeEvent);
+      });
       state.terminalResult.resolve(undefined);
       clearAuthorityState(state);
       state.pendingTurns = Math.max(0, state.pendingTurns - 1);
