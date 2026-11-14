@@ -1108,7 +1108,10 @@ float follows [Translucency](#translucency).
 
 - **Purpose.** The enclosed track for two to seven exclusive values.
 - **Tokens.** A 28px track (2px padding, `--oct-radius-sm`, the muted fill)
-  holding 24px items (8px padding, a 6px corner, 14/500 secondary ink).
+  holding 24px items (8px padding, a 6px corner, 13px secondary ink). Markup
+  that still names the `.segmented` and `.segment` recipe (Agents, Automations,
+  the Project and Rewind dialogs) draws these same measurements, so no page
+  has a taller or bordered track of its own.
 - **States.** Hover the primary ink; `data-pressed` the raised soft fill and the
   primary ink; disabled 0.75. Glass: the track is ink 7%, the pressed item ink
   12%.
@@ -1191,7 +1194,10 @@ without; a menu where any row has an icon reserves the column for all. The
 separator is one hairline as wide as the rows. A choice is a check at the row's
 end, never a fill; a fill means only that the pointer or keyboard is on the
 row. The command palette, the `#` and `/` typeaheads and the composer's pickers
-take the same tokens.
+take the same tokens: a palette row is the 13/500 menu option, its group labels
+the navigation group role (12px, sentence case, muted, never mono), and the row
+the keyboard is on takes `--oct-fill-4` with no border; the Enter hint says
+what it will do.
 
 **Native menus.** In the desktop app context menus and ordinary dropdowns are
 the system's own; searchable pickers and popovers with embedded controls stay
@@ -1379,6 +1385,19 @@ of its rows is here.
   `--oct-radius-md`, the card colour, one hairline.
 
 ### Lists and rows
+
+Two row families share this section, each used the same way everywhere. A
+**page row** (Projects, Inbox, Settings, a Project's thread list, an
+automation card) has the row label (14/500) over a detail or meta line (13
+secondary or 12 meta). A **list row** (the sidebar, Home's lists, the pull
+request list, the work lists) has a 13/400 title over a 12px meta line, a state
+glyph at its start, and sits under a group heading in the navigation group
+role (12px muted, the count at the right edge). A section's heading on a page
+or in a card (Settings, Inbox, Automations, a Project's Threads and its cards)
+is always the section label (14/600 secondary), never the primary ink or a
+lighter weight. An empty page or section is one line and at most one outline
+button. Chips above a composer are 24px; the start screens' suggestion chips
+are the one borderless 28px chip (see Start screen).
 
 Rows are hairline rails, never cards. They reserve stable gutters for marks;
 hover actions take no width until hovered (a section head's actions keep their
