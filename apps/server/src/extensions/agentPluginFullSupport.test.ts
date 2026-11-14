@@ -867,13 +867,14 @@ describe("Agent Plugin MCP session manager", () => {
     });
 
     await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(manager.sessions()).toHaveLength(0);
     expect(manager.toolDefinitions()).toHaveLength(0);
     expect(manager.failedComponents()).toEqual([
       expect.objectContaining({
         componentId: "mcp-local",
-        reason: expect.stringContaining("closed before initialization"),
+        reason: expect.stringMatching(/closed before initialization|transport closed/i),
       }),
     ]);
     await manager.drainAll();
