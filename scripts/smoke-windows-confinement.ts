@@ -235,11 +235,17 @@ try {
     return new Set(listing.match(/S-1-15-2(?:-\d+){7}/gu) ?? []);
   };
   const waiting = [0, 1].map(() => {
-    const launch = prepare(cmd, shell("set /p OCTANT_WAIT="));
-    return spawn(launch.command, [...launch.args], { stdio: ["pipe", "ignore", "pipe"] });
+    const launch = prepare(cmd, shell("set /p OCTANT_WAIT= & echo released %OCTANT_WAIT%"));
+    return spawn(launch.command, [...launch.args], { stdio: ["pipe", "pipe", "pipe"] });
+  });
+  const outputs = waiting.map((child) => {
+    const output = { stdout: "", stderr: "" };
+    child.stdout.on("data", (chunk: Buffer) => (output.stdout += chunk.toString()));
+    child.stderr.on("data", (chunk: Buffer) => (output.stderr += chunk.toString()));
+    return output;
   });
   const exits = waiting.map(
-    (child) => new Promise<number | null>((done) => child.on("exit", (code) => done(code))),
+    (child) => new Promise<number | null>((done) => child.on("close", (code) => done(code))),
   );
   let concurrent = 0;
   for (let attempt = 0; attempt < 60 && concurrent < 2; attempt += 1) {
@@ -252,8 +258,11 @@ try {
   const leftAfter = containerSids().size;
   check(
     "keeps both grants while two launches share a checkout and removes both after",
-    concurrent === 2 && codes.every((code) => code === 0) && leftAfter === 0,
-    { concurrent, codes, leftAfter },
+    concurrent === 2 &&
+      codes.every((code) => code === 0) &&
+      outputs.every((output) => output.stdout.includes("released go")) &&
+      leftAfter === 0,
+    { concurrent, codes, outputs, leftAfter },
   );
 
   const marker = `octant-confine-${randomBytes(6).toString("hex")}`;
