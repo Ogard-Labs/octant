@@ -125,6 +125,35 @@ describe("sendChatCompletionsTurn", () => {
     ]);
   });
 
+  it("keeps the attached image on the person's message for every step after a tool call", async () => {
+    const fetch = vi.fn(async () =>
+      stream(chunk({ role: "assistant" }), chunk({}, "stop"), "[DONE]"),
+    );
+    await Effect.runPromise(
+      sendChatCompletionsTurn(
+        input(fetch, {
+          history: [
+            {
+              role: "user",
+              text: "What is wrong?",
+              attachments: [{ mediaType: "image/png", bytes: new Uint8Array([1, 2, 3]) }],
+            },
+          ],
+          prompt: "",
+          toolAnswers: [],
+        }),
+      ),
+    );
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).messages[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "What is wrong?" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } },
+      ],
+    });
+  });
+
   it("normalizes text, finish, usage-before-DONE, and Octant sequence values", async () => {
     const observed = vi.fn();
     const fetch = vi.fn(async () =>

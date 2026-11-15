@@ -6,7 +6,7 @@ import {
   type ProviderToolDefinition,
   type ProviderToolImage,
 } from "@octant/contracts";
-import { responsesUserContent, type PromptImage } from "./promptImages";
+import { promptImagesOf, responsesUserContent, type PromptImage } from "./promptImages";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { contextOverflowFromBody } from "./contextOverflowRefusal";
@@ -36,6 +36,14 @@ export interface ProtocolToolResult {
 export interface ProtocolHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
+  /**
+   * Images the person attached to this user message. They stay with it for
+   * every step of the turn, so a tool round-trip never sends the message
+   * without them.
+   */
+  readonly attachments?:
+    | ReadonlyArray<{ readonly mediaType: string; readonly bytes: Uint8Array }>
+    | undefined;
   readonly toolCalls?: readonly ProtocolToolCall[] | undefined;
   readonly toolResults?: readonly ProtocolToolResult[] | undefined;
 }
@@ -240,7 +248,13 @@ async function runResponsesTurn(
           ];
         }
         return [
-          { role: entry.role, content: entry.text },
+          {
+            role: entry.role,
+            content:
+              entry.role === "user"
+                ? responsesUserContent(entry.text, promptImagesOf(entry.attachments))
+                : entry.text,
+          },
           ...(entry.toolCalls === undefined
             ? []
             : entry.toolCalls.map((call) => ({

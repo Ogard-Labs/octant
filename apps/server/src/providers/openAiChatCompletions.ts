@@ -1,5 +1,5 @@
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
-import { chatCompletionsUserContent, type PromptImage } from "./promptImages";
+import { chatCompletionsUserContent, promptImagesOf, type PromptImage } from "./promptImages";
 import {
   decodeProviderFailure,
   type ProviderFailure,
@@ -156,7 +156,13 @@ function requestBody(input: ChatCompletionsTurnInput, streaming: boolean): Recor
         }
         return [
           entry.toolCalls === undefined
-            ? { role: entry.role, content: entry.text }
+            ? {
+                role: entry.role,
+                content:
+                  entry.role === "user"
+                    ? chatCompletionsUserContent(entry.text, promptImagesOf(entry.attachments))
+                    : entry.text,
+              }
             : {
                 role: entry.role,
                 content: entry.text.length === 0 ? null : entry.text,

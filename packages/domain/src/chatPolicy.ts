@@ -502,6 +502,7 @@ export interface ResumeChatTurnInput {
   readonly newAttemptId: ChatAttempt["id"];
   readonly newContextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
+  readonly describedImages?: ChatAttempt["describedImages"];
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
 }
@@ -544,6 +545,7 @@ export function resumeChatTurn(
     providerSessionId: attempt.providerSessionId,
     modelId: attempt.modelId,
     ...(attempt.inputReceipt === undefined ? {} : { inputReceipt: attempt.inputReceipt }),
+    ...(input.describedImages === undefined ? {} : { describedImages: input.describedImages }),
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
       ? {}

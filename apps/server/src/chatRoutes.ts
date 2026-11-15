@@ -29,6 +29,7 @@ import {
   authenticateRouteWindowId,
   boundPrincipalIsRestricted,
   readPrincipalRouteContext,
+  retainRouteAdmissionCurrent,
 } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -424,6 +425,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           await dependencies.service.execute(command, {
             windowId: authenticatedWindowId,
             actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+            ...imagesCurrentFor(request, dependencies.windowAuthorityStore, now),
           }),
           200,
           origin,
@@ -861,3 +863,18 @@ function corsHeaders(origin: string | null): Headers {
 }
 
 export type { ChatBootstrap, ChatCommandResult, ChatThread };
+
+/**
+ * Whether the request still stands while Sees images describes its images:
+ * the same check a Work turn's admission makes, read only by the describe.
+ */
+function imagesCurrentFor(
+  request: Request,
+  store: WindowAuthorityStore,
+  now: () => number,
+): { readonly imagesCurrent?: () => boolean } {
+  const context = readPrincipalRouteContext(request);
+  return context === undefined
+    ? {}
+    : { imagesCurrent: retainRouteAdmissionCurrent({ request, context, store, now }) };
+}

@@ -3067,6 +3067,10 @@ describe("ChatService", () => {
     expect(JSON.stringify(fakeDriver.sentTurns.at(-1))).toContain(
       "A sign-in form with a red error.",
     );
+    // A compaction summarizes the words with the message too.
+    expect(service.sessionCompactionConversation(created.thread.id)[0]?.content).toContain(
+      "A sign-in form with a red error.",
+    );
   });
 
   it("refuses an image Sees images cannot describe, with its reason, before any turn is journaled", async () => {

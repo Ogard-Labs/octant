@@ -953,7 +953,13 @@ function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, 
         }));
       }
       return [
-        { role: entry.role, content: entry.text },
+        {
+          role: entry.role,
+          content:
+            entry.role === "user"
+              ? responsesUserContent(entry.text, promptImagesOf(entry.attachments))
+              : entry.text,
+        },
         ...(entry.toolCalls === undefined
           ? []
           : entry.toolCalls.map((call) => ({

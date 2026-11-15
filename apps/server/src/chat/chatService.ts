@@ -628,6 +628,12 @@ export interface ChatServiceExecutionContext {
   /** Host-only revalidation after asynchronous preparation, before durable admission. */
   readonly admissionCurrent?: () => boolean;
   /**
+   * Whether the request that sent a turn still stands (its window's authority
+   * and the request itself), read only while Sees images describes the
+   * turn's images, so a revoked or abandoned send sends no further image.
+   */
+  readonly imagesCurrent?: () => boolean;
+  /**
    * A renderer window the caller speaks for; absent for host-owned callers
    * (usage-limit recovery) that have no window to attach.
    */
@@ -4340,6 +4346,9 @@ export class ChatService {
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
           : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
@@ -4717,7 +4726,9 @@ export class ChatService {
       thread,
       probe,
       attachments,
-      executionContext?.admissionCurrent,
+      () =>
+        executionContext?.admissionCurrent?.() !== false &&
+        executionContext?.imagesCurrent?.() !== false,
     );
     if (described !== undefined) attachments = [];
     const promptForModel =
@@ -6207,13 +6218,7 @@ export class ChatService {
       const stored = requireContent(turn.userMessageRef);
       // An image Sees images described was read as its words, so the
       // history carries them with the person's message.
-      const describedWords = (
-        turn.attempts.findLast((attempt) => attempt.describedImages !== undefined)
-          ?.describedImages ?? []
-      ).flatMap((image) => {
-        const content = contentById.get(image.description.contentId);
-        return content === undefined ? [] : [content.body];
-      });
+      const describedWords = describedWordsOf(turn, contentById);
       const user =
         describedWords.length === 0
           ? stored
@@ -7180,6 +7185,11 @@ export class ChatService {
     | undefined
   > {
     if (attachments.length === 0 || this.#describeImages === undefined) return undefined;
+    // A turn that also carries a document is left to the ordinary check,
+    // which names the document the model cannot take.
+    if (!attachments.every((attachment) => attachment.mediaType.startsWith("image/"))) {
+      return undefined;
+    }
     const model = probe.models.find((candidate) => String(candidate.id) === String(thread.modelId));
     const takes =
       probe.capabilities.nativeAttachments === "supported" &&
@@ -7601,6 +7611,9 @@ export class ChatService {
     return activeChatTurns(view.turns).flatMap((turn) => {
       const exchangeKey = String(turn.id);
       const user = contentById.get(turn.userMessageRef.contentId);
+      // As the turn's context entry sources it: the words Sees images wrote
+      // for the turn's images, then the person's message.
+      const describedWords = describedWordsOf(turn, contentById);
       const messages: Array<SessionConversationMessage> =
         user === undefined
           ? []
@@ -7609,7 +7622,7 @@ export class ChatService {
                 source: { kind: "message", referenceId: String(user.contentId) },
                 role: "user",
                 exchangeKey,
-                content: user.body,
+                content: [...describedWords, user.body].join("\n\n"),
               },
             ];
       const attempt = chatTurnAnsweredAttempt(turn);
@@ -7943,4 +7956,18 @@ export class ChatService {
       }),
     );
   }
+}
+
+/** The words Sees images wrote for a turn's images, from its latest attempt that has them. */
+function describedWordsOf(
+  turn: ChatTurn,
+  contentById: ReadonlyMap<string, { readonly body: string }>,
+): ReadonlyArray<string> {
+  return (
+    turn.attempts.findLast((attempt) => attempt.describedImages !== undefined)?.describedImages ??
+    []
+  ).flatMap((image) => {
+    const content = contentById.get(String(image.description.contentId));
+    return content === undefined ? [] : [content.body];
+  });
 }
