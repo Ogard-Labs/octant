@@ -1934,7 +1934,13 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "does this still hold?");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(resolve).toHaveBeenCalledWith(expect.anything(), [mentionedThreadId]);
+    // The preflight names this composer's own thread, so it judges the reach the send will.
+    expect(resolve).toHaveBeenCalledWith(
+      expect.anything(),
+      [mentionedThreadId],
+      undefined,
+      threadId,
+    );
     // The chip travels as an id. The message the host journals — and the
     // conversation and every later turn read back — is the user's own words,
     // so nothing the mention contributed can be replayed.
