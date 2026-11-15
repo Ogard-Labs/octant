@@ -26,6 +26,7 @@ import {
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
+import { readClaudeGitIdentity } from "./claudeGitIdentity";
 import {
   type ProviderRuntimeNetworkPort,
   type ProviderServerAccessPort,
@@ -278,6 +279,7 @@ export function makeProviderDriver(
         ...(readArtifactDelivery === undefined
           ? {}
           : { artifactDelivery: () => readArtifactDelivery(instance.id) }),
+        gitIdentity: readClaudeGitIdentity,
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,

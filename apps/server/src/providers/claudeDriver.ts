@@ -1,6 +1,7 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
 import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
+import { claudeGitIdentityEnvironment, type ClaudeGitIdentity } from "./claudeGitIdentity";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
@@ -373,6 +374,13 @@ const CLAUDE_WAKEUP_TOOLS = new Set<string>([
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
+/**
+ * How many approvals, and how many pre-tool grants, a session holds at once.
+ * A call past either waits in line for a free slot instead of failing the
+ * turn: parallel subagents used to end a turn at the fifth approval or the
+ * seventeenth waiting call. The line is bounded by the tool uses a session
+ * remembers ({@link MAX_TRACKED_TOOL_USES}).
+ */
 const MAX_PENDING_APPROVALS = 4;
 const MAX_PRE_TOOL_GRANTS = 16;
 /**
@@ -595,7 +603,8 @@ function claudeConfinedTarget(
   workingDirectory: string,
 ): unknown {
   // A shell command and a search with no folder run in the session's working
-  // directory: the Project root, or a worktree Claude moved the session into.
+  // directory: the Project root, a folder below it a `cd` moved the session
+  // into, or a worktree Claude moved the session into.
   if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? workingDirectory;
   if (toolName === "Glob" || toolName === "Grep") return input.path ?? workingDirectory;
   if (toolName === "NotebookEdit") return input.notebook_path;
@@ -611,6 +620,40 @@ function claudeConfinedTarget(
     return input.file_path;
   }
   return projectRoot;
+}
+
+/**
+ * Tools whose ask stays Octant's own even where the person's permission rules
+ * would allow them: a question needs the person's answer, a publish snapshots
+ * the file the person approves, a wake-up is answered by Octant from the
+ * thread's schedule and must never run in the runtime, and a workflow's script
+ * runs as JavaScript in the runtime process, outside the command sandbox, so
+ * the person approves each start below Full access (maintainer decision,
+ * 2026-11-14).
+ */
+const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
+  "AskUserQuestion",
+  CLAUDE_ARTIFACT_TOOL,
+  CLAUDE_WORKFLOW_TOOL,
+  ...CLAUDE_WAKEUP_TOOLS,
+]);
+
+/**
+ * Whether a call the gate would ask about is left to Claude Code's own
+ * permission rules first. The bundled runtime skips its allow-rule check when
+ * a hook forces "ask", so a call the person's `permissions.allow` allows used
+ * to become an Octant approval anyway. Below Full access outside Plan, a call
+ * that passed every Octant refusal (secret paths, folders the session does
+ * not hold, Plan) is answered with no decision: the person's
+ * allow, ask, and deny rules run, and `canUseTool` sees only a real ask, as
+ * in Claude Code on its own (maintainer decision, 2026-11-14). Plan keeps
+ * Octant's ask for everything it asks about.
+ */
+export function claudeOwnRulesDecide(policy: ProviderExecutionPolicy, toolName: string): boolean {
+  return (
+    (policy === "approval-gated" || policy === "auto-accept-edits") &&
+    !CLAUDE_OCTANT_ASKED_TOOLS.has(toolName)
+  );
 }
 
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
@@ -695,6 +738,8 @@ export function claudeSandboxSettings(
     // At Guarded and Reviewed a command may leave the sandbox the way Claude
     // Code lets it on its own (`dangerouslyDisableSandbox` on `Bash`); the
     // gate asks about every such command (maintainer decision, 2026-11-14).
+    // A push or a `gh` call needs this: it reads `~/.ssh`, `~/.gitconfig`,
+    // and `~/.config/gh`, which the sandbox denies.
     // Plan's read-only rule and a Full access thread that kept its sandbox
     // let no command out, so the sandbox itself holds them, not only the hook.
     allowUnsandboxedCommands: claudeSandboxLetsCommandsOut(policy),
@@ -744,10 +789,14 @@ export async function claudeSessionInstructions(input: {
   if (input.mode === "chat" || input.singleUse) return undefined;
   const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
   const ownAccountPaths = claudeOwnAccountPaths(input.environment);
-  const configDir = sources.includes("user") ? undefined : ownAccountPaths[0];
+  const accountDir = ownAccountPaths[0];
   const guarded = claudeSecretGuardApplies(input.executionPolicy);
   const read = await readClaudeInstructionFiles({
-    ...(configDir === undefined ? {} : { configDir }),
+    // With the `user` source on, Claude Code loads the account's CLAUDE.md
+    // itself, but a Project file Octant reads may still import from the
+    // account's folder, so that folder stays an import root.
+    ...(accountDir === undefined || sources.includes("user") ? {} : { configDir: accountDir }),
+    ...(accountDir === undefined ? {} : { importRoots: [accountDir] }),
     ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
     refuses: (path) =>
       isClaudeAccountCredentialFile(path, input.environment) ||
@@ -1010,6 +1059,11 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /**
+   * The person's git identity for commits made inside the command sandbox,
+   * which cannot read their global gitconfig; read at each sandboxed launch.
+   */
+  readonly gitIdentity?: (checkoutRoot: string) => Promise<ClaudeGitIdentity>;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
   /** Claude-owned directory for this account. */
@@ -1172,6 +1226,12 @@ interface SessionState {
   >;
   readonly pendingQuestions: Map<string, ClaudePendingQuestionState>;
   readonly preToolRequests: Map<string, ClaudePreToolGrant>;
+  /**
+   * Calls waiting for a free approval, question, or grant slot. Each is woken
+   * whenever a slot frees and checks again; every waiter is an admitted tool
+   * use, so the list is bounded by {@link MAX_TRACKED_TOOL_USES}.
+   */
+  readonly authorityWaiters: Array<() => void>;
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
@@ -1528,18 +1588,68 @@ function denyClaudeToolRequest(
   message: string,
 ): ClaudeToolDecision {
   if (state !== undefined) {
-    state.preToolRequests.delete(toolUseId);
+    if (state.preToolRequests.delete(toolUseId)) freeAuthoritySlot(state);
     if (state.observedToolUseIds.has(toolUseId)) state.settledToolUseIds.add(toolUseId);
   }
   return { behavior: "deny", message };
 }
 
+/** Whether a call that waited for a slot may still be put to the person. */
+function gateStillOpen(state: SessionState): boolean {
+  return !(
+    state.terminal ||
+    state.releasing ||
+    state.released ||
+    state.context === undefined ||
+    state.context.terminal
+  );
+}
+
+/** Wakes every call waiting for a slot; each checks again whether one is free. */
+function freeAuthoritySlot(state: SessionState): void {
+  for (const wake of state.authorityWaiters.splice(0)) wake();
+}
+
+/**
+ * Waits until a slot may have freed, the call is cancelled, or `wakeAfterMs`
+ * passes (when a held grant expires and so frees a slot by itself).
+ */
+function waitForAuthoritySlot(
+  state: SessionState,
+  signal: AbortSignal,
+  wakeAfterMs?: number,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wake = () => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", wake);
+      const index = state.authorityWaiters.indexOf(wake);
+      if (index >= 0) state.authorityWaiters.splice(index, 1);
+      resolve();
+    };
+    if (signal.aborted) {
+      wake();
+      return;
+    }
+    if (wakeAfterMs !== undefined) timer = setTimeout(wake, Math.max(0, wakeAfterMs));
+    signal.addEventListener("abort", wake, { once: true });
+    state.authorityWaiters.push(wake);
+  });
+}
+
 function expireClaudePreToolGrants(state: SessionState, now: number): void {
+  let freed = false;
   for (const [toolUseId, grant] of state.preToolRequests) {
     if (grant.expiresAt > now) continue;
     state.preToolRequests.delete(toolUseId);
     state.settledToolUseIds.add(toolUseId);
+    freed = true;
   }
+  if (freed) freeAuthoritySlot(state);
 }
 
 /**
@@ -2197,6 +2307,7 @@ function makeConnection(
       state.pendingQuestions.clear();
       state.preToolRequests.clear();
       state.approvalReuse.clear();
+      freeAuthoritySlot(state);
     };
     const release = async (state: SessionState): Promise<void> => {
       if (state.releasePromise !== undefined) {
@@ -2522,6 +2633,16 @@ function makeConnection(
       if (message.kind === "result" && state.pendingTurns === 0) {
         closeAfterPublishedTerminal(state);
         return;
+      }
+      // A call Claude's own rules allowed runs without `canUseTool`, so its
+      // grant is released when its result arrives rather than held to expiry.
+      if (message.kind === "tool-results") {
+        for (const result of message.results) {
+          if (state.preToolRequests.delete(result.toolUseId)) {
+            state.settledToolUseIds.add(result.toolUseId);
+            freeAuthoritySlot(state);
+          }
+        }
       }
       if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
         state.backgroundTasks.add(message.taskId);
@@ -2948,6 +3069,7 @@ function makeConnection(
             return deny("Claude tool request did not pass the Octant authority gate.");
           }
           activeState.preToolRequests.delete(request.toolUseId);
+          freeAuthoritySlot(activeState);
           if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
             const refusal = artifactCallRefusal(request.input);
             if (refusal !== undefined) return deny(refusal);
@@ -2969,12 +3091,13 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           }
-          if (request.toolName === "AskUserQuestion" && activeState.pendingQuestions.size > 0) {
-            terminal(activeState, {
-              kind: "failed",
-              failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-            });
-            return deny("Claude user question state was exhausted.");
+          // One question set is put to the person at a time; another waits
+          // its turn, as a subagent's does while its parent's is open.
+          while (request.toolName === "AskUserQuestion" && activeState.pendingQuestions.size > 0) {
+            await waitForAuthoritySlot(activeState, request.signal);
+            if (request.signal.aborted || !gateStillOpen(activeState)) {
+              return deny("Claude user question was cancelled.");
+            }
           }
           if (request.toolName === "AskUserQuestion" && Object.hasOwn(request.input, "answers")) {
             return deny("Claude user question input was invalid.");
@@ -2987,25 +3110,29 @@ function makeConnection(
             return deny("Claude user question input was invalid.");
           }
           const reusableApprovalKey = approvalReuseKey(request.toolName, digest);
-          if (
+          const reusesEarlierAnswer = () =>
             request.toolName !== "AskUserQuestion" &&
             grant.unsandboxed !== true &&
-            activeState.approvalReuse.has(reusableApprovalKey)
-          ) {
+            activeState.approvalReuse.has(reusableApprovalKey);
+          const allowUnderEarlierAnswer = (): ClaudeToolDecision => {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
-          }
-          if (
+          };
+          if (reusesEarlierAnswer()) return allowUnderEarlierAnswer();
+          while (
             request.toolName !== "AskUserQuestion" &&
             activeState.pendingApprovals.size >= MAX_PENDING_APPROVALS
           ) {
-            terminal(activeState, {
-              kind: "failed",
-              failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-            });
-            return deny("Claude tool authority state was exhausted.");
+            await waitForAuthoritySlot(activeState, request.signal);
+            if (request.signal.aborted || !gateStillOpen(activeState)) {
+              return deny("Claude tool request was cancelled.");
+            }
           }
+          // The approval this call waited behind may have been answered for
+          // the whole session meanwhile: asking again would put the same call
+          // to the person twice.
+          if (reusesEarlierAnswer()) return allowUnderEarlierAnswer();
           const mapped = mapClaudeToolRequest(activeState.context!, request);
           if (mapped.kind === "question") {
             if (providerPrompts === undefined) {
@@ -3032,6 +3159,7 @@ function makeConnection(
               cancel: () => {
                 if (activeState.pendingQuestions.get(pending.requestId) === pending) {
                   activeState.pendingQuestions.delete(pending.requestId);
+                  freeAuthoritySlot(activeState);
                 }
                 activeState.settledToolUseIds.add(pending.providerToolUseId);
               },
@@ -3048,6 +3176,7 @@ function makeConnection(
             for (const [requestId, pending] of activeState.pendingApprovals) {
               if (pending.providerToolUseId !== request.toolUseId) continue;
               activeState.pendingApprovals.delete(requestId);
+              freeAuthoritySlot(activeState);
               activeState.settledToolUseIds.add(pending.providerToolUseId);
               pending.decision.resolve({
                 behavior: "deny",
@@ -3060,6 +3189,7 @@ function makeConnection(
           if (activeState.pendingApprovals.has(mapped.request.requestId)) {
             const existing = activeState.pendingApprovals.get(mapped.request.requestId)!;
             activeState.pendingApprovals.delete(mapped.request.requestId);
+            freeAuthoritySlot(activeState);
             existing.decision.resolve({
               behavior: "deny",
               message: "Claude approval correlation was duplicated.",
@@ -3090,6 +3220,7 @@ function makeConnection(
             cancel: () => {
               if (activeState.pendingApprovals.get(pending.requestId) === pending) {
                 activeState.pendingApprovals.delete(pending.requestId);
+                freeAuthoritySlot(activeState);
               }
               activeState.settledToolUseIds.add(pending.providerToolUseId);
             },
@@ -3128,9 +3259,10 @@ function makeConnection(
             activeState.releasing ||
             activeState.released ||
             request.sessionId !== activeState.claudeSessionId ||
-            // The session's working directory: the Project root, or a
-            // worktree Claude moved it into that the session holds.
-            (request.projectRoot !== projectRoot && !sessionHolds(activeState, request.projectRoot))
+            // The session's working directory: the Project root, any folder
+            // of the Project's a `cd` moved the session into, or a worktree
+            // Claude moved it into that the session holds.
+            !sessionHolds(activeState, request.projectRoot)
           ) {
             return deny("Claude tool request is outside the Project.");
           }
@@ -3227,23 +3359,36 @@ function makeConnection(
           // raised. So the hook may only allow what `canUseTool` would let
           // through unasked; every call that needs an approval or a question
           // is answered "ask", which routes it to `canUseTool` with the grant
-          // recorded here. An allowed call holds no grant: nothing will come
+          // recorded here, or left to Claude Code's own permission rules (see
+          // `claudeOwnRulesDecide`), which reach `canUseTool` the same way
+          // when they ask. An allowed call holds no grant: nothing will come
           // to consume it, and sixteen unconsumed grants used to end the turn.
           const settledUnasked = (): ClaudePreToolDecision => {
             holdWorktree(activeState, request.toolName, requestInput, request.projectRoot);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
-          const askThroughGrant = (outsideProject = false): ClaudePreToolDecision => {
-            if (
+          const askThroughGrant = async (
+            outsideProject = false,
+          ): Promise<ClaudePreToolDecision> => {
+            // Past the grant cap a call waits for a slot: a grant frees when
+            // its call reaches `canUseTool`, its result arrives, or it expires.
+            while (
               !activeState.preToolRequests.has(request.toolUseId) &&
               activeState.preToolRequests.size >= MAX_PRE_TOOL_GRANTS
             ) {
-              terminal(activeState, {
-                kind: "failed",
-                failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
-              });
-              return deny("Claude tool authority state was exhausted.");
+              const oldest = Math.min(
+                ...[...activeState.preToolRequests.values()].map((grant) => grant.expiresAt),
+              );
+              await waitForAuthoritySlot(
+                activeState,
+                request.signal,
+                oldest - factories.authorityNow(),
+              );
+              if (request.signal.aborted || !gateStillOpen(activeState)) {
+                return deny("Claude tool request was cancelled.");
+              }
+              expireClaudePreToolGrants(activeState, factories.authorityNow());
             }
             activeState.preToolRequests.set(request.toolUseId, {
               workingDirectory: request.projectRoot,
@@ -3253,11 +3398,30 @@ function makeConnection(
               ...(outsideProject ? { outsideProject: true as const } : {}),
               ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
             });
-            return { behavior: "ask" };
+            // Octant keeps its own ask, whatever the person's rules allow, for
+            // a command leaving the sandbox (it runs with the person's whole
+            // access to their files and credentials), a path outside the
+            // folders the session holds (asked as Claude Code asks on its own,
+            // and Reviewed's reviewer decides it), and a switch into a
+            // worktree outside them, which the session holds only once
+            // `canUseTool` sees the switch allowed: a rule answering it inside
+            // the runtime would leave every later call there refused.
+            const worktreeTarget =
+              request.toolName === CLAUDE_ENTER_WORKTREE_TOOL
+                ? claudeWorktreeTarget(requestInput, request.projectRoot)
+                : undefined;
+            const entersUnheldWorktree =
+              worktreeTarget !== undefined && !sessionHolds(activeState, worktreeTarget);
+            return claudeOwnRulesDecide(input.executionPolicy, request.toolName) &&
+              !asksUnsandboxed &&
+              !outsideProject &&
+              !entersUnheldWorktree
+              ? { behavior: "own-rules" }
+              : { behavior: "ask" };
           };
           // A publish asks under every posture below Full access, which asks
           // nobody; the path checks above still refuse a file outside the Project.
-          const decide = (): ClaudePreToolDecision =>
+          const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
@@ -3381,9 +3545,17 @@ function makeConnection(
           }
           return answerWakeupCall(request.toolUseId, request.toolName, toolInput, wakeups);
         };
+        const gitIdentity =
+          sandbox === undefined || options.gitIdentity === undefined
+            ? {}
+            : await options.gitIdentity(projectRoot).catch((): ClaudeGitIdentity => ({}));
+        const launchEnvironment = {
+          ...environment.environment,
+          ...claudeGitIdentityEnvironment(gitIdentity),
+        };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(environment.environment)
-          : environment.environment;
+          ? claudeArtifactLaunchEnvironment(launchEnvironment)
+          : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
         const keepsOwnMemory = providerOwnMemoryLaunches({
@@ -3492,6 +3664,7 @@ function makeConnection(
           pendingAppTools: new Map(),
           pendingQuestions: new Map(),
           preToolRequests: new Map(),
+          authorityWaiters: [],
           approvalReuse: new Set(),
           publishedSnapshots: new Map(),
           worktrees: new Set(),
@@ -4032,6 +4205,7 @@ function makeConnection(
           }
           return Effect.sync(() => {
             state.pendingApprovals.delete(answer.requestId);
+            freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
             if (answer.approved) {
               let persistence: PermissionPersistence = "project-default";
@@ -4097,6 +4271,7 @@ function makeConnection(
             pending.received.set(index, normalizedAnswer);
             if (pending.received.size < pending.events.length) return;
             state.pendingQuestions.delete(pending.requestId);
+            freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
             const answers = Object.fromEntries(
               pending.providerPrompts.map((prompt, position) => [

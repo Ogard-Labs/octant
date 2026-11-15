@@ -1,15 +1,14 @@
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, sep } from "node:path";
+
+import { expandClaudeMemoryImports, type ClaudeMemoryFileRead } from "./claudeMemoryImports";
 
 /** The most one instruction file may weigh; a larger file is skipped, not cut. */
 export const MAX_CLAUDE_INSTRUCTION_FILE_BYTES = 64 * 1024;
 /** The most all of a session's instruction files may weigh together. */
 export const MAX_CLAUDE_INSTRUCTION_TOTAL_BYTES = 256 * 1024;
-/**
- * How deep `@path` imports are followed. Claude Code's own loader stops at
- * five levels (`lle` in the bundled 2.1 runtime, read 2026-11-14).
- */
-const MAX_IMPORT_DEPTH = 5;
 /** The most rule files read from one `.claude/rules` folder. */
 const MAX_RULE_FILES = 64;
 
@@ -21,7 +20,8 @@ export interface ClaudeInstructionSkip {
     | "not-text"
     | "total-exceeded"
     | "unreadable"
-    | "protected";
+    | "protected"
+    | "import-limit";
 }
 
 export interface ClaudeInstructionFiles {
@@ -33,6 +33,8 @@ export interface ClaudeInstructionFiles {
 interface Reading {
   /** Whether a file is one this session may not read, in any form it resolves to. */
   readonly refuses: (path: string) => boolean;
+  /** The resolved folders an import may load from: the account's and the Project's. */
+  readonly roots: string[];
   readonly parts: string[];
   readonly skipped: ClaudeInstructionSkip[];
   readonly seen: Set<string>;
@@ -49,25 +51,45 @@ interface Reading {
  * The account's file is `CLAUDE.md` in its config folder. A Project's are
  * the files Claude Code's loader reads at its root (`CLAUDE.md`,
  * `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`) and the
- * files they import with `@path`. Ancestors above the Project root are
- * outside the Project and are not read; nested folders' files Claude Code
- * loads only when it reads inside them. A file is skipped, with its reason,
- * when it is too large, not text, resolves (through a symlink or an import)
- * outside the folder it came from, or is one `refuses` names: a file or
- * import the session may not read is skipped before it is opened.
+ * files they import with `@path`, expanded as Claude Code expands them
+ * ({@link expandClaudeMemoryImports}): relative, `@~/` and absolute imports
+ * that resolve inside the account's or the Project's folder. Ancestors above
+ * the Project root are outside the Project and are not read; nested folders'
+ * files Claude Code loads only when it reads inside them. A file is skipped,
+ * with its reason, when it is too large, not text, resolves (through a
+ * symlink or an import) outside the folders read here, or is one `refuses`
+ * names: a file or import the session may not read is skipped before it is
+ * opened. An import left out because the import bound was reached is
+ * skipped the same way.
+ *
+ * `importRoots` names more folders an import may load from without reading
+ * their top-level files: the account's folder stays one when Claude Code
+ * loads the account's own CLAUDE.md, so a Project file's `@~/.claude/...`
+ * import still resolves.
  */
 export async function readClaudeInstructionFiles(input: {
   readonly configDir?: string;
   readonly projectRoot?: string;
+  readonly importRoots?: ReadonlyArray<string>;
   readonly refuses?: (path: string) => boolean;
 }): Promise<ClaudeInstructionFiles> {
   const reading: Reading = {
     refuses: input.refuses ?? (() => false),
+    roots: [],
     parts: [],
     skipped: [],
     seen: new Set(),
     bytes: 0,
   };
+  for (const folder of [input.configDir, input.projectRoot, ...(input.importRoots ?? [])]) {
+    if (folder === undefined || !isAbsolute(folder)) continue;
+    try {
+      const root = await realpath(folder);
+      if (!reading.roots.includes(root)) reading.roots.push(root);
+    } catch {
+      // A folder that does not resolve holds nothing to import.
+    }
+  }
   if (input.configDir !== undefined && isAbsolute(input.configDir)) {
     await readFolderFiles(reading, input.configDir, [join(input.configDir, "CLAUDE.md")]);
   }
@@ -110,7 +132,7 @@ async function readFolderFiles(
   } catch {
     return;
   }
-  for (const path of paths) await readOne(reading, realFolder, path, 0);
+  for (const path of paths) await readOne(reading, realFolder, path);
 }
 
 function inside(folder: string, path: string): boolean {
@@ -120,8 +142,7 @@ function inside(folder: string, path: string): boolean {
   );
 }
 
-async function readOne(reading: Reading, realFolder: string, path: string, depth: number) {
-  if (depth > MAX_IMPORT_DEPTH) return;
+async function readOne(reading: Reading, realFolder: string, path: string) {
   try {
     await lstat(path);
   } catch {
@@ -175,9 +196,79 @@ async function readOne(reading: Reading, realFolder: string, path: string, depth
   }
   reading.bytes += content.byteLength;
   reading.parts.push(`Contents of ${path}:\n\n${text.trimEnd()}`);
-  for (const imported of importsOf(text)) {
-    await readOne(reading, realFolder, resolve(dirname(real), imported), depth + 1);
+  readImports(reading, real, text);
+}
+
+/**
+ * Adds the files a read instruction file imports, in Claude Code's order.
+ * Each import meets the same checks as the file itself before it is opened:
+ * the refusal list, the folders read here, the size bound, and plain text.
+ */
+function readImports(reading: Reading, real: string, text: string): void {
+  const resolved = new Map<string, string>();
+  const read: ClaudeMemoryFileRead = (path) => {
+    let target: string;
+    try {
+      lstatSync(path);
+      target = realpathSync(path);
+    } catch {
+      return undefined;
+    }
+    if (reading.seen.has(target)) return undefined;
+    if (reading.refuses(path) || reading.refuses(target)) {
+      reading.skipped.push({ path, reason: "protected" });
+      return undefined;
+    }
+    if (!reading.roots.some((root) => inside(root, target))) {
+      reading.skipped.push({ path, reason: "outside-folder" });
+      return undefined;
+    }
+    let content: Buffer;
+    try {
+      const stats = lstatSync(target);
+      if (!stats.isFile()) return undefined;
+      if (stats.size > MAX_CLAUDE_INSTRUCTION_FILE_BYTES) {
+        reading.skipped.push({ path, reason: "too-large" });
+        return undefined;
+      }
+      content = readFileSync(target);
+    } catch {
+      reading.skipped.push({ path, reason: "unreadable" });
+      return undefined;
+    }
+    if (content.byteLength > MAX_CLAUDE_INSTRUCTION_FILE_BYTES) {
+      reading.skipped.push({ path, reason: "too-large" });
+      return undefined;
+    }
+    const imported = textOf(content);
+    if (imported === undefined) {
+      reading.skipped.push({ path, reason: "not-text" });
+      return undefined;
+    }
+    resolved.set(path, target);
+    return { text: imported, realPath: target };
+  };
+  const expansion = expandClaudeMemoryImports({
+    path: real,
+    text,
+    allowedRoots: reading.roots,
+    homeDirectory: homedir(),
+    read,
+  });
+  for (const entry of expansion.entries.slice(1)) {
+    const target = resolved.get(entry.path) ?? entry.path;
+    if (reading.seen.has(target)) continue;
+    reading.seen.add(target);
+    if (entry.text.trim() === "") continue;
+    const bytes = Buffer.byteLength(entry.text, "utf8");
+    if (reading.bytes + bytes > MAX_CLAUDE_INSTRUCTION_TOTAL_BYTES) {
+      reading.skipped.push({ path: entry.path, reason: "total-exceeded" });
+      continue;
+    }
+    reading.bytes += bytes;
+    reading.parts.push(`Contents of ${entry.path}:\n\n${entry.text.trimEnd()}`);
   }
+  for (const path of expansion.omitted) reading.skipped.push({ path, reason: "import-limit" });
 }
 
 /** UTF-8 text with no NUL byte; anything else is not an instruction file. */
@@ -188,29 +279,4 @@ function textOf(content: Buffer): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-/**
- * The `@path` imports a file names outside code: a relative path, as Claude
- * Code reads them. A home path (`@~/…`) or an absolute one is left alone,
- * since it would leave the folder the file came from.
- */
-function importsOf(text: string): ReadonlyArray<string> {
-  const found: string[] = [];
-  let fenced = false;
-  for (const line of text.split("\n")) {
-    if (line.trimStart().startsWith("```")) {
-      fenced = !fenced;
-      continue;
-    }
-    if (fenced) continue;
-    const outsideSpans = line.replace(/`[^`]*`/g, "");
-    for (const match of outsideSpans.matchAll(/(?:^|\s)@([^\s`]+)/g)) {
-      const target = match[1];
-      if (target === undefined || target.startsWith("~") || isAbsolute(target)) continue;
-      if (!/[./]/.test(target)) continue;
-      found.push(target);
-    }
-  }
-  return found;
 }

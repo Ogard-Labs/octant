@@ -166,13 +166,14 @@ cached prefix. The account's file is
 `CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
 the Project's are the files Claude Code's loader reads at its root
 (`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
-and the files they import with `@path`, up to five levels. Ancestors above
+and the files they import with `@path`, expanded as below. Ancestors above
 the Project root are outside the Project and are not read, and Claude Code
 loads a nested folder's file only once it reads inside it, so neither is
 added. Where the source is on, Claude Code loads the files itself and Octant
 adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
-not UTF-8 text, or resolving through a symlink or import outside its folder
-is skipped and the reason logged. The host reads these files outside every
+not UTF-8 text, or resolving through a symlink outside its folder, or
+through an import outside the account's and the Project's folders, is skipped
+and the reason logged. The host reads these files outside every
 gate, so below Full access a file or import the secret guard protects (the
 check a `Read` of it meets) is skipped as `protected` before it is opened,
 and at every level so is the account's own sign-in (`.credentials.json`,
@@ -701,12 +702,76 @@ secret-path refusals still apply to the file tools, and at Full access
 nothing changes: no command is sandboxed there, and a thread that kept its
 sandbox at Full access keeps `allowUnsandboxedCommands: false`.
 
+Below Full access outside Plan, a call the gate would ask about and that
+passed every Octant refusal (the secret guard and folders the session does
+not hold) is answered with no decision, so Claude Code's own
+permission rules run first: the person's `permissions.allow`, `ask`, and
+`deny` decide it, and only a call they leave to ask reaches `canUseTool`,
+where Octant raises its approval or Reviewed's reviewer decides (maintainer
+decision, 2026-11-14). In a Project the person trusted for Claude Code, the
+allow rules committed in its `.claude/settings.json` count as the person's own
+rules, as they do in Claude Code once its folder trust is accepted: trusting
+the Project is the person adopting them. An untrusted Project's settings
+never load, so its rules allow nothing. A question (`AskUserQuestion`), an Artifact publish,
+and a wake-up keep Octant's own ask, because each needs an answer only Octant
+gives, and so does a `Workflow` start, whose script runs as JavaScript in the
+runtime process outside the command sandbox. So do a file tool naming a path outside the folders the session holds,
+which asks as Claude Code does on its own and goes to Reviewed's reviewer, and
+a switch into a worktree outside them, which the session holds only once
+`canUseTool` sees the switch allowed. Plan keeps Octant's ask for everything. A call the person's rules
+allow never meets `canUseTool`, so its grant is released when its result
+arrives. Rationale: the bundled runtime skips its allow-rule check when a
+hook forces "ask", so a call the person had allowed in their own settings
+used to become an Octant approval anyway. The command sandbox keeps
+`autoAllowBashIfSandboxed: false`, unlike Claude Code's default: running a
+sandboxed command unasked would end Guarded's approval for each command and
+Reviewed's review of it, which are built features; a person who wants a
+command to run unasked writes an allow rule for it. Below Full access the
+sandbox sets `allowUnsandboxedCommands: true`, so a command the sandbox
+stopped (a push that needs `~/.ssh`, a `gh` call that needs its config) may
+be retried outside it with `dangerouslyDisableSandbox`; the gate always
+answers that retry with Octant's own ask, never the person's rules, and its
+approval reads "Bash outside the sandbox". Full access with its sandbox keeps
+the retry off. Each sandboxed launch carries the `user.name` and
+`user.email` git resolves in the checkout (`git config --includes --get`, so
+every scope and any `include` or `includeIf` file counts) as `GIT_AUTHOR_*`
+and `GIT_COMMITTER_*`, since the sandbox cannot read `~/.gitconfig` ([Architecture: Git and pull requests](../architecture.md#modes-chat-work-and-code)).
+
+A call's working directory follows the session, as it does in Claude Code:
+after `cd apps/web` the hook names that folder, and the gate accepts any
+working directory inside the folders the session holds (the Project root,
+its extra folders, everything beneath them, and a worktree the session
+was let into), judging a shell command or
+a search with no folder of its own there. A working directory outside them
+is refused (maintainer decision, 2026-11-14). Rationale: the port used to
+refuse every hook whose working directory was not the Project root, so one
+`cd` into a subfolder refused every later call of the turn.
+
+Where Octant reads a `CLAUDE.md` itself (a Project the runtime may not read
+because it is not trusted), it expands the file's `@path` imports as Claude
+Code does (maintainer decision, 2026-11-14): a relative import resolves from
+the importing file's folder and `@~/` from the home folder, an import in a
+code span or fenced block stays text, a file is loaded once so a cycle ends,
+and imports stop five hops from the first file, past 32 files, or past
+256 KiB, the cut said as truncated. Only a file inside the Project's folders
+or the account's config folders is read, judged at the path it resolves to,
+so a symbolic link out of them is refused. The instruction-file reader above
+expands every file it reads this way, each import meeting the same size,
+text and secret-guard checks as the file that names it before it is opened.
+
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
-grant are never forgotten, and the caps on pending approvals (4) and
-pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
-again. Rationale: the earlier caps of 64 calls a turn and 256 a session
-failed long turns that Claude Code runs to the end in its own app.
+grant are never forgotten. At most four approvals are put to the person at
+once, one question set at a time, and sixteen pre-tool grants are held; a
+call past any of these waits in line for a free slot instead of failing the
+turn (maintainer decision, 2026-11-14), and a call still waiting when the
+session ends is refused with the rest. A grant frees when its call reaches
+`canUseTool`, its result arrives, or it expires. The line is bounded by the
+256 remembered ids. A repeat of a forgotten id passes the whole gate again.
+Rationale: the earlier caps of 64 calls a turn and 256 a session failed long
+turns that Claude Code runs to the end in its own app, and failing at the
+fifth approval or the seventeenth waiting call let parallel subagents end a
+turn.
 
 #### Image input
 
@@ -777,7 +842,13 @@ read-only commands in the foreground: `run_in_background` is refused there.
 Rationale: holding the person's turn keeps one journaled turn per send and
 reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
 host-side runner for turns that start on an idle thread would add a second
-turn lifecycle the thread model does not have.
+turn lifecycle the thread model does not have. Decided and not built yet
+(maintainer decision, 2026-11-14): the person's turn completes when the
+model's reply is done while background tasks keep running and show as tasks
+in the thread, and a task's end opens a new runtime-started turn rather than
+reopening the old one; stopping the thread still ends every background task.
+It needs the session to outlive the person's turn and that host-side runner,
+so the hold above stays until both exist.
 
 #### Workflows
 

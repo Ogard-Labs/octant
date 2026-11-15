@@ -17,6 +17,7 @@ import type {
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
+import { isAbsolute } from "node:path";
 
 import {
   claudeOffersTool,
@@ -53,8 +54,15 @@ export type ClaudeToolDecision =
  * final and runs the tool without consulting `canUseTool`, so the hook can
  * only say "allow" for a call Octant would let through unasked; "ask" hands
  * the call to `canUseTool`, where approvals and questions are raised.
+ * "own-rules" answers nothing, so Claude Code's own permission rules (the
+ * person's `permissions.allow`, `ask`, and `deny`) run first and only a call
+ * they leave to ask reaches `canUseTool`: a forced "ask" skips the person's
+ * allow rules in the bundled runtime.
  */
-export type ClaudePreToolDecision = ClaudeToolDecision | { readonly behavior: "ask" };
+export type ClaudePreToolDecision =
+  | ClaudeToolDecision
+  | { readonly behavior: "ask" }
+  | { readonly behavior: "own-rules" };
 
 export interface ClaudeToolRequest {
   readonly toolName: string;
@@ -70,6 +78,10 @@ export interface ClaudeToolRequest {
 
 export interface ClaudePreToolRequest {
   readonly sessionId: string;
+  /**
+   * The session's working directory when the call was made: the Project
+   * root, or any folder a `cd` moved the session into.
+   */
   readonly projectRoot: string;
   readonly toolName: string;
   readonly input: unknown;
@@ -662,8 +674,9 @@ interface ClaudeAgentSdkHookOptions {
   readonly signal: AbortSignal;
 }
 
+/** A hook's answer; one with no `hookSpecificOutput` decides nothing. */
 interface ClaudeAgentSdkHookOutput {
-  readonly hookSpecificOutput: {
+  readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
     readonly permissionDecision: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
@@ -1447,7 +1460,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   typeof hookInput.cwd !== "string" ||
                   typeof hookInput.tool_name !== "string" ||
                   typeof hookInput.tool_use_id !== "string" ||
-                  hookInput.cwd !== input.projectRoot ||
+                  // The session's working directory moves with a `cd`, so it is
+                  // passed on as the call's folder and the driver judges it
+                  // against the folders the session holds: after `cd apps/web`
+                  // every later call used to be refused here.
+                  !isAbsolute(hookInput.cwd) ||
                   hookInput.session_id !== initializedSessionId ||
                   toolUseId === undefined ||
                   toolUseId !== hookInput.tool_use_id
@@ -1495,6 +1512,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   toolUseId,
                   signal: callback.signal,
                 });
+                if (decision.behavior === "own-rules") return {};
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",

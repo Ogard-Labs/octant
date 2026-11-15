@@ -1976,7 +1976,12 @@ export function mapClaudeToolRequest(
         ? artifactApprovalDescription(target, request.input)
         : target === undefined
           ? `Claude requests permission to use ${toolName}.`
-          : `${toolName} · ${target}`,
+          : request.toolName === "Bash" && request.input.dangerouslyDisableSandbox === true
+            ? // Claude retries a command its sandbox stopped (a push that
+              // needs `~/.ssh`, a `gh` call that needs its config) outside
+              // it; the person is told before it runs with their own access.
+              `${toolName} outside the sandbox · ${target}`
+            : `${toolName} · ${target}`,
   });
   return {
     kind: "approval",
