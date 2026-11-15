@@ -3,7 +3,8 @@
 # Builds the package and both installer builds exactly as the release
 # workflow does, minus Authenticode (which needs the release environment's
 # Azure federation), then installs silently for the runner's user, starts the
-# app from its Start menu entry, refuses an install over the running app,
+# installed app until it shows a window and creates its host profile, refuses
+# an install while the installed program runs,
 # installs over the stopped one, and uninstalls. Nothing here is published;
 # the installer artifact is kept three days for inspection.
 name: Windows installer
@@ -37,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate the installer scripts' syntax
         run: |
-          foreach ($octantScript in @('scripts/smoke-windows-installer.ps1', 'scripts/windows-installer/install-nsis.ps1')) {
+          foreach ($octantScript in @('scripts/smoke-windows-installer.ps1', 'scripts/windows-installer/install-nsis.ps1', 'scripts/windows-installer/start-installed.ps1')) {
             $octantTokens = $null
             $octantParseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $pwd $octantScript), [ref]$octantTokens, [ref]$octantParseErrors)
@@ -70,10 +71,19 @@ jobs:
           if ($octantInstaller.Count -ne 1) { throw 'Expected one installer' }
           bun scripts/smoke-windows-installer-trust.ts $octantInstaller[0].FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # The runner's token is elevated with Administrators as its default
+      # owner, which the native profile refuses; the existing owned-job
+      # launcher starts the app with a user-owned token, as for the QA package.
+      - name: Build the owned-job launcher
+        run: |
+          cmake -S scripts/windows-desktop-qa -B "$env:RUNNER_TEMP/desktop-owner" -A x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build "$env:RUNNER_TEMP/desktop-owner" --config Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install, start, update over and uninstall for this user
         run: |
           $octantInstaller = @(Get-ChildItem -LiteralPath out/windows-installer -Filter '*-win32-x64-setup.exe')
-          ./scripts/smoke-windows-installer.ps1 -Installer $octantInstaller[0].FullName
+          ./scripts/smoke-windows-installer.ps1 -Installer $octantInstaller[0].FullName -Launcher "$env:RUNNER_TEMP/desktop-owner/Release/octant-windows-desktop-owner.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: octant-windows-x64-installer-unsigned

@@ -18412,8 +18412,10 @@ refuse by name on Windows.
   and the signing decisions are pure tests on Linux CI. The `Windows
 installer` workflow builds the package and both installer builds unsigned on
   `windows-2025`, refuses that installer through the real signature check,
-  installs it silently for the runner's user, starts the app from its Start
-  menu entry, refuses an install over the running app, installs over the
+  installs it silently for the runner's user, starts the installed app (with
+  a user-owned token, since the runner's elevated token is refused by the
+  native profile) until it shows a window and creates its host profile,
+  refuses an install while the installed program runs, installs over the
   stopped copy, and uninstalls, keeping a file the person added and the data
   folders. Signing runs only in a release run with the Azure federation
   configured.

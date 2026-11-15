@@ -1,11 +1,17 @@
 # Install, start, update over, and uninstall the per-user Windows installer.
+# The app is started through the owned-job launcher with a user-owned token
+# (windows-installer/start-installed.ps1), because the hosted runner's own
+# token is elevated with Administrators as default owner and the native
+# profile refuses it.
 #
 # Runs on a fresh hosted runner and owns everything it checks: it refuses to
 # start if Octant's install folder, Start menu entry, Apps list entry, link
 # registration or data folders already exist, and it stops only processes
 # whose program lives in the install folder it created. The installer is the
 # unsigned CI build; signing is proven only by the release workflow.
-param([Parameter(Mandatory=$true)][string]$Installer)
+param([Parameter(Mandatory=$true)][string]$Installer,
+  # The owned-job launcher that starts the app with a user-owned token.
+  [Parameter(Mandatory=$true)][string]$Launcher)
 $ErrorActionPreference = 'Stop'
 
 $octantProduct = 'Octant'
@@ -66,21 +72,6 @@ function Stop-OctantProcesses {
   }
 }
 
-function Start-OctantFromStartMenu {
-  Start-Process -FilePath $octantShortcut
-  $deadline = [DateTime]::UtcNow.AddSeconds(90)
-  while ([DateTime]::UtcNow -lt $deadline) {
-    foreach ($process in Get-OctantProcesses) {
-      $window = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
-      if ($window -and $window.MainWindowHandle -ne [IntPtr]::Zero -and $window.MainWindowTitle) {
-        return $window.MainWindowTitle
-      }
-    }
-    Start-Sleep -Milliseconds 500
-  }
-  throw 'The installed app showed no window within 90 seconds'
-}
-
 function Assert-Installed {
   foreach ($path in @($octantExe, $octantUninstaller, $octantShortcut, (Join-Path $octantInstall 'resources\app\package.json'))) {
     if (-not (Test-Path -LiteralPath $path)) { throw "The install is missing $path" }
@@ -102,19 +93,28 @@ try {
   Assert-Installed
   Write-Evidence @{ installedPerUser = $octantInstall }
 
-  # Start it the way a person would and wait for its window.
-  $title = Start-OctantFromStartMenu
-  if (-not (Test-Path -LiteralPath (Join-Path $octantLocal "$octantProduct\hosts\octant"))) {
-    throw 'The installed app started without creating its host profile'
-  }
-  Write-Evidence @{ installedAppStarted = $true; windowTitle = $title }
+  # Start it with a user-owned token and wait for its window and host profile.
+  & $Launcher --profile-user-owner (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File (Join-Path $PSScriptRoot 'windows-installer\start-installed.ps1') $octantExe
+  if ($LASTEXITCODE -ne 0) { throw 'The installed app did not start under a user-owned token' }
+  Stop-OctantProcesses
 
-  # An update while the app runs waits for it, then refuses and leaves the
-  # installed copy untouched.
+  # An update while the program runs waits for it, then refuses and leaves
+  # the installed copy untouched. A running program file is what the
+  # installer waits on (a window or a host both hold it), so the installed
+  # program runs here as Node with an idle script: it holds the file without
+  # starting the app or touching its profile.
+  $env:ELECTRON_RUN_AS_NODE = '1'
+  try {
+    $holder = Start-Process -FilePath $octantExe -ArgumentList @('-e', '"setTimeout(() => {}, 150000)"') -PassThru -WindowStyle Hidden
+  } finally {
+    Remove-Item Env:\ELECTRON_RUN_AS_NODE
+  }
+  Start-Sleep -Seconds 2
+  if ($holder.HasExited) { throw 'The installed program did not stay running to hold its file' }
   $before = (Get-FileHash -LiteralPath $octantExe -Algorithm SHA256).Hash
   $code = Invoke-OctantInstaller @('/S') 180
   if ($code -ne 3) { throw "An install over the running app exited $code, not the busy refusal" }
-  if ((Get-OctantProcesses).Count -eq 0) { throw 'The refused install stopped the running app' }
+  if ($holder.HasExited) { throw 'The refused install stopped the running program' }
   if ((Get-FileHash -LiteralPath $octantExe -Algorithm SHA256).Hash -cne $before) { throw 'The refused install changed the app' }
   Write-Evidence @{ installOverRunningAppRefused = $true }
   Stop-OctantProcesses
