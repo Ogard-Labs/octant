@@ -14,8 +14,11 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderResumeCursor,
+  ProviderSessionId,
   ThreadProviderHandoff,
 } from "./providers";
+import { ProviderNativeSessionId } from "./providerNativeSession";
 import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
@@ -67,6 +70,24 @@ export type WorkAccess = typeof WorkAccess.Type;
 
 /** The access a Work thread starts with when nothing else is set. */
 export const DEFAULT_WORK_ACCESS: WorkAccess = "ask-first";
+
+/**
+ * The provider session begun outside Octant that an empty Work thread was
+ * started from, with what its first turn must still match to resume it: the
+ * provider, model, Project binding and folder the host adopted it under. The
+ * cursor is the host's own resume record, as a turn's is.
+ */
+export const WorkThreadAdoptedSession = Schema.Struct({
+  nativeSessionId: ProviderNativeSessionId,
+  providerSessionId: ProviderSessionId,
+  resumeCursor: ProviderResumeCursor,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  bindingRevisionId: BindingRevisionId,
+  workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
+}).annotations(strict);
+export type WorkThreadAdoptedSession = typeof WorkThreadAdoptedSession.Type;
 
 export const WorkThread = Schema.Struct({
   id: WorkThreadId,
@@ -128,6 +149,12 @@ export const WorkThread = Schema.Struct({
    * is idle, under the wake bounds. Absent, the message waits for its next turn.
    */
   messageWake: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when the person started this thread from a provider session begun
+   * outside Octant: its first turn resumes that session. Journaled only on a
+   * thread with no turn yet; absent on every other thread.
+   */
+  adoptedSession: Schema.optional(WorkThreadAdoptedSession),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,

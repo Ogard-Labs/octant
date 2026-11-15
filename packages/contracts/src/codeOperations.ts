@@ -13,6 +13,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
+import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
@@ -2032,13 +2033,8 @@ const ChildActivityEvent = Schema.Struct({
 const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
   .annotations(strict)
   .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
-/**
- * A provider runtime's own id for a session it keeps, as it lists it. Opaque
- * and path-free, so it can name the session and nothing else.
- */
-export const CodeNativeSessionId = Schema.String.pipe(
-  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
-);
+/** A provider runtime's own id for a session it keeps; see {@link ProviderNativeSessionId}. */
+export const CodeNativeSessionId = ProviderNativeSessionId;
 export type CodeNativeSessionId = typeof CodeNativeSessionId.Type;
 export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(CodeNativeSessionId);
 

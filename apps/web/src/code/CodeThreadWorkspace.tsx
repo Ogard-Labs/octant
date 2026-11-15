@@ -47,6 +47,7 @@ import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/Thr
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -72,7 +73,7 @@ import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import { ThreadWakeups } from "../wakeups/ThreadWakeups";
 import { CodeLiveTasks } from "./CodeLiveTasks";
 import { CodeNativeSession } from "./CodeNativeSession";
-import type { CodeSessionClient } from "./codeSessionClient";
+import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
 import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
@@ -615,6 +616,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const { serverUrl, windowCapability, codeSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      codeSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createCodeSessionClient({ serverUrl, windowCapability })),
+    [codeSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "code",
     hostId: props.hostId,
@@ -2552,17 +2562,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 windowCapability={props.windowCapability}
                 client={props.wakeupClient}
               />
-              <CodeLiveTasks
-                threadId={props.threadId}
-                serverUrl={props.serverUrl}
-                windowCapability={props.windowCapability}
-                client={props.codeSessionClient}
-              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
               <CodeNativeSession
                 threadId={props.threadId}
-                serverUrl={props.serverUrl}
-                windowCapability={props.windowCapability}
-                client={props.codeSessionClient}
+                client={sessionClient}
                 threadHasTurns={props.controller.conversation.length > 0}
               />
               <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />

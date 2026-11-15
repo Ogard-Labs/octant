@@ -1,10 +1,11 @@
 import { History } from "../ui/icons";
-import type { CodeNativeSessions, CodeThreadId } from "@octant/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
-import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
+import type { ThreadSessionClient } from "./codeSessionClient";
 import "./code-native-session.css";
+
+type Listed = Awaited<ReturnType<NonNullable<ThreadSessionClient<string>["nativeSessions"]>>>;
 
 const lastWritten = (milliseconds: number) =>
   new Date(milliseconds).toLocaleString(undefined, {
@@ -15,29 +16,19 @@ const lastWritten = (milliseconds: number) =>
   });
 
 /**
- * Starting an empty Code thread from a session its provider keeps for this
- * folder and account, begun outside Octant, and, once started from one, the
- * session's own id in the thread's details. Nothing shows for a thread that
- * has messages of its own and was not started from a session, or while the
- * provider offers none.
+ * Starting an empty Work or Code thread from a session its provider keeps for
+ * this folder and account, begun outside Octant, and, once started from one,
+ * the session's own id in the thread's details. Nothing shows for a thread
+ * that has messages of its own and was not started from a session, or while
+ * the provider offers none.
  */
-export function CodeNativeSession(props: {
-  readonly threadId: CodeThreadId;
+export function CodeNativeSession<Id extends string>(props: {
+  readonly threadId: Id;
   readonly threadHasTurns: boolean;
-  readonly serverUrl?: string | undefined;
-  readonly windowCapability?: string | undefined;
-  readonly client?: CodeSessionClient | undefined;
+  readonly client: ThreadSessionClient<Id> | undefined;
 }) {
-  const { threadId, threadHasTurns, serverUrl, windowCapability } = props;
-  const client = useMemo(
-    () =>
-      props.client ??
-      (serverUrl === undefined || windowCapability === undefined
-        ? undefined
-        : createCodeSessionClient({ serverUrl, windowCapability })),
-    [props.client, serverUrl, windowCapability],
-  );
-  const [listed, setListed] = useState<CodeNativeSessions>();
+  const { threadId, threadHasTurns, client } = props;
+  const [listed, setListed] = useState<Listed>();
   const [open, setOpen] = useState(false);
   const [chosen, setChosen] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -72,7 +63,7 @@ export function CodeNativeSession(props: {
     setMessage(undefined);
     try {
       const result = await client.adoptNativeSession(threadId, choice.nativeSessionId);
-      if (result.kind === "code-native-session-refused") setMessage(result.message);
+      if ("message" in result) setMessage(result.message);
       else setOpen(false);
       await refresh();
     } catch {
