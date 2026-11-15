@@ -136,7 +136,7 @@ import {
 } from "../providers/turnBudget";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
 import { createCodeSessionRouteHandler } from "../code/codeSessionRoutes";
-import { codeSessionKey } from "../code/codeOperationRuntime";
+import { codeSessionKey, codeSessionTerms } from "../code/codeOperationRuntime";
 
 export function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -567,10 +567,53 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           persistence.readShellSettings()?.settings ?? defaultShellSettings(),
         ),
       startRuntimeTurn: (key) => startCodeRuntimeTurn(key),
+      currentTerms: (key) => {
+        if (!key.startsWith("code:")) return undefined;
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(key.slice("code:".length)));
+          return thread === undefined ? undefined : codeSessionTerms(thread);
+        } catch {
+          return undefined;
+        }
+      },
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
     });
-    yield* Effect.addFinalizer(() => Effect.promise(() => outlivingCodeSessions.close()));
+    // Every change to a Code thread passes through the journal (a level or
+    // model change, a checkout rebind, an archive, a move, a deletion), so a
+    // kept session started on terms the thread no longer has is stopped here
+    // rather than from each command's path.
+    const unsubscribeKeptSessionTerms = persistence.journal.subscribeCommitted((append) => {
+      const threadIds = new Set<string>();
+      for (const event of append.events) {
+        if (event.aggregateType === "code-thread") threadIds.add(event.aggregateId);
+        else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
+          if (purged.mode === "code" && typeof purged.threadId === "string") {
+            threadIds.add(purged.threadId);
+          }
+        }
+      }
+      for (const threadId of threadIds) {
+        let key: string;
+        try {
+          key = codeSessionKey(decodeCodeThreadId(threadId));
+        } catch {
+          continue;
+        }
+        void outlivingCodeSessions
+          .stopThreadIfChanged(key)
+          .catch((error: unknown) =>
+            console.error("[live tasks] A changed thread's session did not stop.", error),
+          );
+      }
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        unsubscribeKeptSessionTerms();
+        await outlivingCodeSessions.close();
+      }),
+    );
     let pullRequestWatchService: PullRequestWatchPort | undefined;
     // Areas built after this one add tools to a Code turn here, as they do to
     // a Chat thread, so the runtime never holds the services behind them.

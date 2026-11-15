@@ -1319,9 +1319,18 @@ interface SessionState {
  */
 interface ClaudeRuntimeTurn {
   attached: boolean;
+  /**
+   * The runtime finished the turn before the host attached one. It still
+   * waits, its events held, until the host attaches and reads it whole or
+   * the session is stopped; dropping it lost the turn and stranded the
+   * host's attach.
+   */
+  completed: boolean;
   readonly waiting: Array<ProviderRuntimeEvent>;
   /** More events arrived before the host attached than are held. */
   overflowed: boolean;
+  /** Settles true when the host attaches, false when the session ends first. */
+  readonly opened: DeferredValue<boolean>;
 }
 
 /** What the runtime is told after the person answered its ask to change the thread's level. */
@@ -2391,55 +2400,81 @@ function makeClaudeNativeSessions(
           ),
     adopt: (input) =>
       Effect.tryPromise({
-        try: async () => {
-          if (input.instanceId !== options.instanceId) {
-            throw refuse("invalid-configuration", "Provider instance does not match driver.");
-          }
-          if (await heldByOctant(input.nativeSessionId)) {
-            throw refuse("unavailable", "That Claude session already belongs to an Octant thread.");
-          }
-          const found = await Effect.runPromise(
-            options.sdk.findSession({
-              sessionId: input.nativeSessionId,
-              projectRoot: input.projectRoot,
-              ...configDirectory,
-            }),
-          );
-          if (found === undefined || found.projectRoot !== input.projectRoot) {
-            throw refuse(
-              "stale-resume",
-              "That Claude session is not one of this folder's on this account.",
-            );
-          }
-          await options.resumeIdentityPort.put(
-            {
-              providerInstanceId: options.instanceId,
-              octantSessionId: input.sessionId,
-              sdkSessionId: input.nativeSessionId,
-              projectRoot: input.projectRoot,
-              modelId: input.modelId,
-              authentication: options.authentication,
-            },
-            controller(),
-          );
-          return {
-            driverKind: "claude" as const,
-            value: input.nativeSessionId,
-            binding: providerResumeBinding({
-              instanceId: options.instanceId,
-              sessionId: input.sessionId,
-              projectRoot: input.projectRoot,
-              mode: input.mode,
-              modelId: input.modelId,
-            }),
-          };
-        },
+        try: () =>
+          adoptingOneAtATime(`${String(options.instanceId)}\u0000${input.nativeSessionId}`, () =>
+            adoptOnce(input),
+          ),
         catch: (error) =>
           typeof error === "object" && error !== null && refusals.has(error as ProviderFailure)
             ? (error as ProviderFailure)
             : failure("unavailable", "The Claude session could not be taken up."),
       }),
   };
+  async function adoptOnce(
+    input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
+  ) {
+    if (input.instanceId !== options.instanceId) {
+      throw refuse("invalid-configuration", "Provider instance does not match driver.");
+    }
+    if (await heldByOctant(input.nativeSessionId)) {
+      throw refuse("unavailable", "That Claude session already belongs to an Octant thread.");
+    }
+    const found = await Effect.runPromise(
+      options.sdk.findSession({
+        sessionId: input.nativeSessionId,
+        projectRoot: input.projectRoot,
+        ...configDirectory,
+      }),
+    );
+    if (found === undefined || found.projectRoot !== input.projectRoot) {
+      throw refuse(
+        "stale-resume",
+        "That Claude session is not one of this folder's on this account.",
+      );
+    }
+    await options.resumeIdentityPort.put(
+      {
+        providerInstanceId: options.instanceId,
+        octantSessionId: input.sessionId,
+        sdkSessionId: input.nativeSessionId,
+        projectRoot: input.projectRoot,
+        modelId: input.modelId,
+        authentication: options.authentication,
+      },
+      controller(),
+    );
+    return {
+      driverKind: "claude" as const,
+      value: input.nativeSessionId,
+      binding: providerResumeBinding({
+        instanceId: options.instanceId,
+        sessionId: input.sessionId,
+        projectRoot: input.projectRoot,
+        mode: input.mode,
+        modelId: input.modelId,
+      }),
+    };
+  }
+}
+
+/**
+ * Adoptions of one native session waiting their turn, by instance and session
+ * id. The check that no Octant thread holds the session and the resume record
+ * that then claims it are one step: two threads adopting the same session at
+ * once both passed the check before either wrote, and the second record left
+ * the first thread resuming a session it no longer owned.
+ */
+const adoptionsInFlight = new Map<string, Promise<unknown>>();
+
+async function adoptingOneAtATime<A>(key: string, adopt: () => Promise<A>): Promise<A> {
+  const before = adoptionsInFlight.get(key) ?? Promise.resolve();
+  const mine = before.catch(() => undefined).then(adopt);
+  adoptionsInFlight.set(key, mine);
+  try {
+    return await mine;
+  } finally {
+    if (adoptionsInFlight.get(key) === mine) adoptionsInFlight.delete(key);
+  }
 }
 
 export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
@@ -2558,10 +2593,19 @@ function makeConnection(
     const publish = (event: ProviderRuntimeEvent) => {
       // A turn the runtime started by itself is read from its first event
       // once the host has opened a turn for it.
-      const waiting = sessions.get(event.sessionId)?.runtimeTurn;
-      if (waiting !== undefined && !waiting.attached) {
-        if (waiting.waiting.length < MAX_WAITING_RUNTIME_TURN_EVENTS) waiting.waiting.push(event);
-        else waiting.overflowed = true;
+      const state = sessions.get(event.sessionId);
+      const waiting = state?.runtimeTurn;
+      if (state !== undefined && waiting !== undefined && !waiting.attached) {
+        if (waiting.waiting.length < MAX_WAITING_RUNTIME_TURN_EVENTS) {
+          waiting.waiting.push(event);
+          return;
+        }
+        // A turn that cannot be shown whole never runs on unseen: the
+        // session ends here, and the host's attach is refused.
+        if (!waiting.overflowed) {
+          waiting.overflowed = true;
+          closeAfterPublishedTerminal(state);
+        }
         return;
       }
       Effect.runFork(PubSub.publish(events, event));
@@ -2631,6 +2675,8 @@ function makeConnection(
       if (state.released) return;
       state.releasePromise ??= (async () => {
         state.releasing = true;
+        // A tool call held for the host's attach is refused, never left waiting.
+        state.runtimeTurn?.opened.resolve(false);
         // A stop or teardown mid-compaction ends the request with it; the
         // runtime may already have rewritten the session.
         settleCompaction(state);
@@ -2892,6 +2938,13 @@ function makeConnection(
     const openIdleRuntimeTurn = (state: SessionState) => {
       const previous = state.context;
       if (previous === undefined || state.claudeSessionId === undefined) return;
+      // The runtime started another turn while the last one it finished by
+      // itself still waits for the host. The host reads one runtime turn per
+      // attach, so the session ends rather than run a turn nobody can read.
+      if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+        closeAfterPublishedTerminal(state);
+        return;
+      }
       state.context = makeEventContext(state, state.claudeSessionId, previous.sequence);
       for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
       state.terminalResult = deferred<void>();
@@ -2899,7 +2952,13 @@ function makeConnection(
       state.hookDeliveries.push({ viaHook: false, delivered: false });
       state.appToolsEnabled = false;
       state.outputAccepted = true;
-      state.runtimeTurn = { attached: false, waiting: [], overflowed: false };
+      state.runtimeTurn = {
+        attached: false,
+        completed: false,
+        waiting: [],
+        overflowed: false,
+        opened: deferred<boolean>(),
+      };
       publish({
         kind: "runtime-turn-started",
         trigger: "background-task",
@@ -3063,7 +3122,13 @@ function makeConnection(
         if (isTerminalEvent(mapped.event)) {
           state.heldTurn = undefined;
           state.turnUsage = undefined;
-          state.runtimeTurn = undefined;
+          // A runtime turn the host has not attached yet keeps waiting, with
+          // its terminal event held, until the host attaches and reads it.
+          if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+            state.runtimeTurn.completed = true;
+          } else {
+            state.runtimeTurn = undefined;
+          }
           state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
@@ -3896,7 +3961,36 @@ function makeConnection(
           if (answer.answered && call !== undefined) call.answeredByOctant = true;
           return denyClaudeToolRequest(activeState, toolUseId, answer.message);
         };
+        // A turn the runtime started by itself runs at the level the host
+        // admits it at, so none of its calls is answered, Full access's
+        // unasked allow included, until the host has opened a turn for it at
+        // the thread's current level and attached. A session the host stops
+        // first refuses the call.
+        // Undefined when nothing holds the call, so an ordinary call reaches
+        // its gate in the same tick as before.
+        const heldForRuntimeTurn = (signal: AbortSignal): Promise<boolean> | undefined => {
+          const activeState = callbackState;
+          const runtimeTurn = activeState?.runtimeTurn;
+          if (activeState === undefined || runtimeTurn === undefined || runtimeTurn.attached) {
+            return undefined;
+          }
+          const aborted = new Promise<false>((resolve) => {
+            if (signal.aborted) resolve(false);
+            else signal.addEventListener("abort", () => resolve(false), { once: true });
+          });
+          return Promise.race([runtimeTurn.opened.promise, aborted]).then(
+            (opened) => !opened || signal.aborted || !gateStillOpen(activeState),
+          );
+        };
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
+          const held = heldForRuntimeTurn(request.signal);
+          if (held !== undefined && (await held)) {
+            return denyClaudeToolRequest(
+              callbackState,
+              request.toolUseId,
+              "Claude's own turn ended before Octant opened it.",
+            );
+          }
           const decision = await gateToolUse(request);
           if (
             decision.behavior !== "allow" ||
@@ -3908,6 +4002,14 @@ function makeConnection(
           return answerWakeupCall(request.toolUseId, request.toolName, request.input, wakeups);
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
+          const held = heldForRuntimeTurn(request.signal);
+          if (held !== undefined && (await held)) {
+            return denyClaudeToolRequest(
+              callbackState,
+              request.toolUseId,
+              "Claude's own turn ended before Octant opened it.",
+            );
+          }
           const decision = await gatePreToolUse(request);
           if (
             decision.behavior === "deny" ||
@@ -4610,10 +4712,7 @@ function makeConnection(
         Effect.suspend(() => {
           const state = sessions.get(sessionId);
           const waiting = state?.runtimeTurn;
-          if (state === undefined || state.terminal || waiting === undefined || waiting.attached) {
-            return Effect.fail(failure("protocol", "No turn Claude started by itself is waiting."));
-          }
-          if (waiting.overflowed) {
+          if (state !== undefined && waiting?.overflowed === true) {
             return Effect.promise(async () => {
               state.runtimeTurn = undefined;
               closeAfterPublishedTerminal(state);
@@ -4629,11 +4728,17 @@ function makeConnection(
               ),
             );
           }
+          if (state === undefined || state.terminal || waiting === undefined || waiting.attached) {
+            return Effect.fail(failure("protocol", "No turn Claude started by itself is waiting."));
+          }
           return Effect.sync(() => {
             waiting.attached = true;
             for (const event of waiting.waiting.splice(0)) {
               Effect.runFork(PubSub.publish(events, event));
             }
+            // A turn the runtime already finished is over once it is read.
+            if (waiting.completed && state.runtimeTurn === waiting) state.runtimeTurn = undefined;
+            waiting.opened.resolve(true);
             reportBackgroundWork(state);
           });
         }),

@@ -6,6 +6,7 @@ import {
   type PermissionPersistence,
   type ProviderContextBlock,
   type ProviderFailure,
+  type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
@@ -6878,6 +6879,31 @@ describe("Claude sessions started outside Octant", () => {
     expect(f.resumeIdentities.get("sdk-session-1")?.octantSessionId).toBe(sessionId);
     await acquired.close();
   });
+
+  it("lets only one of two threads adopting the same session at once take it up", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const adopt = (threadSession: string) =>
+      Effect.runPromiseExit(
+        f.driver.nativeSessions!.adopt({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          sessionId: decodeProviderSessionId(threadSession),
+          nativeSessionId: outside,
+          modelId,
+        }),
+      );
+    const [first, second] = await Promise.all([
+      adopt("80000000-0000-4000-8000-000000000801"),
+      adopt("80000000-0000-4000-8000-000000000802"),
+    ]);
+    expect([first, second].filter(Exit.isSuccess)).toHaveLength(1);
+    expect(f.resumeIdentityPort.put).toHaveBeenCalledTimes(1);
+    expect(String(f.resumeIdentities.get(outside)?.octantSessionId)).toBe(
+      "80000000-0000-4000-8000-000000000801",
+    );
+  });
 });
 
 describe("Claude exact resume", () => {
@@ -8306,14 +8332,14 @@ describe("Claude background work", () => {
   });
 
   describe("in a session the host keeps past its turn", () => {
-    async function startKeptTurn() {
+    async function startKeptTurn(executionPolicy: ProviderExecutionPolicy = "approval-gated") {
       const f = harness();
       const acquired = await acquire(f.driver, "code");
       await Effect.runPromise(
         acquired.connection.start({
           sessionId,
           modelId,
-          executionPolicy: "approval-gated",
+          executionPolicy,
           outlivesTurn: true,
         }),
       );
@@ -8349,8 +8375,92 @@ describe("Claude background work", () => {
       const watched = acquired.connection.backgroundWork?.(sessionId);
       const reported: ProviderBackgroundWork[] = [];
       watched?.watch((work) => reported.push(work));
-      return { acquired, query, seen, collected, follow, watched, reported };
+      return { acquired, query, seen, collected, follow, watched, reported, open: f.opens[0]! };
     }
+
+    it("answers none of a runtime-started turn's tool calls until the host attaches a turn to it", async () => {
+      const { acquired, query, collected, follow, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      let answered = false;
+      const decision = open
+        .preToolUse({
+          sessionId: sdk,
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "rm -rf build" },
+          toolUseId: "runtime-bash",
+          signal: new AbortController().signal,
+        })
+        .then((value) => {
+          answered = true;
+          return value;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Full access would allow it unasked, but the host has not admitted the turn.
+      expect(answered).toBe(false);
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "allow" });
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      await acquired.close();
+    });
+
+    it("refuses a held runtime-turn tool call when the session is stopped before the host attaches", async () => {
+      const { acquired, query, collected, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      const decision = open.preToolUse({
+        sessionId: sdk,
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "npm start" },
+        toolUseId: "runtime-start",
+        signal: new AbortController().signal,
+      });
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+      await acquired.close();
+    });
+
+    it("keeps a runtime-started turn that finishes before the host attaches, and reads it whole on attach", async () => {
+      const { acquired, query, seen, collected, follow, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      // Still waiting for the host, so the keeper opens a turn rather than stop it.
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: true, ended: false });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: false });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
 
     it("completes the person's turn when the reply is done while its background command keeps running", async () => {
       const { acquired, query, seen, collected, watched } = await startKeptTurn();

@@ -6661,8 +6661,10 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   runtime-started turn for it through the thread's ordinary admission, at the
   thread's level, and that turn reattaches to the kept session. The kept
   session is stopped when its last task ends with no turn running, when the
-  person stops the thread, after the host's background work limit, when the
-  runtime's turn cannot be opened, and at shutdown. Elsewhere (Work, a child
+  person stops the thread or changes its level, model, checkout or
+  lifecycle, after the host's background work limit, when the runtime's
+  turn cannot be opened, and at shutdown; none of the runtime's tool calls is
+  answered before the host has opened its turn. Elsewhere (Work, a child
   run) the person's turn that started the work is held open until the work
   ends, and each turn the runtime starts inside it is folded in, bounded by a
   cap and the stalled-turn limit. Either way the turn is marked by the

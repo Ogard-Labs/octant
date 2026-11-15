@@ -801,27 +801,39 @@ running and show as live tasks above the thread's composer, with Stop. The
 host keeps the session (`OutlivingSessions`) and starts every Code session
 with `outlivesTurn`, which tells the driver not to hold the turn. When the
 runtime then starts a turn by itself while the thread is idle, the driver
-holds that turn's events, and its approvals wait on the gate, until the host
-opens a runtime-started turn for the thread: an ordinary Code turn started
+holds that turn's events, and every one of its tool calls waits unanswered
+(Full access's unasked allow included, and refused if the session stops
+first), until the host opens a runtime-started turn for the thread: an ordinary Code turn started
 as the host at the thread's own level, whose recorded prompt says why it
 exists and is never sent. That turn reattaches to the kept session with
 `attachRuntimeTurn` instead of sending, reads the held events from their
 `runtime-turn-started` event (`trigger: "background-task"`), and is journaled
 and replayed like any other turn, the frame keeping the runtime as its
-origin. A person's send is refused while such a turn waits to be opened, and
-a turn needing a session started differently (another level, model, or tool
-set) stops the kept one, and its tasks, first. Between turns the runtime's
+origin. A turn the runtime finishes before the host attaches still waits,
+its events held, and is read whole on attach; a second turn the runtime
+starts before the first was attached stops the session, because one attach
+reads one turn. A person's send is refused while such a turn waits to be
+opened, and a turn needing a session started differently (another level,
+model, or tool set) stops the kept one, and its tasks, first. Between turns the runtime's
 own task frames are not shown in any turn; a task's end only changes the
 live tasks.
 
 The kept session is always stopped, never orphaned: when its last task has
-ended and no turn runs, when the person stops the thread (Stop on the live
-tasks, or a Stop with no turn running), after the background work limit with
-no turn in the thread (a host setting: 2 hours by default, Off for no bound),
-when the host cannot open the runtime's turn (the thread was archived, or
-stayed busy for 20 tries), when a turn ends without settling its session,
-and at shutdown. A runtime-started turn holds at most 1,024 events before it
-is opened; past that the session is stopped. Rationale: settling the person's
+ended and no turn runs (after up to 5 seconds for the turn the runtime
+starts for that task's end, which reaches the host first), when the person
+stops the thread (Stop on the live tasks, or a Stop with no turn running),
+when the person changes the thread so it would start a session on other
+terms (its level or how asks are answered, its provider or model, its
+checkout or folder) or archives, moves, or deletes it, read from the
+journal, so a session never goes on acting at the level it launched with,
+after the background work limit with no turn in the thread (a host setting:
+2 hours by default, Off for no bound), when the host cannot open the
+runtime's turn (the thread was archived, or stayed busy for 20 tries), when
+the turn the host opened has not taken the session up within 60 seconds,
+when a turn ends without settling its session, and at shutdown. A
+runtime-started turn holds at most 1,024 events before it is opened; the
+event past that stops the session at once and the host's attach is
+refused. Rationale: settling the person's
 turn keeps a dev server from holding it open forever, and opening the
 runtime's turn through the thread's ordinary admission reuses the gate, the
 journal, the stop and replay unchanged rather than adding a turn kind.
@@ -935,7 +947,10 @@ window that approved and journaled as the person's like any level change,
 then ends the turn that asked: Plan's read-only rule rests on the tool set
 and sandbox profile a session launches with, so the new level applies from
 the next turn's session and never inside the one that asked. A kept session
-started at the old level is stopped before that turn too. Entering Plan
+started at the old level is stopped before that turn too. The level an
+approval applies is worked out when the person answers, from the thread as
+it is then, so a level lowered while the ask was open is the one a plan
+returns to. Entering Plan
 records the level it left as the thread's `planReturnPolicy` (Full access
 is recorded as approval-gated, because only the person chooses Full access),
 and an approved plan returns the thread there, or to approval-gated when the
@@ -952,7 +967,9 @@ whose own folder is the thread's (the SDK's `listSessions` under the
 account's configuration folder, as the resume lookup reads it), newest
 first, at most 50, leaving out any session an Octant thread already resumes:
 adopting one would point its resume record at another thread and strand the
-first. Each carries its title (the name the person gave it, or the runtime's
+first. The check and the resume record it then writes are one step for each
+session: two threads adopting the same session at once take turns, and the
+second is refused. Each carries its title (the name the person gave it, or the runtime's
 summary of its first prompt) and branch for the picker only; a resume lookup
 never reads the title, and nothing journals it. Adopting writes the same
 resume record a session Octant started writes (`ClaudeResumeIdentity`, with

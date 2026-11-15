@@ -44,6 +44,20 @@ export interface OutlivingSessionsOptions {
   readonly onError?: (message: string, error: unknown) => void;
   /** How long to wait before asking again when the thread was busy. */
   readonly busyRetryMs?: number;
+  /**
+   * The terms a thread's session would be started on now (its level, model,
+   * checkout, lifecycle), or undefined when the thread can run no turn. A
+   * kept session started on other terms is stopped: the person changed the
+   * thread, and the session would otherwise go on acting as it was before.
+   */
+  readonly currentTerms?: (key: string) => string | undefined;
+  /**
+   * How long a session whose last task just ended waits for the runtime's
+   * own follow-up turn before it is stopped as idle.
+   */
+  readonly taskEndGraceMs?: number;
+  /** How long an opened runtime turn may take to take up the session. */
+  readonly leaseDeadlineMs?: number;
 }
 
 /** What a thread's live tasks look like to the person. */
@@ -54,6 +68,18 @@ export interface LiveTasks {
 }
 
 const BUSY_RETRIES = 20;
+/**
+ * A task's end reaches the host before the runtime reports the turn it
+ * starts for it, so a session left with no task is given this long to start
+ * one before it counts as idle.
+ */
+const TASK_END_GRACE_MS = 5_000;
+/**
+ * A runtime turn the host opened that has not taken up the session by then
+ * never will (it failed or was refused before reaching the provider), and
+ * the session would otherwise wait for the idle limit, or forever with none.
+ */
+const LEASE_DEADLINE_MS = 60_000;
 
 interface Kept {
   readonly key: string;
@@ -61,6 +87,8 @@ interface Kept {
   readonly scope: Scope.CloseableScope;
   /** The folder, folders, and permission setting the connection was acquired for. */
   readonly acquiredFor: string;
+  /** The thread's terms (see {@link OutlivingSessionsOptions.currentTerms}) its last turn ran on. */
+  terms?: string | undefined;
   session?:
     | {
         readonly sessionId: ProviderSessionId;
@@ -74,6 +102,10 @@ interface Kept {
   /** A host turn reads the connection now. */
   leased: boolean;
   idleTimer?: ReturnType<typeof setTimeout> | undefined;
+  /** Stops the session if no runtime turn starts after its last task ended. */
+  graceTimer?: ReturnType<typeof setTimeout> | undefined;
+  /** Stops the session if the runtime turn the host opened never takes it up. */
+  leaseTimer?: ReturnType<typeof setTimeout> | undefined;
   runtimeTurnRequested: boolean;
   disposed?: Promise<void>;
 }
@@ -97,6 +129,7 @@ export class OutlivingSessions {
     key: string,
     acquiredFor: string,
     open: Effect.Effect<ProviderConnection, ProviderFailure, R | Scope.Scope>,
+    terms?: string,
   ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
     return Effect.gen(this, function* () {
       if (this.#closed) {
@@ -126,6 +159,7 @@ export class OutlivingSessions {
         this.#kept.set(key, kept);
       }
       const leased = kept;
+      leased.terms = terms;
       this.#lease(leased);
       // A turn that ends without settling the session (a failure before its
       // stop, an interruption) never leaves it running unseen.
@@ -157,6 +191,19 @@ export class OutlivingSessions {
     return true;
   }
 
+  /**
+   * The thread changed: its kept session is stopped when the thread would now
+   * start one on other terms (another level, model, checkout) or can run no
+   * turn (archived, moved, deleted). A turn holding the session settles it
+   * when it ends. Answers whether one was stopped.
+   */
+  async stopThreadIfChanged(key: string): Promise<boolean> {
+    const kept = this.#kept.get(key);
+    if (kept === undefined || kept.leased || this.#termsCurrent(kept)) return false;
+    await this.#dispose(kept);
+    return true;
+  }
+
   /** Stops every kept session; nothing is kept after it. */
   async close(): Promise<void> {
     this.#closed = true;
@@ -166,8 +213,14 @@ export class OutlivingSessions {
   #lease(kept: Kept): void {
     kept.leased = true;
     kept.runtimeTurnRequested = false;
-    if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
-    kept.idleTimer = undefined;
+    clearTimers(kept);
+  }
+
+  #termsCurrent(kept: Kept): boolean {
+    const current = this.#options.currentTerms;
+    if (current === undefined) return true;
+    const terms = current(kept.key);
+    return terms !== undefined && terms === kept.terms;
   }
 
   #leasedConnection(kept: Kept): ProviderConnection {
@@ -228,6 +281,7 @@ export class OutlivingSessions {
     const work = kept.work;
     return (
       !this.#closed &&
+      this.#termsCurrent(kept) &&
       kept.session !== undefined &&
       String(kept.session.sessionId) === String(sessionId) &&
       work !== undefined &&
@@ -238,6 +292,7 @@ export class OutlivingSessions {
 
   #observe(kept: Kept, work: ProviderBackgroundWork): void {
     if (this.#kept.get(kept.key) !== kept) return;
+    const taskEnded = (kept.work?.tasks.length ?? 0) > work.tasks.length;
     kept.work = work;
     this.#options.onChanged?.(kept.key);
     if (work.ended) {
@@ -246,13 +301,36 @@ export class OutlivingSessions {
     }
     if (kept.leased) return;
     if (work.runtimeTurnWaiting) {
+      if (kept.graceTimer !== undefined) clearTimeout(kept.graceTimer);
+      kept.graceTimer = undefined;
       if (!kept.runtimeTurnRequested) {
         kept.runtimeTurnRequested = true;
         void this.#requestRuntimeTurn(kept, BUSY_RETRIES);
       }
       return;
     }
-    if (work.tasks.length === 0 && !work.turnRunning) void this.#dispose(kept);
+    if (work.tasks.length > 0 || work.turnRunning || kept.runtimeTurnRequested) return;
+    // The runtime starts a turn for the task that just ended; the session
+    // waits a bounded moment for it rather than stop it before it opens.
+    if (taskEnded || kept.graceTimer !== undefined) {
+      kept.graceTimer ??= unref(
+        setTimeout(() => {
+          kept.graceTimer = undefined;
+          const now = kept.work;
+          if (
+            this.#kept.get(kept.key) === kept &&
+            !kept.leased &&
+            !kept.runtimeTurnRequested &&
+            (now === undefined ||
+              (now.tasks.length === 0 && !now.turnRunning && !now.runtimeTurnWaiting))
+          ) {
+            void this.#dispose(kept);
+          }
+        }, this.#options.taskEndGraceMs ?? TASK_END_GRACE_MS),
+      );
+      return;
+    }
+    void this.#dispose(kept);
   }
 
   async #requestRuntimeTurn(kept: Kept, retries: number): Promise<void> {
@@ -273,17 +351,29 @@ export class OutlivingSessions {
       return;
     }
     // A runtime turn nobody can read never runs on unseen.
-    if (outcome.status !== "started") await this.#dispose(kept);
+    if (outcome.status !== "started") {
+      await this.#dispose(kept);
+      return;
+    }
+    // The turn the host opened takes the session up when it reaches the
+    // provider; one that never does leaves nothing to read the runtime's.
+    kept.leaseTimer = unref(
+      setTimeout(() => {
+        kept.leaseTimer = undefined;
+        if (this.#kept.get(kept.key) === kept && !kept.leased) void this.#dispose(kept);
+      }, this.#options.leaseDeadlineMs ?? LEASE_DEADLINE_MS),
+    );
   }
 
   #armIdleLimit(kept: Kept): void {
     if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
     const limit = this.#options.idleLimitMs();
     if (limit === null) return;
-    kept.idleTimer = setTimeout(() => {
-      if (this.#kept.get(kept.key) === kept && !kept.leased) void this.#dispose(kept);
-    }, limit);
-    kept.idleTimer.unref?.();
+    kept.idleTimer = unref(
+      setTimeout(() => {
+        if (this.#kept.get(kept.key) === kept && !kept.leased) void this.#dispose(kept);
+      }, limit),
+    );
   }
 
   async #stopSession(kept: Kept): Promise<void> {
@@ -301,7 +391,7 @@ export class OutlivingSessions {
     kept.disposed ??= (async () => {
       if (this.#kept.get(kept.key) === kept) this.#kept.delete(kept.key);
       kept.leased = false;
-      if (kept.idleTimer !== undefined) clearTimeout(kept.idleTimer);
+      clearTimers(kept);
       try {
         await this.#stopSession(kept);
       } finally {
@@ -313,6 +403,20 @@ export class OutlivingSessions {
     })();
     return kept.disposed;
   }
+}
+
+function clearTimers(kept: Kept): void {
+  for (const timer of [kept.idleTimer, kept.graceTimer, kept.leaseTimer]) {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  kept.idleTimer = undefined;
+  kept.graceTimer = undefined;
+  kept.leaseTimer = undefined;
+}
+
+function unref(timer: ReturnType<typeof setTimeout>): ReturnType<typeof setTimeout> {
+  timer.unref?.();
+  return timer;
 }
 
 /**

@@ -6019,6 +6019,63 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("returns the plan to the level the person lowered the thread to while the ask to plan was open", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const changeThreadLevel = vi.fn(async () => true);
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "auto-accept-edits" }));
+    const turn = operationId(1391);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, turn)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      // The person lowers the level before answering.
+      fixture.setThread(
+        decodeCodeThread({ ...thread(), executionPolicy: "approval-gated", version: 2 }),
+      );
+      await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1392),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "approved",
+      });
+      expect(changeThreadLevel).toHaveBeenCalledWith(
+        expect.objectContaining({ executionPolicy: "plan", planReturnPolicy: "approval-gated" }),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("keeps the thread's level and the turn running when the person declines the agent's ask to plan", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

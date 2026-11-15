@@ -96,10 +96,11 @@ async function turn(
   runtime: ReturnType<typeof fakeRuntime>,
   during: (connection: ProviderConnection) => void = () => undefined,
   input: ProviderSessionStart = start(),
+  terms?: string,
 ) {
   const scope = Effect.runSync(Scope.make());
   const connection = await Effect.runPromise(
-    Scope.extend(keeper.acquire(key, "same-folder", runtime.open), scope),
+    Scope.extend(keeper.acquire(key, "same-folder", runtime.open, terms), scope),
   );
   await Effect.runPromise(connection.start(input));
   during(connection);
@@ -119,7 +120,7 @@ function keeperFor(options: Partial<ConstructorParameters<typeof OutlivingSessio
 describe("OutlivingSessions", () => {
   it("keeps a session running a background task after its turn and stops it once the task ends with no turn running", async () => {
     const runtime = fakeRuntime();
-    const keeper = keeperFor();
+    const keeper = keeperFor({ taskEndGraceMs: 10 });
     await turn(keeper, runtime, () =>
       runtime.report({ tasks: [{ taskId: "dev", description: "bun run dev" }] }),
     );
@@ -204,6 +205,95 @@ describe("OutlivingSessions", () => {
       "plan",
     ]);
     expect(runtime.started.every((input) => input.outlivesTurn === true)).toBe(true);
+  });
+
+  it("waits for the runtime's own turn after the last task ends before stopping the session", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = fakeRuntime();
+      const startRuntimeTurn = vi.fn(async () => ({ status: "started" as const }));
+      const keeper = keeperFor({ startRuntimeTurn, taskEndGraceMs: 5_000 });
+      await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+      // The task's end arrives before the runtime reports the turn it starts.
+      runtime.report({ tasks: [] });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(runtime.stopped).toEqual([]);
+      runtime.report({ turnRunning: true, runtimeTurnWaiting: true });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(startRuntimeTurn).toHaveBeenCalledWith(key);
+      expect(runtime.stopped).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops a session whose last task ended once the grace passes with no turn of the runtime's", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = fakeRuntime();
+      const keeper = keeperFor({ taskEndGraceMs: 5_000 });
+      await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+      runtime.report({ tasks: [] });
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(runtime.stopped).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(runtime.stopped).toEqual([sessionId]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the session when the runtime turn the host opened never takes it up, even with no idle limit", async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime = fakeRuntime();
+      const keeper = keeperFor({ leaseDeadlineMs: 30_000 });
+      await turn(keeper, runtime, () => runtime.report({ tasks: [{ taskId: "dev" }] }));
+      runtime.report({ turnRunning: true, runtimeTurnWaiting: true });
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(runtime.stopped).toEqual([]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(runtime.stopped).toEqual([sessionId]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the kept session when the person lowers the thread's level after its turn", async () => {
+    const runtime = fakeRuntime();
+    let terms = "full-access";
+    const keeper = keeperFor({ currentTerms: () => terms });
+    await turn(
+      keeper,
+      runtime,
+      () => runtime.report({ tasks: [{ taskId: "dev" }] }),
+      start(),
+      terms,
+    );
+    expect(await keeper.stopThreadIfChanged(key)).toBe(false);
+    expect(runtime.stopped).toEqual([]);
+    terms = "approval-gated";
+    expect(await keeper.stopThreadIfChanged(key)).toBe(true);
+    expect(runtime.stopped).toEqual([sessionId]);
+    expect(keeper.liveTasks(key)).toBeUndefined();
+  });
+
+  it("does not keep a session past a turn during which the thread's level changed", async () => {
+    const runtime = fakeRuntime();
+    let terms: string | undefined = "full-access";
+    const keeper = keeperFor({ currentTerms: () => terms });
+    await turn(
+      keeper,
+      runtime,
+      () => {
+        runtime.report({ tasks: [{ taskId: "dev" }] });
+        // Archived while the turn ran: the thread can run no turn now.
+        terms = undefined;
+      },
+      start(),
+      "full-access",
+    );
+    expect(runtime.stopped).toEqual([sessionId]);
   });
 
   it("refuses a second turn while another holds the thread's session", async () => {

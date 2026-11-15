@@ -3103,12 +3103,17 @@ interface ActiveTurn {
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
   /**
-   * The level each pending level-change approval would move the thread to,
-   * and the level it would return to from Plan, by approval id.
+   * What each pending level-change approval asks (to plan first, or to leave
+   * Plan) and the level it showed the person it would move the thread to, by
+   * approval id. The level it applies is worked out again when it is answered.
    */
   readonly levelChanges: Map<
     string,
-    { readonly to: ProviderExecutionPolicy; readonly planReturnPolicy?: ProviderExecutionPolicy }
+    {
+      readonly kind: "enter-plan" | "exit-plan";
+      readonly to: ProviderExecutionPolicy;
+      readonly planReturnPolicy?: ProviderExecutionPolicy;
+    }
   >;
   /**
    * The thread's posture, as `#approvalPosture` reads it, when each pending
@@ -5219,10 +5224,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active: ActiveTurn,
     input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
     providerRequestId: string,
-    change: {
-      readonly to: ProviderExecutionPolicy;
-      readonly planReturnPolicy?: ProviderExecutionPolicy;
-    },
+    asked: { readonly kind: "enter-plan" | "exit-plan" },
   ) {
     const connection = active.connection;
     if (connection === undefined) return turnState("failed");
@@ -5244,6 +5246,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       await answer(false);
       return answeredTurnState(active.state);
     }
+    // Worked out from the thread as it is now, not as the turn found it: a
+    // person who lowered the level while the ask was open gets the plan's
+    // return at that lower level, never the wider one the turn started at.
+    const change = levelChangeTarget(input.thread, asked.kind);
     const changed =
       input.windowId === undefined
         ? false
@@ -6231,6 +6237,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                         acquireInput.permissionPersistence,
                       ]),
                       active.driver.acquire(acquireInput),
+                      codeSessionTerms(active.thread),
                     )
               ).pipe(
                 Effect.tap((connection) =>
@@ -7133,6 +7140,36 @@ export function codeSessionKey(threadId: CodeThreadId): string {
   return `code:${String(threadId)}`;
 }
 
+/**
+ * What a Code thread's kept provider session was started on: its level and
+ * how its asks are answered, its provider and model, its checkout and
+ * folder, and that it is active. A session kept past its turn on other terms
+ * is stopped, so a person lowering the level, switching the model, moving
+ * the checkout, or archiving, moving or deleting the thread never leaves it
+ * acting as before.
+ */
+export function codeSessionTerms(thread: CodeThread): string | undefined {
+  // `waiting` and `interrupted` are a turn's state after a restart; the
+  // thread still runs turns.
+  if (thread.lifecycle === "archived") return undefined;
+  return JSON.stringify([
+    thread.executionPolicy,
+    thread.autoApprove === true,
+    thread.fullAccessSandbox === true,
+    thread.permissionPersistence,
+    thread.coordinator === true,
+    thread.toolConstraints ?? [],
+    String(thread.providerInstanceId),
+    String(thread.modelId),
+    thread.modelOptionValues ?? null,
+    String(thread.projectId),
+    String(thread.checkoutId),
+    String(thread.bindingRevisionId),
+    thread.workingFolderId === undefined ? null : String(thread.workingFolderId),
+    thread.workingDirectory ?? null,
+  ]);
+}
+
 function normalizedOperationEvent(
   event: CodeTurnEvent,
   active: ActiveTurn,
@@ -7151,7 +7188,7 @@ function normalizedOperationEvent(
     active.approvals.set(String(approvalId), event.requestId);
     if (event.levelChange !== undefined) {
       const change = levelChangeTarget(active.thread, event.levelChange.kind);
-      active.levelChanges.set(String(approvalId), change);
+      active.levelChanges.set(String(approvalId), { kind: event.levelChange.kind, ...change });
       return {
         kind: "approval-requested",
         approvalId,
