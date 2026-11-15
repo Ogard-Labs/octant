@@ -103,7 +103,7 @@ import {
 } from "react";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
-import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
+import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/chat";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
@@ -116,6 +116,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
+import type { WorkTurnId } from "@octant/contracts/work-turns";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
 import { codeSurfaceTitle } from "../code/codeSurfaces";
 import { WorkOverview } from "../work/WorkOverview";
@@ -196,6 +197,16 @@ const PreviewWorkspaceTab = lazy(() =>
 );
 type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 
+/** A search hit's turn: the pane showing that thread brings it into view once. */
+export type RevealedThreadTurn =
+  | { readonly mode: "chat"; readonly threadId: ChatThreadId; readonly turnId: ChatTurnId }
+  | { readonly mode: "work"; readonly threadId: WorkThreadId; readonly turnId: WorkTurnId }
+  | {
+      readonly mode: "code";
+      readonly threadId: CodeThreadId;
+      readonly operationId: CodeOperationId;
+    };
+
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   /** The host's paired iPhones and iPads, shown in the Apple workbench. */
@@ -213,12 +224,9 @@ export interface WorkspaceViewProps {
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
-  readonly revealChatTurn?: {
-    readonly threadId: import("@octant/contracts/chat").ChatThreadId;
-    readonly turnId: import("@octant/contracts/chat").ChatTurnId;
-  };
-  /** Called once the Chat pane has shown `revealChatTurn`; the jump is spent. */
-  readonly onChatTurnRevealed?: () => void;
+  readonly revealTurn?: RevealedThreadTurn;
+  /** Called once the pane has shown `revealTurn`, or found its thread no longer holds it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   readonly codeController: CodeController;
   /**
    * One controller per open Code thread. Every Code surface reads the one for
@@ -1489,6 +1497,15 @@ function renderCodeTab(
       }
     >
       <CodeWorkspaceTab
+        {...(props.revealTurn?.mode === "code" &&
+        String(props.revealTurn.threadId) === String(tab.threadId)
+          ? {
+              revealOperationId: props.revealTurn.operationId,
+              ...(props.onTurnRevealed === undefined
+                ? {}
+                : { onTurnRevealed: props.onTurnRevealed }),
+            }
+          : {})}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -2050,13 +2067,13 @@ function renderNonCodeTab(
         projects={props.projects}
         tab={tab}
         providerController={props.providerController}
-        {...(props.revealChatTurn !== undefined &&
-        String(props.revealChatTurn.threadId) === String(tab.threadId)
+        {...(props.revealTurn?.mode === "chat" &&
+        String(props.revealTurn.threadId) === String(tab.threadId)
           ? {
-              revealTurnId: props.revealChatTurn.turnId,
-              ...(props.onChatTurnRevealed === undefined
+              revealTurnId: props.revealTurn.turnId,
+              ...(props.onTurnRevealed === undefined
                 ? {}
-                : { onTurnRevealed: props.onChatTurnRevealed }),
+                : { onTurnRevealed: props.onTurnRevealed }),
             }
           : {})}
         {...(props.projectServerUrl === undefined
@@ -2163,6 +2180,15 @@ function renderNonCodeTab(
             >
               <WorkThreadWorkspace
                 projects={props.projects}
+                {...(props.revealTurn?.mode === "work" &&
+                String(props.revealTurn.threadId) === String(tab.threadId)
+                  ? {
+                      revealTurnId: props.revealTurn.turnId,
+                      ...(props.onTurnRevealed === undefined
+                        ? {}
+                        : { onTurnRevealed: props.onTurnRevealed }),
+                    }
+                  : {})}
                 {...(props.browserAutomationClient === undefined
                   ? {}
                   : { browserAutomationClient: props.browserAutomationClient })}

@@ -6,7 +6,7 @@ import type {
   ProviderInstanceId,
   ProviderNativeSetup,
 } from "@octant/contracts";
-import { resolveProviderNativeSetup } from "@octant/domain";
+import { accountRunsAsItself, resolveProviderNativeSetup } from "@octant/domain";
 
 export interface ProviderNativeSetupSources {
   readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
@@ -58,7 +58,7 @@ export function sessionNativeSetup(
     driverKind: instance.driverKind,
     mode: input.mode,
     executionPolicy: input.executionPolicy,
-    accountAllows: "nativeSetup" in instance && instance.nativeSetup === true,
+    accountAllows: "nativeSetup" in instance ? accountRunsAsItself(instance) : true,
     projectTrusts,
     ...(threadChoice === undefined ? {} : { threadChoice }),
   });

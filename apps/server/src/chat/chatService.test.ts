@@ -241,6 +241,16 @@ function withProbe(
   };
 }
 
+/**
+ * A provider with no search of its own, so automatic routing takes SearXNG
+ * and the turn carries Octant's web-search tool.
+ */
+function searxngResearchProbe(): ProviderProbeResult {
+  return probeFixture({
+    capabilities: { ...probeFixture().capabilities, nativeWebResearch: "unsupported" },
+  });
+}
+
 function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
@@ -2871,7 +2881,9 @@ describe("ChatService", () => {
   });
 
   it("creates a thread, uploads an attachment, sends a turn, and confines provider access to scratch", async () => {
-    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture();
+    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture({
+      probe: searxngResearchProbe(),
+    });
     const planSpy = vi.spyOn(contextHarness, "planTurn");
     const userProjectRoot = join(dataDirectory, "user-project-root");
     mkdtempSync(userProjectRoot);
@@ -3256,7 +3268,10 @@ describe("ChatService", () => {
         execute: vi.fn(async () => ({ result: { status: "built" } })),
       },
     }));
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const { service, fakeDriver } = openFixture({
+      resolveExtensionSelectionContext,
+      probe: searxngResearchProbe(),
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -3838,6 +3853,7 @@ describe("ChatService", () => {
             })
           : undefined;
       const { service, fakeDriver } = openFixture({
+        probe: searxngResearchProbe(),
         resolveExtensionSelectionContext,
         ...(resolveAppManagedTools === undefined ? {} : { resolveAppManagedTools }),
       });
@@ -7499,7 +7515,7 @@ describe("ChatService", () => {
   });
 
   it("leaves out the summary the compacted plan priced out of the request", async () => {
-    const probe = probeFixture();
+    const probe = searxngResearchProbe();
     const sent: Array<SentTurn> = [];
     const fixture = openFixture({
       probe,
@@ -11817,6 +11833,104 @@ describe("handing a Chat conversation to a new provider session", () => {
         "Turn off the model pool",
       );
       expect(fixture.service.read(threadId).thread).toEqual(before);
+    });
+
+    const setHandoff = (
+      fixture: ReturnType<typeof openFixture>,
+      threadId: ChatThreadId,
+      providerInstanceId: string | undefined,
+    ) =>
+      fixture.service.execute(
+        {
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+        },
+        { actor: person },
+      );
+    const limitedAfterFirst = (turnIndex: number) =>
+      turnIndex === 1 ? ("limited" as const) : ("completed" as const);
+
+    it("hands off once to the named account when the account hits its usage limit, and the next turn discloses it", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+      await setHandoff(fixture, threadId, otherNative);
+
+      await sendFollowUp(fixture, threadId);
+      const limitedAttempt = lastAttempt(fixture, threadId);
+      expect(limitedAttempt?.usageLimit).toEqual({ kind: "exhausted" });
+      expect(fixture.service.read(threadId).thread).toMatchObject({
+        providerInstanceId: otherNative,
+        modelId: "model-a",
+        // The parked attempt no longer holds the thread; its limit stays in history.
+        releasedStopId: String(limitedAttempt?.id),
+        usageLimitHandoff: {
+          providerInstanceId: otherNative,
+          last: {
+            kind: "handed-off",
+            stopId: String(limitedAttempt?.id),
+            fromProviderInstanceId: native,
+            toProviderInstanceId: otherNative,
+          },
+        },
+      });
+
+      await sendFollowUp(fixture, threadId, "Carry on");
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: { reason: "provider-switch", previousProviderInstanceId: native },
+      });
+    });
+
+    it("waits on the usage limit without moving when the person has not opted in", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+
+      await sendFollowUp(fixture, threadId);
+
+      expect(lastAttempt(fixture, threadId)?.usageLimit).toEqual({ kind: "exhausted" });
+      const after = fixture.service.read(threadId).thread;
+      expect(String(after.providerInstanceId)).toBe(native);
+      expect(after.usageLimitHandoff).toBeUndefined();
+    });
+
+    it("refuses the opt-in on a pooled thread and from anyone but the person", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      await expect(
+        fixture.service.execute({
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          providerInstanceId: otherNative,
+        }),
+      ).rejects.toThrow("only when you ask for it");
+      await fixture.service.execute({
+        kind: "select-chat-multi-model-pool",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        pool: {
+          candidates: [
+            { hostId: "local", providerInstanceId: native, modelId: "model-a" },
+            { hostId: "local", providerInstanceId: native, modelId: "model-b" },
+          ],
+          mixedVendorEnabled: false,
+          fallbackAllowed: false,
+          higherCostFallbackAllowed: false,
+        },
+      } as never);
+
+      await expect(setHandoff(fixture, threadId, otherNative)).rejects.toThrow(
+        "Turn off the model pool",
+      );
+      expect(fixture.service.read(threadId).thread.usageLimitHandoff).toBeUndefined();
     });
   });
 

@@ -107,7 +107,11 @@ the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
-host), **Continue elsewhere**, and the thread's **Recap** and the person's
+host), **Continue elsewhere**, **On usage limit** (where the thread's provider
+has another account: **Wait for the reset** or **Hand off to** one named
+account, with **Move to account…** in the same menu in Work and Code, and a
+line saying what the last usage limit did;
+[Architecture: providers](../architecture.md#providers)), and the thread's **Recap** and the person's
 **Notes** ([Thread view](thread-view.md#thread-recap-and-notes)). A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
 from one message to the next (the model, the approval mode) and had grown to
@@ -2284,9 +2288,8 @@ titles among the threads the host listed and, in every mode, message text
 through that mode's host read (`GET /api/chat/transcript-search`,
 `/api/work/transcript-search`, `/api/code/transcript-search`), which lists
 the same threads as the sidebar and its Archived group. A message hit shows its
-snippet after the title matches and names the turn that holds it; a Chat hit
-opens the thread scrolled to that turn, and a Work or Code hit opens its thread,
-because those transcripts do not yet jump to a turn
+snippet after the title matches and names the turn that holds it, and opens
+the thread scrolled to that turn in every mode
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view

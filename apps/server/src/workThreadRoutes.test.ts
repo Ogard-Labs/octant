@@ -235,7 +235,7 @@ describe("Work thread routes", () => {
     expect(local?.status).toBe(200);
   });
 
-  it("lets a device the host's own person paired change Continue after restart for a Work thread or the Work setting, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000040";
@@ -251,6 +251,18 @@ describe("Work thread routes", () => {
         expectedVersion: 1,
         defaultAccess: "ask-first",
         restartContinuation: false,
+      },
+      {
+        kind: "move-work-thread-account",
+        threadId,
+        expectedVersion: 1,
+        providerInstanceId: "73000000-0000-4000-8000-000000000042",
+      },
+      {
+        kind: "set-work-thread-usage-limit-handoff",
+        threadId,
+        expectedVersion: 1,
+        providerInstanceId: "73000000-0000-4000-8000-000000000042",
       },
     ];
     const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
@@ -291,7 +303,7 @@ describe("Work thread routes", () => {
         { actor: { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId } },
       );
     }
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("lets a device the host's own person paired change Wake when a message arrives for a Work thread, as that device, and refuses any other device", async () => {

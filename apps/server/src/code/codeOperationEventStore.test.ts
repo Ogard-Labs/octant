@@ -724,6 +724,47 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("carries the usage limit a waiting provider turn stopped at", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt: {
+          contentId: "89000000-0000-4000-8000-000000000031",
+          digest: "e".repeat(64),
+          byteLength: 4,
+        },
+      }),
+    });
+    const usageLimit = { kind: "temporary", resetsAt: "2026-11-15T18:00:00.000Z" };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId,
+          state: "waiting",
+          failure: { category: "unavailable", message: "Usage limit reached.", usageLimit },
+        },
+      }),
+    });
+
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns).toMatchObject([
+      { operationId, status: "waiting", failure: { usageLimit } },
+    ]);
+    fixture.connection.close();
+  });
+
   it("preserves reported cache counters when conversation usage is rebuilt", () => {
     const path = databasePath();
     const first = openJournal(path);

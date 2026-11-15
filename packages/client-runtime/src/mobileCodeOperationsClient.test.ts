@@ -379,7 +379,66 @@ describe("mobile Code follow-through", () => {
         },
       ],
       hasEarlier: false,
+      hasLater: false,
     });
+  });
+
+  it("carries the usage limit a waiting turn stopped at, so the phone can offer its resume", async () => {
+    const usageLimit = { kind: "temporary", resetsAt: "2026-11-15T18:00:00.000Z" };
+    const conversation = await loadMobileCodeConversation(
+      transport([], {
+        status: "waiting",
+        failure: { category: "unavailable", message: "Usage limit reached.", usageLimit },
+      }),
+      threadId,
+    );
+    expect(conversation.turns[0]?.usageLimit).toEqual(usageLimit);
+  });
+
+  it("reads the page ending at a search hit and says newer turns follow it", async () => {
+    const queries: Array<string | undefined> = [];
+    const base = transport([]);
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: base.hostId,
+        authenticatedFetch: async (input) => {
+          if (input.path.endsWith("/conversation/window")) {
+            queries.push(input.query);
+            const response = await base.authenticatedFetch(input);
+            const body = (await response.json()) as Record<string, unknown>;
+            return jsonResponse({ ...body, hasEarlier: true, hasLater: true });
+          }
+          return base.authenticatedFetch(input);
+        },
+      },
+      threadId,
+      { through: operationId },
+    );
+    expect(queries).toEqual([`?limit=20&through=${operationId}`]);
+    expect(conversation).toMatchObject({ hasEarlier: true, hasLater: true });
+  });
+
+  it("reads the newest page when the host no longer holds the search hit's turn", async () => {
+    const queries: Array<string | undefined> = [];
+    const base = transport([]);
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: base.hostId,
+        authenticatedFetch: async (input) => {
+          if (input.path.endsWith("/conversation/window")) {
+            queries.push(input.query);
+            if (input.query?.includes("through=") === true) {
+              return jsonResponse({ category: "stale", message: "Gone." }, 409);
+            }
+          }
+          return base.authenticatedFetch(input);
+        },
+      },
+      threadId,
+      { through: operationId },
+    );
+    expect(queries).toEqual([`?limit=20&through=${operationId}`, "?limit=20"]);
+    expect(conversation).toMatchObject({ hasLater: false, turns: [{ operationId }] });
   });
 
   it("carries the routine a turn's tool call created, so the phone can show the same receipt", async () => {
@@ -441,6 +500,7 @@ describe("mobile Code follow-through", () => {
         },
       ],
       hasEarlier: false,
+      hasLater: false,
     });
   });
 
@@ -578,6 +638,7 @@ describe("mobile Code follow-through", () => {
         },
       ],
       hasEarlier: false,
+      hasLater: false,
     });
   });
 

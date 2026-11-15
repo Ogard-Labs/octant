@@ -10,9 +10,11 @@ export interface ResumeOffer {
 }
 
 /**
- * A stopped turn's way back, just above an empty composer: Resume or Retry for
- * a Chat turn, and for a Work or Code turn the provider stopped at a usage
- * limit, Resume when it resets (or the scheduled resume with Cancel).
+ * A one-line notice with its one action, just above the composer. It carries a
+ * stopped turn's way back over an empty composer: Resume or Retry for a Chat
+ * turn, and for a Work or Code turn the provider stopped at a usage limit,
+ * Resume when it resets (or the scheduled resume with Cancel). It also carries
+ * the way back to the latest turns from an earlier page a search hit opened.
  */
 export function ResumeBar(props: { readonly offer: ResumeOffer; readonly busy: boolean }) {
   const { colors } = useTheme();

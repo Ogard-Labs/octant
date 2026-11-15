@@ -1949,6 +1949,10 @@ except where a bullet says otherwise.
   context inspector lists it as Person memory in Chat and Work, so a person
   can see when it was used; a Code window, which is counted by part, counts
   it with Octant's instructions.
+- **Written instructions.** Instructions the person writes for Octant itself,
+  per person, per Project, and for coordinator threads, beside each
+  provider's own instruction files, are designed, not built
+  ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
   host tools. It
@@ -4978,7 +4982,9 @@ characters and returns that query with each result's title, URL, and snippet,
 
 - **Where.** A Chat thread is offered it on every provider while its research
   is on and its research route is ready through SearXNG; a provider-native
-  route uses the provider's own search instead. The native harness offers the
+  route uses the provider's own search instead. Automatic routing picks the
+  provider's own search first and SearXNG only when the provider has none, so
+  a fresh install searches without an endpoint. The native harness offers the
   same definition as its own tool in Work and Code, and in Chat under the
   same research grant ([Native harness](#native-harness)). A harness Chat
   thread gets it once, from the harness's own tool set: the turn adds no second
@@ -6423,10 +6429,16 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   hooks, MCP servers, and plugins are the person's own setup, so Octant offers
   them rather than switching them off. The switch-offs elsewhere in these
   specifications describe what is built today; each is marked against this
-  rule. Where a native feature reaches beyond Octant's view, the
-  [guardrail level](#security-and-authority) decides its default: at Guarded
-  and Reviewed it is off until the person turns it on for the account,
-  Project, or thread; at Full access it is on, in Work and Code alike.
+  rule. The person's own setup is on by default at every level, as it is in
+  the provider's own app: Octant adds capabilities to a provider and does not
+  take its core features away (maintainer decision, 2026-11-14, replacing
+  the earlier default that kept it off at Guarded and Reviewed until the
+  person turned it on). Each call still meets the thread's
+  [guardrail level](#security-and-authority): Guarded asks, Reviewed's
+  reviewer decides, Full access runs without asking. The person may turn it
+  off for an account or a thread; a Project's own hooks, MCP servers, and
+  plugins still load only once the person trusts that Project for that
+  provider, as the providers' own folder-trust prompts require.
   Plan stays read-only and Chat's filesystem and shell stay withheld at
   every level. Octant still journals and shows a native child
   run, marks outside content a native web tool read, and reports each
@@ -6450,16 +6462,22 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   follows its own per-account setting, off by default
   ([Modes](#modes-chat-work-and-code)).
 
-  How the person turns it on (built):
+  How the person turns it off, and trusts a Project (built):
 
   - **Account.** Settings › Providers shows **Run <provider> as itself** on
     each Claude Code, Codex, OpenCode, and Mistral Vibe account. It sends
     `set-provider-native-setup`, which a local window or a device the host's own person paired sends (maintainer decision, 2026-11-12), and journals
     `provider.instance-native-setup-changed@1` with the account's whole
-    record; the field is `nativeSetup` on the instance, absent when off, and
-    no configuration change or new account carries it. Any other provider's
+    record; the field is `nativeSetup` on the instance: absent is on, the
+    default, `false` is the person's off, and a `true` left by the earlier
+    default reads as on. No configuration change or new account carries it. Any other provider's
     account, and any other ACP agent, is refused, by the policy and by the
-    journal's own decoder.
+    journal's own decoder. Before this default, turning the switch off left
+    no stored value, so on upgrade every account reads as running as itself,
+    including an account the person had turned off; the person turns it off
+    again if they want (maintainer decision, 2026-11-14). An older build
+    cannot decode `nativeSetup: false`, so downgrading past this change is
+    not supported.
   - **Project.** A Work or Code Project's **Trusted providers** lists the key
     providers it trusts (`nativeProviders` on the Project, set by
     `change-project-native-providers` from a local window or a device the host's own person paired, and journaled as
@@ -6661,16 +6679,33 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
   A thread stays on its instance until the person moves it: the thread's
-  **Move to account…** action (or the model picker) moves it to another
-  account, and the next turn starts there with the disclosed handoff of
+  **Move to account…** action (Chat's thread menu; the thread info panel in
+  Work and Code) or the model picker moves it to another account, and the
+  next turn starts there with the disclosed handoff of
   [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
   whose marker names the new account. The host accepts the move only from the
   person, at a window or on a device they paired, and only while no turn runs
-  and no model pool is on (the pool names the current account);
-  a move from the host itself or an agent is refused, so there is no silent or
-  automatic failover, rotation, or load-balancing between accounts (maintainer
-  decision, 2026-11-14). Built for Chat; Work and Code move through the model
-  picker. An opt-in "on a usage limit, hand off to this account" is not built.
+  and no model pool is on (the pool names the current account); a move from a
+  routine, the host itself or an agent is refused. The person may also set,
+  per thread, **On usage limit → Hand off to** one named account of the same
+  provider (journaled, person-only, refused while a model pool is on). When a
+  turn then stops on a usage limit the provider itself reported, the host
+  moves the thread to that account by the same provider change, so the next
+  turn carries the same disclosed handoff, and records on the thread which
+  account hit its limit and where the conversation went. It acts at most once
+  per stopped turn and only toward the account the person named; when that
+  account is missing, turned off, cannot take the model, or is the account
+  that just hit its limit (so it is limited too), the host does not move the
+  thread and records why, and the thread info panel shows it. It never starts
+  the next turn itself. Either move, the person's or the opt-in's, made while
+  the latest turn is parked on the old account's usage limit records that
+  turn as released on the provider change (`releasedStopId`): the turn keeps
+  its limit in history, and the message queue, the composer and the thread
+  view stop treating it as waiting, so the next message goes to the new
+  account. Without the opt-in a limited thread waits on its
+  account as before, so there is no silent, unchosen or open-ended failover,
+  rotation, or load-balancing between accounts (maintainer decision,
+  2026-11-14).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
@@ -11231,8 +11266,8 @@ that is not yet effective for the thread is refused and never reaches the model.
   The Claude, Codex, Mistral Vibe, and OpenCode rows describe a session with
   the person's own setup off.
   Under [Key providers run as themselves](#providers) their own Project and
-  home skill loading is allowed: on at Full access, and on at Guarded and
-  Reviewed once the person turns it on for the account or Project. Built for
+  home skill loading is on by default at every level, and stays on at Full
+  access or in a trusted Project when the person turned the account off. Built for
   Claude Code: the query reads the account's home settings with `skills:
 "all"`, and a Project's skills, which Claude Code reads only with the
   Project's settings, in a Project trusted for Claude Code. Built for Codex:
@@ -11286,8 +11321,7 @@ that is not yet effective for the thread is refused and never reaches the model.
   For Claude Code, Mistral Vibe, and OpenCode this denial is today's build,
   not the rule: in a Project the person trusted for that provider, a key
   provider loads the Project's hooks, MCP servers, and plugins as it would
-  outside Octant, on at Full access and on at Guarded and Reviewed
-  once the person turns it on ([Key providers run as themselves](#providers);
+  outside Octant, at every level ([Key providers run as themselves](#providers);
   built for Claude Code, which reads the Project's `project` and `local`
   settings and its `.mcp.json` in a trusted Project, and for Mistral Vibe,
   whose launch in a trusted Project unsets `VIBE_TOOL_PATHS` and no longer

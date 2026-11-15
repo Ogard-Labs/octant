@@ -3,6 +3,7 @@ import {
   providerNativeSetupIsOn,
   providerOwnMemoryLaunches,
   resolveProviderNativeSetup,
+  providerRunsAsItself,
 } from "./providerNativeSetupPolicy";
 
 const everything = {
@@ -15,18 +16,48 @@ const everything = {
 } as const;
 
 describe("a key provider running as itself", () => {
-  it("keeps every feature off at Guarded and Reviewed until the person turns it on", () => {
-    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
-      expect(
-        resolveProviderNativeSetup({
+  it("keeps only the runtime's own web search on at Guarded and Reviewed until the person turns the rest on", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+        const setup = resolveProviderNativeSetup({
           driverKind: "claude",
-          mode: "code",
+          mode,
           executionPolicy,
           accountAllows: false,
           projectTrusts: false,
-        }),
-      ).toBeUndefined();
+        });
+        expect(setup).toEqual({
+          subagents: false,
+          webTools: true,
+          skills: false,
+          toolServers: false,
+          hooks: false,
+          projectCode: false,
+        });
+        expect(providerRunsAsItself(setup)).toBe(false);
+      }
     }
+  });
+
+  it("keeps the runtime's web search off in Plan and Chat until the person turns it on", () => {
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "claude",
+        mode: "code",
+        executionPolicy: "plan",
+        accountAllows: false,
+        projectTrusts: false,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveProviderNativeSetup({
+        driverKind: "codex",
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        accountAllows: false,
+        projectTrusts: false,
+      }),
+    ).toBeUndefined();
   });
 
   it("turns its own setup on at Full access, with a Project's code only where the Project is trusted", () => {
