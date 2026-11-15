@@ -1,36 +1,27 @@
 import { Activity } from "lucide-react";
-import type { CodeLiveTask, CodeThreadId } from "@octant/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CodeLiveTask } from "@octant/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   THREAD_ACTIVITY_RECOVERY_MS,
   useThreadActivityRevision,
 } from "../polling/ThreadActivityRevisions";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { OctantButton } from "../ui/base/OctantButton";
-import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
+import type { ThreadSessionClient } from "./codeSessionClient";
 import "./code-live-tasks.css";
 
 /**
  * The background tasks (a dev server, a watch) the thread's provider session
  * still runs after the turn that started them completed, above the composer,
  * with Stop. Nothing shows while none runs. While a turn holds the session the
- * turn itself shows them, so the list waits until it settles.
+ * turn itself shows them, so the list waits until it settles. Work and Code
+ * threads both show it, each reading its own mode's host routes.
  */
-export function CodeLiveTasks(props: {
-  readonly threadId: CodeThreadId;
-  readonly serverUrl?: string | undefined;
-  readonly windowCapability?: string | undefined;
-  readonly client?: CodeSessionClient | undefined;
+export function CodeLiveTasks<Id extends string>(props: {
+  readonly threadId: Id;
+  readonly client: ThreadSessionClient<Id> | undefined;
 }) {
-  const { threadId, serverUrl, windowCapability } = props;
-  const client = useMemo(
-    () =>
-      props.client ??
-      (serverUrl === undefined || windowCapability === undefined
-        ? undefined
-        : createCodeSessionClient({ serverUrl, windowCapability })),
-    [props.client, serverUrl, windowCapability],
-  );
+  const { threadId, client } = props;
   const [tasks, setTasks] = useState<ReadonlyArray<CodeLiveTask>>([]);
   const [stopping, setStopping] = useState(false);
   const [message, setMessage] = useState<string>();

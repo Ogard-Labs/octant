@@ -1133,6 +1133,7 @@ export function startOctantServer(
       threadMessageQueue,
       threadMessageQueueRoutes,
       threadWakeupRoutes,
+      workSessionRoutes,
       workThreadWakeupPort,
       observeWorkThreadRuntime,
       onWorkTurnCancelled,
@@ -1142,6 +1143,7 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       imageDescriber,
+      machineChangeFeed,
       threadWakeups,
       codeProjectAccess,
       isPairedDeviceScope,
@@ -1893,6 +1895,7 @@ export function startOctantServer(
       threadNotesRoutes,
       threadMessageQueueRoutes,
       threadWakeupRoutes,
+      workSessionRoutes,
       usageDashboardRoutes,
       usageRoutes,
       validationEvidenceRoutes,

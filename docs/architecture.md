@@ -1708,7 +1708,13 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 
 - **Claude Code:** the Work session starts with its shell tool, at the
   thread's level as in Code (Guarded asks per command, Reviewed uses its
-  automatic mode, Full access runs unattended).
+  automatic mode, Full access runs unattended). Its session outlives the
+  turn while background work runs, with live tasks and runtime-started
+  turns as in Code, and an empty Work thread can continue a Claude Code
+  session begun outside Octant in the folder its turns run in
+  ([Provider runtimes](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  Claude's own plan-then-approve stays Code's: it moves a thread into and
+  out of Plan, and Work has no Plan.
 - **Codex:** Work threads start and resume with the shell features on and the
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
@@ -6665,26 +6671,28 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
-  Octant never lets the runtime's turn run unseen. In Code the person's turn
-  completes when the model's reply is done, and the host keeps the session
-  while its background tasks run, shown as live tasks in the thread; when
-  the runtime starts a turn by itself on the idle thread, the host opens a
-  runtime-started turn for it through the thread's ordinary admission, at the
-  thread's level, and that turn reattaches to the kept session. The kept
-  session is stopped when its last task ends with no turn running, when the
-  person stops the thread or changes its level, model, checkout or
-  lifecycle, after the host's background work limit, when the runtime's
-  turn cannot be opened, and at shutdown; none of the runtime's tool calls is
-  answered before the host has opened its turn. Elsewhere (Work, a child
-  run) the person's turn that started the work is held open until the work
-  ends, and each turn the runtime starts inside it is folded in, bounded by a
-  cap and the stalled-turn limit. Either way the turn is marked by the
-  runtime event `runtime-turn-started` and, in Code, the journaled operation
-  frame of the same name, so the journal records that it was the runtime's
-  and replay rebuilds it; it passes the same gate at the same level, and the
-  person's stop ends it with the session and every background task in it
-  (maintainer decisions, 2026-11-14; built for Claude Code's background
-  commands and `Monitor` watches, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  Octant never lets the runtime's turn run unseen. In Work and Code the
+  person's turn completes when the model's reply is done, and the host keeps
+  the session while its background tasks run, shown as live tasks in the
+  thread; when the runtime starts a turn by itself on the idle thread, the
+  host opens a runtime-started turn for it through the thread's ordinary
+  admission, at the thread's level, and that turn reattaches to the kept
+  session. The kept session is stopped when its last task ends with no turn
+  running, when the person stops the thread or changes its level, model,
+  checkout, folder or lifecycle, after the host's background work limit,
+  when the runtime's turn cannot be opened, and at shutdown; none of the
+  runtime's tool calls is answered before the host has opened its turn.
+  Elsewhere (a child run, a single-use session) the person's turn that
+  started the work is held open until the work ends, and each turn the
+  runtime starts inside it is folded in, bounded by a cap and the
+  stalled-turn limit. Either way the turn is marked by the runtime event
+  `runtime-turn-started`; Code also journals the operation frame of the same
+  name, and Work journals the opened turn as the system's with the host's
+  fixed prompt, so the journal records that it was the runtime's and replay
+  rebuilds it; it passes the same gate at the same level, and the person's
+  stop ends it with the session and every background task in it (maintainer
+  decisions, 2026-11-14; built for Claude Code's background commands and
+  `Monitor` watches, in Work as in Code, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
   A wake-up the runtime asks for at a later time (`ScheduleWakeup`,
   `CronCreate`) is the host's, never the runtime's: the driver records it
   with the host and the runtime's scheduler holds nothing, so nothing fires

@@ -124,6 +124,7 @@ export type RoutesDependencies = {
     | "threadHandOffRoutes"
     | "threadMessageQueueRoutes"
     | "threadWakeupRoutes"
+    | "workSessionRoutes"
   > &
   Pick<
     ZenWiring,
@@ -263,6 +264,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     threadNotesRoutes,
     threadMessageQueueRoutes,
     threadWakeupRoutes,
+    workSessionRoutes,
     usageDashboardRoutes,
     usageRoutes,
     validationEvidenceRoutes,
@@ -338,6 +340,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await chatRoutes(request)) ??
     (await threadMessageQueueRoutes(request)) ??
     (await threadWakeupRoutes(request)) ??
+    (await workSessionRoutes(request)) ??
     (await codeSessionRoutes(request)) ??
     (await threadCheckpointRoutes(request)) ??
     (await scaffoldRoutes(request)) ??

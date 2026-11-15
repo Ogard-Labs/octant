@@ -4,9 +4,32 @@ import {
   CodeNativeSessions,
   decodeHostAnswer,
   StopCodeLiveTasksResult,
+  type CodeLiveTask,
+  type CodeNativeSession,
   type CodeNativeSessionId,
   type CodeThreadId,
 } from "@octant/contracts";
+
+/**
+ * What the live-tasks row and the outside-sessions row read from the host for
+ * one thread, Work or Code: each mode answers from its own routes.
+ */
+export interface ThreadSessionClient<Id extends string> {
+  readonly liveTasks: (threadId: Id) => Promise<{
+    readonly tasks: ReadonlyArray<CodeLiveTask>;
+    readonly turnRunning: boolean;
+  }>;
+  readonly stopLiveTasks: (threadId: Id) => Promise<{ readonly stopped: boolean }>;
+  readonly nativeSessions?: (threadId: Id) => Promise<{
+    readonly adopted?: { readonly nativeSessionId: CodeNativeSessionId } | undefined;
+    readonly sessions: ReadonlyArray<CodeNativeSession>;
+    readonly unavailable?: string | undefined;
+  }>;
+  readonly adoptNativeSession?: (
+    threadId: Id,
+    nativeSessionId: CodeNativeSessionId,
+  ) => Promise<{ readonly kind: string } | { readonly kind: string; readonly message: string }>;
+}
 
 /**
  * Reads and stops the background work a Code thread's provider session keeps
