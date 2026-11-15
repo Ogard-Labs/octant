@@ -117,6 +117,8 @@ export interface ClaudeToolState {
   fileChange?: ClaudeFileChange;
   /** A task tool call's input, applied with its result once that arrives. */
   taskInput?: { readonly [key: string]: ClaudeJsonValue };
+  /** The start's journaled notice, once one went out. */
+  noticed?: true;
 }
 
 export interface ClaudeRequestCorrelation {
@@ -676,7 +678,23 @@ function mapToolUse(
       ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
       : [];
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
-  if (!resolved.created) return withoutIgnored(inputContent());
+  if (!resolved.created) {
+    // A streamed start carried no input, so a notice that depends on it (a
+    // command leaving the sandbox) is journaled when the whole input comes,
+    // under the start that already went out.
+    const late =
+      authoritativeInput && resolved.state.noticed !== true ? toolStartNotice(content) : undefined;
+    if (late === undefined) return withoutIgnored(inputContent());
+    resolved.state.noticed = true;
+    return [
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: late,
+      }),
+    ];
+  }
   // A shell command rides on the tool's start only when it reaches a server,
   // so the command can be journaled with its host as Octant Shield's record
   // of it; the start of any other command names the tool and nothing more.
@@ -711,6 +729,7 @@ function mapToolUse(
   }
   const notice = toolStartNotice(content);
   if (notice !== undefined) {
+    resolved.state.noticed = true;
     return [
       start,
       ...inputContent(),

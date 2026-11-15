@@ -1867,6 +1867,44 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("marks a streamed command unsandboxed once its whole input arrives, under its one start", () => {
+    const ctx = context();
+    const streamed = eventValues(
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: "sdk-bash-1", toolName: "Bash", input: {} },
+        },
+      }),
+    );
+    const whole = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-bash",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-bash-1",
+            toolName: "Bash",
+            input: { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+          },
+        ],
+        usage,
+      }),
+    );
+    const events = [...streamed, ...whole];
+    expect(events.filter((next) => next.kind === "tool-start")).toHaveLength(1);
+    expect(events.filter((next) => next.kind === "tool-progress")).toEqual([
+      expect.objectContaining({
+        message: expect.stringMatching(/^Unsandboxed: this command runs outside/),
+      }),
+    ]);
+  });
+
   it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code and an escaped command unsandboxed", () => {
     for (const [toolName, input, notice] of [
       [
