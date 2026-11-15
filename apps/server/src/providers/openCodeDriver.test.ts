@@ -3150,7 +3150,10 @@ describe("OpenCode driver", () => {
     const projectFile = "/work/project/src/index.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
     const credentials = join(homedir(), ".aws", "credentials");
-    const protectedPaths = [join(homedir(), ".ssh"), credentials];
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), credentials],
+      atFullAccess: [],
+    };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(
         policy,
@@ -3193,7 +3196,7 @@ describe("OpenCode driver", () => {
       webTools: true,
     } as const;
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const protectedPaths = [join(homedir(), ".ssh")];
+    const protectedPaths = { belowFullAccess: [join(homedir(), ".ssh")], atFullAccess: [] };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
         (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
@@ -3315,10 +3318,14 @@ describe("OpenCode driver", () => {
     ).toBe("allow");
   });
 
-  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there", () => {
+  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there below Full access", () => {
     const outside = "/elsewhere/notes/a.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const protectedPaths = [join(homedir(), ".ssh")];
+    const signIn = join(homedir(), ".codex", "auth.json");
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), signIn],
+      atFullAccess: [signIn],
+    };
     const rulesFor = (policy: "full-access" | "approval-gated" | "plan") => [
       permissionRules(
         policy,
@@ -3337,7 +3344,7 @@ describe("OpenCode driver", () => {
     ];
     for (const rules of rulesFor("full-access")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("allow");
-      expect(lastMatch(rules, "read", key)).toBe("deny");
+      expect(lastMatch(rules, "read", signIn)).toBe("deny");
     }
     for (const rules of rulesFor("approval-gated")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("ask");
@@ -3348,6 +3355,51 @@ describe("OpenCode driver", () => {
     }
     for (const rules of rulesFor("plan")) {
       expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
+    }
+  });
+
+  it("refuses only provider sign-ins at Full access and every protected file below it, the person's own deny still over the env exception", () => {
+    const cloud = join(homedir(), ".aws", "credentials");
+    const added = "/opt/vault/token";
+    const codexSignIn = join(homedir(), ".codex", "auth.json");
+    const claudeSignIn = join(homedir(), ".claude", ".credentials.json");
+    // The host resolves both lists; the driver only chooses one by level.
+    const protectedPaths = {
+      belowFullAccess: [cloud, added, codexSignIn, claudeSignIn],
+      atFullAccess: [codexSignIn, claudeSignIn],
+    };
+    const own = {
+      rules: [{ action: "read", resource: "*.env.example", effect: "deny" }],
+      toolServers: false,
+      webTools: true,
+    } as const;
+    const rulesFor = (policy: "full-access" | "approval-gated" | "auto-accept-edits" | "plan") => [
+      permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      })),
+      betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths),
+    ];
+    for (const rules of rulesFor("full-access")) {
+      expect(lastMatch(rules, "read", cloud)).toBe("allow");
+      expect(lastMatch(rules, "list", added)).toBe("allow");
+      expect(lastMatch(rules, "read", codexSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", claudeSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", "/work/project/.env.example")).toBe("deny");
+      // Provider sign-ins stay the last rules, so no allow reopens them.
+      expect(rules.at(-1)).toEqual({
+        action: "list",
+        resource: `${claudeSignIn}/*`,
+        effect: "deny",
+      });
+    }
+    for (const policy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      for (const rules of rulesFor(policy)) {
+        expect(lastMatch(rules, "read", cloud), policy).toBe("deny");
+        expect(lastMatch(rules, "list", added), policy).toBe("deny");
+        expect(lastMatch(rules, "read", codexSignIn), policy).toBe("deny");
+      }
     }
   });
 

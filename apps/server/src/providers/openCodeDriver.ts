@@ -148,6 +148,19 @@ export interface OpenCodeClientPort {
   ) => Promise<void>;
 }
 
+/**
+ * The host's protected files in force, as absolute paths, at each level: the
+ * full list below Full access, and the narrower list Octant's own file tools
+ * still refuse at Full access. The host picks both lists; the driver only
+ * chooses between them by the session's execution policy.
+ */
+export interface OpenCodeProtectedPaths {
+  readonly belowFullAccess: ReadonlyArray<string>;
+  readonly atFullAccess: ReadonlyArray<string>;
+}
+
+const NO_PROTECTED_PATHS: OpenCodeProtectedPaths = { belowFullAccess: [], atFullAccess: [] };
+
 export interface OpenCodeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
@@ -162,11 +175,12 @@ export interface OpenCodeDriverOptions {
   readonly readOwnSetup?: () => OpenCodeOwnSetup;
   /**
    * The host's protected files and folders in force, as absolute paths, which
-   * every session refuses to read or list. The host resolves them, so the
-   * driver never reads its protected-file configuration itself. Absent
-   * refuses none beyond OpenCode's own `.env` rule.
+   * a session refuses to read or list: one list below Full access, one at it.
+   * The host resolves both, so the driver never reads its protected-file
+   * configuration or policy itself. Absent refuses none beyond OpenCode's own
+   * `.env` rule.
    */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -189,7 +203,7 @@ interface SessionState {
   /** The person's own permission rules this session applies, empty when none. */
   readonly own: OwnPermissions;
   /** The host's protected paths when the session started, refused last in its rules. */
-  readonly protectedPaths: ReadonlyArray<string>;
+  readonly protectedPaths: OpenCodeProtectedPaths;
   readonly approvals: Set<string>;
   /**
    * The delegated session each pending approval or question came from, when it
@@ -1654,7 +1668,7 @@ function acquireRuntime(
     [],
     false,
     NO_OWN_PERMISSIONS,
-    options.protectedPaths?.() ?? [],
+    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
@@ -2103,7 +2117,7 @@ function makeConnection(
                     extraFolders,
                     ownSkills,
                     ownPermissions(ownSetup),
-                    options.protectedPaths?.() ?? [],
+                    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
@@ -2471,7 +2485,7 @@ function makeConnection(
             input.nativeSetup,
             rememberedEdits,
             ownPermissions(ownSetup),
-            options.protectedPaths?.() ?? [],
+            options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -2642,7 +2656,7 @@ function makeConnection(
                 input.nativeSetup,
                 rememberedEdits,
                 ownPermissions(ownSetup),
-                options.protectedPaths?.() ?? [],
+                options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -3168,7 +3182,7 @@ function newSessionState(
   nativeSetup: ProviderNativeSetup | undefined,
   rememberedEdits: Set<string>,
   own: OwnPermissions,
-  protectedPaths: ReadonlyArray<string>,
+  protectedPaths: OpenCodeProtectedPaths,
 ): SessionState {
   return {
     sessionId,
@@ -3630,15 +3644,21 @@ const OPENCODE_ENV_READ_RULES: ReadonlyArray<PermissionV2Rule> = [
 /**
  * The read refusals that come after everything else, so no allow reopens
  * them: the host's protected files in force, which the host resolves and
- * passes in, refused as the Claude Code gate refuses them. A name pattern in
- * that list arrives as its whole folder and is refused as `folder/*`, since
- * OpenCode's wildcards cannot say a regular expression: stricter, never wider.
+ * passes in, refused as Octant's own file tools refuse them at the same
+ * level. At Full access the secret-path refusals do not apply, as OpenCode
+ * reads any file on its own, and only the provider sign-ins stay refused
+ * (maintainer decision, 2026-11-15). A name pattern in that list arrives as
+ * its whole folder and is refused as `folder/*`, since OpenCode's wildcards
+ * cannot say a regular expression: stricter, never wider.
  */
 export function openCodeProtectedReadRefusals(
-  protectedPaths: ReadonlyArray<string>,
+  policy: ProviderExecutionPolicy,
+  protectedPaths: OpenCodeProtectedPaths,
 ): ReadonlyArray<PermissionV2Rule> {
   const patterns = new Set<string>();
-  for (const path of protectedPaths) {
+  const inForce =
+    policy === "full-access" ? protectedPaths.atFullAccess : protectedPaths.belowFullAccess;
+  for (const path of inForce) {
     patterns.add(path);
     patterns.add(`${path}/*`);
   }
@@ -3654,13 +3674,13 @@ export function permissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
     // Full access reaches folders outside the Project, as OpenCode does on
-    // its own (maintainer decision, 2026-11-14); the protected-file refusals
-    // below still hold.
+    // its own (maintainer decision, 2026-11-14); of the protected-file
+    // refusals below only the provider sign-ins hold there.
     rules = [{ permission: "*", pattern: "*", action: "allow" }];
   } else if (policy === "auto-accept-edits") {
     // Edits inside the bound directory proceed; everything else still asks,
@@ -3720,7 +3740,7 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
-  for (const rule of openCodeProtectedReadRefusals(protectedPaths)) {
+  for (const rule of openCodeProtectedReadRefusals(policy, protectedPaths)) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
   if (managedToolServerName === undefined) return rules;
@@ -3760,7 +3780,7 @@ export function betaAgentPermissionRules(
   _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionV2Ruleset {
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
@@ -3797,7 +3817,7 @@ export function betaAgentPermissionRules(
   return [
     ...rules,
     ...outsideFolderAllows(policy, extraFolders),
-    ...openCodeProtectedReadRefusals(protectedPaths),
+    ...openCodeProtectedReadRefusals(policy, protectedPaths),
   ];
 }
 
@@ -3863,7 +3883,7 @@ export function betaSessionPermissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<string> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),

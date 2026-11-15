@@ -258,7 +258,10 @@ checks never change registry/configuration or journal state.
   there.
 - **Protected paths.** The file tools, the Files panel and file editor, `@` path
   mentions, and search refuse the secret guard's list at every level, Full
-  access included, as the guard's tools refuse it locally. It is one list
+  access included. Locally Octant's own file tools refuse only provider
+  sign-ins at Full access (maintainer decision, 2026-11-15); not built yet:
+  the same softening here, which needs a Full access form of the server's
+  pattern. It is one list
   (`serverProtectedPathPattern` in the secret guard policy), so the two cannot
   drift, and the person's own changes in Settings › Permissions › Protected
   files apply: an added `~/x` or absolute path, and a removed group. The server
