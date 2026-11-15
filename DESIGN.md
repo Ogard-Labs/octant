@@ -261,7 +261,7 @@ under the fill).
 | Rail, band, sidebar, stage, tiles, bottom panel                        | frame ground; pane; sidebar fill                                                                                     | clear on the coat                               | opaque                                                          |
 | Card (`--octant-card`, `bg-card`), Code Home cards, approval card      | card colour + hairline                                                                                               | ink 4% + hairline                               | card colour + hairline (strong border under increased contrast) |
 | Settings group                                                         | ink 2% + hairline                                                                                                    | ink 2% + hairline                               | ink 2% + hairline                                               |
-| Dock card, Environment card                                            | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                  | same                                                            |
+| Dock card                                                              | ink 4% (oklab)                                                                                                       | ink 4% (oklab)                                  | same                                                            |
 | Control fill, chip, segmented track                                    | control roles                                                                                                        | ink 7%, 11% hover, 15% pressed; chosen ink 12%  | control roles                                                   |
 | Outline button                                                         | rests on the page colour                                                                                             | rests on the card step                          | page colour                                                     |
 | Composer box                                                           | card colour + faint hairline + float shadow                                                                          | ink 7% + faint hairline + float shadow, no blur | card colour                                                     |
@@ -650,7 +650,8 @@ failed, never painted.
 | ------------------------------- | ----------- | ------- |
 | `--oct-nav-row-h`               | 32px        | 28px    |
 | Settings row minimum            | 52px        | 44px    |
-| Environment and dock card row   | 44px        | 32px    |
+| Dock card row                   | 44px        | 32px    |
+| Environment row                 | 28px        | 28px    |
 | `--oct-thread-gutter`           | 40px        | 32px    |
 | Composer prompt padding (block) | 12px        | 8px     |
 
@@ -791,7 +792,22 @@ where they are through the slide.
 panel: flat, touching, one line between neighbours, no corner or gap of their
 own. The dock's header is an empty spacer under the band; its tool row lives in
 the band. Divider hit areas are 8px centred on the line (`margin-left: -4px`).
-The dock's tool columns are at least 280px and open at 640px; Environment is a static 240px strip beside them, with no handle.
+Every dock tool has a size class, declared once in `rightUtilityDockModel.ts`.
+**Fixed** tools (Environment at 300px, and panel tools such as Vitals, Plan,
+Agents and Delivery at 360px) always have that width and no resize handle,
+whatever opens or closes beside them. **Flexible** tools (Browser, Terminal,
+device and simulator, desktop, Canvas, Review, Document, Files) open at 640px
+and resize between 480px and the dock's ceiling (half the workspace, or what
+the thread's minimum leaves for two columns); the handle stands only on a
+flexible column's edge. A flexible tool beside a fixed one gives the column the
+flexible rules. Environment is not a pane: it is the thread's own surface
+continued to the right, on the thread's fill, 300px wide, with the thread's
+hairline on its leading edge and no header, close button or handle. It is a
+flat list: a muted 12px section label, rows of a 16px muted icon, a 13px label
+and a right-aligned muted plain-text detail (28px tall, filled only by the
+pointer, a chevron only on hover), and a hairline between sections and none
+between rows. A minimised Browser or terminal flows after the last section as a
+live preview: its head has no box, only the 16:10 picture is rounded.
 
 **Narrow windows.**
 

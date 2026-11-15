@@ -449,17 +449,28 @@ describe("tool tiles in the right sidebar", () => {
 
     it("stands alone at its own width with no tool column while only Environment is open", () => {
       render(<TiledDock initial={opened("environment")} />);
-      expect(strip().style.width).toBe("240px");
+      expect(strip().style.width).toBe("300px");
       expect(document.querySelector(".dock-tool-column")).toBeNull();
     });
 
-    it("has no resize handle, expand or arrange control, only a close button", () => {
+    it("draws no header bar, close button or handle: it is a section of the thread, not a pane", () => {
       render(<TiledDock initial={opened("environment", "files")} />);
-      const buttons = within(strip())
-        .getAllByRole("button")
-        .map((button) => button.getAttribute("aria-label"));
-      expect(buttons).toEqual(["Close Environment"]);
+      expect(within(strip()).queryByRole("button")).toBeNull();
       expect(within(strip()).queryByRole("separator")).toBeNull();
+      expect(strip().querySelector("header, .dock-head")).toBeNull();
+    });
+
+    it("leaves the strip alone, at exactly its width and with nothing in the title band, once the last tool closes", () => {
+      const { unmount } = render(<TiledDock initial={opened("environment", "vitals")} />);
+      const before = strip().style.width;
+      unmount();
+      const { container } = render(<TiledDock initial={opened("environment")} />);
+      expect(strip().style.width).toBe(before);
+      expect(strip().style.width).toBe("300px");
+      expect(document.querySelector(".dock-tool-column")).toBeNull();
+      // The strip's first child is content, never a bar that would draw up in the band.
+      expect(strip().firstElementChild?.className).toContain("dock-env-strip__body");
+      expect(container.querySelector(".right-utility-dock__toolbar")).toBeNull();
     });
 
     it("keeps its width and place when a Browser opens beside it", () => {
@@ -489,11 +500,13 @@ describe("tool tiles in the right sidebar", () => {
       expect(strip()).toBeVisible();
     });
 
-    it("draws minimised cards at the foot of the strip", () => {
+    it("flows minimised cards after the strip's content, not pinned to its foot", () => {
       const state = opened("environment", "browser");
       const browserTab = state.tabs.find((tab) => tab.surface === "browser");
       render(<TiledDock initial={minimiseUtilityTool(state, browserTab?.id ?? "")} />);
-      expect(strip().querySelector('[data-dock-card="browser"]')).not.toBeNull();
+      const card = strip().querySelector('[data-dock-card="browser"]');
+      expect(card).not.toBeNull();
+      expect(card?.closest(".dock-env-strip__body")).not.toBeNull();
       expect(document.querySelector(".dock-tool-column")).toBeNull();
     });
 

@@ -703,17 +703,11 @@ describe("WindowChrome", () => {
     // so the dock stays workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).not.toContain("background");
-    // The Environment's boundary is its header card now, not the checkout block:
-    // a wash of the ink over the dock, with no ring (increased contrast adds one).
-    expect(cssRule(".thread-environment-dock__header")).toContain(
-      "background: var(--environment-card-fill);",
-    );
-    expect(cssRule(".thread-environment-dock__header")).not.toContain("border:");
-    // The meta line mixes the branch with the folder; only the folder is an
-    // identifier, so only it takes the identifier face.
-    expect(cssRule(".thread-environment-dock__place", 1)).toContain(
-      "font-family: var(--oct-font-mono);",
-    );
+    // The Environment is a flat list: its head has no card fill and no ring, and
+    // the muted path after the project's name is the only thing in the line that
+    // is not the name.
+    expect(cssRule(".thread-environment-dock__header")).not.toMatch(/background|border/);
+    expect(cssRule(".environment-row__path")).toContain("color: var(--oct-meta);");
 
     expect(styles).toContain("@media (min-width: 681px) and (max-width: 960px)");
     expect(cssRule(".workspace")).toContain("min-width: 0;");
@@ -728,8 +722,7 @@ describe("WindowChrome", () => {
     expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
     expect(increasedContrastRules()).toContain(".environment-checkout");
     const environmentContrast = increasedContrastRules(environmentStyles);
-    expect(environmentContrast).toContain(".thread-environment-dock__header");
-    expect(environmentContrast).toContain(".environment-card__rows");
+    expect(environmentContrast).toMatch(/\.environment-card\s+\+\s+\.environment-card/);
     expect(
       cssRule('html[data-octant-increased-contrast="true"] .project-row[data-active="true"]'),
     ).toContain("background: var(--octant-control-hover);");
@@ -764,9 +757,16 @@ describe("WindowChrome", () => {
       expect(styles).toContain(selector);
     }
     const row = cssRule(".environment-row");
-    expect(row).not.toContain("background");
-    // An open row's body starts under the row's label, past its icon tile.
-    expect(cssRule(".environment-group__body")).toContain("var(--environment-tile-size)");
+    expect(row).not.toMatch(/background:\s+(?!transparent)/);
+    // The detail is plain muted text: no chip fill, no border, whole value kept.
+    expect(cssRule(".environment-row__detail")).not.toMatch(/background|border/);
+    expect(cssRule(".environment-row__detail")).toContain("white-space: nowrap;");
+    // A row is filled only by the pointer, never at rest and never on click.
+    expect(cssRule("button.environment-group__header:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    // An open row's body starts under the row's label, past its icon.
+    expect(cssRule(".environment-group__body")).toContain("var(--environment-icon-size)");
     expect(cssRule(".environment-git-group__error")).toContain("color: var(--oct-muted);");
     expect(cssRule(".environment-git-group__error")).not.toMatch(/warn|yellow/i);
     expect(styles).not.toContain(".thread-environment-disclosure");

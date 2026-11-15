@@ -11,7 +11,9 @@ import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { splitEnvironmentStrip } from "./dockEnvironmentStrip";
 import {
+  dockColumnIsFixed,
   dockWidthCeiling,
+  flexibleDockMinimum,
   ENVIRONMENT_STRIP_WIDTH,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceDescriptor,
@@ -84,6 +86,10 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     props.tiles !== undefined &&
     split.environmentTabId !== undefined &&
     !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+  // Fixed tools never resize, so their column draws no handle.
+  const columnFixed = dockColumnIsFixed(
+    props.tabs.map((tab) => ("surface" in tab ? tab.surface : tab).id),
+  );
   const reserved = stripOpen ? ENVIRONMENT_STRIP_WIDTH : 0;
   const ceiling = dockWidthCeiling(workspaceWidth, {
     reservedWidth: reserved,
@@ -124,7 +130,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       className="right-utility-dock__resize"
       edge="leading"
       maximum={ceiling}
-      minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
+      minimum={columnFixed ? MIN_CONTEXT_SIDEBAR_WIDTH : flexibleDockMinimum(ceiling)}
       {...(props.onCancelWidthPreview === undefined
         ? {}
         : { onCancel: props.onCancelWidthPreview })}
@@ -167,7 +173,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
       {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
-      {...(stripOpen ? { toolResizeHandle: resizeHandle } : {})}
+      {...(stripOpen && !columnFixed ? { toolResizeHandle: resizeHandle } : {})}
       {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
@@ -205,7 +211,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       id="right-utility-dock"
       ref={dock}
     >
-      {stripOpen ? null : resizeHandle}
+      {stripOpen || columnFixed ? null : resizeHandle}
       {surface}
     </aside>
   );

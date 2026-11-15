@@ -5,7 +5,11 @@ import {
   RIGHT_UTILITY_DOCK_SURFACES,
   dockTotalWidth,
   dockWidthCeiling,
+  COMPACT_DOCK_WIDTH,
+  dockColumnIsFixed,
   ENVIRONMENT_STRIP_WIDTH,
+  FLEXIBLE_DOCK_MIN_WIDTH,
+  flexibleDockMinimum,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   TILED_DOCK_WIDTH,
@@ -37,12 +41,50 @@ describe("how wide the right utility dock is", () => {
     expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
   });
 
-  it("holds the workbench width for any open tool, whichever tab is in front", () => {
-    for (const tool of ["review", "canvas", "files", "terminal"]) {
+  it("holds the workbench width for any open flexible tool, whichever tab is in front", () => {
+    for (const tool of [
+      "review",
+      "canvas",
+      "files",
+      "terminal",
+      "browser",
+      "document",
+      "ios-simulator",
+      "android-emulator",
+      "desktop",
+    ]) {
       expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment", tool] })).toBe(
         WORKBENCH_DOCK_WIDTH,
       );
     }
+  });
+
+  it("opens a column of panel tools at 360 and never moves it, however wide the dock was dragged", () => {
+    for (const tool of ["vitals", "plan", "agents", "delivery", "side-chat", "pull-requests"]) {
+      const tabSurfaces = ["environment", tool];
+      expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces })).toBe(COMPACT_DOCK_WIDTH);
+      expect(
+        resolveDockPresentationWidth({ storedWidth: 700, widthChosen: true, tabSurfaces }),
+      ).toBe(COMPACT_DOCK_WIDTH);
+      expect(dockColumnIsFixed(tabSurfaces)).toBe(true);
+    }
+    expect(COMPACT_DOCK_WIDTH).toBe(360);
+  });
+
+  it("gives a flexible tool beside a fixed one the flexible width and a handle", () => {
+    const tabSurfaces = ["environment", "vitals", "browser"];
+    expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces })).toBe(WORKBENCH_DOCK_WIDTH);
+    expect(dockColumnIsFixed(tabSurfaces)).toBe(false);
+    expect(dockColumnIsFixed(["environment"])).toBe(false);
+  });
+
+  it("holds a flexible column to a 480px minimum and the dock's ceiling as its maximum", () => {
+    expect(
+      resolveDockPresentationWidth({ storedWidth: 300, widthChosen: true, tabSurfaces: ["files"] }),
+    ).toBe(FLEXIBLE_DOCK_MIN_WIDTH);
+    expect(FLEXIBLE_DOCK_MIN_WIDTH).toBe(480);
+    expect(flexibleDockMinimum(1000)).toBe(480);
+    expect(flexibleDockMinimum(400)).toBe(400);
   });
 
   it("holds the Browser's width while its tab is open, whichever tab is in front", () => {
@@ -72,13 +114,15 @@ describe("how wide the right utility dock is", () => {
         widthChosen: true,
         tabSurfaces: ["browser"],
       }),
-    ).toBe(420);
+    ).toBe(FLEXIBLE_DOCK_MIN_WIDTH);
   });
 
   it("widens the dock to fit two columns of tools until the person sizes it", () => {
     const tiled = { ...narrow, tabSurfaces: ["ios-simulator", "canvas"], tileColumns: 2 };
     expect(resolveDockPresentationWidth(tiled)).toBe(TILED_DOCK_WIDTH);
-    expect(resolveDockPresentationWidth({ ...tiled, widthChosen: true })).toBe(360);
+    expect(resolveDockPresentationWidth({ ...tiled, widthChosen: true })).toBe(
+      FLEXIBLE_DOCK_MIN_WIDTH,
+    );
     expect(resolveDockPresentationWidth({ ...tiled, storedWidth: 900 })).toBe(900);
   });
 
@@ -106,8 +150,8 @@ describe("how wide the whole dock is around the Environment strip", () => {
     expect(dockTotalWidth({ toolsWidth: 640, environmentOpen: false, toolsShown: true })).toBe(640);
   });
 
-  it("keeps the strip at 240px", () => {
-    expect(ENVIRONMENT_STRIP_WIDTH).toBe(240);
+  it("keeps the strip at 300px", () => {
+    expect(ENVIRONMENT_STRIP_WIDTH).toBe(300);
   });
 });
 

@@ -576,15 +576,6 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           data-shelf={shelfEntries.length === 0 ? undefined : "true"}
           style={{ width: ENVIRONMENT_STRIP_WIDTH }}
         >
-          <header className="dock-head right-utility-dock__toolbar dock-env-strip__head">
-            <DockToolIcon surface="environment" />
-            <span className="dock-tile__name">Environment</span>
-            <IconButton
-              icon={X}
-              label="Close Environment"
-              onClick={() => closeTool(environmentTab.id)}
-            />
-          </header>
           <div className="right-utility-dock__tool dock-env-strip__body">
             {environmentAvailable.kind === "surface" ? (
               renderToolBody(environmentTab, environmentTab.id, false, false)
@@ -595,8 +586,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                 title="Environment is unavailable"
               />
             )}
+            {/* Minimised Browsers and terminals flow after the last section
+                as live previews, rather than standing pinned to the foot. */}
+            {shelfNode}
           </div>
-          {shelfNode}
         </section>
         {split.toolTabIds.length === 0 ? null : (
           <div className="dock-tool-column">
