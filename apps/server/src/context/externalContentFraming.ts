@@ -17,6 +17,7 @@ export const INSTRUCTION_CONTEXT_SECTIONS = [
   "user-instructions",
   "person-instructions",
   "project-instructions",
+  "orchestration-instructions",
   "extension-instructions",
   "octant-tools",
 ] as const satisfies ReadonlyArray<ContextEntryCategory>;

@@ -2537,7 +2537,10 @@ export function wireRemote(deps: RemoteDependencies) {
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       personMemoryEntries: () => personMemory.view().entries,
-      instructions: () => ({ yours: octantInstructions.view(true).instructions }),
+      instructions: () => ({
+        yours: octantInstructions.view(true).instructions,
+        orchestration: octantInstructions.view(true).orchestration,
+      }),
       projectInstructions: () =>
         octantInstructions.projectInstructions().map((entry) => ({
           projectId: decodeProjectId(entry.projectId),

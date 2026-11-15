@@ -21,18 +21,33 @@ export const PersonInstructionsText = Schema.String.pipe(
 export const ProjectInstructionsText = Schema.String.pipe(
   Schema.maxLength(PROJECT_INSTRUCTIONS_MAX_CHARACTERS),
 );
+export const OrchestrationInstructionsText = Schema.String.pipe(
+  Schema.maxLength(ORCHESTRATION_INSTRUCTIONS_MAX_CHARACTERS),
+);
 
 export const PERSON_INSTRUCTIONS_AGGREGATE_TYPE = "person-instructions";
 export const PROJECT_INSTRUCTIONS_AGGREGATE_TYPE = "project-instructions";
+export const ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE = "orchestration-instructions";
 
 export const PERSON_INSTRUCTIONS_CHANGED = "person-instructions.changed@1";
 export const PROJECT_INSTRUCTIONS_CHANGED = "project-instructions.changed@1";
+export const ORCHESTRATION_INSTRUCTIONS_CHANGED = "orchestration-instructions.changed@1";
 
 /** The person's whole record as changed: every change carries the whole new text. */
 export const PersonInstructionsChanged = Schema.Struct({
   instructions: PersonInstructionsText,
 }).annotations(strict);
 export type PersonInstructionsChanged = typeof PersonInstructionsChanged.Type;
+
+/**
+ * The orchestration text as changed, on its own record: saving it never makes
+ * an open edit of your instructions stale, and the person record's event keeps
+ * the shape every earlier build decodes.
+ */
+export const OrchestrationInstructionsChanged = Schema.Struct({
+  orchestration: OrchestrationInstructionsText,
+}).annotations(strict);
+export type OrchestrationInstructionsChanged = typeof OrchestrationInstructionsChanged.Type;
 
 /**
  * One Project's instructions as changed. The aggregate is the Project, so
@@ -50,8 +65,11 @@ const RecordVersion = Schema.Int.pipe(Schema.nonNegative());
 export const OctantInstructionsView = Schema.Struct({
   kind: Schema.Literal("octant-instructions"),
   instructions: PersonInstructionsText,
-  /** The person record's version; a change names the one it read. */
+  orchestration: OrchestrationInstructionsText,
+  /** The person record's version; a change to your instructions names the one it read. */
   version: RecordVersion,
+  /** The orchestration record's version; a change to orchestration names the one it read. */
+  orchestrationVersion: RecordVersion,
   canChange: Schema.Boolean,
 }).annotations(strict);
 export type OctantInstructionsView = typeof OctantInstructionsView.Type;
@@ -72,6 +90,12 @@ export const OctantInstructionsCommand = Schema.Union(
     kind: Schema.Literal("change-person-instructions"),
     expectedVersion: RecordVersion,
     instructions: PersonInstructionsText,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-orchestration-instructions"),
+    /** The orchestration record's version, not the person record's. */
+    expectedVersion: RecordVersion,
+    orchestration: OrchestrationInstructionsText,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("read-project-instructions"),
@@ -108,6 +132,9 @@ export type OctantInstructionsResult = typeof OctantInstructionsResult.Type;
 export const decodePersonInstructionsChanged = Schema.decodeUnknownSync(PersonInstructionsChanged);
 export const decodeProjectInstructionsChanged = Schema.decodeUnknownSync(
   ProjectInstructionsChanged,
+);
+export const decodeOrchestrationInstructionsChanged = Schema.decodeUnknownSync(
+  OrchestrationInstructionsChanged,
 );
 export const decodeOctantInstructionsCommand = Schema.decodeUnknownSync(OctantInstructionsCommand);
 export const decodeOctantInstructionsResult = Schema.decodeUnknownSync(OctantInstructionsResult);

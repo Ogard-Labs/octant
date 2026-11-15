@@ -95,7 +95,10 @@ make changes itself.
   and truncation stated. The roster names no titles, since a title is text an
   agent wrote, so it does not mark the coordinator. The host writes it again at
   every turn, so compaction never loses it. What the coordinator learns belongs
-  in Project memory, as for any thread.
+  in Project memory, as for any thread. It also carries the person's
+  Orchestration text, which no ordinary thread gets; the text guides when and
+  how it starts workers and grants nothing
+  ([Octant instructions](octant-instructions.md)).
 - **It is set apart in the workspace, and its workers live inside it.** A
   coordinator sits in its own section at the top of its Project. Its workers are
   not part of the thread list: by default they are not listed in the sidebar or

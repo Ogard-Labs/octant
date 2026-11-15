@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **261**   | **156** | **101**      | **4**               |
+| **All areas**                                                                         | **261**   | **157** | **100**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1510,7 +1510,7 @@ A person writes instructions for Octant itself, beside each provider's own instr
 - Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
 - They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
 
-Status: Partly built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
+Status: Built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 

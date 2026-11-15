@@ -243,7 +243,10 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
       listProjects: () => [{ projectId, name: "Smoke project", type: "chat", lifecycle: "active" }],
       readProjectMemory: (id) => readProjectMemory(connection, decodeProjectId(id)),
       personMemoryEntries: () => [],
-      instructions: () => ({ yours: "Hand long research to a Work thread." }),
+      instructions: () => ({
+        yours: "Hand long research to a Work thread.",
+        orchestration: "Start a worker per failing test.",
+      }),
       projectInstructions: () => [{ projectId, instructions: "Ship from main only." }],
       listCanvases: () => [],
       readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
@@ -302,7 +305,10 @@ describe("data-rights smoke: export, purge, re-export on a throwaway host", () =
     expect(firstBundle.kind).toBe("exported");
     expect(firstBundle).toMatchObject({
       bundle: {
-        instructions: { yours: "Hand long research to a Work thread." },
+        instructions: {
+          yours: "Hand long research to a Work thread.",
+          orchestration: "Start a worker per failing test.",
+        },
         projectInstructions: [{ projectId, instructions: "Ship from main only." }],
       },
     });
