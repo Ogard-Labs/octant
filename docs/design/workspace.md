@@ -2232,7 +2232,9 @@ because those transcripts do not yet jump to a turn
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. That row stands in the same place in
+picker uses, not an icon in the header. The phone's Work and Code tabs offer the
+same three as a segmented control above their thread list
+([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
 all three, with the Project tree's own Projects heading under it, so pressing
 the switch moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded
@@ -2593,6 +2595,22 @@ control (see [Minimised tools](#minimised-tools) and
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
+
+On the phone, a thread's header button (Views and panes) is the one way to
+reach anything beside the conversation. Its sheet lists the full-screen views
+the host would fill (Browser today) under Views; choosing one replaces the
+transcript, and a Conversation chip under the header leads back, so no thread
+carries a tab row it rarely uses. Below them it opens Environment, Review,
+Context & usage, and Agents with a segmented control, read-only and in this
+section's wording at phone scale: the header card's name, branch, and folder
+name; Uncommitted changes with its counts, opening Review's changed files and
+their unified diffs, with the checkout's recent commits under them; Running
+(Local servers, Subagents) and Delivery (the linked pull request). Environment
+and Review appear only on a Code thread. Commit, push, Stop, and steering a
+subagent stay at a window, and a subagent is shown by its counts rather than
+one row per run, because AgentRun reads authorize a local window only. The
+reads it uses and the gaps are in
+[Mobile maturity](mobile-maturity.md#exists-today).
 
 ### Browser toolbar
 

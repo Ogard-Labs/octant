@@ -14,6 +14,7 @@ import {
   listAllHostsMobileInbox,
   loadMobileChatThread,
   loadMobileCodeConversation,
+  searchMobileTranscripts,
   sendMobileCodeTurn,
 } from "@octant/client-runtime";
 import {
@@ -23,6 +24,23 @@ import {
 } from "./mobileMockScenario";
 
 describe("mobile mock scenarios", () => {
+  it("answers message search in Work and Code as well as Chat", async () => {
+    const transport = createMobileMockScenario("full").transports[0]!;
+
+    const work = await searchMobileTranscripts(transport, "press kit");
+    expect(work).toMatchObject({
+      status: "ready",
+      hits: [{ mode: "work", turnId: "84000000-0000-4000-8000-000000000002" }],
+    });
+    const code = await searchMobileTranscripts(transport, "side panes");
+    expect(code).toMatchObject({
+      status: "ready",
+      hits: expect.arrayContaining([
+        expect.objectContaining({ mode: "code", turnId: "82000000-0000-4000-8000-000000000001" }),
+      ]),
+    });
+  });
+
   it("activates only known scenarios in development", () => {
     expect(resolveMobileMockScenario("full", true)).toBe("full");
     expect(resolveMobileMockScenario("stale", true)).toBe("stale");
