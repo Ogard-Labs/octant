@@ -14,6 +14,7 @@ export const MachineChangeTopic = Schema.Literal(
   "tool-approvals",
   "thread-follow-ups",
   "thread-message-queue",
+  "todos",
 );
 export type MachineChangeTopic = typeof MachineChangeTopic.Type;
 
@@ -31,7 +32,7 @@ export const MachineChangeFrame = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("changed"),
     sequence: Schema.Int.pipe(Schema.positive()),
-    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(11)),
+    topics: Schema.Array(MachineChangeTopic).pipe(Schema.maxItems(12)),
     epoch: Schema.optional(MachineChangeEpoch),
   }).annotations(strict),
   Schema.Struct({
