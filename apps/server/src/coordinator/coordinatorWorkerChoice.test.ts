@@ -614,6 +614,13 @@ describe("continuing a running worker on its role's fallback", () => {
     expect(h.hostTurns).toHaveLength(0);
   });
 
+  it("pauses rather than move into a role that asks a person first", async () => {
+    const h = running([slot("default", [sonnet]), slot("deep", [opus], true)]);
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+    expect(h.moves).toHaveLength(0);
+    expect(h.hostTurns).toHaveLength(0);
+  });
+
   it("never moves a worker whose model a person changed", async () => {
     const h = running(standardRoles, { coordinatorChoice: { role: "default", rank: "person" } });
     expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");

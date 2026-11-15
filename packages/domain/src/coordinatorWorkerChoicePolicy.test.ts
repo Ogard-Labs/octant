@@ -171,6 +171,25 @@ describe("nextWorkerFallback", () => {
     ).toMatchObject({ kind: "stays", reason: "box-off" });
   });
 
+  it("stays rather than move onto a model of a role that asks a person first", () => {
+    const asks = roles([slot("default", [sonnet]), slot("deep", [opus], { askBeforeUsing: true })]);
+    // Builder's list is used up and the list it borrows asks first.
+    expect(
+      nextWorkerFallback(asks, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "asks-first" });
+    // A worker a person approved in an ask-first role keeps that one model.
+    const approved = roles([slot("deep", [opus, astra], { askBeforeUsing: true })]);
+    expect(
+      nextWorkerFallback(approved, facts(), {
+        current: opus,
+        choice: { role: "deep", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "asks-first" });
+  });
+
   it("reads the box from the Project's choice for the role before Settings", () => {
     const projectOff = roles(
       [slot("default", [sonnet, astra])],
@@ -576,7 +595,13 @@ describe("usageLimitFromReading", () => {
     return (
       status === "available"
         ? { status, providerInstanceId: "p", observedAt, limits }
-        : { status, providerInstanceId: "p", observedAt, staleLimits: limits }
+        : {
+            status,
+            providerInstanceId: "p",
+            observedAt,
+            lastSuccessfulAt: observedAt,
+            staleLimits: limits,
+          }
     ) as never;
   }
 
@@ -653,6 +678,28 @@ describe("usageLimitFromReading", () => {
     expect(usageLimitFromReading(named, Date.parse("2026-11-15T12:30:00.000Z"))).toEqual({
       until: "2026-11-15T14:00:00.000Z",
     });
+  });
+
+  it("times a failed refresh's kept limits from the reading they came from, not the failed refresh", () => {
+    const limits = {
+      rateLimitWindows: [{ window: "w", status: "exhausted" }],
+      quota: "available",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+    };
+    const failed = (lastSuccessfulAt?: string) =>
+      ({
+        status: "failed",
+        providerInstanceId: "p",
+        observedAt: "2026-11-15T12:59:00.000Z",
+        failure: { category: "unavailable", message: "refresh failed" },
+        staleLimits: limits,
+        ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),
+      }) as never;
+    const at = Date.parse("2026-11-15T13:00:00.000Z");
+    expect(usageLimitFromReading(failed("2026-11-15T12:00:00.000Z"), at)).toBeUndefined();
+    expect(usageLimitFromReading(failed("2026-11-15T12:58:00.000Z"), at)).toEqual({});
+    expect(usageLimitFromReading(failed(), at)).toBeUndefined();
   });
 
   it("never counts a reading below its limit, or one whose reset has passed", () => {

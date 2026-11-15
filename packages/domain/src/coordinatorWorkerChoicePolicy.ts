@@ -397,6 +397,8 @@ export type WorkerFallbackStay =
   | "box-off"
   /** The roles no longer list the model it runs on. */
   | "not-in-roles"
+  /** The next model sits in a role that asks a person before using it. */
+  | "asks-first"
   /** No model after it in the walk can take the work now. */
   | "none-left";
 
@@ -425,7 +427,9 @@ export type WorkerFallbackChoice =
  * never back; at the end it stays, and pauses as before. A worker whose
  * model a person picked, whose role has the box off (the Project's choice
  * for the role before Settings), or whose model the roles no longer list
- * stays too. It never returns a model outside the roles.
+ * stays too, and so does one whose next model sits in a role that asks a
+ * person first, or whose own role asks first (a person approved one model,
+ * not the list). It never returns a model outside the roles.
  */
 export function nextWorkerFallback(
   roles: WorkerRoles,
@@ -442,7 +446,10 @@ export function nextWorkerFallback(
   const { choice } = worker;
   if (choice.rank === "person") return stays("taken-over");
   const role = choice.role;
-  if (effectiveWorkerRoleSlot(roles, role)?.continueOnFallback === false) return stays("box-off");
+  const roleSlot = effectiveWorkerRoleSlot(roles, role);
+  if (roleSlot?.continueOnFallback === false) return stays("box-off");
+  // A person approved one model in an ask-first role, not the role's list.
+  if (roleSlot?.askBeforeUsing === true) return stays("asks-first");
   const walk = [role, ...BORROWS[role]].flatMap((listRole) =>
     (effectiveWorkerRoleSlot(roles, listRole)?.candidates ?? []).map((candidate, index) => ({
       candidate,
@@ -495,6 +502,10 @@ export function nextWorkerFallback(
       continue;
     }
     passedOver.push(...verdicts.slice(0, pickedIndex));
+    // A start there would ask a person first, so a running move never goes there.
+    if (effectiveWorkerRoleSlot(roles, listRole)?.askBeforeUsing === true) {
+      return stays("asks-first", passedOver);
+    }
     const rank: CoordinatorWorkerChoiceRank =
       listRole !== role
         ? {

@@ -311,7 +311,9 @@ default (absent is on). The person's fallback list is their consent
   them, a review's other provider), which the worker's recorded choice keeps.
   The model that stopped is out; its siblings on the same account are judged
   by the host's facts, since some limits are per model. Never a model outside
-  the roles.
+  the roles, and never one in a role that has **Ask before using**: a start
+  there would ask a person, so the worker pauses instead, and a worker in an
+  ask-first role keeps the one model a person approved.
 - **How.** The ordinary provider change, made as the host and recorded on the
   worker's choice with `continued-on-fallback` and a host-written reason
   ("Opus 5.5 (Work) at usage limit; continued on Astra (Personal)"). On the

@@ -6743,7 +6743,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   at most once and then pauses as before, and it never reaches a model outside
   the roles. A coordinator, a worker on a model a person picked or with the
   person's own usage-limit hand-off, a thread put away, marked Done, snoozed
-  or archived, and a role with the box off are never moved
+  or archived, and a role with the box off are never moved, and a move never
+  goes into or within a role that has **Ask before using**
   ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude

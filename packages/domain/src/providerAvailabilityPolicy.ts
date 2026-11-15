@@ -55,7 +55,10 @@ export function usageLimitFromReading(
         ? entry.staleLimits
         : undefined;
   if (limits === undefined || entry === undefined) return undefined;
-  const unnamedHolds = now < Date.parse(String(entry.observedAt)) + PROVIDER_DOWN_MS;
+  // A failed refresh keeps the last good reading; its time is that reading's,
+  // not the failed refresh's, or refreshes that keep failing would hold it.
+  const readAt = entry.status === "failed" ? entry.lastSuccessfulAt : entry.observedAt;
+  const unnamedHolds = readAt !== undefined && now < Date.parse(String(readAt)) + PROVIDER_DOWN_MS;
   const future = (resetsAt: string | undefined) =>
     resetsAt === undefined || Date.parse(resetsAt) > now;
   const windows = limits.rateLimitWindows ?? [];
