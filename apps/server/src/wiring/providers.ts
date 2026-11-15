@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { hostStartsThreadsAtOpenFullAccess } from "@octant/domain/guardrail-policy";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -734,7 +735,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
     const codexProcessPort =
       options.codexProcess ??
-      makeCodexProcessLive({ octantVersion: version, runtimeNetwork, serverAccess });
+      makeCodexProcessLive({
+        octantVersion: version,
+        runtimeNetwork,
+        serverAccess,
+        windowsCatalogForOpenFullAccess: () =>
+          hostStartsThreadsAtOpenFullAccess({
+            code: persistence.readCodeSettings()?.settings,
+            work: workThreadProjection.settings(),
+          }),
+      });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
         Effect.suspend(() =>

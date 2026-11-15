@@ -60,7 +60,7 @@ import { CodeFollowUpService } from "../code/codeFollowUpService";
 import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "../code/terminalProcessPort";
-import { defaultTerminalShell } from "../code/terminalShell";
+import { terminalShellFor } from "../code/terminalShell";
 import type { CodeRouteService } from "../codeRoutes";
 import { GitMutationPort } from "../code/gitMutationPort";
 import { codeThreadTurns } from "../code/codeForkPoint";
@@ -935,7 +935,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               );
             },
             workingDirectory,
-            shell: defaultTerminalShell(),
+            shell: terminalShellFor({
+              platform: process.platform,
+              windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+            }),
             credentialReferences: [],
             environment: {},
           };

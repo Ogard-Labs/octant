@@ -126,6 +126,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 
 const attachmentRoots: string[] = [];
 
@@ -148,8 +149,8 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
-  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"] as const)(
-    "refuses a Windows Work turn at %s before acquiring a provider or appending the journal",
+  it.each(["ask-first", "auto-accept-edits", "auto"] as const)(
+    "refuses a Windows Work turn at %s, naming the missing sandbox, before acquiring a provider or appending the journal",
     async (threadAccess) => {
       const fixture = serviceFixture({ threadAccess });
       vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
@@ -157,7 +158,7 @@ describe("WorkTurnService", () => {
         await expect(
           fixture.service.startFirstTurn(ids.window, startCommand()),
         ).rejects.toMatchObject({
-          failure: { category: "unavailable" },
+          failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
         });
         expect(fixture.acquireInputs).toHaveLength(0);
         expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
@@ -166,6 +167,34 @@ describe("WorkTurnService", () => {
       }
     },
   );
+
+  it("refuses a Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
+    const fixture = serviceFixture({ threadAccess: "full-access" });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand(), { accessCeiling: "ask-first" }),
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+      expect(fixture.acquireInputs).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("starts a Windows Work turn at Full access and reaches its provider", async () => {
+    const fixture = serviceFixture({ threadAccess: "full-access" });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("launches in the selected approved folder and refuses revocation without falling back", async () => {
     const base = workProject();

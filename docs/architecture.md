@@ -15352,7 +15352,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   reaches it under the read authority of its window and sees only a terminal
   that window owns. Project terminals are unchanged: their output is never
   journaled and a window reads it from the host's transcript by offset.
-- **Terminal shell configuration.** On macOS a thread or Project terminal is
+- **Terminal shell configuration.** On Windows a terminal opens the shell
+  Settings › Code › Terminal shell names, only at Full access (the
+  [Windows sequence](#current-release-boundary), step 3). On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
   where they exist, the shell's rc and login files, the framework trees they
   source, and the tool homes PATH points into, each listed in
@@ -18246,11 +18248,11 @@ update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.
-Windows Work and Code at Full access are tracked as their own work and need
-Windows forms of the confined launches first (maintainer decision, 2026-11-12);
-the guarded levels stay refused there until an explicitly approved Windows
-confinement design is documented. Today Work and Code are refused on Windows at
-every level. Finding and removing worktrees on this computer is
+Work and Code run on Windows at Full access with the sandbox off (step 3 of
+the [Windows sequence](#current-release-boundary) below; maintainer request,
+2026-11-15); every guarded level, and Full access with the sandbox kept, stays
+refused there until the Windows confinement launcher has run a real provider
+on a person's Windows machine. Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -18348,8 +18350,8 @@ client, public Canvas links, and Browser upload and download manifests take no
 new scope until [the Full access rule](#security-and-authority) is built. What
 is built or specified for them stays as it is. The hold on the Windows building
 blocks is lifted (maintainer decision, 2026-11-14): Windows work takes new
-scope again under the sequence and confinement gate below, and running Work and
-Code on Windows still needs Windows forms of the confined launches first.
+scope again under the sequence and confinement gate below. Work and Code run
+there at Full access only (step 3).
 
 Also out of scope, kept on 2026-11-14: physical phones and tablets and
 app-store upload (above), and an interactive raw provider terminal mode, whose
@@ -18378,13 +18380,11 @@ uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel, and no workflow publishes it to a release;
 native host admission and credentials remain separate prerequisites. The
-release form is the signed per-user installer of step 5 below. Windows Work and Code below Full access stay
-unavailable until an approved Windows confinement design is documented: the confinement port
-supports only macOS and Linux and refuses every other platform, so the guarded
-levels fail closed there. Full access uses no confinement, but running Work
-and Code there on Windows is tracked as its own work and needs Windows forms
-of the confined launches first (maintainer decision, 2026-11-12); today every
-level is refused. Simulator, the Apple workbench, and vibrancy stay
+release form is the signed per-user installer of step 5 below. Windows Work and
+Code below Full access stay unavailable: the confinement port refuses Windows
+unless its caller opts into the dormant launcher, which no production caller
+does, so the guarded levels fail closed there. Full access uses no confinement,
+so Work and Code run there on Windows (step 3 below). Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -18397,16 +18397,136 @@ deliverable and keeps every gate above:
 2. A Windows confinement design for the confined launches (process, file,
    and network boundary equivalent to Seatbelt and Bubblewrap, with the
    secret guard as an OS rule), approved and documented here before any
-   guarded level is admitted. Until then Work and Code stay refused on
-   Windows at every level, and the honest capability report says so.
+   guarded level is admitted. Until then every guarded level stays refused
+   on Windows.
    Partly built: the design below is documented and its launcher is built
    dormant (maintainer decision, 2026-11-15). It has run only on a hosted
-   Windows runner, so every Windows launch stays refused.
-3. Work and Code at Full access on Windows on top of the confined launches'
-   Windows forms; Code terminals with an explicit shell setting (PowerShell
-   by default, never a guessed POSIX shell), Windows process-tree stop in
-   place of process-group signals, and no `/tmp` or POSIX path assumptions in
-   provider launches.
+   Windows runner, so every confined Windows launch stays refused.
+3. Work and Code at Full access on Windows. Partly built (maintainer request,
+   2026-11-15: build it now, without waiting for the launcher):
+   - **The level gate.** A Work turn, a Code turn and every Code operation on
+     a thread (terminal, tests, and the rest) on a Windows host run only at
+     Full access with the sandbox off. Anything else is refused on the server
+     before it is journaled or starts a process, with the reason that Windows
+     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
+     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
+     turn's level clamped to its caller's ceiling, a Code turn's composer
+     level, recorded start or coordinator Plan clamped to the thread, and a
+     live turn's narrower posture, never only the thread's stored level. A
+     Code command that only journals (creating, renaming, moving a thread) and
+     host-side Git a person confirms are not process launches and run at any
+     level. The mode picker reads the host's reported platform and shows each
+     guarded level, and Keep the sandbox, unavailable with that reason; the
+     one-time Full access warning shows as on every platform.
+   - **Terminals.** A Code or Project terminal on Windows opens the shell
+     Settings › Code › Terminal shell names (`windowsTerminalShell`): Windows
+     PowerShell by default (`System32\WindowsPowerShell\v1.0\powershell.exe`),
+     PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) or Command Prompt,
+     each by absolute path with its own arguments (`-NoLogo`, `-Command`;
+     `/D /S /C`), never a guessed POSIX shell and never POSIX `-l`. It runs
+     unconfined, only at Full access, through node-pty's ConPTY, with the
+     inherited environment names a Windows shell needs (`SYSTEMROOT`,
+     `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
+     allowlist. A Project action is written for a POSIX shell and is refused
+     on Windows. Close confirms the stop by the shell's pid, because ConPTY
+     reports a shell's exit about 25 seconds after the process ends
+     (measured on `windows-2025`).
+   - **Ownership receipts.** An owned process's identity on Windows is its
+     pid and creation time, read through System32's Windows PowerShell with
+     an exact argument list and no shell
+     (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
+     never matches. Provider runtimes and terminals keep their receipts there
+     as elsewhere, and so do the harness shell's Windows commands (supervisor
+     `windows-harness-shell`, beside the other harness receipts). A host
+     restart finds and stops what it left behind, through the tree stop, and
+     a receipt whose process cannot be shown stopped is kept for the next
+     start instead of holding up this one. Without the identity every receipt
+     failed on Windows, and a provider launch, which waits for its receipt,
+     never started. A tree stop that has not answered within 10 seconds
+     counts as failed, and a harness command whose stop failed ends its call
+     10 seconds later as timed out or cancelled, marked cleanup-uncertain,
+     rather than leaving the call waiting.
+   - **Process-tree stop.** Windows has no process groups, and
+     `ChildProcess.kill` there ends only the root. Every stop that signals a
+     process group elsewhere (each provider family's runtime, owned-process
+     receipts, agent runs, terminals) ends the whole tree on Windows with
+     `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
+     shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
+     `--full-access` job object would end a tree that re-parented itself too,
+     but it is not packaged and has not run on a person's machine; taskkill
+     follows parent links, so a descendant whose parent already exited
+     survives it, a residual recorded here.
+   - **Paths.** Provider launches at Full access take the thread's folder and
+     the OS temporary directory (`os.tmpdir()`), never `/tmp`; terminal paths
+     are judged by the host's own path rules.
+   - **Providers.** A Codex launch at Full access with the sandbox off reads
+     its `--version` and starts its app-server unconfined on Windows
+     (maintainer request, 2026-11-15): the runtime the read precedes has the
+     same reach, and the confined read has no Windows form. The decision is
+     made per launch, from that launch's own level, so no earlier read or
+     cached result admits another launch; every other level keeps the
+     confined read and launch, which refuse there, and the server gate above
+     refuses those turns first. Codex's model catalog is read by a lease of
+     its own with no thread; on Windows it runs unconfined only while the host
+     starts new threads at open Full access (Settings › Code's default mode or
+     Settings › Work's default access is Full access with the sandbox off,
+     each chosen through the one-time warning; `hostStartsThreadsAtOpenFullAccess`
+     in the domain), and is refused otherwise, so Codex reports itself
+     unavailable on a Windows host whose defaults are guarded. Codex's
+     environment keeps a Windows host's `Path`, `SystemRoot` and profile
+     names whatever their case. A Codex installed only as an npm `.cmd` shim
+     does not start (Windows starts a `.cmd` only through a shell, which
+     Octant does not use for a provider); its binary path names the
+     `codex.exe` the package carries.
+   - **Harness shell.** The Octant Harness's shell tool at Full access on
+     Windows runs each command in the terminal shell Settings › Code names
+     (Windows PowerShell by default) from a `.ps1` (`-NoProfile
+-NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
+     own script folder, with the Windows names a shell needs in its
+     environment, and ends the command's tree on timeout or cancellation. A
+     command's failure reaches the result: PowerShell running a `-File`
+     script reports exit 0 when a native program inside it failed, so the
+     script ends with the last native program's exit code when one set it, 1
+     when the last command failed, and 0 otherwise, and a cmdlet's error stops
+     it with exit 1 (`$ErrorActionPreference = 'Stop'`). In Windows
+     PowerShell 5.1 a native program's error output the command redirects
+     itself (`2>&1`) counts as such an error, which can read a success as a
+     failure, never the reverse. A Command Prompt script ends with
+     `exit /b %errorlevel%`. A command that ends before its identity is
+     read needs no receipt and keeps its result; only a live command whose
+     receipt cannot be kept is stopped and reported unavailable. The tool
+     keeps its name, and a Work or Code lead on a Windows host is told
+     which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
+     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
+     before a command is planned.
+   - **Not yet on Windows.** These run at Full access on macOS and Linux and
+     are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
+     families, whose version read, catalog and launch preparation have not
+     been given the Windows form Codex has (their confined reads refuse there,
+     so each reports itself unavailable); the
+     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
+     a Project's [own toolchain copy](design/language-services.md#user-added-servers);
+     and Project actions. A provider that starts no local process before its
+     turn (an Octant Harness model over an endpoint) runs Full access turns
+     there with Octant's own file tools and the harness shell.
+   - **Evidence.** The level gate, the picker, the settings and the launch
+     rules are tested on Linux CI with the host's platform set to Windows.
+     The `server-windows` CI job runs against real processes on
+     `windows-2025`: the tree stop (a PowerShell root and the program it
+     started both end), a running process's identity read twice alike and
+     its receipt kept and removed, a live shell stopped from its receipt when
+     the terminal port starts again, a long harness command a "crashed" port
+     left running stopped from its receipt by a fresh port, the production Codex driver reading its
+     catalog through a runtime registry that keeps receipts, a failed native
+     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
+     and a live one that close ends, the harness shell running a turn's
+     PowerShell command that writes a file in the checkout and returns its
+     output and ending a timed-out command's tree, and a fake Codex app-server
+     compiled to a Windows program (`bun build --compile`) started at Full
+     access with an unconfined version read, refused at a guarded or
+     sandboxed level, and its catalog read only for a host at open Full
+     access. A whole Work or Code turn through a real provider on a person's
+     Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a
@@ -18656,9 +18776,10 @@ starts the command, and removes what it added when the command ends.
   on purpose, which step 3 decides). Each refusal is `incompatible`, so a
   launch never runs with less confinement than it asked for.
 - **Full access** is full access here too: no AppContainer, no grants, no
-  network rule. Its Windows form is the job object alone
+  network rule. The launcher's form of it is the job object alone
   (`--full-access`), so a stop ends every process the launch started. Step 3
-  uses it.
+  does not use it yet: until the launcher is packaged, a Full access launch on
+  Windows starts directly and stops through the tree stop described there.
 - **Not confined or not yet known.** The registry and named objects are what
   an AppContainer gives by default (its own hive view and object namespace;
   no per-launch rule is added). Writing an inheritable entry walks every
@@ -18672,10 +18793,9 @@ starts the command, and removes what it added when the command ends.
   container are not measured.
 - **Off by default.** `makeProcessConfinementLive` refuses `win32` exactly as
   before unless its caller passes `unverifiedWindowsConfinement` with the
-  launcher's path, and no production caller does. The provider-level
-  refusals ("Provider processes require Windows host confinement") stay, the
-  launcher is not packaged, and the capability report still says Work and
-  Code are unavailable on Windows. Lifting any of these is step 3, after the
+  launcher's path, and no production caller does, and the launcher is not
+  packaged. Step 3 lifted only Full access with the sandbox off; every
+  confined launch, and so every guarded level, stays refused until the
   launcher has run a real provider on a person's Windows machine.
 - **Evidence.** The plan, argument building, refusals and the off-by-default
   gate are pure tests that run on Linux CI, and the plan's also on the hosted

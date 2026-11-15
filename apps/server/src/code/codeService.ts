@@ -122,6 +122,7 @@ import {
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
+  type WindowsTerminalShell,
 } from "@octant/contracts";
 import type {
   AgentProfile,
@@ -264,6 +265,13 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "plan-on-server":
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
+
+/** Absent reads as Windows PowerShell, so only another choice is stored. */
+function windowsTerminalShellSetting(shell: WindowsTerminalShell | undefined): {
+  readonly windowsTerminalShell?: WindowsTerminalShell;
+} {
+  return shell === undefined || shell === "powershell" ? {} : { windowsTerminalShell: shell };
+}
 
 function stripProposedOutcome(
   deliveryTarget: CodeThread["deliveryTarget"],
@@ -1574,8 +1582,6 @@ export class CodeService {
   ): Promise<CodeCommandResult> {
     const actor = executionContext?.actor;
     try {
-      if (process.platform === "win32")
-        throw this.#failure("unavailable", "Code execution requires Windows host confinement.");
       let command;
       try {
         command = decodeCodeCommand(input);
@@ -2088,6 +2094,10 @@ export class CodeService {
           ...((command.restartContinuation ?? current.restartContinuation) === false
             ? { restartContinuation: false }
             : {}),
+          // Absent reads as Windows PowerShell, so only another choice needs a value.
+          ...windowsTerminalShellSetting(
+            command.windowsTerminalShell ?? current.windowsTerminalShell,
+          ),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });

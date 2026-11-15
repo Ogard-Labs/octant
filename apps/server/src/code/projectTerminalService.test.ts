@@ -310,7 +310,7 @@ it.runIf(process.platform === "darwin")(
       actor,
       uuid: () => crypto.randomUUID(),
       clock: () => now,
-      shell: "/bin/sh",
+      shell: () => "/bin/sh",
     });
     try {
       expect(

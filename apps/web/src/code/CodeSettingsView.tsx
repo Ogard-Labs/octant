@@ -1,4 +1,4 @@
-import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
+import type { CodeDiffLayout, CodeSettings, WindowsTerminalShell } from "@octant/contracts/code";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import { Schema } from "effect";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
+import { useHostPlatform } from "../platform";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantFieldError } from "../ui/base/OctantField";
@@ -53,6 +54,8 @@ export interface CodeSettingsUpdate {
   readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
   /** Absent keeps the stored choice. */
   readonly restartContinuation?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly windowsTerminalShell?: WindowsTerminalShell;
 }
 
 /** Settings › Code › Coordinators › Starting workers (docs/design/coordinator-threads.md). */
@@ -62,6 +65,16 @@ export const COORDINATOR_STARTING_OPTIONS: ReadonlyArray<{
 }> = [
   { id: "start-without-asking", label: "Start without asking" },
   { id: "propose-for-approval", label: "Propose for approval" },
+];
+
+/** Settings › Code › Terminal shell, offered on a Windows host only. */
+export const WINDOWS_TERMINAL_SHELL_OPTIONS: ReadonlyArray<{
+  readonly id: WindowsTerminalShell;
+  readonly label: string;
+}> = [
+  { id: "powershell", label: "Windows PowerShell" },
+  { id: "pwsh", label: "PowerShell 7" },
+  { id: "cmd", label: "Command Prompt" },
 ];
 
 const isOpenWorkerLimit = Schema.is(CoordinatorOpenWorkerLimit);
@@ -138,6 +151,7 @@ type CodeSettingsSectionId =
   | "coordinators"
   | "editor"
   | "devices"
+  | "terminal"
   | "external-editor";
 
 /**
@@ -202,9 +216,18 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [openWorkerLimit, setOpenWorkerLimit] = useState<number>(
     props.settings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
   );
+  const hostPlatform = useHostPlatform();
+  const [windowsShell, setWindowsShell] = useState<WindowsTerminalShell>(
+    props.settings.windowsTerminalShell ?? "powershell",
+  );
   const [previousSettings, setPreviousSettings] = useState(props.settings);
   if (previousSettings !== props.settings) {
     setPreviousSettings(props.settings);
+    setWindowsShell((current) =>
+      current === (previousSettings.windowsTerminalShell ?? "powershell")
+        ? (props.settings.windowsTerminalShell ?? "powershell")
+        : current,
+    );
     setCoordinatorStarting((current) =>
       current === (previousSettings.coordinatorStarting ?? "start-without-asking")
         ? (props.settings.coordinatorStarting ?? "start-without-asking")
@@ -290,6 +313,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     },
   ) {
     const host = hostSettings.current;
@@ -326,6 +350,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     if (change.restartContinuation !== undefined) {
       setRestartContinuation(host.restartContinuation !== false);
     }
+    if (change.windowsTerminalShell !== undefined) {
+      setWindowsShell(host.windowsTerminalShell ?? "powershell");
+    }
   }
 
   /**
@@ -345,6 +372,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     },
   ) {
     const draft: CodeSettingsDraft = {
@@ -411,6 +439,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.coordinatorOpenWorkerLimit === undefined
           ? {}
           : { coordinatorOpenWorkerLimit: change.coordinatorOpenWorkerLimit }),
+        ...(change.windowsTerminalShell === undefined
+          ? {}
+          : { windowsTerminalShell: change.windowsTerminalShell }),
         ...(trimmedExecutable === ""
           ? {}
           : {
@@ -666,6 +697,35 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="devices" />
       </SettingsSection>
+      {hostPlatform === "win32" ? (
+        <SettingsSection title="Terminal">
+          <div className="setgroup">
+            <SettingRow
+              description="The shell a Code or Project terminal opens on this computer. Terminals run only at Full access on Windows."
+              focused={props.focusedSetting === "code-terminal-shell"}
+              label="Terminal shell"
+              scope="mode"
+              settingId="code-terminal-shell"
+            >
+              <OctantSelectField
+                aria-label="Terminal shell"
+                className="settings-view__select window-no-drag"
+                onValueChange={(value) => {
+                  const option = WINDOWS_TERMINAL_SHELL_OPTIONS.find(
+                    (candidate) => candidate.id === value,
+                  );
+                  if (option === undefined || option.id === windowsShell) return;
+                  setWindowsShell(option.id);
+                  void commit("terminal", { windowsTerminalShell: option.id });
+                }}
+                options={WINDOWS_TERMINAL_SHELL_OPTIONS}
+                value={windowsShell}
+              />
+            </SettingRow>
+          </div>
+          <CodeSettingsFeedbackSlot feedback={feedback} section="terminal" />
+        </SettingsSection>
+      ) : null}
       <SettingsSection title="External editor">
         <div className="setgroup">
           <SettingRow

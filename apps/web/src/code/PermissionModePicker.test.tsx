@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { HostPlatformContext } from "../platform";
 import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
 
 afterEach(cleanup);
@@ -150,5 +152,47 @@ describe("the sandbox at Full access in the mode picker", () => {
     expect(keeps("local")).toBe(true);
     expect(keeps("claude")).toBe(true);
     expect(keeps("missing")).toBe(false);
+  });
+});
+
+describe("the mode picker on a Windows host", () => {
+  it("offers Full access, shows every guarded level unavailable with the reason, and warns once before the first Full access pick", async () => {
+    const onChange = vi.fn();
+    render(
+      <HostPlatformContext.Provider value="win32">
+        <PermissionModePicker
+          autoSupported
+          onChange={onChange}
+          value="ask-first"
+          warningScope={{ projectId: `windows-${Math.random()}` }}
+        />
+      </HostPlatformContext.Provider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/]) {
+      const item = await screen.findByRole("menuitemradio", { name });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription(WINDOWS_SANDBOX_MISSING_REASON);
+    }
+    const full = screen.getByRole("menuitemradio", { name: /^Full access/ });
+    expect(full).not.toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(full);
+    expect(await screen.findByRole("dialog", { name: "Use Full access?" })).toBeVisible();
+    expect(onChange).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Use Full access" }));
+    expect(onChange).toHaveBeenCalledWith("full-access");
+  });
+
+  it("keeps every level available on a Mac host", async () => {
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <PermissionModePicker autoSupported onChange={() => undefined} value="ask-first" />
+      </HostPlatformContext.Provider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    expect(await screen.findByRole("menuitemradio", { name: /^Plan/ })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 });
