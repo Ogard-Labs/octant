@@ -75,40 +75,81 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+    outputs:
+      windows: ${{ steps.support.outputs.windows }}
+    env:
+      # A rollback builds the published Nightly tag in its own checkout, as in
+      # `release-build.yml`. Only packaging runs there: the installer tooling
+      # (NSIS bootstrap, installer script) is this workflow's own, because a
+      # tag from before Windows installers does not have it.
+      SOURCE_DIR: ${{ inputs.source_commit != '' && 'release-source' || '.' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the rollback source
+        if: inputs.source_commit != ''
+        uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_commit != '' && inputs.source_commit || github.sha }}
+          ref: ${{ inputs.source_commit }}
+          path: release-source
+      # A rollback to a tag from before Windows packaging has no Windows
+      # package to build. That tag's release carried no installer, so the
+      # rollback carries none either, and the other platforms still publish.
+      - name: Skip a source that predates Windows packaging
+        id: support
+        run: |
+          $octantPackaging = Join-Path $env:SOURCE_DIR 'scripts/package-desktop.ts'
+          $octantElectron = Join-Path $env:SOURCE_DIR 'scripts/ensure-ci-electron.ts'
+          if ((Test-Path -LiteralPath $octantElectron) -and (Select-String -LiteralPath $octantPackaging -SimpleMatch '"win32-x64"' -Quiet)) {
+            'windows=true' | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Output '::notice title=No Windows installer::This rollback source predates Windows packaging, so this release carries no Windows installer.'
+            'windows=false' | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
       - uses: oven-sh/setup-bun@v2
+        if: steps.support.outputs.windows == 'true'
         with:
           bun-version: 1.4.4
       - uses: actions/setup-node@v4
+        if: steps.support.outputs.windows == 'true'
         with:
           node-version: 26
-      - run: bun install --frozen-lockfile
+      - name: Install this workflow's tooling
+        if: steps.support.outputs.windows == 'true'
+        run: bun install --frozen-lockfile
+      - name: Install the rollback source
+        if: steps.support.outputs.windows == 'true' && inputs.source_commit != ''
+        working-directory: release-source
+        run: bun install --frozen-lockfile
       - name: Prepare the pinned Electron runtime
+        if: steps.support.outputs.windows == 'true'
+        working-directory: ${{ env.SOURCE_DIR }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ensure-ci-electron.ts
       - name: Fetch the pinned NSIS
+        if: steps.support.outputs.windows == 'true'
         run: ./scripts/windows-installer/install-nsis.ps1
       - name: Build the Windows package
+        if: steps.support.outputs.windows == 'true'
+        working-directory: ${{ env.SOURCE_DIR }}
         env:
           OCTANT_PACKAGE_TARGET: win32-x64
           OCTANT_PACKAGE_FLAVOR: ${{ inputs.flavor }}
           OCTANT_RELEASE_VERSION: ${{ inputs.version }}
         run: bun run package:desktop
       - name: Write the uninstaller and gather what the sign job needs
+        if: steps.support.outputs.windows == 'true'
         env:
           PRODUCT: ${{ inputs.product }}
         run: |
           $octantSigning = Join-Path $pwd 'out/windows-signing'
           if (Test-Path -LiteralPath $octantSigning) { throw 'Refusing a pre-existing signing folder' }
           [void](New-Item -ItemType Directory -Path $octantSigning)
-          Move-Item -LiteralPath "out/$env:PRODUCT-win32-x64" -Destination (Join-Path $octantSigning 'package')
+          Move-Item -LiteralPath (Join-Path $env:SOURCE_DIR "out/$env:PRODUCT-win32-x64") -Destination (Join-Path $octantSigning 'package')
           bun scripts/package-windows-installer.ts uninstaller --package out/windows-signing/package --out "out/windows-signing/Uninstall $env:PRODUCT.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
+        if: steps.support.outputs.windows == 'true'
         with:
           name: windows-unsigned
           path: out/windows-signing
@@ -118,6 +159,7 @@ jobs:
   sign:
     name: Sign and verify the Windows installer
     needs: build
+    if: needs.build.outputs.windows == 'true'
     runs-on: windows-2025
     timeout-minutes: 45
     environment: ${{ inputs.environment }}

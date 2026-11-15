@@ -18366,7 +18366,9 @@ refuse by name on Windows.
   pinned by SHA-256, because the hosted Windows images carry none.
 - **Signing.** Every Windows program in a release is signed with Authenticode
   through Azure Artifact Signing, in `release-windows.yml`, called by every
-  release workflow. The job that builds runs the source with no credential;
+  release workflow. The job that builds runs the source with no credential
+  (a Nightly rollback packages its tag but runs this revision's installer
+  tooling, and a tag from before Windows packaging gets no installer);
   the job that signs runs only the workflow's own scripts, signs in with
   GitHub's OIDC token (`azure/login`, no stored password) in the ring's
   environment (`preview` or the approval-gated `stable`), and signs, with
