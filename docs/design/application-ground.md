@@ -66,7 +66,7 @@ paints its own fill). It paints the page where the stage is and, on a wide
 window, runs on under the sidebar over the sidebar's own width and the height of
 the window below the title band, as the same picture: a scene is composed for the
 stage and continues to the left, so no seam and no second composition shows at the
-sidebar's edge, and the sidebar's translucent fill (82%) shows it softly. A drawn
+sidebar's edge, and the sidebar's translucent fill (94%) shows it softly. A drawn
 ground dims itself to a third there; the picture grounds and Flowing take a third
 through their mask. It is drawn under the sidebar only where that fill is
 translucent: not on a phone, not with the sidebar collapsed, not under Glass, and
@@ -131,8 +131,9 @@ lists sit in that column. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see [Depth and material](../../DESIGN.md#depth-and-material)). Every
 surface that shows text or information softens it beneath one continuous
-reading veil, the sheet colour at 80%, so it shows at about a fifth of its
-strength and agent replies remain bare prose: a thread, every other pane
+reading veil, the sheet colour at 94% (`--octant-reading-surface-keep`, also the
+sidebar's fill; at 80% and 82% a photo still ran through the letters, maintainer
+request 2026-11-15), so the ground is a whisper and agent replies remain bare prose: a thread, every other pane
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
 generator). A start screen (a welcome or a new thread) is the one exception and

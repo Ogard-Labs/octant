@@ -142,7 +142,18 @@ describe("window glass", () => {
 
   it("lets the ground show softly through the sidebar fill and keeps it whole under reduced transparency and increased contrast", () => {
     const shell = read("styles/shell.css");
-    expect(shell).toContain("--octant-sidebar-keep: 82%;");
+    // A surface that holds running text keeps 94% of its own colour over the
+    // ground (82% and 80% let a photo run through the letters), one variable
+    // for the sidebar and the reading veil; the empty areas keep the ground whole.
+    const keep = /--octant-reading-surface-keep:\s*(\d+)%;/.exec(shell)?.[1];
+    expect(Number(keep)).toBeGreaterThanOrEqual(94);
+    expect(shell).toContain("--octant-sidebar-keep: var(--octant-reading-surface-keep);");
+    expect(read("styles/surface.css")).toMatch(
+      /--octant-thread-veil: color-mix\(\s*in srgb,\s*var\(--octant-veil-surface, var\(--octant-sheet-surface\)\)\s*var\(--octant-reading-surface-keep, 94%\),\s*transparent\s*\);/,
+    );
+    expect(shell).toMatch(
+      /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*:is\(\.shell, \.shell\[data-octant-sidebar-vibrancy\]\) \{[^}]*--octant-reading-surface-keep: 100%;/,
+    );
     expect(shell).toMatch(/var\(--octant-sidebar-keep\),\s*transparent/);
     expect(shell).toMatch(
       /html:is\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)\s*:is\(\.shell, \.shell\[data-octant-sidebar-vibrancy\]\) \{[^}]*--octant-sidebar-keep: 100%;/,

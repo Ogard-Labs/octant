@@ -861,7 +861,7 @@ describe("WindowChrome", () => {
       "--octant-thread-veil: var(--octant-veil-surface, var(--octant-sheet-surface));",
     );
     expect(flattened).toContain(
-      "--octant-thread-veil: color-mix( in srgb, var(--octant-veil-surface, var(--octant-sheet-surface)) 80%, transparent );",
+      "--octant-thread-veil: color-mix( in srgb, var(--octant-veil-surface, var(--octant-sheet-surface)) var(--octant-reading-surface-keep, 94%), transparent );",
     );
     // The thread's own container stays clear under the veil and under Glass,
     // or it paints a solid slab over both.

@@ -45,8 +45,8 @@ above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, its paragraphs, list items and table cells at
 the 1.6 reading leading ([DESIGN.md: Scale](../../DESIGN.md#scale)), with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading veil below the title band: the sheet colour at 80%, so the
-ground stays faintly visible behind the transcript. Replies remain bare prose, including on translucent
+continuous reading veil below the title band: the sheet colour at 94%, so the
+ground stays a whisper behind the transcript. Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
 ground. Under Glass the thread's container stays clear, the ground steps down to an eighth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 

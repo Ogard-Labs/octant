@@ -1260,7 +1260,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
     ) {
     --octant-thread-veil: color-mix(
       in srgb,
-      var(--octant-veil-surface, var(--octant-sheet-surface)) 80%,
+      var(--octant-veil-surface, var(--octant-sheet-surface))
+        var(--octant-reading-surface-keep, 94%),
       transparent
     );
   }

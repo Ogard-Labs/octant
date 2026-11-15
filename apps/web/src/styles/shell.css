@@ -61,6 +61,13 @@
     var(--octant-text-primary)
   );
   --octant-panel-surface: var(--octant-panel-opaque);
+  /* A surface that holds running text (the thread's reading veil, the sidebar's
+     lists) keeps this much of its own colour over the application ground, so the
+     ground is a whisper behind words: at 82% and 80% a photo or a field of
+     characters still ran through the letters and read as noise. One variable, so
+     one edit moves every such surface; an empty area (a start screen, the gutters,
+     the title band) keeps the ground at full strength. */
+  --octant-reading-surface-keep: 94%;
   /* The sidebar inside the framed panel is the panel's tone, a few steps toward
      the ground at most, so the two sides of the seam read as one surface with
      a line between them. It keeps 82% of its colour, so the application ground
@@ -68,7 +75,7 @@
      under it so a row of text never meets a glyph. No blur: the desktop app
      does not draw one. Reduced transparency and increased contrast keep it
      whole, and under Glass it keeps the glass tint instead. */
-  --octant-sidebar-keep: 82%;
+  --octant-sidebar-keep: var(--octant-reading-surface-keep);
   --octant-sidebar-fill: color-mix(
     in srgb,
     color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque))
@@ -166,6 +173,7 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
   --octant-stage-surface: var(--octant-app-background);
   --octant-panel-surface: var(--octant-panel-opaque);
   --octant-sidebar-keep: 100%;
+  --octant-reading-surface-keep: 100%;
   --octant-card: inherit;
   --card: inherit;
   --octant-outline-rest: initial;
@@ -178,6 +186,8 @@ html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contra
     --octant-stage-surface: var(--octant-app-background);
     --octant-panel-surface: var(--octant-panel-opaque);
     --octant-sidebar-keep: 100%;
+    --octant-reading-surface-keep: 100%;
+    --octant-reading-surface-keep: 100%;
     --octant-card: inherit;
     --card: inherit;
     --octant-outline-rest: initial;
