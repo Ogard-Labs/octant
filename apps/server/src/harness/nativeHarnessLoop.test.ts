@@ -836,7 +836,7 @@ describe("native harness loop", () => {
     expect(requests[0]?.history).toEqual([{ role: "user", text: "hello" }]);
   });
 
-  it("puts your instructions in the system prompt after Octant's own, and person memory in the message", async () => {
+  it("puts your and the Project's instructions in the system prompt after Octant's own, and person memory in the message", async () => {
     const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
     await Effect.runPromise(
       Effect.scoped(
@@ -852,6 +852,7 @@ describe("native harness loop", () => {
             context: [
               { kind: "instructions", text: "Octant's rule." },
               { kind: "person-instructions", key: "octant-person-instructions", text: "Yours." },
+              { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
               { kind: "person-memory", text: "Remembered." },
               { kind: "instructions", text: "Octant's tool note." },
             ],
@@ -862,7 +863,7 @@ describe("native harness loop", () => {
         }),
       ),
     );
-    expect(requests[0]?.system).toBe("Octant's rule.\n\nOctant's tool note.\n\nYours.");
+    expect(requests[0]?.system).toBe("Octant's rule.\n\nOctant's tool note.\n\nYours.\n\nShip.");
     expect(requests[0]?.history.at(-1)?.text).toContain("Remembered.");
     expect(requests[0]?.history.at(-1)?.text).not.toContain("Yours.");
   });

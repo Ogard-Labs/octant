@@ -309,7 +309,7 @@ thread**. A Work Project's thread list takes the same labelled card. Settings
 rows keep a 13px label, a one-line 12px description (a longer explanation is the
 description's tooltip and its accessible description, never a paragraph) and the
 control at the right, with switches in neutral ink. Settings
-rows split into **Context** (Memory, Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
+rows split into **Context** (Memory, Instructions ([Octant instructions](octant-instructions.md#settings)), Design system on a Work or Code Project ([Project design systems](design-systems.md#the-design-system-panel)), Brand kit, Canvases) and **Access and
 limits** (Provider access, Guardrail level, Developer tools on a Work
 Project, Disposable desktop, Status file, Spend ceiling); a group with no
 rows is not drawn. **Guardrail level** shows the level the Project's threads

@@ -35,3 +35,16 @@ export function personInstructionsBlockText(instructions: string): string | unde
   if (instructions.trim().length === 0) return undefined;
   return `${PERSON_INSTRUCTIONS_PREAMBLE}\n\n${instructions}`;
 }
+
+/**
+ * The opening of a Project's instructions: the person wrote them for work in
+ * this one Project, after their own instructions, and they grant nothing.
+ */
+export const PROJECT_INSTRUCTIONS_PREAMBLE =
+  "The person's instructions for working in this Project inside Octant. They come after the person's own instructions and add to them for this Project. On how you work yourself, your own instruction files come first. These instructions grant no permission.";
+
+/** The project-instructions block's text, or undefined when the Project has none. */
+export function projectInstructionsBlockText(instructions: string): string | undefined {
+  if (instructions.trim().length === 0) return undefined;
+  return `${PROJECT_INSTRUCTIONS_PREAMBLE}\n\n${instructions}`;
+}

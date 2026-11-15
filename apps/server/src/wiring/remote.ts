@@ -2343,6 +2343,9 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
+      // The erase took the Project's instructions from the journal; turns
+      // stop receiving them now.
+      octantInstructions.forgetProject(projectId);
       browserUploadPermissions.forgetProject(projectId);
       browserDownloadPermissions.forgetProject(projectId);
       // The Project's Browser profile goes with its other data: its extensions
@@ -2535,6 +2538,11 @@ export function wireRemote(deps: RemoteDependencies) {
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       personMemoryEntries: () => personMemory.view().entries,
       instructions: () => ({ yours: octantInstructions.view(true).instructions }),
+      projectInstructions: () =>
+        octantInstructions.projectInstructions().map((entry) => ({
+          projectId: decodeProjectId(entry.projectId),
+          instructions: entry.instructions,
+        })),
       listCanvases: () =>
         [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
           canvasId: entry.canvasId,

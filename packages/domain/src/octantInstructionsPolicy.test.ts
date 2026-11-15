@@ -4,6 +4,8 @@ import {
   PERSON_INSTRUCTIONS_PREAMBLE,
   octantInstructionsWithinLimit,
   personInstructionsBlockText,
+  PROJECT_INSTRUCTIONS_PREAMBLE,
+  projectInstructionsBlockText,
 } from "./octantInstructionsPolicy";
 import { looksLikeSecret } from "./secretShapedTextPolicy";
 
@@ -25,6 +27,15 @@ describe("Octant instructions policy", () => {
     expect(personInstructionsBlockText("Use Work for research.\n")).toBe(
       `${PERSON_INSTRUCTIONS_PREAMBLE}\n\nUse Work for research.\n`,
     );
+  });
+
+  it("sends a Project's words after a preamble that places them after yours, and nothing when empty", () => {
+    expect(projectInstructionsBlockText(" ")).toBeUndefined();
+    expect(projectInstructionsBlockText("Ship from main only.")).toBe(
+      `${PROJECT_INSTRUCTIONS_PREAMBLE}\n\nShip from main only.`,
+    );
+    expect(PROJECT_INSTRUCTIONS_PREAMBLE).toContain("after the person's own instructions");
+    expect(PROJECT_INSTRUCTIONS_PREAMBLE).toContain("grant no permission");
   });
 
   it("says the text is for Octant, that a provider's own files come first, and that it grants nothing", () => {

@@ -1693,6 +1693,9 @@ export const ProviderContextBlock = Schema.Struct({
     // runtime with a higher-authority channel never lifts the person's text
     // into it: the text grants nothing.
     "person-instructions",
+    // The instructions the person wrote for one Project, after their own.
+    // Standing and keyed by the Project, like the person's own.
+    "project-instructions",
     // What Octant remembers about the person from earlier threads, framed as
     // data. Standing, so a session keeps it after the first turn.
     "person-memory",

@@ -1,6 +1,8 @@
-import type {
-  OctantInstructionsResult,
-  OctantInstructionsView,
+import {
+  decodeOctantInstructionsResult,
+  type OctantInstructionsCommand,
+  type OctantInstructionsResult,
+  type OctantInstructionsView,
 } from "@octant/contracts/octant-instructions";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +11,8 @@ import {
   INSTRUCTIONS_READ_ONLY_NOTE,
   INSTRUCTIONS_SECRET_WARNING,
   OctantInstructionsSettings,
+  PROJECT_INSTRUCTIONS_PURPOSE,
+  ProjectInstructionsSettings,
   YOUR_INSTRUCTIONS_PURPOSE,
 } from "./OctantInstructionsSettings";
 
@@ -27,10 +31,13 @@ function fakeClient(
   answer: (instructions: string) => OctantInstructionsResult = (instructions) =>
     view({ instructions, version: 4 }),
 ) {
-  const change = vi.fn(async (command: { readonly instructions: string }) =>
-    answer(command.instructions),
+  const change = vi.fn(async (command: OctantInstructionsCommand) =>
+    answer("instructions" in command ? command.instructions : ""),
   );
-  return { change, client: { read: vi.fn(async () => initial), change } };
+  return {
+    change,
+    client: { read: vi.fn(async () => initial), readProject: vi.fn(async () => initial), change },
+  };
 }
 
 /** Matches an accessible description that holds `text` anywhere. */
@@ -158,5 +165,82 @@ describe("Your instructions in Settings", () => {
     rerender(<OctantInstructionsSettings client={{ ...client }} />);
 
     await waitFor(() => expect(field).toHaveValue("Use Code for fixes."));
+  });
+});
+
+describe("Project instructions in a Project's settings", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const projectView = (instructions: string, canChange = true) =>
+    decodeOctantInstructionsResult({
+      kind: "project-instructions",
+      projectId,
+      instructions,
+      version: 1,
+      canChange,
+    });
+
+  function projectClient(instructions: string, canChange = true) {
+    const change = vi.fn(async (command: OctantInstructionsCommand) =>
+      projectView("instructions" in command ? command.instructions : "", canChange),
+    );
+    return {
+      change,
+      client: {
+        read: vi.fn(async () => view()),
+        readProject: vi.fn(async () => projectView(instructions, canChange)),
+        change,
+      },
+    };
+  }
+
+  it("shows the Project's text with its 4,000 character limit and saves it on the Project", async () => {
+    const user = userEvent.setup();
+    const { client, change } = projectClient("Ship from main only.");
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} />);
+
+    const field = await screen.findByRole("textbox", { name: "Project instructions" });
+    expect(screen.getByText(PROJECT_INSTRUCTIONS_PURPOSE)).toBeVisible();
+    expect(screen.getByText("20 / 4,000 characters")).toBeVisible();
+    await user.type(field, " Always.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(client.readProject).toHaveBeenCalledWith(projectId);
+    expect(change).toHaveBeenCalledWith({
+      kind: "change-project-instructions",
+      projectId,
+      expectedVersion: 1,
+      instructions: "Ship from main only. Always.",
+    });
+  });
+
+  it("keeps the refusal and the draft after a stale save of a Project's text", async () => {
+    const user = userEvent.setup();
+    const { client, change } = projectClient("Ship from main only.");
+    change.mockResolvedValueOnce(
+      decodeOctantInstructionsResult({
+        kind: "octant-instructions-refused",
+        reason: "stale-version",
+        message: "This Project's instructions changed since you opened them. Reload and try again.",
+      }),
+    );
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} />);
+
+    const field = await screen.findByRole("textbox", { name: "Project instructions" });
+    await user.type(field, " Always.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(client.readProject).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent("changed since you opened them");
+    expect(field).toHaveValue("Ship from main only. Always.");
+  });
+
+  it("shows an archived Project's text read-only", async () => {
+    const { client } = projectClient("Ship from main only.");
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} readOnly />);
+
+    expect(await screen.findByRole("textbox", { name: "Project instructions" })).toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });

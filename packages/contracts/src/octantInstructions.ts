@@ -56,11 +56,32 @@ export const OctantInstructionsView = Schema.Struct({
 }).annotations(strict);
 export type OctantInstructionsView = typeof OctantInstructionsView.Type;
 
+/** One Project's instructions, as its settings show them. */
+export const ProjectInstructionsView = Schema.Struct({
+  kind: Schema.Literal("project-instructions"),
+  projectId: ProjectId,
+  instructions: ProjectInstructionsText,
+  /** The Project record's version; a change names the one it read. */
+  version: RecordVersion,
+  canChange: Schema.Boolean,
+}).annotations(strict);
+export type ProjectInstructionsView = typeof ProjectInstructionsView.Type;
+
 export const OctantInstructionsCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("change-person-instructions"),
     expectedVersion: RecordVersion,
     instructions: PersonInstructionsText,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("read-project-instructions"),
+    projectId: ProjectId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-project-instructions"),
+    projectId: ProjectId,
+    expectedVersion: RecordVersion,
+    instructions: ProjectInstructionsText,
   }).annotations(strict),
 );
 export type OctantInstructionsCommand = typeof OctantInstructionsCommand.Type;
@@ -69,11 +90,13 @@ export const OctantInstructionsRefusalReason = Schema.Literal(
   "malformed",
   "stale-version",
   "not-the-person",
+  "project-not-found",
 );
 export type OctantInstructionsRefusalReason = typeof OctantInstructionsRefusalReason.Type;
 
 export const OctantInstructionsResult = Schema.Union(
   OctantInstructionsView,
+  ProjectInstructionsView,
   Schema.Struct({
     kind: Schema.Literal("octant-instructions-refused"),
     reason: OctantInstructionsRefusalReason,

@@ -3,21 +3,28 @@ import {
   AggregateVersion,
   CorrelationId,
   EventId,
+  decodeProjectId,
   type EventActor,
 } from "@octant/contracts";
 import {
   PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
   PERSON_INSTRUCTIONS_CHANGED,
+  PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
   PROJECT_INSTRUCTIONS_CHANGED,
   PersonInstructionsChanged,
   ProjectInstructionsChanged,
   decodePersonInstructionsChanged,
+  decodeProjectInstructionsChanged,
   type OctantInstructionsCommand,
   type OctantInstructionsRefusalReason,
   type OctantInstructionsResult,
   type OctantInstructionsView,
+  type ProjectInstructionsView,
 } from "@octant/contracts/octant-instructions";
-import { personInstructionsBlockText } from "@octant/domain/octant-instructions-policy";
+import {
+  personInstructionsBlockText,
+  projectInstructionsBlockText,
+} from "@octant/domain/octant-instructions-policy";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
@@ -38,6 +45,11 @@ const PERSON_INSTRUCTIONS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000e2";
  */
 export const PERSON_INSTRUCTIONS_CONTEXT_KEY = "octant-person-instructions";
 
+/** A Project's key names the Project, so moving between Projects is a withdrawal, not a revision. */
+export function projectInstructionsContextKey(projectId: string): string {
+  return `octant-project-instructions:${projectId}`;
+}
+
 type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 /**
@@ -45,7 +57,7 @@ type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
  * context category, so the inspector names it the same way in every mode.
  */
 export interface OctantInstructionsBlock {
-  readonly kind: "person-instructions";
+  readonly kind: "person-instructions" | "project-instructions";
   readonly key: string;
   readonly text: string;
 }
@@ -87,6 +99,7 @@ const REFUSAL_MESSAGES: Record<OctantInstructionsRefusalReason, string> = {
   malformed: "That change is not valid.",
   "stale-version": "Your instructions changed since you opened them. Reload and try again.",
   "not-the-person": "Only you can change your instructions, from a window or a device you paired.",
+  "project-not-found": "That Project is no longer on this host.",
 };
 
 export function refusedOctantInstructions(
@@ -94,6 +107,15 @@ export function refusedOctantInstructions(
 ): OctantInstructionsResult {
   return { kind: "octant-instructions-refused", reason, message: REFUSAL_MESSAGES[reason] };
 }
+
+interface InstructionsRecord {
+  instructions: string;
+  version: number;
+}
+
+type InstructionsEvent =
+  | { readonly kind: "person"; readonly instructions: string }
+  | { readonly kind: "project"; readonly projectId: string; readonly instructions: string };
 
 /**
  * The instructions the person wrote for Octant, rebuilt from the journal at
@@ -105,80 +127,208 @@ export class OctantInstructionsStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #clock: () => string;
-  #instructions = "";
-  #version = 0;
+  readonly #projectExists: (projectId: string) => boolean;
+  readonly #person: InstructionsRecord = { instructions: "", version: 0 };
+  readonly #projects = new Map<string, InstructionsRecord>();
 
   constructor(options: {
     readonly journal: JournalPort;
     readonly uuid: () => string;
     readonly clock: () => string;
+    /** Whether the Project is on this host; a change for any other is refused. */
+    readonly projectExists?: (projectId: string) => boolean;
   }) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#projectExists = options.projectExists ?? (() => true);
     this.#hydrate();
   }
 
   view(canChange: boolean): OctantInstructionsView {
     return {
       kind: "octant-instructions",
-      instructions: this.#instructions,
-      version: this.#version,
+      instructions: this.#person.instructions,
+      version: this.#person.version,
       canChange,
     };
+  }
+
+  /** One Project's instructions, or a refusal when the Project is not on this host. */
+  projectView(projectId: string, canChange: boolean): OctantInstructionsResult {
+    if (!this.#projectExists(projectId)) return refusedOctantInstructions("project-not-found");
+    return this.#projectViewOf(projectId, canChange);
   }
 
   change(
     command: OctantInstructionsCommand,
     author: OctantInstructionsAuthor,
   ): OctantInstructionsResult {
+    if (command.kind === "read-project-instructions") {
+      return this.projectView(String(command.projectId), actsAsPerson(author));
+    }
     if (!actsAsPerson(author)) return refusedOctantInstructions("not-the-person");
-    if (command.expectedVersion !== this.#version) {
+    const actor = author.actor;
+    if (command.kind === "change-person-instructions") {
+      if (command.expectedVersion !== this.#person.version) {
+        return refusedOctantInstructions("stale-version");
+      }
+      const payload = decodePersonInstructionsChanged({ instructions: command.instructions });
+      this.#append(
+        PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
+        PERSON_INSTRUCTIONS_AGGREGATE_ID,
+        this.#person,
+        PERSON_INSTRUCTIONS_CHANGED,
+        payload,
+        actor,
+      );
+      this.#person.instructions = payload.instructions;
+      return this.view(true);
+    }
+    const projectId = String(command.projectId);
+    if (!this.#projectExists(projectId)) return refusedOctantInstructions("project-not-found");
+    const record = this.#project(projectId);
+    if (command.expectedVersion !== record.version) {
       return refusedOctantInstructions("stale-version");
     }
-    const payload = decodePersonInstructionsChanged({ instructions: command.instructions });
+    const payload = decodeProjectInstructionsChanged({
+      projectId: command.projectId,
+      instructions: command.instructions,
+    });
+    this.#append(
+      PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
+      projectId,
+      record,
+      PROJECT_INSTRUCTIONS_CHANGED,
+      payload,
+      actor,
+    );
+    record.instructions = payload.instructions;
+    return this.#projectViewOf(projectId, true);
+  }
+
+  /**
+   * Drops a Project's instructions after a Project-scoped purge erased their
+   * journal, so turns stop receiving them at once rather than at restart.
+   */
+  forgetProject(projectId: string): void {
+    this.#projects.delete(projectId);
+  }
+
+  /** Each Project's instructions that are not empty, for Export my data. */
+  projectInstructions(): ReadonlyArray<{
+    readonly projectId: string;
+    readonly instructions: string;
+  }> {
+    return [...this.#projects]
+      .filter(([, record]) => record.instructions.length > 0)
+      .map(([projectId, record]) => ({ projectId, instructions: record.instructions }));
+  }
+
+  /**
+   * The standing blocks a turn receives, in their order: the person's own
+   * instructions, then its Project's. Every turn gets them, including the
+   * turns Octant starts itself, because they are the rules the person wrote
+   * for all work here.
+   */
+  contextBlocks(
+    scope: {
+      readonly projectId?: string | undefined;
+    } = {},
+  ): ReadonlyArray<OctantInstructionsBlock> {
+    const blocks: OctantInstructionsBlock[] = [];
+    const person = personInstructionsBlockText(this.#person.instructions);
+    if (person !== undefined) {
+      blocks.push({
+        kind: "person-instructions",
+        key: PERSON_INSTRUCTIONS_CONTEXT_KEY,
+        text: person,
+      });
+    }
+    const project =
+      scope.projectId === undefined
+        ? undefined
+        : projectInstructionsBlockText(this.#projects.get(scope.projectId)?.instructions ?? "");
+    if (project !== undefined && scope.projectId !== undefined) {
+      blocks.push({
+        kind: "project-instructions",
+        key: projectInstructionsContextKey(scope.projectId),
+        text: project,
+      });
+    }
+    return blocks;
+  }
+
+  #projectViewOf(projectId: string, canChange: boolean): ProjectInstructionsView {
+    const record = this.#projects.get(projectId);
+    return {
+      kind: "project-instructions",
+      projectId: decodeProjectId(projectId),
+      instructions: record?.instructions ?? "",
+      version: record?.version ?? 0,
+      canChange,
+    };
+  }
+
+  #project(projectId: string): InstructionsRecord {
+    const existing = this.#projects.get(projectId);
+    if (existing !== undefined) return existing;
+    const created: InstructionsRecord = { instructions: "", version: 0 };
+    this.#projects.set(projectId, created);
+    return created;
+  }
+
+  #append(
+    aggregateType: string,
+    aggregateId: string,
+    record: InstructionsRecord,
+    eventName: string,
+    payload: unknown,
+    actor: EventActor,
+  ): void {
     this.#journal.append({
-      aggregate: {
-        aggregateType: PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
-        aggregateId: decodeAggregateId(PERSON_INSTRUCTIONS_AGGREGATE_ID),
-      },
-      expectedVersion: decodeAggregateVersion(this.#version),
+      aggregate: { aggregateType, aggregateId: decodeAggregateId(aggregateId) },
+      expectedVersion: decodeAggregateVersion(record.version),
       events: [
         {
           eventId: decodeEventId(this.#uuid()),
-          eventName: PERSON_INSTRUCTIONS_CHANGED,
+          eventName,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor: author.actor,
+          actor,
           occurredAt: this.#clock(),
           payload,
         },
       ],
     });
-    this.#version += 1;
-    this.#instructions = payload.instructions;
-    return this.view(true);
-  }
-
-  /**
-   * The standing blocks a turn receives, in their order: the person's own
-   * instructions. Every turn gets them, including the turns Octant starts
-   * itself, because they are the rules the person wrote for all work here.
-   */
-  contextBlocks(): ReadonlyArray<OctantInstructionsBlock> {
-    const text = personInstructionsBlockText(this.#instructions);
-    return text === undefined
-      ? []
-      : [{ kind: "person-instructions", key: PERSON_INSTRUCTIONS_CONTEXT_KEY, text }];
+    record.version += 1;
   }
 
   #hydrate(): void {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
+      PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
     ])) {
-      if (envelope.eventName !== PERSON_INSTRUCTIONS_CHANGED) continue;
-      this.#version = envelope.aggregateVersion;
-      this.#instructions = decodePersonInstructionsChanged(envelope.payload).instructions;
+      const event = decodeEvent(envelope.eventName, envelope.payload);
+      if (event === undefined) continue;
+      const record = event.kind === "person" ? this.#person : this.#project(event.projectId);
+      record.version = envelope.aggregateVersion;
+      record.instructions = event.instructions;
     }
   }
+}
+
+function decodeEvent(eventName: string, payload: unknown): InstructionsEvent | undefined {
+  if (eventName === PERSON_INSTRUCTIONS_CHANGED) {
+    return { kind: "person", instructions: decodePersonInstructionsChanged(payload).instructions };
+  }
+  if (eventName === PROJECT_INSTRUCTIONS_CHANGED) {
+    const decoded = decodeProjectInstructionsChanged(payload);
+    return {
+      kind: "project",
+      projectId: String(decoded.projectId),
+      instructions: decoded.instructions,
+    };
+  }
+  return undefined;
 }
