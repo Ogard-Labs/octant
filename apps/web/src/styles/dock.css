@@ -1908,6 +1908,16 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   min-height: 0;
 }
 
+/* A page's own icon: 16px, never shrunk, never moving the label beside it. */
+.dock-page-favicon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: var(--oct-radius-sm);
+  object-fit: contain;
+}
+
 /* The shelf: minimised tools as small live cards at the foot of the dock body,
    under the overview or the tiles. It takes its natural height and never more
    than two fifths of the dock, scrolling inside past that; the area above

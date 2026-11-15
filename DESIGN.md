@@ -1339,8 +1339,9 @@ cues never fold. A tool alone in the dock keeps no bar. The folding order is in
 
 Panel tabs (the tool strip, the Browser's pages, a Code thread's open files)
 draw one recipe (`.content-tab`, with `PanelTabStrip` and `PanelTab` for a
-panel's own row): a 28px tab in the control radius with a 14px leading mark (the
-tool's, a page's favicon when it has one, a file's kind), a 13px label that
+panel's own row): a 28px tab in the control radius with a leading mark (a
+tool's icon; a Browser page's 16px favicon, or the globe when it has none; a
+file tab has no mark and shows its name alone), a 13px label that
 ellipsises at 180px, and a 16px × that always keeps its slot. The open tab
 (`aria-selected`) has the raised control fill and the primary ink; the others
 are secondary ink with a hover fill. The × shows on the open tab, on hover and
@@ -1353,7 +1354,12 @@ middle click, Delete, Backspace or Cmd+W closes a closable one, and a "+" icon
 button follows the last tab where a new one makes sense. A Files preview tab is
 italic. A segmented view switch (Review's Working tree, Local commits, History)
 stays a segmented control and sits in the same 36px row. A tab strip is never
-drawn a second way in a panel: reuse `.content-tab`. Closing a Files tab, or
+drawn a second way in a panel: reuse `.content-tab`. A bar or toolbar row is
+`flex: none`: it never shrinks, and the content under it scrolls inside itself
+(`min-height: 0`), so nothing covers a bar. A row too narrow for its controls
+wraps to a second line (or, in a tile's bar, folds into the ⋯ menu); no control
+is cut off. Selecting, opening or closing a tab never reorders the others, and
+closing the selected tab selects its right neighbour, else its left. Closing a Files tab, or
 the Files tool, with unsaved edits asks "Save changes to <name>?" with Save,
 Don't save and Cancel (Cancel is the default and Escape); several dirty files
 ask once each, in order.

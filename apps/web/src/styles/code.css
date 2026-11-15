@@ -3208,7 +3208,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-diff-pane__toolbar {
-  height: 36px;
+  min-height: 36px;
   flex: none;
   justify-content: flex-end;
   padding: 0 var(--oct-space-2);
@@ -3219,8 +3219,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-diff-pane__status {
   display: flex;
-  height: 28px;
+  min-height: 28px;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
@@ -3318,7 +3319,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 /* The changed files: a left column when the pane is wide, a short list above
    the diffs when it is narrow. */
 .code-diff-pane__body {
+  flex: 1 1 0;
   flex-direction: column;
+  overflow: auto;
 }
 
 .code-diff-pane__files {
@@ -3349,4 +3352,37 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding-inline: var(--oct-file-inset);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* Bars never shrink and content never covers them. The review's toolbar row
+   and status row keep their height whatever the pane's width or height: a row
+   too narrow for its controls grows a second line instead of cutting one off
+   (the toolbar was a fixed 36px that wrapped, and at a narrow width stacked its
+   controls in a column, so the icons ran under the bar above). The files and
+   diffs below scroll inside themselves. */
+.code-diff-pane > .code-diff-pane__toolbar,
+.code-diff-pane > .code-diff-pane__status {
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.code-diff-pane > .code-diff-pane__toolbar {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.code-diff-pane > .code-diff-pane__toolbar > .code-diff-pane__controls {
+  display: flex;
+  flex: none;
+  margin-inline-start: auto;
+}
+
+.git-history__toolbar {
+  flex: none;
+  flex-wrap: wrap;
+}
+
+.git-history__toolbar--tab-bar {
+  padding-block: var(--oct-space-1);
 }

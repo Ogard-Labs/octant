@@ -26,6 +26,30 @@ function strip(options: { readonly dirty?: boolean; readonly onClose?: () => voi
   return { onClose, onSelect, ...view };
 }
 
+describe("PanelTab without an icon", () => {
+  it("shows the name alone, italic for a preview, with the close mark at the end", () => {
+    render(
+      <PanelTabStrip label="Open files" selectedId="a">
+        <PanelTab
+          id="a"
+          label="main.ts"
+          onClose={vi.fn()}
+          onSelect={vi.fn()}
+          preview
+          roving
+          selected
+        />
+      </PanelTabStrip>,
+    );
+    const tab = screen.getByRole("tab", { name: /main\.ts/ });
+    expect(tab.querySelector("svg")).toBeNull();
+    expect(tab.closest(".content-tab")).toHaveAttribute("data-preview", "true");
+    expect(tab.closest(".content-tab")?.lastElementChild).toBe(
+      screen.getByRole("button", { name: "Close main.ts" }),
+    );
+  });
+});
+
 describe("PanelTabStrip", () => {
   it("marks the open tab selected and keeps the others out of the tab order", () => {
     strip();

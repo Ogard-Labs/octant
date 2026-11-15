@@ -8,6 +8,8 @@ import {
 } from "@octant/contracts";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { CodeDiffPane, type CodeDiffProjection } from "./CodeDiffPane";
@@ -280,6 +282,50 @@ describe("CodeDiffPane", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Ignore whitespace" }));
 
     expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it.each([320, 640])(
+    "keeps the toolbar row and the status row with every named control in a %ipx pane",
+    async (width) => {
+      render(
+        <div style={{ width, height: 400 }}>
+          <CodeDiffPane
+            client={client()}
+            diff={available()}
+            ignoreWhitespace={{ value: false, onChange: vi.fn() }}
+            loadRuntime={runtime().loadRuntime}
+            onRefresh={vi.fn()}
+          />
+        </div>,
+      );
+      await screen.findByRole("region", { name: "src/index.ts" });
+      const pane = screen.getByRole("region", { name: "Review" });
+      const toolbar = pane.querySelector(".code-diff-pane__toolbar") as HTMLElement;
+      expect(toolbar).not.toBeNull();
+      for (const name of ["Unified", "Side by side", "Ignore whitespace", "Refresh review"]) {
+        expect(within(toolbar).getByRole("button", { name })).toBeInTheDocument();
+      }
+      const status = pane.querySelector(".code-diff-pane__status") as HTMLElement;
+      expect(status).toHaveTextContent("2 files changed");
+    },
+  );
+
+  it("keeps the review's bars from shrinking so the content below cannot cover them", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const block = (selector: string) => {
+      const from = css.lastIndexOf(`\n${selector} {`);
+      expect(from, selector).toBeGreaterThanOrEqual(0);
+      return css.slice(from, css.indexOf("}", from));
+    };
+    for (const selector of [
+      ".code-diff-pane > .code-diff-pane__toolbar,\n.code-diff-pane > .code-diff-pane__status",
+      ".git-history__toolbar",
+    ]) {
+      expect(block(selector)).toMatch(/flex:\s*none/);
+      expect(block(selector)).toMatch(/flex-wrap:\s*wrap/);
+    }
+    expect(block(".code-diff-pane__body")).toMatch(/overflow:\s*auto/);
+    expect(block(".code-diff-pane__body")).toMatch(/flex:\s*1 1 0/);
   });
 
   it("loads exact Git evidence and compares one changed file at a time", async () => {

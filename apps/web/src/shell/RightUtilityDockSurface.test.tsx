@@ -51,6 +51,9 @@ function surface(id: RightUtilityDockSurfaceId) {
   return found;
 }
 
+const ICON =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
 describe("the right sidebar surface", () => {
   it("puts every tool's toolbar on the dock's own rail", () => {
     const rail = dockStylesheet.match(/\.right-utility-dock__tool\s+:is\(([^)]*)\)\s*\{([^}]*)\}/);
@@ -272,6 +275,7 @@ describe("tool tiles in the right sidebar", () => {
     readonly launchable?: ReadonlyArray<(typeof RIGHT_UTILITY_DOCK_SURFACES)[number]>;
     readonly narrow?: boolean;
     readonly resolveSurface?: DockTileControls["resolveSurface"];
+    readonly pageIcon?: (tabId: string) => string | undefined;
   }) {
     const [state, setState] = useState(props.initial);
     const tabs = state.tabs.map((tab) => ({
@@ -357,6 +361,7 @@ describe("tool tiles in the right sidebar", () => {
           {...(state.active === undefined ? {} : { activeTabId: state.active })}
           onCloseTab={(id) => setState((current) => closeUtilityTabState(current, id))}
           onOpenTab={vi.fn()}
+          {...(props.pageIcon === undefined ? {} : { pageIcon: props.pageIcon })}
           onSelectSurface={(id) => setState((current) => selectUtilityTabState(current, id))}
           renderTab={(tab) => <Probe id={tab.id} />}
           overview={<p>Thread overview</p>}
@@ -913,6 +918,49 @@ describe("tool tiles in the right sidebar", () => {
       ),
     ).toBeVisible();
     expect(screen.getByText("Live files")).toBeVisible();
+  });
+
+  it("keeps a single Browser page's tab and the new-page button in the tile's bar when stacked", () => {
+    const page = "10000000-0000-4000-8000-000000000001";
+    let state = openUtilityTabState({ tabs: [] }, "files");
+    state = addUtilityTabState(state, "browser", page);
+    state = showUtilityTabBelow(state, "files");
+    render(<TiledDock initial={state} />);
+    const region = screen.getByRole("region", { name: "Browser" });
+    const bar = region.querySelector(".dock-tile__bar") as HTMLElement;
+    const pages = within(bar).getByRole("tablist", { name: "Browser pages" });
+    expect(within(pages).getAllByRole("tab")).toHaveLength(1);
+    expect(within(pages).getByRole("button", { name: "New Browser page" })).toBeVisible();
+  });
+
+  it("keeps a lone Browser tile's page tab and new-page button in the row at the top of its body", () => {
+    const page = "10000000-0000-4000-8000-000000000001";
+    const state = addUtilityTabState(openUtilityTabState({ tabs: [] }, "files"), "browser", page);
+    render(<TiledDock initial={state} />);
+    const region = screen.getByRole("region", { name: "Browser" });
+    expect(region.querySelector(".dock-tile__bar")).toBeNull();
+    const pages = within(region).getByRole("tablist", { name: "Browser pages" });
+    expect(within(pages).getAllByRole("tab")).toHaveLength(1);
+    expect(within(pages).getByRole("button", { name: "New Browser page" })).toBeVisible();
+  });
+
+  it("draws a Browser page's own icon in its tab and the globe when it has none", () => {
+    const withIcon = "10000000-0000-4000-8000-000000000001";
+    const without = "10000000-0000-4000-8000-000000000002";
+    let state = openUtilityTabState({ tabs: [] }, "files");
+    state = addUtilityTabState(state, "browser", withIcon);
+    state = addUtilityTabState(state, "browser", without);
+    state = showUtilityTabBeside(state, "files");
+    render(<TiledDock initial={state} pageIcon={(id) => (id === withIcon ? ICON : undefined)} />);
+    const tabs = within(screen.getByRole("tablist", { name: "Browser pages" })).getAllByRole("tab");
+    const image = tabs[0]?.querySelector("img");
+    expect(image).toHaveAttribute("src", ICON);
+    expect(image).toHaveAttribute("alt", "");
+    expect(image).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(image).toHaveAttribute("draggable", "false");
+    expect(tabs[1]?.querySelector("img")).toBeNull();
+    fireEvent.error(image as HTMLImageElement);
+    expect(tabs[0]?.querySelector("img")).toBeNull();
   });
 
   it("makes the Browser tile's bar its row of pages, naming the Browser once", () => {

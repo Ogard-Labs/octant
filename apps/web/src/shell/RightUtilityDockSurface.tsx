@@ -39,6 +39,39 @@ import {
   type RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
+type PagedSurface = "browser" | "terminal";
+
+/** The tools whose instances are pages in one tile: one tab each, plus a new one. */
+const PAGED_SURFACES: Readonly<
+  Record<PagedSurface, { readonly name: string; readonly label: string; readonly newLabel: string }>
+> = {
+  browser: { name: "Browser", label: "Browser pages", newLabel: "New Browser page" },
+  terminal: { name: "Terminal", label: "Terminal sessions", newLabel: "New terminal" },
+};
+
+function isPagedSurface(surface: RightUtilityDockSurfaceId): surface is PagedSurface {
+  return surface === "browser" || surface === "terminal";
+}
+
+/** A page's own icon at 16px, or the Browser's globe when it has none or fails to load. */
+function PageFavicon(props: { readonly src: string | undefined }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [props.src]);
+  if (props.src === undefined || failed) return <DockToolIcon surface="browser" />;
+  return (
+    <img
+      alt=""
+      className="dock-page-favicon"
+      draggable={false}
+      height={16}
+      onError={() => setFailed(true)}
+      referrerPolicy="no-referrer"
+      src={props.src}
+      width={16}
+    />
+  );
+}
+
 function unavailableMessage(): string {
   return "The active pane holds no compatible thread. Focus a thread pane to restore its tools.";
 }
@@ -101,6 +134,8 @@ export interface RightUtilityDockSurfaceProps {
   readonly onClose?: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
+  /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
+  readonly pageIcon?: (tabId: string) => string | undefined;
   readonly onSelectSurface: (tabId: string) => void;
   /** What the dock shows above its tool launcher while no tool is chosen. */
   readonly overview?: ReactNode;
@@ -157,6 +192,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // keeps its tabs inside its own window: the title band's Browser button names
   // it once, and the pages sit in a row of their own inside it.
   const browserTabs = props.tabs.filter((tab) => dockTabSurface(tab).id === "browser");
+  const pagedTabs = (surface: PagedSurface) =>
+    surface === "browser"
+      ? browserTabs
+      : props.tabs.filter((tab) => dockTabSurface(tab).id === surface);
   const tiles = props.tiles;
   const layout = tiles?.layout;
   // Tiles are drawn whenever a layout exists and the dock is not the narrow
@@ -183,9 +222,16 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     environmentTab !== undefined &&
     shelfDrawn &&
     !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
-  // A pages row lives in a tile's bar only where tiles carry bars: with two or
-  // more tools drawn together.
-  const barsDrawn = strip ? split.toolTabIds.length >= 2 : tiled;
+  // A tile carries a bar only with two or more tools drawn together; a tool
+  // alone has none. Counting the tiles drawn, not asking whether tiles exist,
+  // keeps the pages row where a bar is: a lone tile counted as barred left its
+  // pages in neither place.
+  const drawnLayout = strip ? split.toolLayout : tiled ? layout : undefined;
+  const drawnTiles =
+    drawnLayout === undefined
+      ? 1
+      : drawnLayout.columns.reduce((sum, column) => sum + column.tiles.length, 0);
+  const barsDrawn = drawnTiles >= 2;
   const draggedTool = useDraggedDockTool();
   const [dropZone, setDropZone] = useState<"beside" | "below" | "replace">();
   const root = useRef<HTMLDivElement>(null);
@@ -297,31 +343,45 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     else if (zone === "below") tiles?.onShowBelow(id);
     else props.onSelectSurface(id);
   }
-  /** The Browser's pages: its bar in a tile, a row at the top of its body alone. */
-  function pagesRow(selectedId: string | undefined) {
+  /**
+   * A paged tool's pages (the Browser's pages, the Terminal's sessions): its bar
+   * in a tile, a row at the top of its body alone. Every Browser and Terminal
+   * has the row, one page included, so a page never loses its tab.
+   */
+  function pagesRow(surface: PagedSurface, selectedId: string | undefined) {
+    const paged = PAGED_SURFACES[surface];
+    const pages = pagedTabs(surface);
     return (
       <PanelTabStrip
         className="dock-browser-pages"
-        label="Browser pages"
-        newTabLabel="New Browser page"
-        onNewTab={() => props.onOpenTab("browser")}
+        label={paged.label}
+        newTabLabel={paged.newLabel}
+        onNewTab={() => props.onOpenTab(surface)}
         selectedId={selectedId}
       >
-        {browserTabs.map((page) => (
-          <PanelTab
-            icon={<DockToolIcon surface="browser" />}
-            id={page.id}
-            key={page.id}
-            label={page.label}
-            onClose={() => props.onCloseTab(page.id)}
-            onSelect={() => props.onSelectSurface(page.id)}
-            roving={
-              page.id ===
-              (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
-            }
-            selected={page.id === selectedId}
-          />
-        ))}
+        {pages.map((page) => {
+          const favicon = surface === "browser" ? props.pageIcon?.(page.id) : undefined;
+          return (
+            <PanelTab
+              icon={
+                surface === "browser" ? (
+                  <PageFavicon src={favicon} />
+                ) : (
+                  <DockToolIcon surface={surface} />
+                )
+              }
+              id={page.id}
+              key={page.id}
+              label={page.label}
+              onClose={() => props.onCloseTab(page.id)}
+              onSelect={() => props.onSelectSurface(page.id)}
+              roving={
+                page.id === (pages.some((tab) => tab.id === selectedId) ? selectedId : pages[0]?.id)
+              }
+              selected={page.id === selectedId}
+            />
+          );
+        })}
       </PanelTabStrip>
     );
   }
@@ -333,12 +393,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   function renderToolBody(
     tab: RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor,
     selectedId: string | undefined,
-    pages: boolean,
+    pages: PagedSurface | undefined,
     rowInBody: boolean,
   ) {
-    return pages ? (
+    return pages !== undefined ? (
       <>
-        {rowInBody ? pagesRow(selectedId) : null}
+        {rowInBody ? pagesRow(pages, selectedId) : null}
         <div className="dock-browser-pages__page-body" key={tab.id}>
           {props.renderTab?.(dockTabDescriptor(tab)) ?? contents[dockTabSurface(tab).id]}
         </div>
@@ -364,29 +424,30 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     if (tab === undefined) return undefined;
     const tool = dockTabSurface(tab);
     const available = tiles?.resolveSurface(tool.id) ?? { kind: "surface" };
-    const pages = tool.id === "browser" && browserTabs.length > 1;
-    const label = pages ? "Browser" : tab.label;
+    const pages = isPagedSurface(tool.id) ? tool.id : undefined;
+    const label = pages === undefined ? tab.label : PAGED_SURFACES[pages].name;
     const movable = (direction: DockTileMove) =>
       moveUtilityTile(placementState, tab.id, direction) !== placementState;
     return {
-      key: pages ? "browser" : tab.id,
+      key: pages ?? tab.id,
       label,
       surface: tool.id,
-      barLeading: pages ? (
-        pagesRow(tab.id)
-      ) : (
-        <>
-          <DockToolIcon surface={tool.id} />
-          <span className="dock-tile__name">{label}</span>
-        </>
-      ),
+      barLeading:
+        pages !== undefined ? (
+          pagesRow(pages, tab.id)
+        ) : (
+          <>
+            <DockToolIcon surface={tool.id} />
+            <span className="dock-tile__name">{label}</span>
+          </>
+        ),
       moves: {
         left: movable("left"),
         right: movable("right"),
         up: movable("up"),
         down: movable("down"),
       },
-      bodyClassName: `right-utility-dock__tool${pages ? " right-utility-dock__tool--pages" : ""}`,
+      bodyClassName: `right-utility-dock__tool${pages === undefined ? "" : " right-utility-dock__tool--pages"}`,
       minimisable: shelfDrawn && MINIMISABLE_DOCK_SURFACES.has(tool.id),
       inset: tool.id === "plan" || tool.id === "delivery" || tool.id === "agents",
       children:
@@ -560,7 +621,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         >
           <div className="right-utility-dock__tool dock-env-strip__body">
             {environmentAvailable.kind === "surface" ? (
-              renderToolBody(environmentTab, environmentTab.id, false, false)
+              renderToolBody(environmentTab, environmentTab.id, undefined, false)
             ) : (
               <OctantEmpty
                 message={unavailableMessage()}

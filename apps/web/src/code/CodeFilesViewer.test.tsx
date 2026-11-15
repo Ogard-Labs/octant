@@ -152,6 +152,27 @@ describe("CodeFilesViewer", () => {
     expect(await screen.findByRole("region", { name: "Code editor for a.ts" })).toBeVisible();
   });
 
+  it("selects the right neighbour when the selected tab closes, else the left, without reordering the rest", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.dblClick(await screen.findByRole("treeitem", { name: "a.ts" }));
+    await user.dblClick(screen.getByRole("treeitem", { name: "b.ts" }));
+    await user.dblClick(screen.getByRole("treeitem", { name: "notes.md" }));
+    await user.click(screen.getByRole("tab", { name: "b.ts" }));
+    await user.click(screen.getByRole("button", { name: "Close b.ts" }));
+    expect(tabNames()).toEqual(["a.ts", "notes.md"]);
+    expect(screen.getByRole("tab", { name: "notes.md" })).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("button", { name: "Close notes.md" }));
+    expect(screen.getByRole("tab", { name: "a.ts" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("shows a file tab as its name alone, with no file-type icon", async () => {
+    const user = userEvent.setup();
+    mount();
+    await user.dblClick(await screen.findByRole("treeitem", { name: "a.ts" }));
+    expect(screen.getByRole("tab", { name: "a.ts" }).querySelector("svg")).toBeNull();
+  });
+
   it("offers the file as a workspace tab only from the file menu action", async () => {
     const user = userEvent.setup();
     const { onOpenInMainArea } = mount();

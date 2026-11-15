@@ -1114,7 +1114,7 @@ Each tile resolves its own availability against the active pane, and the dock
 still never shows another pane's content. All Browser tabs are pages of one
 Browser tool and share one tile. The layout is window-local presentation in
 local storage: it grants nothing, starts nothing, and the bottom panel never
-has one. Each tile has one bar, 32px: the tool's name (the Browser's bar is its page row),
+has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
 text; they fold into a named view menu and then a More menu before the name is
 cut), with an Arrange menu (Move left, right, up and down where the caps allow, Move

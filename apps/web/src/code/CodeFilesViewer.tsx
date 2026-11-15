@@ -3,10 +3,9 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNod
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { PanelTab, PanelTabStrip } from "../shell/PanelTabs";
-import { Code, File, FileText, Image, PanelRight, PanelRightOpen } from "../ui/icons";
+import { File, PanelRight, PanelRightOpen } from "../ui/icons";
 import { pathBasename } from "../lib/fileName";
 import type { CodeFileChange } from "./CodeFileExplorer";
-import { fileKindOf } from "./CodeFileExplorer";
 import { CodeFileExplorerPanel, type CodeFileExplorerPanelProps } from "./CodeFileExplorerPanel";
 import { registerFilesCloseGuard } from "./filesCloseGuard";
 import { UnsavedFileDialog, type UnsavedFileChoice } from "./UnsavedFileDialog";
@@ -31,13 +30,6 @@ interface OpenFile {
 interface EditorActions {
   readonly save: () => Promise<boolean>;
   readonly discard: () => void;
-}
-
-function FileTabGlyph(props: { readonly name: string }) {
-  const kind = fileKindOf(props.name);
-  const Glyph =
-    kind === "code" ? Code : kind === "document" ? FileText : kind === "image" ? Image : File;
-  return <Glyph aria-hidden="true" size={14} />;
 }
 
 export interface CodeFilesViewerProps {
@@ -207,7 +199,6 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
               {files.map((file) => (
                 <PanelTab
                   dirty={dirtyMarks.has(String(file.path))}
-                  icon={<FileTabGlyph name={pathBasename(file.path)} />}
                   id={String(file.path)}
                   key={file.path}
                   label={pathBasename(file.path)}

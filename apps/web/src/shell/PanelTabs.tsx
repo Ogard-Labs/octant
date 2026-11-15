@@ -59,7 +59,8 @@ export function revealInStrip(node: HTMLElement, tab: HTMLElement): void {
 export function PanelTab(props: {
   readonly id: string;
   readonly label: string;
-  readonly icon: ReactNode;
+  /** A leading mark; a file tab has none and shows its name alone. */
+  readonly icon?: ReactNode;
   readonly selected: boolean;
   /** The one tab the next open replaces: drawn in italics. */
   readonly preview?: boolean;
@@ -113,7 +114,7 @@ export function PanelTab(props: {
         type="button"
         variant="ghost"
       >
-        {props.icon}
+        {props.icon ?? null}
         <span className="content-tab__label">{props.label}</span>
         {props.preview === true ? <span className="sr-only">, preview</span> : null}
         {props.dirty === true ? <span className="sr-only">, unsaved changes</span> : null}
