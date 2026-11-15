@@ -77,21 +77,62 @@ export type CloudMachineRecipe = typeof CloudMachineRecipe.Type;
 export const decodeCloudMachineRecipe = Schema.decodeUnknownSync(CloudMachineRecipe);
 
 /**
+ * One SSH host public key as the provider reports it, in the `known_hosts`
+ * form after the host pattern: the key type, one space, and the base64 key.
+ * Only OpenSSH's current host key types are accepted, and nothing else may
+ * ride on the line, because the host writes it into a known hosts file.
+ */
+export const SshHostPublicKey = Schema.String.pipe(
+  Schema.maxLength(4_096),
+  Schema.pattern(
+    /^(ssh-ed25519|ecdsa-sha2-nistp256|ecdsa-sha2-nistp384|ecdsa-sha2-nistp521|ssh-rsa|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) [A-Za-z0-9+/]+={0,2}$/,
+  ),
+);
+export type SshHostPublicKey = typeof SshHostPublicKey.Type;
+
+/**
  * Where the existing server Project connection reaches the machine: a host
  * name or address and a login, on port 22. It is registered as a server like
- * any other, so the person's SSH agent and known hosts still decide the login.
+ * any other, so the person's SSH agent still signs the login. `hostKeys` are
+ * the machine's own host keys as its provider reported them at creation; the
+ * host pins them for that server, so the strict host check accepts the new
+ * machine and refuses any other key. Without them the person's known hosts
+ * decide, as for any registered server.
  */
 export const CloudMachineSshEndpoint = Schema.Struct({
   host: ShieldServerAlias,
   user: ShieldServerUser,
+  hostKeys: Schema.optional(
+    Schema.Array(SshHostPublicKey).pipe(Schema.minItems(1), Schema.maxItems(8)),
+  ),
 }).annotations(strict);
 export type CloudMachineSshEndpoint = typeof CloudMachineSshEndpoint.Type;
+
+/**
+ * What the provider itself says the machine costs per hour, exactly as it
+ * reported it: the amount as the provider wrote it, its ISO 4217 currency,
+ * and which provider record it came from. Octant shows it as reported and
+ * never estimates, converts or totals it.
+ */
+export const CloudMachineHourlyCost = Schema.Struct({
+  amount: Schema.String.pipe(Schema.pattern(/^\d{1,9}(\.\d{1,9})?$/)),
+  currency: Schema.String.pipe(Schema.pattern(/^[A-Z]{3}$/)),
+  /** The provider record the figure came from, such as its price list for the size. */
+  source: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(120),
+    Schema.filter((value) => !/[\u0000-\u001f]/.test(value)),
+  ),
+}).annotations(strict);
+export type CloudMachineHourlyCost = typeof CloudMachineHourlyCost.Type;
 
 /** The provider's machine as a target plugin reports it; decoded before it is believed. */
 export const CloudMachineDescription = Schema.Struct({
   providerMachineId: boundedToken(256),
   state: CloudMachineState,
   endpoint: Schema.optional(CloudMachineSshEndpoint),
+  /** Absent when the provider reports no price for this machine; never filled in by Octant. */
+  costPerHour: Schema.optional(CloudMachineHourlyCost),
 }).annotations(strict);
 export type CloudMachineDescription = typeof CloudMachineDescription.Type;
 export const decodeCloudMachineDescription = Schema.decodeUnknownOption(CloudMachineDescription);
@@ -125,6 +166,12 @@ export const CloudMachine = Schema.Struct({
   state: Schema.optional(CloudMachineState),
   stateObservedAt: Schema.optional(UtcTimestamp),
   endpoint: Schema.optional(CloudMachineSshEndpoint),
+  /** The provider's last reported hourly cost and when it was read. */
+  costPerHour: Schema.optional(
+    Schema.Struct({ ...CloudMachineHourlyCost.fields, observedAt: UtcTimestamp }).annotations(
+      strict,
+    ),
+  ),
   serverId: Schema.optional(AggregateId),
   projectId: Schema.optional(ProjectId),
   detail: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
@@ -174,6 +221,8 @@ export const CloudMachineStateChangedPayload = Schema.Struct({
   act: Schema.Literal("suspend", "resume", "destroy", "observe"),
   state: CloudMachineState,
   observedAt: UtcTimestamp,
+  /** Present only when the provider reported a cost with this answer. */
+  costPerHour: Schema.optional(CloudMachineHourlyCost),
   principal: localWindow,
 }).annotations(strict);
 

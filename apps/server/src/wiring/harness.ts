@@ -149,6 +149,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "cloudMachineServers"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -173,6 +174,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
     agentRunInteractions,
+    cloudMachineServers,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -276,6 +278,7 @@ export function wireHarness(deps: HarnessDependencies) {
     ownerCurrent: (owner) =>
       windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
     agentSocket: sshAgentSocket,
+    pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
     record: (record) => serverProjectStore.recordPreview(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
@@ -299,6 +302,8 @@ export function wireHarness(deps: HarnessDependencies) {
     projects: serverProjectStore,
   });
   cloudMachines.load();
+  cloudMachineServers.pinnedHostKeys = (server) => cloudMachines.pinnedHostKeys(server);
+  cloudMachineServers.suspendedRefusal = (server) => cloudMachines.suspendedRefusal(server);
   const cloudMachineRoutes = createCloudMachineRouteHandler({
     windowAuthorityStore,
     service: cloudMachines,

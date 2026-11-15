@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import {
+  pinnedHostKeyOptions,
   SERVER_CONNECTION_OPTIONS,
   serverSshEnvironment,
   type ServerAddress,
@@ -56,6 +57,8 @@ export interface ServerPreviewOptions {
   readonly record: (record: ServerPreviewView & { readonly owner: string }) => boolean;
   readonly sshPath?: string;
   readonly configFile?: string;
+  /** The known hosts file holding a server's pinned keys, when the host pinned any. */
+  readonly pinnedKnownHosts?: (server: ServerAddress) => string | undefined;
   /**
    * The server's process authority clock. A tunnel's hour runs on it, so a
    * wall clock set back cannot keep a tunnel open longer.
@@ -68,11 +71,13 @@ export function serverPreviewSshArguments(
   server: ServerAddress,
   port: number,
   configFile?: string,
+  pinnedKnownHosts?: string,
 ): ReadonlyArray<string> {
   return [
     ...(configFile === undefined ? [] : ["-F", configFile]),
     ...[
       ...SERVER_CONNECTION_OPTIONS,
+      ...pinnedHostKeyOptions(pinnedKnownHosts),
       "ControlMaster=no",
       "ControlPath=none",
       "ExitOnForwardFailure=yes",
@@ -294,7 +299,14 @@ export class ServerPreviewTunnels {
     }
     const child = spawn(
       this.#options.sshPath ?? "ssh",
-      [...serverPreviewSshArguments(preview.server, preview.remotePort, this.#options.configFile)],
+      [
+        ...serverPreviewSshArguments(
+          preview.server,
+          preview.remotePort,
+          this.#options.configFile,
+          this.#options.pinnedKnownHosts?.(preview.server),
+        ),
+      ],
       {
         env: serverSshEnvironment(process.env, this.#options.agentSocket()),
         stdio: ["pipe", "pipe", "pipe"],

@@ -1,6 +1,11 @@
 import { RemoteSetupCheckResult, type RemoteSetupCheckInput } from "@octant/contracts/remote-setup";
 import { decodeHostAnswer } from "@octant/contracts";
 import {
+  type CloudMachinesCommand,
+  CloudMachinesCommandResult,
+  CloudMachinesView,
+} from "@octant/contracts/cloud-machines";
+import {
   type ServerProjectsCommand,
   ServerProjectsCommandResult,
   ServerProjectsView,
@@ -27,6 +32,9 @@ export interface ServerProjectsClient {
   check?(input: RemoteSetupCheckInput, signal?: AbortSignal): Promise<RemoteSetupCheckResult>;
   previewRead?(projectId: string): Promise<ServerPreviewView | null>;
   previewCommand?(command: ServerPreviewCommand): Promise<ServerPreviewResult>;
+  /** Machines in the person's cloud account; refused off this computer. */
+  cloudMachinesRead?(signal?: AbortSignal): Promise<CloudMachinesView>;
+  cloudMachinesCommand?(command: CloudMachinesCommand): Promise<CloudMachinesCommandResult>;
   command(
     command: ServerProjectsCommand,
     signal?: AbortSignal,
@@ -74,6 +82,7 @@ export function createServerProjectsClient(
       typeof body === "object" &&
       body !== null &&
       ((body as { kind?: unknown }).kind === "server-projects-refused" ||
+        (body as { kind?: unknown }).kind === "cloud-machines-refused" ||
         (body as { kind?: unknown }).kind === "refused");
     if (!response.ok && !refusal) {
       const message =
@@ -111,6 +120,18 @@ export function createServerProjectsClient(
           { method: "POST", body: JSON.stringify(command) },
           "/api/server-project-preview",
         ),
+      );
+    },
+    async cloudMachinesRead(signal) {
+      const body = await send(
+        { method: "GET", ...(signal === undefined ? {} : { signal }) },
+        "/api/cloud-machines",
+      );
+      return decodeHostAnswer(CloudMachinesView)((body as { view?: unknown }).view);
+    },
+    async cloudMachinesCommand(command) {
+      return decodeHostAnswer(CloudMachinesCommandResult)(
+        await send({ method: "POST", body: JSON.stringify(command) }, "/api/cloud-machines"),
       );
     },
     async read(signal) {
