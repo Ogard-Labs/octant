@@ -2258,6 +2258,108 @@ describe("BrowserSurfaceHost", () => {
 
       expect(peeked.screenshotDataUrl).toBeUndefined();
     });
+
+    it("fails closed without touching a debugger another session already holds", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      created.webContents.debugger.attach("1.3");
+      vi.mocked(created.webContents.debugger.attach).mockClear();
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(created.webContents.debugger.attach).not.toHaveBeenCalled();
+      expect(created.webContents.debugger.detach).not.toHaveBeenCalled();
+      expect(created.webContents.debugger.sendCommand).not.toHaveBeenCalledWith(
+        "DOM.getDocument",
+        expect.anything(),
+      );
+    });
+
+    it("reads the DOM only after the agent's queued action has finished", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      let finishAction!: () => void;
+      vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishAction = () => resolve("text");
+          }),
+      );
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      const acting = host.act(contextId, { kind: "screenshot" });
+      await vi.waitFor(() => expect(finishAction).toBeTypeOf("function"));
+
+      const peeking = host.peek(contextId);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(created.webContents.debugger.attach).not.toHaveBeenCalled();
+
+      finishAction();
+      await acting.catch(() => undefined);
+      await expect(peeking).resolves.toMatchObject({
+        screenshotDataUrl: "data:image/jpeg;base64,AQID",
+      });
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("leaves no protocol listener behind when the debugger refuses to attach", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      const on = vi.fn();
+      Object.assign(created.webContents.debugger, { on, removeListener: vi.fn() });
+      vi.mocked(created.webContents.debugger.attach).mockImplementation(() => {
+        throw new Error("Another debugger is attached.");
+      });
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(on).not.toHaveBeenCalled();
+    });
+
+    it("fails closed on a frame owner of any tag whose frame it cannot reach", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      const answer = vi.mocked(created.webContents.debugger.sendCommand);
+      const original = answer.getMockImplementation();
+      answer.mockImplementation(async (method, parameters, sessionId) =>
+        method === "DOM.getDocument"
+          ? {
+              root: {
+                nodeName: "#document",
+                nodeType: 9,
+                children: [{ nodeName: "FENCEDFRAME", nodeType: 1, frameId: "elsewhere" }],
+              },
+            }
+          : original?.(method, parameters, sessionId),
+      );
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("fails closed when the page's DOM never answers", async () => {
+      const created = sandboxedPage({ nodeName: "#document", children: [] });
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation((method) =>
+        method === "DOM.getDocument" ? new Promise(() => undefined) : Promise.resolve(undefined),
+      );
+
+      const started = Date.now();
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+      expect(Date.now() - started).toBeLessThan(4_000);
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    }, 10_000);
   });
 
   it("keeps the native context reusable after an agent closes its current tab", async () => {

@@ -638,7 +638,7 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Repository checkout changed" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Repository checkout unavailable" })).toBeVisible();
     // The old copy sent the reader off to start over. Recovery exists now, so
     // abandoning the thread is no longer the advice.
     expect(screen.queryByText(/create a fresh Code thread/i)).not.toBeInTheDocument();
@@ -674,7 +674,7 @@ describe("CodeWorkspace", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Connecting repository checkout" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Repository checkout changed" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Repository checkout unavailable" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Start terminal" })).not.toBeInTheDocument();
   });
 
