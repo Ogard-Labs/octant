@@ -52,6 +52,7 @@ export const MOBILE_COPY = {
   workNoFolder: "No folder",
   searchMessages: "In threads",
   searchToolOutput: "Tool output",
+  searchCanvas: "Canvas",
   noProject: "No Project",
   threadViews: "Views",
   threadViewsAndPanes: "Views and panes",

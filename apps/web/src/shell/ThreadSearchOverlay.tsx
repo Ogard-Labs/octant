@@ -149,7 +149,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       : `${hits.length} matching thread${hits.length === 1 ? "" : "s"}.${
           results.truncated ? " Showing the most recent matches." : ""
         }`;
-  const placeholder = "Search titles, messages, and tool output";
+  const placeholder = "Search titles, messages, Canvas, and tool output";
 
   function open(hit: ThreadSearchHit | undefined): void {
     if (hit === undefined) return;
@@ -292,11 +292,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   data-archived={hit.archived}
                   data-content={hit.snippet !== undefined}
                   id={optionId(index)}
-                  key={
-                    hit.turnId === undefined
-                      ? `${hit.mode}:${hit.threadId}`
-                      : `${hit.mode}:${hit.threadId}:${hit.turnId}`
-                  }
+                  key={`${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
                   onClick={() => open(hit)}
                   onMouseMove={() => setActiveIndex(index)}
                   role="option"
@@ -314,8 +310,10 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                       </span>
                     )}
                   </span>
-                  {hit.field === "tool" ? (
-                    <span className="thread-search__result-state">Tool output</span>
+                  {hit.field === "tool" || hit.field === "canvas" ? (
+                    <span className="thread-search__result-state">
+                      {hit.field === "tool" ? "Tool output" : "Canvas"}
+                    </span>
                   ) : null}
                   {scope === "all" ? (
                     <span className="thread-search__result-state">{MODE_LABEL[hit.mode]}</span>
@@ -372,8 +370,8 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       )}
       <p className="thread-search__scope" role="note">
         {scope === "all"
-          ? "Searches titles, messages, and tool output in Chat, Work, and Code, archived threads included. Every word must appear; quote a phrase to match it exactly."
-          : `Searches ${modeLabel} titles, messages, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.`}
+          ? "Searches titles, messages, attachment names, Canvas, and tool output in Chat, Work, and Code, archived threads included. Every word must appear; quote a phrase to match it exactly."
+          : `Searches ${modeLabel} titles, messages, attachment names, Canvas, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.`}
       </p>
     </OctantDialog>
   );

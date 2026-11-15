@@ -104,6 +104,7 @@ export function threadSearchAnswer(read: ThreadSearchRead): TranscriptSearchAnsw
         lifecycle: hit.lifecycle,
         ...(turnId === undefined ? {} : { turnId: String(turnId) }),
         field: hit.field,
+        ...(hit.canvasId === undefined ? {} : { canvasId: String(hit.canvasId) }),
         snippet: hit.snippet,
         updatedAt: hit.updatedAt,
         ...(hit.matchRanges === undefined || hit.matchRanges.length === 0

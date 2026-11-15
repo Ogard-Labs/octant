@@ -50,12 +50,14 @@ export interface ThreadSearchHit {
   readonly turnId?: string;
   /** Where the host found the text; absent on a title match made from the listed threads. */
   readonly field?: ThreadSearchField;
+  /** The Canvas whose words matched, on a `canvas` hit. */
+  readonly canvasId?: string;
   readonly snippet?: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
 }
 
 /** Where in a thread the host matched the text. */
-export type ThreadSearchField = "title" | "prompt" | "reply" | "tool";
+export type ThreadSearchField = "title" | "prompt" | "reply" | "tool" | "canvas";
 
 /** Which modes the overlay searches: every mode, or one. */
 export type ThreadSearchScope = "all" | SidebarActivityMode;
@@ -68,9 +70,10 @@ export interface ThreadSearchContentHit {
   readonly title: string;
   readonly projectId?: string;
   readonly lifecycle: "active" | "archived";
-  /** Absent on a title match, which names no turn. */
+  /** Absent on a title or Canvas match, which names no turn. */
   readonly turnId?: string;
   readonly field?: ThreadSearchField;
+  readonly canvasId?: string;
   readonly snippet: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
   readonly updatedAt?: string;
@@ -143,8 +146,7 @@ export function buildThreadSearchResults(
           (hit) =>
             (hit.lifecycle === "active" || hit.lifecycle === "archived") &&
             !(
-              hit.turnId === undefined &&
-              listedTitles.has(`${hit.mode ?? input.mode}:${hit.threadId}`)
+              hit.field === "title" && listedTitles.has(`${hit.mode ?? input.mode}:${hit.threadId}`)
             ),
         )
       : [];
@@ -248,6 +250,7 @@ function toContentHit(
     archived: hit.lifecycle === "archived",
     ...(hit.turnId === undefined ? {} : { turnId: hit.turnId }),
     ...(hit.field === undefined ? {} : { field: hit.field }),
+    ...(hit.canvasId === undefined ? {} : { canvasId: hit.canvasId }),
     // A title match's snippet is the title the row already shows.
     ...(hit.field === "title" ? {} : { snippet: hit.snippet }),
     ...(hit.field === "title" || hit.matchRanges === undefined || hit.matchRanges.length === 0

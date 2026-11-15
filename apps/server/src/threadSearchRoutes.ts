@@ -157,7 +157,8 @@ async function searchAcrossModes(
   for (const match of found.matches) {
     const thread = listed.get(`${match.mode}:${match.threadId}`);
     if (thread === undefined) continue;
-    const anchorKey = match.mode === "code" ? "operationId" : "turnId";
+    const anchorKey =
+      match.field === "canvas" ? "canvasId" : match.mode === "code" ? "operationId" : "turnId";
     hits.push({
       mode: match.mode,
       threadId: thread.id,

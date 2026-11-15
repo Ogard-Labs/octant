@@ -750,9 +750,42 @@ describe("ChatProjection", () => {
     expect(searchThreads(connection, "neutral", visible, 50).matches).toEqual([
       expect.objectContaining({ field: "title", anchorId: "" }),
     ]);
+    // An attachment's file name joins its turn's prompt; a purged one leaves it.
+    const attachment = (status: "finalized" | "purged") =>
+      pending("chat.attachment-updated@1", {
+        kind: "attachment-updated",
+        attachment: {
+          id: "82000000-0000-4000-8000-000000000070",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          displayName: "budget-q3.pdf",
+          mediaType: "application/pdf",
+          byteLength: 10,
+          digest: digest("pdf"),
+          status,
+          createdAt: now,
+        },
+      });
     store.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
       expectedVersion: 2 + deltas.length,
+      events: [attachment("finalized")],
+    });
+    expect(
+      searchThreads(connection, "budget-q3", visible, 50).matches.map((match) => [
+        match.anchorId,
+        match.field,
+      ]),
+    ).toEqual([[ids.turn, "prompt"]]);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 3 + deltas.length,
+      events: [attachment("purged")],
+    });
+    expect(searchThreads(connection, "budget-q3", visible, 50).matches).toEqual([]);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 4 + deltas.length,
       events: [
         pending("chat.deleted@1", { kind: "deleted", threadId: ids.thread, deletedAt: now }),
       ],

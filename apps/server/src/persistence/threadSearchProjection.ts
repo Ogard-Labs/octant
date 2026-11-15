@@ -1,6 +1,9 @@
 import {
   decodeChatAttemptResponseAppended,
   decodeChatAttemptToolStepChanged,
+  decodeCanvasCreated,
+  decodeCanvasVersionAppended,
+  decodeChatAttachmentUpdated,
   decodeChatAttemptUpdated,
   decodeChatDeleted,
   decodeChatThreadCreated,
@@ -26,7 +29,7 @@ import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import { clipSearchSnippet, escapeLikePattern, parseSearchTerms } from "./transcriptSearchText";
 
 export type ThreadSearchMode = "chat" | "work" | "code";
-export type ThreadSearchDocumentField = "title" | "prompt" | "reply" | "tool";
+export type ThreadSearchDocumentField = "title" | "prompt" | "reply" | "tool" | "canvas";
 
 /**
  * A tool document keeps at most this much text. Terminal output can run to
@@ -192,6 +195,28 @@ export class ThreadSearchProjection implements Projection {
         );
         return;
       }
+      case "chat.attachment-updated@1": {
+        // An attachment is part of the person's message: its file name joins
+        // the turn's prompt document, so "the budget spreadsheet" finds the
+        // turn that sent budget.pdf. Its bytes live in files outside the
+        // journal and are not read here. A purged attachment leaves the index.
+        const attachment = decodeChatAttachmentUpdated(event.payload).attachment;
+        if (attachment.turnId === undefined) return;
+        const turnId = String(attachment.turnId);
+        index.putPart(
+          {
+            mode: "chat",
+            threadId: String(attachment.threadId),
+            turnKey: turnId,
+            anchorId: turnId,
+            field: "prompt",
+          },
+          `attachment:${String(attachment.id)}`,
+          1,
+          attachment.status === "purged" ? "" : attachment.displayName,
+        );
+        return;
+      }
       case "chat.thread-rewound@1": {
         const rewound = decodeChatThreadRewound(event.payload);
         index.dropInactiveChatTurns(String(rewound.thread.id));
@@ -273,6 +298,32 @@ export class ThreadSearchProjection implements Projection {
             ? decodeCodeThreadCreated(event.payload).thread
             : decodeCodeThreadUpdated(event.payload).thread;
         index.setTitle("code", String(thread.id), thread.title);
+        return;
+      }
+      case "canvas.created@1":
+      case "canvas.version-appended@1": {
+        // Every version carries the whole Canvas, so the newest one replaces
+        // its text. A Canvas is filed under the one thread its provenance
+        // names, so it is found exactly where that thread may be listed.
+        const { canvasId, version } =
+          event.eventName === "canvas.created@1"
+            ? decodeCanvasCreated(event.payload)
+            : decodeCanvasVersionAppended(event.payload);
+        const { title, provenance, blocks } = version.definition;
+        const key = `canvas:${String(canvasId)}`;
+        index.moveCanvas(key, provenance.mode, String(provenance.threadId));
+        index.putPart(
+          {
+            mode: provenance.mode,
+            threadId: String(provenance.threadId),
+            turnKey: key,
+            anchorId: String(canvasId),
+            field: "canvas",
+          },
+          "content",
+          0,
+          [title, ...canvasBlockText(blocks)].join("\n"),
+        );
         return;
       }
       case "code.operation-event-recorded@1":
@@ -476,6 +527,28 @@ class SearchIndexWriter {
     );
   }
 
+  /**
+   * A Canvas whose newest version names another thread than the one it was
+   * filed under leaves the old thread, so it is never found where it no
+   * longer belongs.
+   */
+  moveCanvas(turnKey: string, mode: ThreadSearchMode, threadId: string): void {
+    const rows = this.#connection
+      .prepare(
+        `SELECT DISTINCT mode, thread_id FROM thread_search_document
+         WHERE field = 'canvas' AND turn_key = ?`,
+      )
+      .all(turnKey) as ReadonlyArray<{
+      readonly mode: ThreadSearchMode;
+      readonly thread_id: string;
+    }>;
+    for (const row of rows) {
+      if (row.mode !== mode || row.thread_id !== threadId) {
+        this.removeTurn(row.mode, row.thread_id, turnKey);
+      }
+    }
+  }
+
   /** The thread a Work turn was filed under when the index saw it accepted. */
   threadOfTurn(mode: ThreadSearchMode, turnKey: string): string | undefined {
     const row = this.#connection
@@ -635,6 +708,61 @@ function keepTail(text: string): string {
     : text;
 }
 
+/**
+ * The words a Canvas shows: the text, titles, labels and table cells of its
+ * blocks, read by field name, never an id, URL, colour or number. Bounded,
+ * so a very large Canvas keeps its first words.
+ */
+const CANVAS_TEXT_FIELDS = new Set([
+  "text",
+  "title",
+  "subtitle",
+  "label",
+  "caption",
+  "description",
+  "heading",
+  "name",
+  "columns",
+  "rows",
+  "cells",
+  "items",
+  "nodes",
+  "edges",
+  "events",
+  "entries",
+  "series",
+  "value",
+  "summary",
+  "detail",
+]);
+
+function canvasBlockText(blocks: unknown): ReadonlyArray<string> {
+  const words: string[] = [];
+  let length = 0;
+  const visit = (value: unknown, readable: boolean): void => {
+    if (length >= MAX_THREAD_SEARCH_MESSAGE_TEXT) return;
+    if (typeof value === "string") {
+      if (!readable || value.trim().length === 0) return;
+      words.push(value);
+      length += value.length + 1;
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, readable);
+      return;
+    }
+    if (typeof value === "object" && value !== null) {
+      for (const [key, child] of Object.entries(value)) {
+        // Only named text fields count, at any depth: a URL or colour nested
+        // under a table row is never read as words.
+        visit(child, CANVAS_TEXT_FIELDS.has(key));
+      }
+    }
+  };
+  visit(blocks, false);
+  return words;
+}
+
 function toolStepText(step: ThreadToolStep): string {
   return [step.toolName, step.summary ?? ""].join(" ").trim();
 }
@@ -686,7 +814,7 @@ const TRIGRAM = 3;
  * matches when each term appears somewhere in it (its prompt, any piece of its
  * reply, or what its tools did), and is shown once, by the document that holds
  * the most terms (a prompt before a reply before tool text on a tie). Title
- * matches come first, then message matches, then tool matches, each newest
+ * matches come first, then message and Canvas matches, then tool matches, each newest
  * thread first and newest turn first within a thread. Listing authority is
  * applied in the query, before the cap, so `truncated` counts only matches
  * the caller may see.
@@ -734,7 +862,8 @@ export function searchThreads(
           document.anchor_id, document.field, document.start_sequence, document.body,
           visible.updated_at, count(DISTINCT term_hits.term) AS terms,
           CASE document.field
-            WHEN 'title' THEN 0 WHEN 'prompt' THEN 1 WHEN 'reply' THEN 2 ELSE 3
+            WHEN 'title' THEN 0 WHEN 'prompt' THEN 1 WHEN 'reply' THEN 2 WHEN 'canvas' THEN 3
+            ELSE 4
           END AS field_rank
         FROM term_hits
         INNER JOIN thread_search_document AS document ON document.doc_id = term_hits.doc_id
@@ -767,7 +896,7 @@ export function searchThreads(
       FROM ranked
       WHERE turn_rank = 1
       ORDER BY
-        CASE WHEN field_rank = 0 THEN 0 WHEN field_rank < 3 THEN 1 ELSE 2 END,
+        CASE WHEN field_rank = 0 THEN 0 WHEN field_rank < 4 THEN 1 ELSE 2 END,
         updated_at DESC, mode ASC, thread_id ASC, turn_sequence DESC
       LIMIT ?
     `)

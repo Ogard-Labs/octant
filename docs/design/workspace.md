@@ -2224,10 +2224,12 @@ hands its text to the command-style overlay; the overlay also stays in the
 command palette. The overlay searches every mode at once by default, with an
 All, Chat, Work, and Code filter under its field, through the host's search
 across modes (`GET /api/search`), which matches thread titles, messages, and
-tool output among the threads each mode's sidebar and Archived group list.
+tool output, attachment names, and Canvas text among the threads each mode's
+sidebar and Archived group list.
 Every word must appear, and a quoted phrase must appear as written. Titles the
 current mode listed match at once; the host's hits follow, each naming its
-mode when the filter is All, and `Tool output` when a tool's text matched. A
+mode when the filter is All, `Tool output` when a tool's text matched, and
+`Canvas` when a Canvas the thread made matched (it opens the thread). A
 message or tool hit names the turn that holds it and opens the thread
 scrolled to that turn in every mode: Chat reads the page that ends with the
 turn, and Work and Code read earlier pages, one at a time, until it arrives.

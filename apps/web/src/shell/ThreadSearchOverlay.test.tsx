@@ -45,7 +45,7 @@ describe("ThreadSearchOverlay", () => {
     expect(screen.getByRole("dialog", { name: "Search Chat threads" })).toBeVisible();
     expect(
       screen.getByText(
-        "Searches Chat titles, messages, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.",
+        "Searches Chat titles, messages, attachment names, Canvas, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.",
       ),
     ).toBeVisible();
     expect(screen.getByRole("group", { name: "Threads" })).toBeVisible();

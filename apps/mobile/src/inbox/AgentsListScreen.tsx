@@ -101,7 +101,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     () =>
       messageHits.filter(
         (hit) =>
-          hit.turnId !== undefined ||
+          hit.field !== "title" ||
           !rows.some(
             (row) =>
               row.hostId === hit.hostId && row.mode === hit.mode && row.threadId === hit.threadId,
@@ -447,10 +447,12 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
                 detail={formatScreenshotSafeLabel(
                   hit.field === "tool"
                     ? `${MOBILE_COPY.searchToolOutput} · ${hit.snippet}`
-                    : hit.snippet,
+                    : hit.field === "canvas"
+                      ? `${MOBILE_COPY.searchCanvas} · ${hit.snippet}`
+                      : hit.snippet,
                 )}
                 icon={modeIcon(hit.mode)}
-                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId ?? "title"}`}
+                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
                 label={formatScreenshotSafeLabel(hit.title)}
                 last={index === threadHits.length - 1}
                 onPress={() =>

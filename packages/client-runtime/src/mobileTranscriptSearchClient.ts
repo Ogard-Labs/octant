@@ -24,6 +24,8 @@ export interface MobileTranscriptHit {
   readonly turnId?: string;
   /** Where the host found the text; absent from a host that predates search across modes. */
   readonly field?: ThreadSearchField;
+  /** The Canvas whose words matched, on a `canvas` hit. */
+  readonly canvasId?: string;
   readonly snippet: string;
 }
 
@@ -124,6 +126,7 @@ async function searchAcrossModes(
             title: entry.title,
             ...(turnId === undefined ? {} : { turnId: String(turnId) }),
             field: entry.field,
+            ...(entry.canvasId === undefined ? {} : { canvasId: String(entry.canvasId) }),
             snippet: entry.snippet,
           };
         }),

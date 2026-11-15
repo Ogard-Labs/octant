@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { CANVAS_SCHEMA_VERSION } from "@octant/contracts";
 import { CodeEvidenceStore } from "../code/codeEvidenceStore";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
@@ -32,6 +33,7 @@ const ids = {
   workThread: "85000000-0000-4000-8000-00000000000b",
   workRequest: "85000000-0000-4000-8000-00000000000c",
   workTurn: "85000000-0000-4000-8000-00000000000d",
+  canvas: "85000000-0000-4000-8000-00000000000e",
 } as const;
 const operation = (index: number) =>
   `85000000-0000-4000-8000-0000000001${String(index).padStart(2, "0")}`;
@@ -201,6 +203,36 @@ describe("search across modes", () => {
     }
   });
 
+  it("finds a Canvas by its title and block text under the thread that made it, and its newest version replaces its words", () => {
+    const store = openStore();
+    try {
+      store.thread(ids.thread, "Launch", now);
+      store.canvas(1, "Launch plan", [
+        { blockId: "intro", kind: "rich-text", text: "Ship the pricing page on Friday." },
+      ]);
+      const visible = [code(ids.thread)];
+      const found = (query: string) =>
+        searchThreads(store.connection, query, visible, 50).matches.map((match) => [
+          match.field,
+          match.anchorId,
+        ]);
+
+      expect(found("pricing friday")).toEqual([["canvas", ids.canvas]]);
+      expect(found("launch plan")).toEqual([["canvas", ids.canvas]]);
+      // A block's kind is structure, not words the Canvas shows.
+      expect(found("rich-text")).toEqual([]);
+
+      store.canvas(2, "Launch plan", [
+        { blockId: "intro", kind: "rich-text", text: "Ship the pricing page on Monday." },
+      ]);
+      expect(found("friday")).toEqual([]);
+      expect(found("monday")).toEqual([["canvas", ids.canvas]]);
+      expect(searchThreads(store.connection, "monday", [], 50).matches).toEqual([]);
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("drops turns a rewind removed and rebuilds to the same index", () => {
     const store = openStore();
     try {
@@ -347,6 +379,38 @@ function openStore() {
           files: "not-requested",
         },
       });
+    },
+    canvas(sequence: number, title: string, blocks: ReadonlyArray<Record<string, unknown>>) {
+      const version = {
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        canvasId: ids.canvas,
+        versionId: `85000000-0000-4000-8000-0000000002${String(sequence).padStart(2, "0")}`,
+        sequence,
+        definition: {
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          title,
+          provenance: {
+            mode: "code",
+            hostId: "local",
+            projectId: ids.project,
+            threadId: ids.thread,
+            actor: { kind: "system", actorId: ids.actor },
+            providerInstanceId: ids.provider,
+            modelId: "model-a",
+            createdAt: now,
+          },
+          sourceManifest: [],
+          blocks: blocks.map((block) => ({ schemaVersion: CANVAS_SCHEMA_VERSION, ...block })),
+        },
+        createdBy: { kind: "system", actorId: ids.actor },
+        createdAt: now,
+      };
+      append(
+        { aggregateType: "canvas", aggregateId: ids.canvas },
+        sequence - 1,
+        sequence === 1 ? "canvas.created@1" : "canvas.version-appended@1",
+        { canvasId: ids.canvas, version },
+      );
     },
     toolActivity(
       threadId: string,

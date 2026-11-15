@@ -221,16 +221,18 @@ message search above; only those are searched, before the cap. A mode that
 cannot list (not running, or not ready) is named in `unavailable` and the
 others are still searched. Each hit carries its mode, the thread, its title,
 `active` or `archived`, its Project when it has one, when the thread last
-changed, the field that matched (`title`, `prompt`, `reply`, or `tool`), the
-turn that holds it (a Chat or Work `turnId`, or a Code `operationId`; none for
-a title), and a snippet of at most 160 characters with every term marked.
+changed, the field that matched (`title`, `prompt`, `reply`, `tool`, or
+`canvas`), the turn that holds it (a Chat or Work `turnId`, or a Code
+`operationId`; none for a title or a Canvas, which names its `canvasId`), and a
+snippet of at most 160 characters with every term marked.
 
 Every word of the query must appear, in any order and ignoring case; text in
 double quotes is one phrase that must appear as written, and at most eight
 terms count. A turn matches when each term appears somewhere in it (its prompt,
 any piece of its reply, or its tool text) and is shown once, by the text that
-holds the most terms, a prompt before a reply before tool text on a tie. Title
-matches come first, then message matches, then tool matches, each newest
+holds the most terms, a prompt before a reply before tool text on a tie. A
+Canvas matches as a whole. Title matches come first, then message and Canvas
+matches, then tool matches, each newest
 thread first and newest turn first within a thread.
 
 The `thread-search` projection holds a trigram full-text index, so any run of
@@ -240,7 +242,14 @@ its reply, one row per streamed piece, each led in by the end of the piece
 before it so a word split across two pieces still matches; and its tool text:
 each tool step's name and summary, the files a Work turn wrote, and a Code
 terminal's output, its newest 64 pieces of at most 32 KB each, a redraw
-replacing what it showed. A title, prompt, or Work reply keeps at most its
+replacing what it showed. A Chat attachment's file name joins its
+turn's prompt (its bytes live outside the journal and are not read), and a
+purged attachment leaves it. A Canvas is one `canvas` document filed under the
+thread its provenance names: its title and the text, titles, labels and cells
+of its blocks, read by field name (never an id, URL or colour); each version
+replaces the words, and a Canvas hit names its `canvasId` and no turn. Who may
+read a Canvas is who may open that thread, so the listing rule above covers
+it. A title, prompt, or Work reply keeps at most its
 first 256 KB, and a turn's joined tool steps their newest 32 KB.
 The projection is derived and rebuilt from the journal; Chat and Code text is
 read from their content stores when an event applies. A turn an edit

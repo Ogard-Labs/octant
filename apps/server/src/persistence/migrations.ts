@@ -2717,7 +2717,7 @@ CREATE INDEX validation_evidence_authority_idx
         thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
         turn_key TEXT NOT NULL,
         anchor_id TEXT NOT NULL,
-        field TEXT NOT NULL CHECK(field IN ('title', 'prompt', 'reply', 'tool')),
+        field TEXT NOT NULL CHECK(field IN ('title', 'prompt', 'reply', 'tool', 'canvas')),
         stream_key TEXT NOT NULL,
         start_sequence INTEGER NOT NULL CHECK(start_sequence > 0),
         body TEXT NOT NULL

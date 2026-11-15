@@ -7,6 +7,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
   MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
 } from "./chat";
+import { CanvasId } from "./canvasIdentity";
 import { CodeThreadId } from "./code";
 import { CodeOperationId } from "./codeOperations";
 import { ProjectId } from "./projects";
@@ -85,15 +86,18 @@ export const ThreadSearchScope = Schema.Literal(...THREAD_SEARCH_SCOPES);
 export type ThreadSearchScope = typeof ThreadSearchScope.Type;
 
 /**
- * Where in the thread the text matched. A title hit names no turn; every other
- * field names the turn that holds it.
+ * Where in the thread the text matched. A title or Canvas hit names no turn
+ * (a Canvas hit names its Canvas); every other field names the turn that
+ * holds it.
  */
-export const ThreadSearchField = Schema.Literal("title", "prompt", "reply", "tool");
+export const ThreadSearchField = Schema.Literal("title", "prompt", "reply", "tool", "canvas");
 export type ThreadSearchField = typeof ThreadSearchField.Type;
 
 const ThreadSearchHitFields = {
   ...TranscriptSearchHitFields,
   field: ThreadSearchField,
+  /** The Canvas whose title or blocks matched, on a `canvas` hit. */
+  canvasId: Schema.optional(CanvasId),
   /** When the thread last changed, so a client can order or label hits. */
   updatedAt: Schema.String,
 };
