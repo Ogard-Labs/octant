@@ -97,6 +97,7 @@ function tool(
     remote?: RemoteDelegationPort;
     ingestion?: "recorded" | "refused";
     resultTexts?: Readonly<Record<string, string>>;
+    sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -204,7 +205,7 @@ function tool(
         return true;
       },
       uuid: () => "00000000-0000-4000-8000-0000000000ee",
-      sleep: () => Promise.resolve(),
+      sleep: options.sleep ?? (() => Promise.resolve()),
     }),
   };
 }
@@ -801,6 +802,34 @@ describe("agents managed tools", () => {
     expect(settlements.map((command) => ("runId" in command ? String(command.runId) : ""))).toEqual(
       [ids.run],
     );
+  });
+
+  it("leaves every finished reply owed when the turn is interrupted while it waits for the rest", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const controller = new AbortController();
+    const { set, settlements, ingested } = tool({
+      runs: [
+        queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never }),
+        queuedRun({ id: second as never, lifecycleStatus: "running" }),
+      ],
+      // The person stops the turn while the second child is still running.
+      sleep: () => {
+        controller.abort();
+        return Promise.reject(new Error("aborted"));
+      },
+    });
+    const outcome = await set.execute({
+      name: "octant_agents",
+      inputJson: JSON.stringify({
+        operation: "wait",
+        runIds: [ids.run, second],
+        timeoutMs: 60_000,
+      }),
+      signal: controller.signal,
+    });
+    expect(outcome.result).toMatchObject({ error: "tool-interrupted" });
+    expect(settlements).toEqual([]);
+    expect(ingested).toEqual([]);
   });
 
   it("refuses a wait that names both runId and runIds, or repeats a child", async () => {

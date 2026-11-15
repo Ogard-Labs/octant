@@ -504,6 +504,8 @@ export function agentRunEligibleTargets(
 
 export interface AgentRunTargetAvailabilityInput {
   readonly project: Project | undefined;
+  /** The level the child would run at, when known; see `modelCanTakeDelegatedWork`. */
+  readonly level?: Parameters<typeof modelCanTakeDelegatedWork>[3];
   readonly instances: ReadonlyArray<
     Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind">
   >;
@@ -542,7 +544,7 @@ export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInpu
       continue;
     }
     const serving = observed.models.filter((model) =>
-      modelCanTakeDelegatedWork(instance.driverKind, observed, model.id),
+      modelCanTakeDelegatedWork(instance.driverKind, observed, model.id, input.level),
     );
     if (serving.length === 0) {
       // It would serve a model if it carried Octant's tools, so that is what

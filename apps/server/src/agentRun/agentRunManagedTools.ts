@@ -401,6 +401,19 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
       : undefined;
   };
   /**
+   * Whether `wait` would answer for this child now, without collecting its
+   * reply: the same cases `settleWait` answers, read with no side effect.
+   */
+  const waitSettles = (runId: string): boolean => {
+    const run = childRun(runId);
+    return (
+      run === undefined ||
+      isTerminal(run.lifecycleStatus) ||
+      (run.lifecycleStatus === "waiting" && run.usageLimit !== undefined) ||
+      options.orchestration.waitsForProviderSlot?.(run) === true
+    );
+  };
+  /**
    * What `wait` answers for one child now, or undefined while it is still
    * running and worth blocking on.
    */
@@ -583,54 +596,51 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           }
         }
         // Several children: answer when the first settles ("any") or when every
-        // one has ("all"). A reply is collected once, when its child settles, so
-        // a later `wait` on the same child reads it as already handed back.
+        // one has ("all"). While waiting, children are only checked: a reply is
+        // collected (settled as handed back) only into the answer this call
+        // actually returns, so a turn interrupted mid-wait leaves every reply
+        // owed for a later wait or for delivery.
         //
-        // The whole answer must fit one tool response. Collecting a reply
-        // settles it as handed back, so a reply that would push the answer past
-        // the budget is left uncollected and still owed: the parent receives it
-        // from a later wait or from delivery, never as a cut-off preview.
+        // The whole answer must fit one tool response, so a reply that would
+        // push it past the budget is left uncollected and still owed, never
+        // handed back as a cut-off preview.
         const waitFor = input.waitFor ?? "all";
-        const settledById = new Map<string, unknown>();
-        const withheld = new Set<string>();
-        let answerBytes = WAIT_ANSWER_ENVELOPE_BYTES;
         for (;;) {
           if (signal?.aborted) return failure("tool-interrupted");
-          for (const runId of runIds) {
-            if (settledById.has(runId) || withheld.has(runId)) continue;
-            const run = childRun(runId);
-            const text =
-              run?.lifecycleStatus === "completed" && run.result !== undefined
-                ? options.persistence.resultText(run.id)
-                : undefined;
-            if (
-              text !== undefined &&
-              answerBytes + Buffer.byteLength(text, "utf8") + WAIT_ENTRY_OVERHEAD_BYTES >
-                MAX_PROVIDER_TOOL_RESULT_BYTES
-            ) {
-              withheld.add(runId);
-              continue;
-            }
-            const settled = settleWait(runId);
-            if (settled === undefined) continue;
-            const entry = { runId, ...settled.result };
-            answerBytes += Buffer.byteLength(JSON.stringify(entry), "utf8");
-            settledById.set(runId, entry);
-          }
-          const pending = runIds.filter((runId) => !settledById.has(runId) && !withheld.has(runId));
-          const finished = settledById.size + withheld.size;
-          const done = waitFor === "any" ? finished > 0 : pending.length === 0;
+          const ready = runIds.filter((runId) => waitSettles(runId));
+          const done = waitFor === "any" ? ready.length > 0 : ready.length === runIds.length;
           const remaining = deadline - Date.now();
           if (done || remaining <= 0) {
+            const settled: Array<unknown> = [];
+            const withheld: Array<string> = [];
+            let answerBytes = WAIT_ANSWER_ENVELOPE_BYTES;
+            for (const runId of ready) {
+              const run = childRun(runId);
+              const text =
+                run?.lifecycleStatus === "completed" && run.result !== undefined
+                  ? options.persistence.resultText(run.id)
+                  : undefined;
+              if (
+                text !== undefined &&
+                answerBytes + Buffer.byteLength(text, "utf8") + WAIT_ENTRY_OVERHEAD_BYTES >
+                  MAX_PROVIDER_TOOL_RESULT_BYTES
+              ) {
+                withheld.push(runId);
+                continue;
+              }
+              const entry = { runId, ...(settleWait(runId)?.result ?? {}) };
+              answerBytes += Buffer.byteLength(JSON.stringify(entry), "utf8");
+              settled.push(entry);
+            }
             return answer({
               status: done ? "settled" : "still-running",
               waitFor,
-              settled: [...settledById.values()],
-              pending,
-              ...(withheld.size === 0
+              settled,
+              pending: runIds.filter((runId) => !ready.includes(runId)),
+              ...(withheld.length === 0
                 ? {}
                 : {
-                    withheld: [...withheld],
+                    withheld,
                     message:
                       "These children finished, but their replies did not fit this response. They remain owed: wait on each alone, or let them be delivered.",
                   }),

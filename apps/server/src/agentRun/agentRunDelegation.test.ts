@@ -243,4 +243,32 @@ describe("agentRunTargetAvailability", () => {
       ["Other", "project-policy"],
     ]);
   });
+
+  it("offers a runtime whose Octant tools are mixed only to a child that runs at Full access", () => {
+    const openCode = {
+      id: "80000000-0000-4000-8000-000000000030",
+      displayName: "OpenCode",
+      driverKind: "opencode",
+      enabled: true,
+    } as const;
+    const availability = (executionPolicy?: "full-access" | "approval-gated") =>
+      agentRunTargetAvailability({
+        project: undefined,
+        instances: [openCode] as never,
+        ...(executionPolicy === undefined ? {} : { level: { executionPolicy } }),
+        observedState: () => ({
+          readiness: "ready",
+          models: [model("m")],
+          capabilities: { appManagedTools: "unsupported", appManagedToolsAtFullAccess: "mixed" },
+        }),
+        isTargetAllowed: () => true,
+      });
+    expect(availability("full-access").targets.map((target) => target.displayName)).toEqual([
+      "OpenCode",
+    ]);
+    expect(availability("approval-gated").unavailable).toMatchObject([
+      { displayName: "OpenCode", reason: "tools-unsupported" },
+    ]);
+    expect(availability().targets).toEqual([]);
+  });
 });

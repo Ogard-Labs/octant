@@ -1,4 +1,9 @@
-import { DEFAULT_HOST_RESOURCE_POLICY, type NativeHarnessSlotCandidate } from "@octant/contracts";
+import {
+  DEFAULT_HOST_RESOURCE_POLICY,
+  decodeAgentRunParentThreadId,
+  type NativeHarnessSlotCandidate,
+  type ProviderExecutionPolicy,
+} from "@octant/contracts";
 import { HostResourceBudget } from "../process/hostResourceBudget";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
@@ -1086,13 +1091,18 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           modelId,
           mediaType,
         ),
-      isReady: ({ providerInstanceId, modelId }) => {
+      isReady: ({ providerInstanceId, modelId, executionPolicy }) => {
         const instance = persistence.readProviderInstance(providerInstanceId as never);
         if (instance === undefined || !instance.enabled) return false;
         const observed = providerRuntimeRegistry.observedState(providerInstanceId as never);
         return (
           observed !== undefined &&
-          modelCanTakeDelegatedWork(instance.driverKind, observed, modelId as never)
+          modelCanTakeDelegatedWork(
+            instance.driverKind,
+            observed,
+            modelId as never,
+            executionPolicy === undefined ? undefined : { executionPolicy },
+          )
         );
       },
     },
@@ -1204,8 +1214,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     uuid: randomUUID,
   };
-  const agentRunTargetsFor = (projectId: ProjectId | undefined) =>
+  const agentRunTargetsFor = (
+    projectId: ProjectId | undefined,
+    executionPolicy?: ProviderExecutionPolicy,
+  ) =>
     agentRunTargetAvailability({
+      ...(executionPolicy === undefined ? {} : { level: { executionPolicy } }),
       project: projectId === undefined ? undefined : persistence.readProject(projectId),
       instances: persistence.readProviderInstances(),
       observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
@@ -1213,8 +1227,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       isTargetAllowed: (project, instanceId, modelId) =>
         isProjectPolicyTargetAllowed(project, instanceId, modelId),
     });
-  const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
-    agentRunTargetsFor(projectId).targets;
   const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -1268,6 +1280,16 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
      */
     readonly askThroughHost?: { readonly lead: NativeHarnessSlotCandidate };
   }): AppManagedToolSet => {
+    const parentExecutionPolicy = (): ProviderExecutionPolicy | undefined => {
+      try {
+        return agentRunAdmission.authorizeCreation({
+          parentThreadId: decodeAgentRunParentThreadId(input.parentThreadId),
+          windowId: input.windowId,
+        })?.liveAuthority.executionPolicy;
+      } catch {
+        return undefined;
+      }
+    };
     const hostLead = input.askThroughHost?.lead;
     const ask:
       | ((
@@ -1313,8 +1335,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       mode: input.mode,
       windowId: input.windowId,
       parentThreadId: input.parentThreadId,
-      listTargets: () => agentRunEligibleTargets(input.projectId),
-      listUnavailableTargets: () => agentRunTargetsFor(input.projectId).unavailable,
+      // A child runs at most at its parent's live level, so a runtime whose
+      // Octant tools are `mixed` is offered to a Full access parent only.
+      listTargets: () => agentRunTargetsFor(input.projectId, parentExecutionPolicy()).targets,
+      listUnavailableTargets: () =>
+        agentRunTargetsFor(input.projectId, parentExecutionPolicy()).unavailable,
       projectId: input.projectId,
       remote: remoteDelegation,
       routing: {
@@ -1449,11 +1474,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       });
     },
     listTargets: (parent) =>
-      agentRunEligibleTargets(
+      agentRunTargetsFor(
         parent.parentRoute.projectId === undefined
           ? undefined
           : decodeProjectId(parent.parentRoute.projectId),
-      ),
+        parent.liveAuthority.executionPolicy,
+      ).targets,
     onExecutionAccepted: onAgentRunExecutionAccepted,
     windowAuthorityStore,
     persistence: agentRunPersistence,
