@@ -6,7 +6,7 @@ import {
   type OctantInstructionsText,
 } from "@octant/domain/octant-instructions-policy";
 import { looksLikeSecret } from "@octant/domain/secret-shaped-text-policy";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -45,12 +45,33 @@ export interface InstructionsFieldProps {
  */
 export function InstructionsField(props: InstructionsFieldProps) {
   const [draft, setDraft] = useState(props.value);
+  const seeded = useRef(props.value);
   const fieldId = useId();
   const countId = useId();
-  useEffect(() => setDraft(props.value), [props.value]);
+  const secretId = useId();
+  const problemId = useId();
+  const noteId = useId();
+  // A new text from the host replaces the field only when the person has not
+  // typed over the last one. A stale refusal rereads the host's text, and the
+  // person's unsaved draft must survive it so Save can retry on the new version.
+  useEffect(() => {
+    const previous = seeded.current;
+    seeded.current = props.value;
+    setDraft((current) => (current === previous ? props.value : current));
+  }, [props.value]);
   const limit = OCTANT_INSTRUCTIONS_LIMITS[props.text];
   const fits = octantInstructionsWithinLimit(props.text, draft);
   const changed = draft !== props.value;
+  const warnsOfSecret = props.canChange && looksLikeSecret(draft);
+  const describedBy = [
+    `${props.settingId}-description`,
+    warnsOfSecret ? secretId : undefined,
+    props.problem === undefined ? undefined : problemId,
+    countId,
+    props.canChange ? undefined : noteId,
+  ]
+    .filter((id) => id !== undefined)
+    .join(" ");
   return (
     <div className="octant-instructions-row">
       <SettingRow
@@ -63,7 +84,7 @@ export function InstructionsField(props: InstructionsFieldProps) {
       >
         <div className="octant-instructions-field">
           <OctantTextarea
-            aria-describedby={countId}
+            aria-describedby={describedBy}
             aria-invalid={fits ? undefined : true}
             id={fieldId}
             onChange={(event) => setDraft(event.target.value)}
@@ -71,11 +92,15 @@ export function InstructionsField(props: InstructionsFieldProps) {
             rows={6}
             value={draft}
           />
-          {props.canChange && looksLikeSecret(draft) ? (
-            <OctantAlert tone="warning">{INSTRUCTIONS_SECRET_WARNING}</OctantAlert>
+          {warnsOfSecret ? (
+            <OctantAlert id={secretId} tone="warning">
+              {INSTRUCTIONS_SECRET_WARNING}
+            </OctantAlert>
           ) : null}
           {props.problem === undefined ? null : (
-            <OctantAlert tone="danger">{props.problem}</OctantAlert>
+            <OctantAlert id={problemId} tone="danger">
+              {props.problem}
+            </OctantAlert>
           )}
           <div className="octant-instructions-field__foot">
             <span
@@ -96,7 +121,9 @@ export function InstructionsField(props: InstructionsFieldProps) {
                 Save
               </OctantButton>
             ) : (
-              <span className="octant-instructions-field__note">{INSTRUCTIONS_READ_ONLY_NOTE}</span>
+              <span className="octant-instructions-field__note" id={noteId}>
+                {INSTRUCTIONS_READ_ONLY_NOTE}
+              </span>
             )}
           </div>
         </div>

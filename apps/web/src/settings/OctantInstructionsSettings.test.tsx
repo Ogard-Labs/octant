@@ -2,7 +2,7 @@ import type {
   OctantInstructionsResult,
   OctantInstructionsView,
 } from "@octant/contracts/octant-instructions";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -33,6 +33,11 @@ function fakeClient(
   return { change, client: { read: vi.fn(async () => initial), change } };
 }
 
+/** Matches an accessible description that holds `text` anywhere. */
+function containing(text: string): RegExp {
+  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
 describe("Your instructions in Settings", () => {
   it("shows what the text is for, its count and limit, and saves the whole text against the version read", async () => {
     const user = userEvent.setup();
@@ -59,14 +64,29 @@ describe("Your instructions in Settings", () => {
   });
 
   it("refuses to save a text past its limit", async () => {
-    const { client } = fakeClient(view({ instructions: "a".repeat(8_001) }));
+    const user = userEvent.setup();
+    const { client } = fakeClient(view({ instructions: "a".repeat(8_000) }));
     render(<OctantInstructionsSettings client={client} />);
 
-    expect(await screen.findByText("8,001 / 8,000 characters")).toBeVisible();
-    expect(screen.getByRole("textbox", { name: "Your instructions" })).toHaveAttribute(
-      "aria-invalid",
-      "true",
-    );
+    const field = await screen.findByRole("textbox", { name: "Your instructions" });
+    await user.type(field, "b");
+
+    expect(screen.getByText("8,001 / 8,000 characters")).toBeVisible();
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("describes the field by its purpose, its warnings, and its count", async () => {
+    const user = userEvent.setup();
+    const { client } = fakeClient(view({ instructions: "" }));
+    render(<OctantInstructionsSettings client={client} />);
+
+    const field = await screen.findByRole("textbox", { name: "Your instructions" });
+    await user.type(field, "api_key=sk-live-1234");
+
+    expect(field).toHaveAccessibleDescription(containing(YOUR_INSTRUCTIONS_PURPOSE));
+    expect(field).toHaveAccessibleDescription(containing(INSTRUCTIONS_SECRET_WARNING));
+    expect(field).toHaveAccessibleDescription(containing("20 / 8,000 characters"));
   });
 
   it("warns when the text looks like it holds a key", async () => {
@@ -89,15 +109,19 @@ describe("Your instructions in Settings", () => {
     expect(field).toHaveValue("Use Work for research.");
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
     expect(screen.getByText(INSTRUCTIONS_READ_ONLY_NOTE)).toBeVisible();
+    expect(field).toHaveAccessibleDescription(containing(INSTRUCTIONS_READ_ONLY_NOTE));
   });
 
-  it("says why a save was refused and rereads the current text after a stale one", async () => {
+  it("keeps the unsaved draft after a stale refusal and saves it against the version reread", async () => {
     const user = userEvent.setup();
-    const { client } = fakeClient(view(), () => ({
+    const { client, change } = fakeClient(view(), () => ({
       kind: "octant-instructions-refused",
       reason: "stale-version",
       message: "Your instructions changed since you opened them. Reload and try again.",
     }));
+    client.read
+      .mockResolvedValueOnce(view())
+      .mockResolvedValueOnce(view({ instructions: "Use Code for fixes.", version: 5 }));
     render(<OctantInstructionsSettings client={client} />);
 
     const field = await screen.findByRole("textbox", { name: "Your instructions" });
@@ -105,6 +129,34 @@ describe("Your instructions in Settings", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("changed since you opened them");
+    expect(field).toHaveAccessibleDescription(containing("changed since you opened them"));
     expect(client.read).toHaveBeenCalledTimes(2);
+    expect(field).toHaveValue("Use Work for research. Always.");
+    const save = screen.getByRole("button", { name: "Save" });
+    await waitFor(() => expect(save).toBeEnabled());
+
+    change.mockResolvedValueOnce(
+      view({ instructions: "Use Work for research. Always.", version: 6 }),
+    );
+    await user.click(save);
+    expect(change).toHaveBeenLastCalledWith({
+      kind: "change-person-instructions",
+      expectedVersion: 5,
+      instructions: "Use Work for research. Always.",
+    });
+  });
+
+  it("takes the host's text when the person has not typed over it", async () => {
+    const { client } = fakeClient(view());
+    client.read
+      .mockResolvedValueOnce(view())
+      .mockResolvedValueOnce(view({ instructions: "Use Code for fixes.", version: 5 }));
+    const { rerender } = render(<OctantInstructionsSettings client={client} />);
+    const field = await screen.findByRole("textbox", { name: "Your instructions" });
+    expect(field).toHaveValue("Use Work for research.");
+
+    rerender(<OctantInstructionsSettings client={{ ...client }} />);
+
+    await waitFor(() => expect(field).toHaveValue("Use Code for fixes."));
   });
 });
