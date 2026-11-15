@@ -349,6 +349,15 @@ export {
 export { createWindowsHostStartup } from "./windowsHostStartup";
 
 export {
+  createWindowsLogonEntryPolicy,
+  isWindowsSystemRoot,
+  windowsLogonEntryPresent,
+  WINDOWS_LOGON_ENTRY_KEY,
+  WINDOWS_LOGON_ENTRY_VALUE,
+  type WindowsLogonEntryQuery,
+} from "./windowsLogonEntry";
+
+export {
   createWindowsDesktopLauncher,
   type WindowsDesktopLauncher,
 } from "./windowsDesktopLauncher";

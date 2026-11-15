@@ -591,7 +591,8 @@ crash from memory looks like an unmarked file with a high last reading, and
 nothing more is inferred. The per-user service restarts a crashed host: the
 launchd job keeps the host alive after any exit but a successful one (30
 seconds apart), and the systemd unit restarts it on failure, which includes a
-kill by signal. A start that failed on configuration does not loop. No telemetry
+kill by signal. The Windows logon entry does not restart a crashed host
+([Windows CLI](#current-release-boundary)). A start that failed on configuration does not loop. No telemetry
 is involved at any step.
 
 **Background host and recovery screen.** Settings > General offers "Keep
@@ -18230,9 +18231,71 @@ deliverable and keeps every gate above:
    by default, never a guessed POSIX shell), Windows process-tree stop in
    place of process-group signals, and no `/tmp` or POSIX path assumptions in
    provider launches.
-4. The `octant` CLI on Windows: native host paths (today the generic host
-   paths refuse `win32`), a browser opener that runs no shell, and a service
-   manager equivalent; until then the CLI's service commands refuse Windows.
+4. The `octant` CLI on Windows: native host paths, a browser opener that runs
+   no shell, and a service manager equivalent. Partly built (maintainer
+   request, 2026-11-15); detail in the next paragraph. It has run only on a
+   hosted Windows runner, whose account holds an administrator token, so a
+   standard account and a person's Windows machine remain unverified.
+
+**Windows CLI** (step 4). The CLI opens Octant's host through the native
+profile the desktop app and server use (`%LOCALAPPDATA%\Octant\hosts\octant`,
+from the known-folder lookup, never an environment string), so all three share
+one host; the generic POSIX host paths still refuse `win32`, and
+`OCTANT_DATA_DIR` and `OCTANT_LOGS_DIR` refuse as they do for the server. It
+loads the native binding from the same `native` folder the server it starts
+loads (four folders above each module), and talks to the owner over the
+authenticated native pipe. `octant server start|stop|restart|status|enable|
+disable|logs|run` and `octant web [--no-open]` run there; `web` attaches to a
+running host only and sends the bridge secret only to the address the native
+host-info projection names for the owner the pipe authenticated. Every other
+command, `--pair`, the headless `install|upgrade|uninstall` and the hub role
+refuse by name on Windows.
+
+- **Browser.** A launch link opens through
+  `%SystemRoot%\System32\rundll32.exe url.dll,FileProtocolHandler <link>`,
+  started directly with no shell, and only for plain http(s) to loopback
+  with no user info. `cmd /c start` would read `&`, `^` and `%` in the link
+  as command syntax, and Explorer splits its argument at commas.
+- **Service.** The service is a `REG_SZ` value named `Octant` under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` holding the CLI's
+  own `server start`, each argument quoted for Windows' standard argument
+  parsing and written by `reg.exe` with an exact argument list. Install and
+  enable write it, disable removes it, and uninstall stops the host and
+  removes it. That value is the one record of automatic startup on Windows.
+  The host reads it for Settings, so Settings and `octant server status`
+  always agree; the host never writes it (only the CLI knows the command it
+  records), so Settings' enable and disable report unavailable there and name
+  `octant server enable` and `octant server disable`. Settings' restart is
+  unavailable too and names `octant server restart`: a drain would leave the
+  host down until sign-in, since the value restarts nothing. The host's
+  native service-policy record is not consulted on Windows. Start launches the server entry hidden and detached and returns
+  once the native pipe authenticates its owner, or fails when the process
+  exits first. Stop sends the authenticated graceful stop and, only when the
+  owner outlives it by ten seconds, ends the owner's whole process tree with
+  `taskkill /PID <pid> /T /F`, using only a PID the pipe has just
+  authenticated (PID and process birth) and never one from an unanswered
+  record. Status reads the Run value and the native lookup.
+- **Why a Run value rather than a Scheduled Task.** Writing the current user's
+  Run key needs no administrator rights or logon-type privilege on any
+  Windows edition, while an at-logon task created through `schtasks.exe` can
+  need elevation, and an interactive-token task cannot run from a
+  non-interactive session such as a hosted runner. The Run value only has to
+  start the host at sign-in; start, stop and status go through the native
+  owner either way. The cost: nothing restarts a Windows host that exits
+  unexpectedly until the next `octant server start` or sign-in, where launchd
+  and systemd restart it, and a process the host started whose parent already
+  exited is outside the tree `taskkill /T` ends.
+- **Evidence.** The `Windows CLI service lifecycle` workflow builds the native
+  binding and credential helper beside the checkout and drives the real CLI
+  on `windows-2025`, under the owner reader's restricted token whose default
+  owner is the user (the runner's elevated token is refused by the profile
+  check, as an elevated prompt is): it checks the resolved profile folders, the refused data
+  override, a ready start under the Run value with its exact command line, a
+  `/health` answer with storage ready, a minted `web --no-open` link, status
+  diagnostics and the service log over the pipe, a stop that leaves no
+  process of the host's tree and clears its published address, disable and
+  enable of the Run value, and an uninstall that stops a running host.
+
 5. An installer, Authenticode signing, and a signed update feed that builds
    on the Linux signed-feed trust root once that path has been exercised on a
    real image; the unsigned QA ZIP stays QA-only.

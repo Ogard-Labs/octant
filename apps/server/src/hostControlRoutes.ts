@@ -101,6 +101,11 @@ const RESTORE_GUIDANCE =
   "Stop the Octant host, then run the offline restore command with --confirm.";
 
 export interface HostControlServicePolicyPort {
+  /**
+   * `logon-entry`: the Windows Run value, which is the policy itself and
+   * restarts nothing; Settings then offers neither restart nor a startup change.
+   */
+  readonly supervisor?: "restarts" | "logon-entry";
   read(): Promise<{ readonly enabled: boolean; readonly updatedAt: string }>;
   setEnabled(enabled: boolean): Promise<{ readonly enabled: boolean; readonly updatedAt: string }>;
 }
@@ -708,6 +713,9 @@ function lifecycleControls(
   const derived = deriveHostLifecycleControls({
     serviceMode,
     policy: policy.kind === "known" ? { kind: "known", enabled: policy.enabled } : policy,
+    ...(dependencies.servicePolicy?.supervisor === undefined
+      ? {}
+      : { supervisor: dependencies.servicePolicy.supervisor }),
   });
   if (dependencies.servicePolicy === undefined) {
     const unavailable = {

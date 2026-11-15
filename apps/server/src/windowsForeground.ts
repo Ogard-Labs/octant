@@ -8,6 +8,7 @@ import {
   createWindowsDesktopLauncher,
   createWindowsHostStartup,
   createWindowsListenerTlsFiles,
+  createWindowsLogonEntryPolicy,
   createWindowsRosterSigningKeyFile,
   createWindowsServerIdentityFiles,
   createWindowsSqliteStores,
@@ -199,7 +200,11 @@ export async function runWindowsForeground(
             credentialBrokerUrl: ownedBroker.url,
             credentialBrokerToken: ownedBroker.token,
             hostControl: {
-              servicePolicy: ownedStartup.servicePolicy,
+              // Settings reads the same logon entry `octant server` writes,
+              // never a separate record that could disagree with it.
+              servicePolicy: createWindowsLogonEntryPolicy({
+                systemRoot: process.env.SystemRoot ?? "C:\\Windows",
+              }),
               requestOwnerStop: stop,
               readServiceLog: async () => (await ownedStartup.logs.read({ limit: 200 })).entries,
             },
