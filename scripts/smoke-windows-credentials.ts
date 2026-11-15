@@ -253,7 +253,7 @@ try {
   const oldVersion = Buffer.from(frame);
   oldVersion[4] = 1;
   const unknownPurpose = Buffer.from(frame);
-  unknownPurpose[83] = 8;
+  unknownPurpose[83] = 9;
   const wrongFamily = Buffer.from(frame);
   wrongFamily[6] = 2;
   requireValue(
