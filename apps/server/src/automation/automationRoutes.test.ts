@@ -97,6 +97,7 @@ function createHarness(
     readonly prepareFileSource?: AutomationRouteDependencies["prepareFileSource"];
     readonly projectAccessible?: () => boolean;
     readonly personPairedDeviceCurrent?: AutomationRouteDependencies["personPairedDeviceCurrent"];
+    readonly serverProjects?: AutomationRouteDependencies["serverProjects"];
   } = {},
 ): Harness {
   const connection = openConnection();
@@ -145,6 +146,7 @@ function createHarness(
     ...(options.personPairedDeviceCurrent === undefined
       ? {}
       : { personPairedDeviceCurrent: options.personPairedDeviceCurrent }),
+    ...(options.serverProjects === undefined ? {} : { serverProjects: options.serverProjects }),
     now: () => 1,
   });
   return { handler, service, projection, authority };
@@ -419,6 +421,68 @@ describe("automation routes", () => {
       kind: "automation-command-failed",
     });
     expect(projection.getDefinition(automationId("6103"))).toBeUndefined();
+  });
+
+  it("saves a routine in a server Project for the host's own person, refuses a restricted device, and refuses a file trigger there", async () => {
+    let prepared = 0;
+    const { handler, projection } = createHarness({
+      serverProjects: () => [{ id: AUTOMATION_TEST_IDS.otherProject, mode: "work" }],
+      personPairedDeviceCurrent: () => true,
+      prepareFileSource: async () => {
+        prepared += 1;
+        throw new Error("A server Project has no folder on this host.");
+      },
+    });
+    const draft = automationDefinitionDraftFixture();
+    const onServer = (id: string, trigger?: unknown) =>
+      postCommand({
+        kind: "create-automation",
+        automationId: automationId(id),
+        expectedVersion: 0,
+        definition: {
+          ...draft,
+          ...(trigger === undefined ? {} : { trigger }),
+          projectId: AUTOMATION_TEST_IDS.otherProject,
+          binding: { ...draft.binding, projectId: AUTOMATION_TEST_IDS.otherProject },
+          executionProfile: {
+            ...draft.executionProfile,
+            projectId: AUTOMATION_TEST_IDS.otherProject,
+          },
+        },
+      });
+
+    expect(await json(await handler(onServer("6201")))).toMatchObject({
+      kind: "automation-created",
+    });
+    expect(await json(await handler(fromDevice(onServer("6202"), "host-person")))).toMatchObject({
+      kind: "automation-created",
+    });
+    expect(await json(await handler(fromDevice(onServer("6203"), "hub-roster")))).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "unauthorized",
+    });
+    expect(projection.getDefinition(automationId("6203"))).toBeUndefined();
+
+    const fileRoutine = await json(
+      await handler(
+        onServer("6204", {
+          kind: "file-arrival",
+          directory: "Inbox",
+          includeExtensions: ["txt"],
+          excludeDirectories: [],
+          settleSeconds: 2,
+          automaticStartLimit: 8,
+        }),
+      ),
+    );
+    expect(fileRoutine).toMatchObject({
+      kind: "automation-command-failed",
+      reason: "blocked",
+      message:
+        "A file routine watches a folder on this computer, so it cannot run in a Project on a server.",
+    });
+    expect(prepared).toBe(0);
+    expect(projection.getDefinition(automationId("6204"))).toBeUndefined();
   });
 
   it("lists event sources for a device the host's own person paired and refuses a restricted device", async () => {
