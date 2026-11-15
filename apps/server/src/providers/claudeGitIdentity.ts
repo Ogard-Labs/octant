@@ -11,8 +11,9 @@ export interface ClaudeGitIdentity {
  * makes inside its command sandbox. The sandbox denies `~/.gitconfig`, so a
  * sandboxed `git commit` found no identity and failed or used git's guess from
  * the OS account. Git reads `GIT_AUTHOR_*` and `GIT_COMMITTER_*` before any
- * config file, so only the fields the checkout does not set itself are passed
- * (see {@link readClaudeGitIdentity}); a checkout's own identity keeps winning.
+ * config file, so the values passed are the ones git would resolve in the
+ * checkout (see {@link readClaudeGitIdentity}); a checkout's own identity
+ * keeps winning.
  */
 export function claudeGitIdentityEnvironment(
   identity: ClaudeGitIdentity,
@@ -28,22 +29,26 @@ export function claudeGitIdentityEnvironment(
 }
 
 /**
- * Reads the person's global `user.name` and `user.email` from the server
- * process, which the sandbox does not hold, leaving out each field the
- * checkout sets in its own config. A field git cannot read is left out.
+ * Reads the `user.name` and `user.email` git itself would use in the
+ * checkout, from the server process, which the sandbox does not hold: every
+ * scope (system, global, the checkout's own) and every `include` and
+ * `includeIf` file. Reading only the `--global` file missed an identity set
+ * through `includeIf "gitdir:..."`, so a commit in a work checkout carried the
+ * person's home address. A field git cannot read is left out.
  */
 export async function readClaudeGitIdentity(checkoutRoot: string): Promise<ClaudeGitIdentity> {
-  const read = (args: ReadonlyArray<string>) =>
+  const field = (key: "user.name" | "user.email") =>
     new Promise<string | undefined>((resolve) => {
-      execFile("git", [...args], { timeout: 2_000, windowsHide: true }, (error, stdout) => {
-        const value = error === null ? stdout.trim() : "";
-        resolve(value === "" || value.includes("\n") ? undefined : value);
-      });
+      execFile(
+        "git",
+        ["-C", checkoutRoot, "config", "--includes", "--get", key],
+        { timeout: 2_000, windowsHide: true },
+        (error, stdout) => {
+          const value = error === null ? stdout.trim() : "";
+          resolve(value === "" || value.includes("\n") ? undefined : value);
+        },
+      );
     });
-  const field = async (key: "user.name" | "user.email") => {
-    const local = await read(["-C", checkoutRoot, "config", "--local", "--get", key]);
-    return local === undefined ? read(["config", "--global", "--get", key]) : undefined;
-  };
   const [name, email] = await Promise.all([field("user.name"), field("user.email")]);
   return {
     ...(name === undefined ? {} : { name }),

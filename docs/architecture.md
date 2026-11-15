@@ -3194,10 +3194,10 @@ Which path reaches the forge depends on the thread's
   is retried outside it (`dangerouslyDisableSandbox`), and Octant always
   asks about that retry itself, whatever the person's own permission rules
   allow, naming it as a command outside the sandbox, so once approved git
-  and `gh` read their own credentials and config. The person's global git
-  `user.name` and `user.email` are carried into sandboxed commands as
-  `GIT_AUTHOR_*` and `GIT_COMMITTER_*` for each field the checkout does not
-  set itself. A provider reviewer that answers internally never sends Octant
+  and `gh` read their own credentials and config. The `user.name` and
+  `user.email` git resolves in the checkout (every scope, `include` and
+  `includeIf` files included) are carried into sandboxed commands as
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*`. A provider reviewer that answers internally never sends Octant
   that pending command; the change is still journaled when it starts.
   _Rationale:_ refusing a push the person would approve in the runtime on its
   own broke the plain workflow of committing, pushing and opening a pull

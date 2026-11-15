@@ -726,10 +726,10 @@ stopped (a push that needs `~/.ssh`, a `gh` call that needs its config) may
 be retried outside it with `dangerouslyDisableSandbox`; the gate always
 answers that retry with Octant's own ask, never the person's rules, and its
 approval reads "Bash outside the sandbox". Full access with its sandbox keeps
-the retry off. Each sandboxed launch carries the person's global git
-`user.name` and `user.email` as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, for each
-field the checkout does not set itself, since the sandbox cannot read
-`~/.gitconfig` ([Architecture: Git and pull requests](../architecture.md#modes-chat-work-and-code)).
+the retry off. Each sandboxed launch carries the `user.name` and
+`user.email` git resolves in the checkout (`git config --includes --get`, so
+every scope and any `include` or `includeIf` file counts) as `GIT_AUTHOR_*`
+and `GIT_COMMITTER_*`, since the sandbox cannot read `~/.gitconfig` ([Architecture: Git and pull requests](../architecture.md#modes-chat-work-and-code)).
 
 A call's working directory follows the session, as it does in Claude Code:
 after `cd apps/web` the hook names that folder, and the gate accepts any
