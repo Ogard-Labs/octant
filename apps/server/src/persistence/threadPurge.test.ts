@@ -159,6 +159,30 @@ describe("thread purge sweep", () => {
     ]);
   });
 
+  it("erases a helper result steered into a purged thread's running turn and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedCodeProjection(harness, threads.code.id);
+    seedControlThread(harness);
+    for (const threadId of [threads.code.id, controlThreadId]) {
+      insertEvent(
+        harness.connection,
+        "agent-result-steering",
+        uuidFor(threadId, "steered"),
+        { kind: "agent-result-steered", threadId, turnKey: "turn", body: `steered ${threadId}` },
+        "agent.result-steered@1",
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(
+        "SELECT json_extract(payload_json, '$.threadId') AS threadId FROM event_journal WHERE aggregate_type = 'agent-result-steering'",
+      )
+      .all();
+    expect(remaining).toEqual([{ threadId: controlThreadId }]);
+  });
+
   it("refuses a remote principal and a purge that was not confirmed", async () => {
     const harness = openHarness();
     const scope = {

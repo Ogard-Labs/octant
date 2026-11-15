@@ -2848,8 +2848,16 @@ having read outside content before either, and its approval gates read the
 mark live, so later tools in the same turn act marked; a Code turn reviewed by
 the provider's own reviewer is never steered, because that reviewer was chosen
 while the thread was unmarked. A steered result settles as delivered with
-detail "Steered into the parent's running turn." and, like a reply `wait`
-collected, leaves no child-result card in the transcript.
+detail "Steered into the parent's running turn." and is journaled as
+`agent.result-steered@1` on its own aggregate (the thread, the running turn's
+key, the delivery mark and the framed text), so it never moves the turn's or
+the thread's version. Chat, Work and Code turn reads attach it as
+`steeredResults`, once per run generation, and the transcript shows the
+ordinary child-result card after the turn's reply, labelled "Delivered into the
+running turn"; it shows on the next read, not as a stream frame. The thread
+purge erases it with the thread, as every aggregate whose payload names the
+thread. A crash between the steer and the record leaves the result delivered
+without a card.
 
 A subagent the provider runtime started itself is observed, never managed. Its
 one control is Stop, offered (`control: "stop"`) only while the thread's
@@ -2860,7 +2868,15 @@ on that child's provider instance and session. `POST
 /api/agent-runs/observed/stop` checks the window as the summary read does and
 finds the child only among the observations that window may read; Codex
 (an interrupt on a subagent thread is unverified) and ACP (no protocol call)
-report it unsupported. A helper on another hub member follows
+report it unsupported.
+
+A provider-started subagent carries what its runtime reports and nothing it
+does not: its model (Claude from the subagent call, Codex from the spawn call,
+OpenCode from the child's first reply; ACP names only an agent profile), a
+final summary of at most 2,048 characters when it completes, and token usage
+(input and output for Codex and OpenCode, a total for Claude, none for ACP).
+The summary is shown to the person only and never added to the parent's
+context, so it changes no outside-content mark. A helper on another hub member follows
 the same rule, and the same answer covers it (maintainer decision, 2026-11-13;
 [Hub and spokes: delegation](design/hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation)).
 

@@ -273,7 +273,12 @@ lineage and explicit partial, truncated or conflicting history. They have no
 managed conversation, workspace authority or result acknowledgement; their one
 control is Stop, offered only where the running turn can stop that subagent
 alone, and a stop request leaves the reported state until the provider reports
-the subagent finished. Every row, managed or not, names its provider.
+the subagent finished. Its detail shows the final summary (folded) and token
+usage where the runtime reports them, "Usage not reported" otherwise. Every
+row, managed or not, names its provider.
+
+A result steered into the parent's running turn shows as the same child-result
+card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
