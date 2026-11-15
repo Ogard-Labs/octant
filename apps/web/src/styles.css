@@ -7651,13 +7651,22 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   min-width: 0;
 }
 
-/* Workspace conversations and dock tools share one compact tab recipe. */
+/* Panel tabs (Files, Browser pages, the dock's tool row) share one recipe: a
+   28px tab in the control radius with a 14px leading mark, a 13px label, and a
+   16px close that always keeps its slot. The open tab has the raised control
+   fill and the primary ink; the others are secondary ink with a hover fill. */
+.content-tab,
+.panel-tabs {
+  --oct-tab-gap: calc(var(--oct-space-1) * 1.5);
+  --oct-tab-pad: calc(var(--oct-space-1) * 2.5);
+}
 .content-tab {
+  position: relative;
   display: inline-flex;
   flex: none;
   min-width: 0;
-  height: 26px;
-  max-width: 202px;
+  height: 28px;
+  max-width: 214px;
   gap: 0;
   align-items: center;
   padding: 0;
@@ -7669,28 +7678,28 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
-/* The open tab is a neutral wash of the ink, like the open thread row: the
-   control role carries a tinted preset's hue and drew the tab as a coloured
-   button with a ring. */
+/* The open tab is filled with the raised control surface, so it reads as the
+   selected one without a tinted ring. */
 .content-tab:has([role="tab"][aria-selected="true"]) {
   color: var(--oct-fg);
-  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
+  background: var(--octant-control);
 }
 .content-tab > .content-tab__select {
-  height: 26px;
-  min-height: 26px;
+  height: 28px;
+  min-height: 28px;
   min-width: 0;
   max-width: 180px;
-  gap: var(--oct-space-1);
-  padding: 0 8px;
-  font-size: var(--oct-text-xs);
+  gap: var(--oct-tab-gap);
+  padding: 0 var(--oct-tab-gap) 0 var(--oct-tab-pad);
+  font-size: var(--oct-text-detail);
   transform: none;
 }
 .content-tab > .content-tab__close {
-  width: 22px;
-  min-width: 22px;
-  height: 24px;
-  min-height: 24px;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin-right: var(--oct-space-2);
   padding: 0;
   opacity: 0;
   transform: none;
@@ -7699,6 +7708,58 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .content-tab:focus-within > .content-tab__close,
 .content-tab:has([aria-selected="true"]) > .content-tab__close {
   opacity: 1;
+}
+/* Unsaved edits: a dot stands in the close slot until the tab is pointed at or
+   focused, when the close takes its place. Both stay in the slot, so nothing
+   moves. */
+.content-tab__dirty {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 6px;
+  height: 6px;
+  background: var(--oct-fg);
+  border-radius: var(--oct-radius-pill);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+.content-tab[data-dirty="true"]:not(:hover):not(:focus-within) > .content-tab__dirty {
+  opacity: 1;
+}
+.content-tab[data-dirty="true"]:not(:hover):not(:focus-within) > .content-tab__close {
+  opacity: 0;
+}
+.content-tab__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-tab[data-preview="true"] .content-tab__label {
+  font-style: italic;
+}
+/* A panel's tab bar: its own row a step off the pane, a hairline under it, and
+   tabs that scroll sideways without a scrollbar. */
+.panel-tabs {
+  display: flex;
+  height: 36px;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-tab-gap);
+  padding: 0 var(--oct-space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+.panel-tabs::-webkit-scrollbar {
+  display: none;
+}
+.panel-tabs > .panel-tabs__new {
+  flex: none;
 }
 /* A pane's conversation tabs are a row of equal chips: each open thread is
    its own soft card at a shared width, so the row reads as a set of open
@@ -7732,9 +7793,15 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   position: relative;
 }
 .workspace-content-tabs .content-tab > .content-tab__select {
-  padding-right: var(--oct-space-8);
+  padding: 0 var(--oct-space-8) 0 8px;
+  font-size: var(--oct-text-xs);
 }
 .workspace-content-tabs .content-tab > .content-tab__close {
+  width: 22px;
+  min-width: 22px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
   position: absolute;
   top: 50%;
   right: var(--oct-space-1);

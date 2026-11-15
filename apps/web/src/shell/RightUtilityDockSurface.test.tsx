@@ -76,17 +76,15 @@ describe("the right sidebar surface", () => {
       sharedStylesheet,
       '.content-tab:has([role="tab"][aria-selected="true"])',
     );
-    // A neutral ink wash, not the theme-tinted control fill with a ring.
-    expect(selected).toMatch(
-      /background:\s*color-mix\(in oklab, var\(--oct-fg\) 9%, transparent\)/,
-    );
+    // The raised control fill, with no ring.
+    expect(selected).toMatch(/background:\s*var\(--octant-control\)/);
     expect(selected).not.toMatch(/box-shadow/);
     expect(ruleBody(sharedStylesheet, ".content-tab:hover")).toMatch(
       /background:\s*var\(--oct-fg-soft\)/,
     );
-    expect(ruleBody(sharedStylesheet, ".content-tab")).toMatch(/height:\s*26px/);
+    expect(ruleBody(sharedStylesheet, ".content-tab")).toMatch(/height:\s*28px/);
     expect(ruleBody(sharedStylesheet, ".content-tab > .content-tab__close")).toMatch(
-      /width:\s*22px/,
+      /width:\s*16px/,
     );
     for (const selector of [
       ".content-tab > .content-tab__select",

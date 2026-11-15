@@ -2354,8 +2354,11 @@ remains in the bottom-left identity menu.
 
 ### Content tabs
 
-Workspace content and dock tool tabs share a compact 26px recipe for height,
-spacing, selected fill and edge, and close controls. A pane's conversation tabs
+Workspace content and dock tool tabs share a compact recipe for height,
+spacing, selected fill and edge, and close controls: panel tabs are 28px with a
+raised selected fill and a 16px close (see DESIGN.md, Panel tabs), and a Files
+tab with unsaved edits shows a dot and asks Save, Don't save or Cancel before it
+closes. A pane's conversation tabs
 then become a row of equal soft tabs with the control corner, 28px tall at a shared 196px (never
 narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
 hovered one a little more, and the open one the brightest wash with a hairline

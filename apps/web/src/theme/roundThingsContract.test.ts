@@ -77,6 +77,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   ".board-status-mark__dot",
   ".code-file-explorer__mark",
   ".content-tab__attention",
+  ".content-tab__dirty",
   ".settings-accent__dot",
   ".thread-activity-pip__pulse",
   ".dock-mini-card__dot",

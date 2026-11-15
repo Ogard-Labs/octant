@@ -318,7 +318,7 @@ describe("the dock tool strip", () => {
     const styles = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
     const from = styles.indexOf(".content-tab > .content-tab__close {");
     const idle = styles.slice(from, styles.indexOf("}", from));
-    expect(idle).toMatch(/width:\s*22px/);
+    expect(idle).toMatch(/width:\s*16px/);
     expect(idle).toMatch(/opacity:\s*0/);
     expect(idle).not.toMatch(/display:\s*none|visibility:\s*hidden/);
     const shown = styles.slice(styles.indexOf(".content-tab:hover > .content-tab__close,"));

@@ -35,6 +35,14 @@
   max-width: 100%;
   flex-wrap: wrap;
 }
+/* The view switcher is a segmented control that sits in a tab bar's row: the
+   same 36px height, background and hairline as a panel's tabs. */
+.git-history__toolbar--tab-bar {
+  min-height: 36px;
+  padding: 0 var(--oct-space-2);
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
 .git-history__search input {
   min-width: 0;
   flex: 1;

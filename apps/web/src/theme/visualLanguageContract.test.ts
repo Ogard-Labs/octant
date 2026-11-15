@@ -1663,6 +1663,7 @@ describe("the public-block visual language", () => {
         ".code-home__suggestions",
         ".code-project-views__inline",
         ".dock-browser-pages",
+        ".panel-tabs",
         ".phone-scroll",
         ".setnav",
         ".settings-view__outline ul",

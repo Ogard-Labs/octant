@@ -202,7 +202,25 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
               draggable={props.onTabDragStart === undefined ? undefined : true}
               onClick={() => props.onSelect(tool.id)}
               onDragEnd={() => props.onTabDragEnd?.()}
+              onAuxClick={(event) => {
+                if (event.button !== 1) return;
+                event.preventDefault();
+                props.onClose(tool.id);
+              }}
+              onMouseDown={(event) => {
+                // A middle press would otherwise start the platform's autoscroll.
+                if (event.button === 1) event.preventDefault();
+              }}
               onKeyDown={(event) => {
+                const closeKey =
+                  event.key === "Delete" ||
+                  event.key === "Backspace" ||
+                  (event.key.toLowerCase() === "w" && event.metaKey && !event.shiftKey);
+                if (closeKey) {
+                  event.preventDefault();
+                  props.onClose(tool.id);
+                  return;
+                }
                 // The menu key is the only keyboard route the browser turns into
                 // a context menu, and a Mac has none: Shift+F10 asks for it too.
                 if (event.key !== "F10" || !event.shiftKey) return;

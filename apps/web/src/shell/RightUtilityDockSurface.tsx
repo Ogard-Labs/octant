@@ -1,6 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
-import { moveWithinTabList } from "../ui/base/radioGroupKeys";
-import { Plus, X } from "../ui/icons";
+import { X } from "../ui/icons";
 import {
   useContext,
   useEffect,
@@ -15,8 +14,8 @@ import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockToolButtons, type DockToolButtonsProps } from "./DockToolButtons";
 import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
+import { PanelTab, PanelTabStrip } from "./PanelTabs";
 import { IconButton } from "./IconButton";
-import { OctantButton } from "../ui/base/OctantButton";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
 import {
   MINIMISABLE_DOCK_SURFACES,
@@ -301,46 +300,29 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   /** The Browser's pages: its bar in a tile, a row at the top of its body alone. */
   function pagesRow(selectedId: string | undefined) {
     return (
-      <div
-        aria-label="Browser pages"
+      <PanelTabStrip
         className="dock-browser-pages"
-        onKeyDown={moveWithinTabList}
-        role="tablist"
+        label="Browser pages"
+        newTabLabel="New Browser page"
+        onNewTab={() => props.onOpenTab("browser")}
+        selectedId={selectedId}
       >
         {browserTabs.map((page) => (
-          <span className="dock-browser-pages__page content-tab" key={page.id} role="presentation">
-            <OctantButton
-              aria-selected={page.id === selectedId}
-              tabIndex={
-                page.id ===
-                (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
-                  ? 0
-                  : -1
-              }
-              className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
-              onClick={() => props.onSelectSurface(page.id)}
-              role="tab"
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <DockToolIcon surface="browser" />
-              <span>{page.label}</span>
-            </OctantButton>
-            <IconButton
-              className="content-tab__close text-muted-foreground"
-              icon={X}
-              label={`Close ${page.label}`}
-              onClick={() => props.onCloseTab(page.id)}
-            />
-          </span>
+          <PanelTab
+            icon={<DockToolIcon surface="browser" />}
+            id={page.id}
+            key={page.id}
+            label={page.label}
+            onClose={() => props.onCloseTab(page.id)}
+            onSelect={() => props.onSelectSurface(page.id)}
+            roving={
+              page.id ===
+              (browserTabs.some((tab) => tab.id === selectedId) ? selectedId : browserTabs[0]?.id)
+            }
+            selected={page.id === selectedId}
+          />
         ))}
-        <IconButton
-          icon={Plus}
-          label="New Browser page"
-          onClick={() => props.onOpenTab("browser")}
-        />
-      </div>
+      </PanelTabStrip>
     );
   }
   /**

@@ -85,7 +85,7 @@ function BoundReview(props: DockReviewToolProps) {
   return (
     <div className="git-history">
       {hosted !== undefined ? null : (
-        <div className="git-history__toolbar">
+        <div className="git-history__toolbar git-history__toolbar--tab-bar">
           <OctantToggleGroup
             aria-label="Review view"
             value={[view]}

@@ -1337,14 +1337,26 @@ to a named control, then actions into one More menu; status text and must-read
 cues never fold. A tool alone in the dock keeps no bar. The folding order is in
 [Workspace: Tool tiles](docs/design/workspace.md#tool-tiles).
 
-The tool strip and the Browser's page row draw one tab recipe (`.content-tab`):
-a 26px pill in the control radius, a 14px leading icon (the tool's, a page's
-favicon when it has one) and a 12px label that ellipsises at 10rem. The open
-tab (`aria-selected`) has the subtle ink wash; the others are muted text with a
-hover fill. Its × always has its 22px slot and is revealed by opacity on the
-open tab, on hover and on focus, so a label never shifts; a New page "+" icon
-button follows the last Browser page. A Files preview tab is italic. A tab
-strip is never drawn a second way in a panel: reuse `.content-tab`.
+Panel tabs (the tool strip, the Browser's pages, a Code thread's open files)
+draw one recipe (`.content-tab`, with `PanelTabStrip` and `PanelTab` for a
+panel's own row): a 28px tab in the control radius with a 14px leading mark (the
+tool's, a page's favicon when it has one, a file's kind), a 13px label that
+ellipsises at 180px, and a 16px × that always keeps its slot. The open tab
+(`aria-selected`) has the raised control fill and the primary ink; the others
+are secondary ink with a hover fill. The × shows on the open tab, on hover and
+on focus by opacity alone, so a label never shifts. A tab with unsaved edits
+shows a dot in the × slot until it is hovered or focused. A panel's own tab row
+is a 36px bar (`.panel-tabs`) a step off the pane with a hairline under it; it
+scrolls sideways without a scrollbar and moves only its own scroll to keep the
+open tab in view. It is a tablist: arrows, Home and End move between tabs, a
+middle click, Delete, Backspace or Cmd+W closes a closable one, and a "+" icon
+button follows the last tab where a new one makes sense. A Files preview tab is
+italic. A segmented view switch (Review's Working tree, Local commits, History)
+stays a segmented control and sits in the same 36px row. A tab strip is never
+drawn a second way in a panel: reuse `.content-tab`. Closing a Files tab, or
+the Files tool, with unsaved edits asks "Save changes to <name>?" with Save,
+Don't save and Cancel (Cancel is the default and Escape); several dirty files
+ask once each, in order.
 
 ### Composer row
 

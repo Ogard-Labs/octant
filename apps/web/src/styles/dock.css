@@ -1352,23 +1352,27 @@
    was shrink-0, so the tab's box shrank around it and the close mark ran under
    the button beside it. */
 .dock-tile__lead > .dock-browser-pages {
+  height: auto;
   gap: var(--oct-space-1);
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select {
+.dock-tile__lead > .dock-browser-pages > .content-tab > .content-tab__select {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 
-.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__select > span {
+.dock-tile__lead > .dock-browser-pages > .content-tab > .content-tab__select > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dock-tile__lead > .dock-browser-pages > .dock-browser-pages__page > .content-tab__close {
+.dock-tile__lead > .dock-browser-pages > .content-tab > .content-tab__close {
   flex: none;
 }
 
@@ -1899,32 +1903,9 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   flex-direction: column;
 }
 
-.dock-browser-pages {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.dock-browser-pages::-webkit-scrollbar {
-  display: none;
-}
-
-.dock-browser-pages > .dock-browser-pages__page {
+/* The pages' row in the Browser's body is a panel tab bar (see .panel-tabs). */
+.dock-browser-pages > .content-tab {
   flex: 0 1 auto;
-}
-
-.dock-browser-pages__page > .content-tab__select {
-  max-width: 10rem;
-}
-
-.dock-browser-pages__page > .content-tab__select > svg {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
 }
 
 .dock-browser-pages__page-body {
