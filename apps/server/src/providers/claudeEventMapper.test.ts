@@ -792,6 +792,23 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("names the model Claude's own subagent call asked for, and leaves it unknown otherwise", () => {
+    const start = (input: Record<string, unknown>) =>
+      eventValues(
+        mapped(context(), {
+          kind: "stream-event",
+          sessionId: claudeSessionId,
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: { kind: "tool-use", toolUseId: "sdk-agent", toolName: "Agent", input },
+          },
+        }),
+      ).find((value) => value.kind === "child-agent-activity");
+    expect(start({ description: "Review", model: "haiku" })).toMatchObject({ modelId: "haiku" });
+    expect(start({ description: "Review" })).not.toHaveProperty("modelId");
+  });
+
   it("shows Claude's own subagent as a child run and marks the thread when the subagent reads the web", () => {
     const ctx = context();
     const started = mapped(ctx, {

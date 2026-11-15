@@ -7,7 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
@@ -589,6 +589,14 @@ function mapToolUse(
     // The runtime's own subagent: shown as a child run of this thread from
     // its start. Its own tool calls each pass Octant's gate on their own.
     const task = normalized(jsonString(content.input, "description") ?? "", SUMMARY_MAX_CHARACTERS);
+    // The model the call asked for, as Claude names it (an alias such as
+    // "haiku" or a full id). Without one the subagent's definition or the
+    // parent decides, which Claude does not report, so it stays unknown.
+    const requestedModel = jsonString(content.input, "model")?.trim() ?? "";
+    const modelId =
+      requestedModel.length === 0 || requestedModel.length > 128
+        ? undefined
+        : decodeProviderModelId(requestedModel);
     return [
       start,
       ...inputContent(),
@@ -596,6 +604,7 @@ function mapToolUse(
         kind: "child-agent-activity",
         childAgentId: resolved.state.toolCallId,
         ...(task === undefined ? {} : { task }),
+        ...(modelId === undefined ? {} : { modelId }),
         status: "starting",
         summary: "Claude started a subagent.",
       }),
