@@ -706,7 +706,8 @@ routes; its `question` tool publishes a `form.created` form marked
 (the question as the description, its header as the title, its choices as
 options), and takes the answer at
 `POST /api/session/{id}/form/{form}/reply` as `{ answer: { q0: ... } }`
-(read from the v2.0.22 and v2.0.27 source). From 2.0.22 the written posture
+(read from the v2.0.22 and v2.0.27 source). A subagent's form is asked the
+same way and answered in the subagent's own session. From 2.0.22 the written posture
 allows `question` at every level, Plan included, since a question changes
 nothing, and the capability is reported `supported`. An earlier 2.x release
 keeps `question` denied, as before, so the model is told no and carries on

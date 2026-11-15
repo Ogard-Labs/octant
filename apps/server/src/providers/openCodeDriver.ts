@@ -1721,10 +1721,16 @@ function makeConnection(
         }
         return;
       }
-      const requestId = textProperty(forwarded.properties, "id");
+      const forwardedType = String(forwarded.type);
+      // A 2.x form carries its id inside the form; the answer goes back to
+      // the child's session, as a 1.x question's does.
+      const requestId =
+        forwardedType === "form.created"
+          ? (openCodeQuestionForm(forwarded.properties)?.properties.id ?? "")
+          : textProperty(forwarded.properties, "id");
       if (
         requestId !== "" &&
-        String(forwarded.type).endsWith(".asked") &&
+        (forwardedType.endsWith(".asked") || forwardedType === "form.created") &&
         state.requestSources.size < 256
       ) {
         state.requestSources.set(requestId, child.childSource);

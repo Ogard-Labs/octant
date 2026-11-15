@@ -2587,6 +2587,90 @@ describe("OpenCode driver", () => {
     expect(fixture.calls).toContain("question.reply:Yes");
   });
 
+  it("asks a 2.x subagent's question form and answers it in the subagent's own session", async () => {
+    // The root's own read is allowed and answered by the host, after which
+    // OpenCode delegates; the child then asks through a form.
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-read",
+            sessionID: "provider-session",
+            action: "read",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+      ],
+      eventsOnReply: [
+        {
+          type: "session.created",
+          properties: {
+            sessionID: "child-session",
+            info: { id: "child-session", parentID: "provider-session", title: "Plan it" },
+          },
+        } as unknown as Event,
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_child",
+              sessionID: "child-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Scope",
+                  description: "Include the tests?",
+                  type: "string",
+                  options: [{ value: "Yes", label: "Yes" }],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const { events, answer } = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["user-input-request", "completed", "failed"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              const events = Array.from(yield* Fiber.join(collector));
+              const question = events.find((event) => event.kind === "user-input-request");
+              if (question?.kind !== "user-input-request") return { events, answer: undefined };
+              const answer = yield* Effect.exit(
+                connection.answerUserInput({
+                  sessionId,
+                  requestId: question.requestId,
+                  answer: "Yes",
+                }),
+              );
+              return { events, answer };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(events.find((event) => event.kind === "user-input-request")).toMatchObject({
+      prompt: "Include the tests?",
+    });
+    expect(answer?._tag).toBe("Success");
+    expect(fixture.questionReplies).toEqual(["child-session:frm_child"]);
+  });
+
   it("refuses a 2.x question form that asks for a secret and never shows or journals it", async () => {
     const fixture = betaDriver({
       events: [
@@ -3338,6 +3422,7 @@ function driverFixture(
   const createdPermissions: PermissionRuleset[] = [];
   const mcpBridges: Array<{ readonly url: string; readonly session: string | null }> = [];
   const permissionReplies: string[] = [];
+  const questionReplies: string[] = [];
   const registry = new ProviderRuntimeRegistry();
   const processPort = {
     start: (input: OpenCodeProcessStartInput) =>
@@ -3445,8 +3530,9 @@ function driverFixture(
       );
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     },
-    replyQuestion: async (_sessionId, _id, answers) => {
+    replyQuestion: async (replySession, id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
+      questionReplies.push(`${replySession}:${id}`);
     },
     deleteSession: async (id) => {
       calls.push(`session.delete:${id}`);
@@ -3461,6 +3547,7 @@ function driverFixture(
     processInputs,
     createdPermissions,
     permissionReplies,
+    questionReplies,
     mcpBridges,
     registry,
     driver: makeOpenCodeDriver({
