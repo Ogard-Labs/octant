@@ -27,6 +27,25 @@ describe("the approval control", () => {
     await userEvent.click(trigger);
     expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
   });
+
+  it("opens in Octant's own menu in the desktop app, not the system's, so each mode keeps its line of detail", async () => {
+    const popup = vi.fn(async () => ({ kind: "dismissed" }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    try {
+      render(<PermissionModePicker autoSupported onChange={() => undefined} value="ask-first" />);
+      await userEvent.click(screen.getByRole("button", { name: "Mode: Ask first" }));
+      expect(await screen.findAllByRole("menuitemradio")).toHaveLength(5);
+      expect(screen.getByRole("menuitemradio", { name: "Plan" })).toHaveAccessibleDescription(
+        "Read-only. No commands or file changes.",
+      );
+      expect(popup).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "octantHost");
+    }
+  });
 });
 
 describe("the mode control's state at a glance", () => {

@@ -210,7 +210,9 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   return (
     <>
       <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
-      <OctantMenuRoot>
+      {/* A composer popup is Octant's float, never the system's menu: each mode
+          carries a line of detail that a system menu cannot show. */}
+      <OctantMenuRoot native={false}>
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger

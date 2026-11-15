@@ -2,8 +2,16 @@ import { useContext, useLayoutEffect, type ComponentProps } from "react";
 import * as Web from "../shadcn/dropdown-menu";
 import { Native, NativeRoot } from "./NativeContextMenu";
 
-export function DropdownMenu(props: ComponentProps<typeof Web.DropdownMenu>) {
-  const popup = window.octantHost?.popupNativeMenu;
+/**
+ * `native={false}` keeps Octant's own menu in the desktop app. A system menu
+ * flattens each row to one line, so a row with a second line of detail (the
+ * composer's mode menu) read as its label and detail run together.
+ */
+export function DropdownMenu({
+  native = true,
+  ...props
+}: ComponentProps<typeof Web.DropdownMenu> & { readonly native?: boolean }) {
+  const popup = native ? window.octantHost?.popupNativeMenu : undefined;
   return popup === undefined ? (
     <Web.DropdownMenu {...props} />
   ) : (
