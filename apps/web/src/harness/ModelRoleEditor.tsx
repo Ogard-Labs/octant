@@ -76,9 +76,13 @@ function when(isoTime: string | undefined): string | undefined {
 export function ModelRoleEditor(props: ModelRoleEditorProps) {
   const rooms = useProviderRooms();
   const [adding, setAdding] = useState(false);
+  // The model to replace is held by identity, not position: the list stays
+  // editable while the person decides, and a position taken before a reorder
+  // or removal replaced the wrong model once they confirmed. `replacing` is
+  // absent when the pick adds a fallback at the end.
   const [needsSettings, setNeedsSettings] = useState<{
     readonly candidate: NativeHarnessSlotCandidate;
-    readonly index: number;
+    readonly replacing?: NativeHarnessSlotCandidate;
   }>();
   const [note, setNote] = useState<string>();
   const [verifying, setVerifying] = useState<string>();
@@ -132,7 +136,8 @@ export function ModelRoleEditor(props: ModelRoleEditorProps) {
       return;
     }
     if (props.settingsModels !== undefined && !hasCandidate(props.settingsModels, candidate)) {
-      setNeedsSettings({ candidate, index });
+      const replacing = candidates[index];
+      setNeedsSettings(replacing === undefined ? { candidate } : { candidate, replacing });
       return;
     }
     const next = [...candidates];
@@ -142,15 +147,30 @@ export function ModelRoleEditor(props: ModelRoleEditorProps) {
     commit(next);
   };
   const addInSettings = async (pending: {
-    candidate: NativeHarnessSlotCandidate;
-    index: number;
+    readonly candidate: NativeHarnessSlotCandidate;
+    readonly replacing?: NativeHarnessSlotCandidate;
   }) => {
     if (props.onAddInSettings === undefined) return;
+    // The model it replaces must still be in the role; checked before
+    // Settings changes, so a stale pick changes nothing anywhere.
+    const { replacing } = pending;
+    let target = candidates.length;
+    if (replacing !== undefined) {
+      const key = nativeHarnessSlotCandidateKey(replacing);
+      target = candidates.findIndex(
+        (candidate) => nativeHarnessSlotCandidateKey(candidate) === key,
+      );
+      if (target < 0) {
+        setNeedsSettings(undefined);
+        setNote(`${nameOf(replacing)} is no longer in ${role.label}. Choose again.`);
+        return;
+      }
+    }
     const added = await props.onAddInSettings(pending.candidate);
     if (!added) return;
     // The model lands where the person picked it, not at the end.
     const next = [...candidates];
-    next[pending.index] = pending.candidate;
+    next[target] = pending.candidate;
     setNeedsSettings(undefined);
     setAdding(false);
     commit(next);
