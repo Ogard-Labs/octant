@@ -4,7 +4,9 @@ import {
   mobileQuickAdd,
   mobileTickCommand,
   mobileTodoDetail,
+  mobileTodoLinkCommand,
   mobileTodoSections,
+  mobileTodoStartDraft,
 } from "./todosPresentation";
 
 const AT = "2026-11-14T10:00:00.000Z";
@@ -72,6 +74,63 @@ describe("the phone's to-do list", () => {
     });
     expect(done === undefined ? undefined : mobileTickCommand(done)).toMatchObject({
       state: "open",
+    });
+  });
+
+  it("says a to-do whose started thread could not be linked, instead of Started", () => {
+    const [todo] = todos({ tags: ["errand"] });
+    expect(todo === undefined ? undefined : mobileTodoDetail(todo, { unlinked: true })).toBe(
+      "#errand · Thread started, not linked",
+    );
+  });
+});
+
+describe("starting a thread from a to-do on the phone", () => {
+  const OTHER_HOST = "22222222-2222-4222-8222-222222222222";
+  const WORK = "00000000-0000-4000-8000-0000000000a1";
+  const CODE = "00000000-0000-4000-8000-0000000000a2";
+  const projectsHere = {
+    hostId: HOST,
+    workProjects: [{ projectId: WORK, name: "Home" }],
+    codeProjects: [{ projectId: CODE, name: "App" }],
+  };
+
+  it("puts the title and the notes under it in the prompt, in the to-do's Project and its mode", () => {
+    const [todo] = todos({
+      title: "Fix the login",
+      notes: "It fails on the second try.",
+      projects: [{ hostId: HOST, projectId: CODE, name: "App" }],
+    });
+    expect(todo === undefined ? undefined : mobileTodoStartDraft(todo, projectsHere)).toEqual({
+      prompt: "Fix the login\n\nIt fails on the second try.",
+      mode: "code",
+      projectId: CODE,
+    });
+  });
+
+  it("starts a Chat when no Project of the to-do lives on the computer new threads go to", () => {
+    const [todo] = todos({
+      title: "Plan the trip",
+      projects: [
+        { hostId: OTHER_HOST, projectId: WORK, name: "Home" },
+        { hostId: HOST, projectId: "00000000-0000-4000-8000-0000000000a9", name: "Gone" },
+      ],
+    });
+    expect(todo === undefined ? undefined : mobileTodoStartDraft(todo, projectsHere)).toEqual({
+      prompt: "Plan the trip",
+      mode: "chat",
+    });
+  });
+
+  it("links the thread on the computer that made it", () => {
+    const thread = "00000000-0000-4000-8000-0000000000b1";
+    const todoId = "00000000-0000-4000-8000-000000000001";
+    expect(
+      mobileTodoLinkCommand(todoId, { hostId: OTHER_HOST, threadId: thread, mode: "work" }),
+    ).toEqual({
+      kind: "link-todo-thread",
+      todoId,
+      thread: { hostId: OTHER_HOST, threadId: thread, mode: "work" },
     });
   });
 });
