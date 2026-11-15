@@ -20,6 +20,7 @@ import {
 
 /** Why a role's model cannot start a worker now. */
 export type WorkerCandidateRejection =
+  | "provider-off"
   | "not-signed-in"
   | "provider-down"
   | "model-not-offered"
@@ -35,8 +36,11 @@ export interface WorkerCandidateFacts {
   readonly label: string;
   /** The provider family ("claude-code", "codex", ...): a review prefers another one. */
   readonly providerKind: string;
-  /** Signed out, provider down (its check or its last request failed), or the model is not offered. */
-  readonly notReady?: "not-signed-in" | "provider-down" | "model-not-offered";
+  /**
+   * Turned off or missing, signed out, down (its check or its last request
+   * failed), or the model is not offered.
+   */
+  readonly notReady?: "provider-off" | "not-signed-in" | "provider-down" | "model-not-offered";
   /** At the account's usage limit, until the provider's reset when it named one. */
   readonly usageLimit?: { readonly until?: string };
   /** Allowed by the Project's provider policy and data rules. */
@@ -384,6 +388,7 @@ function hardRejections(
 }
 
 const REJECTION_WORDS: Readonly<Record<WorkerCandidateRejection, string>> = {
+  "provider-off": "provider turned off",
   "not-signed-in": "not signed in",
   "provider-down": "provider down",
   "model-not-offered": "not offered by its provider",

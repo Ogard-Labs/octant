@@ -10,27 +10,47 @@ import {
   type CodeThreadId,
   type CoordinatorBounds,
   type CoordinatorStartInput,
+  type CoordinatorWorkerChoice,
   type CoordinatorWorkerState,
+  type NativeHarnessSlotCandidate,
   type Project,
   type ProjectId,
   type ProviderExecutionPolicy,
   type WindowId,
 } from "@octant/contracts";
 import {
+  chooseWorkerModel,
   coordinatorNoticeFor,
   coordinatorStartingFor,
   decideCoordinatorStart,
   decideMessageWake,
+  describeWorkerCandidateRejection,
+  effectiveWorkerRoleSlot,
   readsAsCoordinator,
+  WORKER_ROLE_CALL_NAMES,
+  WORKER_ROLE_NAMES,
+  WORKER_ROLE_ORDER,
+  workerClockTime,
+  workerModelHandles,
+  workerRolesConfigured,
+  type WorkerCandidateVerdict,
+  type WorkerChoiceRequest,
+  type WorkerModelChoice,
+  type WorkerRoles,
 } from "@octant/domain";
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { EventEnvelope } from "@octant/contracts";
 import type { InheritedExternalContentMark } from "../context/inheritedExternalContentMark";
 import type { CoordinatorCounts } from "./coordinatorCountStore";
 import type { CoordinatorWakes, OpenCoordinatorWake } from "./coordinatorWakeJournal";
+import type { CoordinatorCandidateFacts } from "./coordinatorWorkerFacts";
 
 /** The roster names at most this many workers, most recently changed first. */
 export const MAX_COORDINATOR_ROSTER_ROWS = 32;
+/** The role card's track record counts this coordinator's most recent workers. */
+export const COORDINATOR_TRACK_RECORD_WORKERS = 20;
+/** A worker's first turn is watched this long for a failure before any work. */
+const FIRST_TURN_WATCH_MS = 15 * 60_000;
 const HOUR_MS = 60 * 60_000;
 
 /** What the coordinator service reads and does through the host. */
@@ -60,8 +80,27 @@ export interface CoordinatorServicePorts {
     executionContext: {
       readonly inheritedMark?: InheritedExternalContentMark;
       readonly coordinatorThreadId?: CodeThreadId;
+      /** How the host chose the worker's model; journaled on its record. */
+      readonly coordinatorChoice?: CoordinatorWorkerChoice;
     },
   ) => Promise<CodeCommandResult>;
+  /**
+   * Settings' model roles and this Project's own choice. Absent, or with no
+   * Builder model, workers start on the coordinator's own model as before.
+   */
+  readonly readRoles?: (projectId: ProjectId) => WorkerRoles;
+  /** What the host knows about one role model for a worker in this Project. */
+  readonly candidateFacts?: (
+    project: Project,
+    candidate: NativeHarnessSlotCandidate,
+  ) => CoordinatorCandidateFacts;
+  /** Records a provider as down for the next starts (its first request failed). */
+  readonly markProviderDown?: (providerInstanceId: string) => void;
+  /**
+   * Whether a worker's first turn failed for availability before any output
+   * or tool call, so starting it on the next model is still the start.
+   */
+  readonly firstTurnFailedBeforeWork?: (workerId: string, operationId: string) => boolean;
   /**
    * Starts one agent-initiated host turn on a thread with this prompt, through
    * the ordinary turn admission; answers the turn's id, or why it did not start.
@@ -81,6 +120,8 @@ export interface CoordinatorServicePorts {
       readonly providerInstanceId?: string;
       readonly modelId?: string;
       readonly executionPolicy: string;
+      readonly choice?: CoordinatorWorkerChoice;
+      readonly modelName?: string;
     },
   ) =>
     | { readonly status: "proposed"; readonly proposalId: string }
@@ -99,6 +140,28 @@ type ToolAnswer = { readonly result: unknown; readonly isError: boolean };
 interface PendingNotice {
   readonly state: CoordinatorWorkerState;
   readonly at: string;
+}
+
+/** The model a start resolved: from the roles, or the call's own (no roles configured). */
+interface ResolvedWorkerModel {
+  readonly providerInstanceId: string;
+  readonly modelId: string;
+  readonly choice?: CoordinatorWorkerChoice;
+  readonly modelName?: string;
+}
+
+/**
+ * A worker's first turn the host watches, so a failure before any work
+ * starts the same worker on the next model. The prompt stays in memory only
+ * and is dropped when the watch ends.
+ */
+interface WatchedFirstTurn {
+  readonly windowId: WindowId;
+  readonly operationId: string;
+  readonly prompt: string;
+  readonly request: WorkerChoiceRequest;
+  readonly tried: ReadonlyArray<string>;
+  readonly startedAt: number;
 }
 
 /**
@@ -120,6 +183,7 @@ export class CoordinatorService {
   readonly #lastTurn = new Map<string, string | undefined>();
   readonly #notices = new Map<string, Map<string, PendingNotice>>();
   readonly #noticeHops = new Map<string, number>();
+  readonly #firstTurns = new Map<string, WatchedFirstTurn>();
   #sweepTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(ports: CoordinatorServicePorts) {
@@ -219,26 +283,53 @@ export class CoordinatorService {
     if (project?.type !== "code" || project.lifecycle !== "active") {
       return refusedAnswer("unavailable", "The coordinator's Code Project is not active.");
     }
-    if (
-      call.providerInstanceId !== undefined &&
-      !this.#ports.providerKnown(call.providerInstanceId)
-    ) {
-      return refusedAnswer("provider-unavailable", "That provider is not available on this host.");
-    }
-    if ((call.providerInstanceId === undefined) !== (call.modelId === undefined)) {
-      return refusedAnswer("policy", "Name a provider and a model together, or neither.");
+    const roles = this.#ports.readRoles?.(caller.projectId);
+    let resolved: ResolvedWorkerModel;
+    let request: WorkerChoiceRequest | undefined;
+    let asksFirst = false;
+    if (roles !== undefined && workerRolesConfigured(roles)) {
+      const chosen = this.#chooseFromRoles(caller, project, roles, call);
+      if (chosen.status === "refused") return chosen.answer;
+      resolved = chosen.resolved;
+      request = chosen.request;
+      asksFirst = chosen.asksFirst;
+    } else {
+      if (call.role !== undefined || call.model !== undefined) {
+        return refusedAnswer(
+          "policy",
+          "No model roles are set up on this host, so role and model cannot be named. Leave them out.",
+        );
+      }
+      if (
+        call.providerInstanceId !== undefined &&
+        !this.#ports.providerKnown(call.providerInstanceId)
+      ) {
+        return refusedAnswer(
+          "provider-unavailable",
+          "That provider is not available on this host.",
+        );
+      }
+      if ((call.providerInstanceId === undefined) !== (call.modelId === undefined)) {
+        return refusedAnswer("policy", "Name a provider and a model together, or neither.");
+      }
+      resolved = {
+        providerInstanceId: call.providerInstanceId ?? String(caller.providerInstanceId),
+        modelId: call.modelId ?? String(caller.modelId),
+      };
     }
     this.#ports.counts.recordStart(input.callerThreadId, now);
-    if (decision.status === "propose") {
+    if (decision.status === "propose" || asksFirst) {
+      const named = resolved.choice !== undefined || call.providerInstanceId !== undefined;
       const proposed = this.#ports.propose(
         caller.id,
         { title: call.title, intent: call.prompt },
         {
-          ...(call.providerInstanceId === undefined
-            ? {}
-            : { providerInstanceId: call.providerInstanceId }),
-          ...(call.modelId === undefined ? {} : { modelId: call.modelId }),
+          ...(named
+            ? { providerInstanceId: resolved.providerInstanceId, modelId: resolved.modelId }
+            : {}),
           executionPolicy: decision.level,
+          ...(resolved.choice === undefined ? {} : { choice: resolved.choice }),
+          ...(resolved.modelName === undefined ? {} : { modelName: resolved.modelName }),
         },
       );
       return proposed.status === "proposed"
@@ -246,13 +337,292 @@ export class CoordinatorService {
             result: {
               status: "proposed",
               proposalId: proposed.proposalId,
-              message: "A person approves this worker before it starts.",
+              message:
+                decision.status === "propose"
+                  ? "A person approves this worker before it starts."
+                  : `${WORKER_ROLE_NAMES[resolved.choice?.role ?? "default"]} asks before using; a person approves this worker before it starts.`,
             },
             isError: false,
           }
         : refusedAnswer("unavailable", proposed.message);
     }
-    return await this.#createWorker(input.windowId, caller, call, decision.level);
+    return await this.#createWorker(
+      input.windowId,
+      caller,
+      call,
+      decision.level,
+      resolved,
+      request,
+    );
+  }
+
+  /**
+   * Runs {@link chooseWorkerModel} again for a pending proposal in the
+   * Builder role, for **Use Builder instead**. Answers the new model and
+   * choice, or why there is none.
+   */
+  rechooseAsBuilder(
+    coordinatorThreadId: string,
+  ):
+    | { readonly status: "chosen"; readonly resolved: ResolvedWorkerModel }
+    | { readonly status: "refused"; readonly message: string } {
+    const caller = this.#ports.readThread(coordinatorThreadId);
+    const project = caller === undefined ? undefined : this.#ports.readProject(caller.projectId);
+    const roles = caller === undefined ? undefined : this.#ports.readRoles?.(caller.projectId);
+    if (caller === undefined || project === undefined || roles === undefined) {
+      return { status: "refused", message: "This proposal's roles are unavailable." };
+    }
+    const choice = chooseWorkerModel(roles, this.#choiceFacts(project, roles), {
+      task: "feature",
+      size: "normal",
+    });
+    if (choice.kind === "refused") return { status: "refused", message: choice.message };
+    return { status: "chosen", resolved: this.#resolvedFrom(project, choice, undefined) };
+  }
+
+  #chooseFromRoles(
+    caller: CodeThread,
+    project: Project,
+    roles: WorkerRoles,
+    call: CoordinatorStartInput,
+  ):
+    | {
+        readonly status: "chosen";
+        readonly resolved: ResolvedWorkerModel;
+        readonly request: WorkerChoiceRequest;
+        readonly asksFirst: boolean;
+      }
+    | { readonly status: "refused"; readonly answer: ToolAnswer } {
+    const card = () => this.#roleCard(caller, project, roles).join("\n");
+    // With roles set up the host chooses; a raw id from the agent would skip
+    // every filter the roles apply.
+    if (call.providerInstanceId !== undefined || call.modelId !== undefined) {
+      return {
+        status: "refused",
+        answer: refusedAnswer(
+          "policy",
+          `Raw provider and model ids are not accepted: name task and size, or role or model (a handle) with a why.\n${card()}`,
+        ),
+      };
+    }
+    if (call.task === undefined || call.size === undefined) {
+      return {
+        status: "refused",
+        answer: refusedAnswer("policy", `Name task and size.\n${card()}`),
+      };
+    }
+    const retried = call.retries === undefined ? undefined : this.#ownWorker(caller, call.retries);
+    if (call.retries !== undefined && retried === undefined) {
+      return {
+        status: "refused",
+        answer: refusedAnswer("policy", "retries names no worker this coordinator started."),
+      };
+    }
+    const reviewed = call.reviews === undefined ? undefined : this.#ownWorker(caller, call.reviews);
+    if (call.reviews !== undefined && reviewed === undefined) {
+      return {
+        status: "refused",
+        answer: refusedAnswer("policy", "reviews names no worker this coordinator started."),
+      };
+    }
+    const reviewedKind =
+      reviewed === undefined
+        ? undefined
+        : this.#ports.candidateFacts?.(project, {
+            hostId: "" as never,
+            providerInstanceId: reviewed.providerInstanceId as never,
+            modelId: reviewed.modelId as never,
+          }).providerKind;
+    const request: WorkerChoiceRequest = {
+      task: call.task,
+      size: call.size,
+      ...(retried === undefined
+        ? {}
+        : {
+            retries:
+              retried.coordinatorChoice === undefined ? {} : { role: retried.coordinatorChoice.role },
+          }),
+      ...(reviewedKind === undefined ? {} : { reviewedProviderKind: reviewedKind }),
+      ...(call.risk === undefined ? {} : { risk: call.risk }),
+      ...(call.role === undefined ? {} : { role: call.role }),
+      ...(call.model === undefined ? {} : { model: call.model }),
+      ...(call.needsImages === undefined ? {} : { needsImages: call.needsImages }),
+      ...(call.why === undefined ? {} : { why: call.why }),
+    };
+    const choice = chooseWorkerModel(roles, this.#choiceFacts(project, roles), request);
+    if (choice.kind === "refused") {
+      return {
+        status: "refused",
+        answer: refusedAnswer(
+          choice.reason,
+          [choice.message, ...this.#verdictLines(project, choice.perCandidate), card()].join("\n"),
+        ),
+      };
+    }
+    return {
+      status: "chosen",
+      resolved: this.#resolvedFrom(
+        project,
+        choice,
+        call.role !== undefined || call.model !== undefined ? call.why : undefined,
+      ),
+      request,
+      asksFirst: choice.kind === "propose",
+    };
+  }
+
+  #resolvedFrom(
+    project: Project,
+    choice: Extract<WorkerModelChoice, { readonly kind: "start" | "propose" }>,
+    why: string | undefined,
+    reasonPrefix?: string,
+  ): ResolvedWorkerModel {
+    const reason =
+      reasonPrefix === undefined
+        ? choice.reason
+        : [reasonPrefix, choice.reason].filter((part) => part !== undefined).join("; ");
+    const label = this.#ports.candidateFacts?.(project, choice.candidate).label;
+    return {
+      providerInstanceId: String(choice.candidate.providerInstanceId),
+      modelId: String(choice.candidate.modelId),
+      choice: {
+        role: choice.role,
+        rank: choice.rank,
+        ...(reason === undefined || reason === "" ? {} : { reason: reason.slice(0, 400) }),
+        ...(why === undefined ? {} : { why }),
+      },
+      ...(label === undefined ? {} : { modelName: label.slice(0, 256) }),
+    };
+  }
+
+  #choiceFacts(project: Project, roles: WorkerRoles, unavailable: ReadonlyArray<string> = []) {
+    const facts = (candidate: NativeHarnessSlotCandidate): CoordinatorCandidateFacts => {
+      const known = this.#ports.candidateFacts?.(project, candidate) ?? {
+        label: String(candidate.modelId),
+        providerKind: String(candidate.providerInstanceId),
+        providerName: String(candidate.providerInstanceId),
+        notReady: "provider-off",
+        allowed: false,
+        toolsVerified: false,
+        readsImages: false,
+      };
+      // A model a worker's first request already failed on is down for its restart.
+      return known.notReady === undefined && unavailable.includes(candidateKey(candidate))
+        ? { ...known, notReady: "provider-down" }
+        : known;
+    };
+    const seesImages = effectiveWorkerRoleSlot(roles, "vision")?.candidates ?? [];
+    return {
+      candidate: facts,
+      seesImagesAvailable: seesImages.some((candidate) => {
+        const fact = facts(candidate);
+        return fact.notReady === undefined && fact.usageLimit === undefined && fact.allowed;
+      }),
+    };
+  }
+
+  #verdictLines(
+    project: Project,
+    verdicts: ReadonlyArray<WorkerCandidateVerdict>,
+  ): ReadonlyArray<string> {
+    return verdicts.map(
+      (verdict) =>
+        `- ${WORKER_ROLE_NAMES[verdict.role]}: ${describeWorkerCandidateRejection(
+          verdict,
+          this.#choiceFacts(project, { host: { slots: [], jobSlots: [] } }).candidate(
+            verdict.candidate,
+          ),
+        )}`,
+    );
+  }
+
+  /** A worker this coordinator started, by the roster's reference or its thread id. */
+  #ownWorker(coordinator: CodeThread, reference: string): CodeThread | undefined {
+    const threadId = reference.split("@")[0] ?? reference;
+    const worker = this.#ports.readThread(threadId);
+    return worker !== undefined && String(worker.coordinatorThreadId) === String(coordinator.id)
+      ? worker
+      : undefined;
+  }
+
+  /**
+   * The host-written role card: per worker role its models by handle, with
+   * host facts only (names the person or the provider gave, status, context,
+   * images), and a track record from this coordinator's own workers. No
+   * text an agent wrote, so it never marks the coordinator.
+   */
+  #roleCard(coordinator: CodeThread, project: Project, roles: WorkerRoles): ReadonlyArray<string> {
+    const handles = workerModelHandles(roles);
+    const facts = this.#choiceFacts(project, roles).candidate;
+    const handleOf = (candidate: NativeHarnessSlotCandidate) =>
+      handles.find((entry) => candidateKey(entry.candidate) === candidateKey(candidate))?.handle;
+    const describe = (candidate: NativeHarnessSlotCandidate, withHandle: boolean) => {
+      const fact = facts(candidate);
+      const handle = withHandle ? `${handleOf(candidate) ?? "?"} ` : "";
+      const context =
+        fact.contextTokens === undefined ? "" : ` ${String(Math.round(fact.contextTokens / 1000))}k`;
+      return `${handle}${fact.label} (${fact.providerName})${context} images:${fact.readsImages ? "yes" : "no"} ${statusOf(fact)}`;
+    };
+    const lines = [
+      "Model roles, written by Octant from its own facts (no agent wrote this). start picks by task and size; override with role or model (a handle) plus why.",
+    ];
+    for (const role of WORKER_ROLE_ORDER) {
+      const slot = effectiveWorkerRoleSlot(roles, role);
+      const name = `${WORKER_ROLE_NAMES[role]} (${WORKER_ROLE_CALL_NAMES[role]})`;
+      if (slot === undefined || slot.candidates.length === 0) {
+        lines.push(`${name}: no models; uses Builder's`);
+        continue;
+      }
+      const [main, ...fallbacks] = slot.candidates;
+      if (main === undefined) continue;
+      lines.push(
+        `${name}${slot.askBeforeUsing === true ? " [asks a person first]" : ""}: ${[
+          describe(main, true),
+          ...fallbacks.map((candidate) => `fallback ${describe(candidate, true)}`),
+        ].join(" · ")}`,
+      );
+    }
+    const vision = effectiveWorkerRoleSlot(roles, "vision")?.candidates ?? [];
+    lines.push(
+      vision.length === 0
+        ? "Sees images: none"
+        : `Sees images: ${vision.map((candidate) => describe(candidate, false)).join(" · ")}`,
+    );
+    const recent = this.#ports
+      .readThreads()
+      .filter((thread) => String(thread.coordinatorThreadId) === String(coordinator.id))
+      .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, COORDINATOR_TRACK_RECORD_WORKERS);
+    const record = new Map<string, { started: number; done: number; closed: number }>();
+    for (const worker of recent) {
+      const handle = handleOf({
+        hostId: "" as never,
+        providerInstanceId: worker.providerInstanceId as never,
+        modelId: worker.modelId as never,
+      });
+      if (handle === undefined) continue;
+      const entry = record.get(handle) ?? { started: 0, done: 0, closed: 0 };
+      record.set(handle, {
+        started: entry.started + 1,
+        done: entry.done + (worker.completedAt === undefined ? 0 : 1),
+        closed:
+          entry.closed +
+          (worker.completedAt === undefined && worker.lifecycle === "archived" ? 1 : 0),
+      });
+    }
+    lines.push(
+      record.size === 0
+        ? `Track record (this coordinator, last ${String(COORDINATOR_TRACK_RECORD_WORKERS)}): none yet`
+        : `Track record (this coordinator, last ${String(COORDINATOR_TRACK_RECORD_WORKERS)}): ${[
+            ...record.entries(),
+          ]
+            .map(
+              ([handle, entry]) =>
+                `${handle} ${String(entry.started)} started, ${String(entry.done)} Done, ${String(entry.closed)} closed without Done`,
+            )
+            .join(" · ")}`,
+    );
+    return lines;
   }
 
   /**
@@ -285,7 +655,15 @@ export class CoordinatorService {
         : `Your workers (reference: state)${workers.length > rows.length ? `, newest ${String(rows.length)} of ${String(workers.length)}` : ""}:`,
       ...rows,
       ...(changes.length === 0 ? [] : ["Changes since your last turn:", ...changes]),
+      ...this.#roleCardFor(coordinator),
     ].join("\n");
+  }
+
+  #roleCardFor(coordinator: CodeThread): ReadonlyArray<string> {
+    const roles = this.#ports.readRoles?.(coordinator.projectId);
+    const project = this.#ports.readProject(coordinator.projectId);
+    if (roles === undefined || project === undefined || !workerRolesConfigured(roles)) return [];
+    return this.#roleCard(coordinator, project, roles);
   }
 
   /** Feed committed journal appends: an admitted agent message may wake its recipient. */
@@ -313,6 +691,7 @@ export class CoordinatorService {
    * idle coordinator for it under the wake bounds.
    */
   async sweep(): Promise<void> {
+    await this.#watchFirstTurns();
     const threads = this.#ports.readThreads();
     for (const coordinator of threads) {
       if (!this.#readsAsCoordinator(coordinator)) continue;
@@ -375,6 +754,8 @@ export class CoordinatorService {
     caller: CodeThread,
     call: CoordinatorStartInput,
     level: Exclude<ProviderExecutionPolicy, "plan">,
+    resolved: ResolvedWorkerModel,
+    request: WorkerChoiceRequest | undefined,
   ): Promise<ToolAnswer> {
     const hop = this.#hopFrom(String(caller.id));
     let workerId: CodeThreadId;
@@ -399,8 +780,8 @@ export class CoordinatorService {
         projectId: caller.projectId,
         bindingRevisionId: prepared.bindingRevisionId,
         title: call.title,
-        providerInstanceId: call.providerInstanceId ?? caller.providerInstanceId,
-        modelId: call.modelId ?? caller.modelId,
+        providerInstanceId: resolved.providerInstanceId,
+        modelId: resolved.modelId,
         executionPolicy: level,
         permissionPersistence: "current-session",
         ...(caller.autoApprove === true && level === caller.executionPolicy
@@ -425,6 +806,7 @@ export class CoordinatorService {
       }
       const created = await this.#ports.executeCode(windowId, command, {
         coordinatorThreadId: caller.id,
+        ...(resolved.choice === undefined ? {} : { coordinatorChoice: resolved.choice }),
         ...(marked
           ? {
               inheritedMark: {
@@ -456,11 +838,28 @@ export class CoordinatorService {
     );
     if (turn.status === "started") {
       this.#ports.counts.recordHostTurn(String(workerId), { operationId: turn.operationId, hop });
+      if (request !== undefined) {
+        this.#firstTurns.set(String(workerId), {
+          windowId,
+          operationId: turn.operationId,
+          prompt: call.prompt,
+          request,
+          tried: [`${resolved.providerInstanceId}:${resolved.modelId}`],
+          startedAt: this.#ports.now(),
+        });
+      }
     }
     return {
       result: {
         status: "started",
         reference,
+        ...(resolved.choice === undefined
+          ? {}
+          : {
+              model: resolved.modelName ?? resolved.modelId,
+              role: WORKER_ROLE_NAMES[resolved.choice.role],
+              ...(resolved.choice.reason === undefined ? {} : { choice: resolved.choice.reason }),
+            }),
         firstTurn: turn.status === "started" ? "started" : "not-started",
         ...(turn.status === "refused"
           ? { message: `The worker was created; its first message did not start: ${turn.message}` }
@@ -468,6 +867,103 @@ export class CoordinatorService {
       },
       isError: false,
     };
+  }
+
+  /**
+   * A worker whose first turn failed for availability before any output or
+   * tool call starts again on the next eligible model of its role: still
+   * the start, so it is not a switch of a running worker. The provider is
+   * marked down, the worker's record says which model and why, and the same
+   * opening prompt is sent again. A next model that would need a person's
+   * approval, or none at all, leaves the worker as it is for the coordinator
+   * and the person.
+   */
+  async #watchFirstTurns(): Promise<void> {
+    for (const [workerId, watch] of [...this.#firstTurns.entries()]) {
+      const worker = this.#ports.readThread(workerId);
+      const latest = this.#ports.latestTurnId(workerId);
+      if (
+        worker === undefined ||
+        latest !== watch.operationId ||
+        this.#ports.now() - watch.startedAt > FIRST_TURN_WATCH_MS
+      ) {
+        this.#firstTurns.delete(workerId);
+        continue;
+      }
+      const state = this.#ports.threadState(workerId);
+      if (state === "working") continue;
+      if (this.#ports.firstTurnFailedBeforeWork?.(workerId, watch.operationId) !== true) {
+        // Settled any other way: it did work, or failed for another reason.
+        if (state !== undefined) this.#firstTurns.delete(workerId);
+        continue;
+      }
+      this.#firstTurns.delete(workerId);
+      await this.#restartOnNextModel(worker, watch).catch((error: unknown) =>
+        this.#ports.onError?.("A worker could not start on its next model.", error),
+      );
+    }
+  }
+
+  async #restartOnNextModel(worker: CodeThread, watch: WatchedFirstTurn): Promise<void> {
+    const failedProvider = String(worker.providerInstanceId);
+    this.#ports.markProviderDown?.(failedProvider);
+    const coordinator =
+      worker.coordinatorThreadId === undefined
+        ? undefined
+        : this.#ports.readThread(String(worker.coordinatorThreadId));
+    const project = this.#ports.readProject(worker.projectId);
+    const roles = this.#ports.readRoles?.(worker.projectId);
+    if (
+      coordinator === undefined ||
+      !this.#readsAsCoordinator(coordinator) ||
+      project === undefined ||
+      roles === undefined
+    ) {
+      return;
+    }
+    const tried = [...watch.tried, `${failedProvider}:${String(worker.modelId)}`];
+    const choice = chooseWorkerModel(roles, this.#choiceFacts(project, roles, tried), {
+      ...watch.request,
+      // The named model is the one that failed; the next start walks the role.
+      model: undefined,
+    });
+    if (choice.kind !== "start") return;
+    const failedName =
+      this.#ports.candidateFacts?.(project, {
+        hostId: "" as never,
+        providerInstanceId: worker.providerInstanceId as never,
+        modelId: worker.modelId as never,
+      }).label ?? String(worker.modelId);
+    const resolved = this.#resolvedFrom(
+      project,
+      choice,
+      worker.coordinatorChoice?.why,
+      `first request on ${failedName} failed before any work`,
+    );
+    const changed = await this.#ports.executeCode(
+      watch.windowId,
+      decodeCodeCommand({
+        kind: "change-code-thread-provider",
+        threadId: worker.id,
+        expectedVersion: worker.version,
+        providerInstanceId: resolved.providerInstanceId,
+        modelId: resolved.modelId,
+      }),
+      resolved.choice === undefined ? {} : { coordinatorChoice: resolved.choice },
+    );
+    if (changed.kind !== "thread-updated") return;
+    const turn = await this.#ports.startHostTurn(worker.id, watch.prompt);
+    if (turn.status !== "started") return;
+    this.#ports.counts.recordHostTurn(String(worker.id), {
+      operationId: turn.operationId,
+      hop: this.#ports.counts.hostTurn(String(worker.id))?.hop ?? 0,
+    });
+    this.#firstTurns.set(String(worker.id), {
+      ...watch,
+      operationId: turn.operationId,
+      tried: [...tried, `${resolved.providerInstanceId}:${resolved.modelId}`],
+      startedAt: this.#ports.now(),
+    });
   }
 
   async #maybeWake(
@@ -695,6 +1191,26 @@ export class CoordinatorService {
       ).length;
     return Math.max(created, this.#ports.counts.startsSince(String(coordinator.id), now - HOUR_MS));
   }
+}
+
+function candidateKey(candidate: NativeHarnessSlotCandidate): string {
+  return `${String(candidate.providerInstanceId)}:${String(candidate.modelId)}`;
+}
+
+/** A role model's state in the card: ready, or why it is not. */
+function statusOf(fact: CoordinatorCandidateFacts): string {
+  if (fact.notReady === "not-signed-in") return "not signed in";
+  if (fact.notReady === "provider-off") return "turned off";
+  if (fact.notReady === "provider-down") return "down";
+  if (fact.notReady === "model-not-offered") return "not offered";
+  if (fact.usageLimit !== undefined) {
+    return fact.usageLimit.until === undefined
+      ? "at limit"
+      : `at limit until ${workerClockTime(fact.usageLimit.until)}`;
+  }
+  if (!fact.allowed) return "not allowed here";
+  if (!fact.toolsVerified) return "tools not verified";
+  return "ready";
 }
 
 function refusedAnswer(reason: string, message: string): ToolAnswer {

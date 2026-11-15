@@ -100,6 +100,7 @@ import {
   type CodeThreadActivity,
   type CodeThreadForkOrigin,
   type CodeThreadId,
+  type CoordinatorWorkerChoice,
   type CodeThreadView,
   type CodeOperationEventFrame,
   decodeCodeOperationEventFrame,
@@ -694,6 +695,13 @@ export interface CodeServiceExecutionContext {
    * command carries it, and a created thread's own record never may.
    */
   readonly coordinatorThreadId?: CodeThreadId;
+  /**
+   * How the host chose a coordinator worker's model, set only by the host's
+   * coordinator start (on creation, and when a first request that failed
+   * before any work moves the worker to its next model) and a confirmed
+   * proposal. No wire command carries it.
+   */
+  readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /**
    * Who asked, as the route resolved it from the authenticated principal: a
    * paired device's change is journaled as that device. Absent means the
@@ -1753,6 +1761,10 @@ export class CodeService {
               ...(executionContext?.coordinatorThreadId === undefined
                 ? {}
                 : { coordinatorThreadId: executionContext.coordinatorThreadId }),
+              ...(executionContext?.coordinatorThreadId === undefined ||
+              executionContext.coordinatorChoice === undefined
+                ? {}
+                : { coordinatorChoice: executionContext.coordinatorChoice }),
               version: 1,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -2109,6 +2121,7 @@ export class CodeService {
         if (
           command.thread.coordinator !== undefined ||
           command.thread.coordinatorThreadId !== undefined ||
+          command.thread.coordinatorChoice !== undefined ||
           command.thread.coordinatorBounds !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
@@ -2767,6 +2780,20 @@ export class CodeService {
                             providerInstanceId: command.providerInstanceId,
                             modelId: command.modelId,
                             ...nextModelOptionValues(current, command),
+                            // A worker's choice follows its model: the host's
+                            // restart on the next model records its own, and
+                            // anyone else's change reads as a person's pick.
+                            ...(current.coordinatorChoice === undefined ||
+                            (String(current.providerInstanceId) ===
+                              String(command.providerInstanceId) &&
+                              String(current.modelId) === String(command.modelId))
+                              ? {}
+                              : {
+                                  coordinatorChoice: executionContext?.coordinatorChoice ?? {
+                                    role: current.coordinatorChoice.role,
+                                    rank: "person",
+                                  },
+                                }),
                             ...(String(current.providerInstanceId) ===
                               String(command.providerInstanceId) &&
                             String(current.modelId) === String(command.modelId)

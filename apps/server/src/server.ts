@@ -572,6 +572,7 @@ export function startOctantServer(
       reviewedModelManifest,
       managedWorktreeService,
       skillDiscoveryService,
+      providerAvailabilityMarks,
     } = yield* wireProviders({
       hostResourceBudget,
       serverRegistry,
@@ -869,6 +870,9 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       hostResourceBudget,
+      providerAvailabilityMarks,
+      nativeHarnessRoutingStore,
+      isProjectPolicyTargetAllowed,
       threadMoveHolds,
       onThreadArchived,
       codeSessionConversation,
