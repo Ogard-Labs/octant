@@ -1527,7 +1527,7 @@
   min-width: 0;
   min-height: 0;
   padding: 0;
-  overflow: hidden;
+  overflow: clip;
   color: var(--oct-fg);
   outline: 0;
   pointer-events: auto;

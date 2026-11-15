@@ -1,3 +1,6 @@
+/* The frame clips rather than hides its overflow: a box with overflow hidden
+   can still be scrolled by scrollIntoView, and a section jump slid the whole
+   sheet up, rail and title with it. Only the navigation list and the page scroll. */
 .settings-view {
   display: grid;
   width: 100%;
@@ -6,7 +9,7 @@
   min-width: 0;
   min-height: 0;
   grid-template-columns: var(--octant-sidebar-width, 248px) minmax(0, 1fr);
-  overflow: hidden;
+  overflow: clip;
   color: var(--octant-text-primary);
   background: var(--octant-app-background);
   font-family: var(--oct-font-display);
@@ -30,7 +33,7 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: clip;
   background: var(--octant-sidebar-opaque);
   border-right: 1px solid var(--octant-border);
 }
@@ -163,7 +166,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 1 1 auto;
   flex-direction: column;
   padding: 8px 12px 12px;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .settings-view__navigation-scroll {
@@ -194,7 +197,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   min-width: 0;
   min-height: 0;
   grid-template-rows: var(--oct-title-rail-h) minmax(0, 1fr);
-  overflow: hidden;
+  overflow: clip;
   background: var(--octant-app-background);
 }
 
