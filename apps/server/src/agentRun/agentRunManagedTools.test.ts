@@ -96,6 +96,7 @@ function tool(
     authorizeCancel?: (run: AgentRun) => boolean;
     remote?: RemoteDelegationPort;
     ingestion?: "recorded" | "refused";
+    resultTexts?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const calls: string[] = [];
@@ -163,7 +164,9 @@ function tool(
           runs[index] = run;
           return { kind: "run-updated", run };
         },
-        resultText: (runId) => (String(runId) === ids.run ? "child reply" : undefined),
+        resultText: (runId) =>
+          options.resultTexts?.[String(runId)] ??
+          (String(runId) === ids.run ? "child reply" : undefined),
       },
       mode: "chat",
       windowId: ids.window,
@@ -771,6 +774,31 @@ describe("agents managed tools", () => {
       settled: [{ runId: ids.run, status: "completed" }],
       pending: [second],
     });
+  });
+
+  it("leaves a finished reply owed when it would not fit a several-child answer", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const done = (id: string) =>
+      queuedRun({ id: id as never, lifecycleStatus: "completed", result: { text: "x" } as never });
+    const { set, settlements } = tool({
+      runs: [done(ids.run), done(second)],
+      resultTexts: { [ids.run]: "a".repeat(40_000), [second]: "b".repeat(40_000) },
+    });
+    const outcome = await call(set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      timeoutMs: 0,
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.result).toMatchObject({
+      status: "settled",
+      settled: [{ runId: ids.run, status: "completed" }],
+      withheld: [second],
+      pending: [],
+    });
+    expect(Buffer.byteLength(JSON.stringify(outcome.result), "utf8")).toBeLessThanOrEqual(65_536);
+    // Only the carried reply is settled as handed back; the other stays owed.
+    expect(settlements.map((command) => String(command.runId))).toEqual([ids.run]);
   });
 
   it("refuses a wait that names both runId and runIds, or repeats a child", async () => {

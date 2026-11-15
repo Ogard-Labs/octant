@@ -1,5 +1,6 @@
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
+  MAX_PROVIDER_TOOL_RESULT_BYTES,
   AGENT_RUN_TERMINAL_STATUSES,
   MAX_AGENT_RUN_DEPENDENCIES,
   type AgentRun,
@@ -64,6 +65,9 @@ export interface AgentsManagedToolsOptions {
 const AGENTS_TOOL_NAME = "octant_agents";
 /** One wait covers at most a thread's whole concurrency ceiling. */
 const MAX_WAIT_RUN_IDS = 16;
+/** Room kept for a several-child answer's own fields and one entry's metadata. */
+const WAIT_ANSWER_ENVELOPE_BYTES = 1_024;
+const WAIT_ENTRY_OVERHEAD_BYTES = 512;
 
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
@@ -581,17 +585,41 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
         // Several children: answer when the first settles ("any") or when every
         // one has ("all"). A reply is collected once, when its child settles, so
         // a later `wait` on the same child reads it as already handed back.
+        //
+        // The whole answer must fit one tool response. Collecting a reply
+        // settles it as handed back, so a reply that would push the answer past
+        // the budget is left uncollected and still owed: the parent receives it
+        // from a later wait or from delivery, never as a cut-off preview.
         const waitFor = input.waitFor ?? "all";
         const settledById = new Map<string, unknown>();
+        const withheld = new Set<string>();
+        let answerBytes = WAIT_ANSWER_ENVELOPE_BYTES;
         for (;;) {
           if (signal?.aborted) return failure("tool-interrupted");
           for (const runId of runIds) {
-            if (settledById.has(runId)) continue;
+            if (settledById.has(runId) || withheld.has(runId)) continue;
+            const run = childRun(runId);
+            const text =
+              run?.lifecycleStatus === "completed" && run.result !== undefined
+                ? options.persistence.resultText(run.id)
+                : undefined;
+            if (
+              text !== undefined &&
+              answerBytes + Buffer.byteLength(text, "utf8") + WAIT_ENTRY_OVERHEAD_BYTES >
+                MAX_PROVIDER_TOOL_RESULT_BYTES
+            ) {
+              withheld.add(runId);
+              continue;
+            }
             const settled = settleWait(runId);
-            if (settled !== undefined) settledById.set(runId, { runId, ...settled.result });
+            if (settled === undefined) continue;
+            const entry = { runId, ...settled.result };
+            answerBytes += Buffer.byteLength(JSON.stringify(entry), "utf8");
+            settledById.set(runId, entry);
           }
-          const pending = runIds.filter((runId) => !settledById.has(runId));
-          const done = waitFor === "any" ? settledById.size > 0 : pending.length === 0;
+          const pending = runIds.filter((runId) => !settledById.has(runId) && !withheld.has(runId));
+          const finished = settledById.size + withheld.size;
+          const done = waitFor === "any" ? finished > 0 : pending.length === 0;
           const remaining = deadline - Date.now();
           if (done || remaining <= 0) {
             return answer({
@@ -599,6 +627,13 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
               waitFor,
               settled: [...settledById.values()],
               pending,
+              ...(withheld.size === 0
+                ? {}
+                : {
+                    withheld: [...withheld],
+                    message:
+                      "These children finished, but their replies did not fit this response. They remain owed: wait on each alone, or let them be delivered.",
+                  }),
             });
           }
           try {
