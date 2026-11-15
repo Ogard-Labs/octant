@@ -800,7 +800,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   : context,
               attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
               tools: [...(input.appManagedTools?.definitions ?? [])],
-              ...providerWebSearchAtSend(input.appManagedTools),
+              ...providerWebSearchAtSend(input.appManagedTools, input.providerSessionId),
             })
             .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),

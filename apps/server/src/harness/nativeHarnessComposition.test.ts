@@ -189,19 +189,21 @@ describe("native harness composition", () => {
     };
     const atFullAccess = { withdrawAfterFirstStep: false };
     const offers = {
-      chat: composition.forChat({ thread: chatThread, windowId: "w" })?.providerWebSearch?.(),
+      chat: composition
+        .forChat({ thread: chatThread, windowId: "w" })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
       work: composition
         .forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" })
-        ?.providerWebSearch?.(),
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
       code: composition
         .forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" })
-        ?.providerWebSearch?.(),
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
       serverWork: composition
         .forServerWork({ thread: workThread, ...serverPorts })
-        ?.providerWebSearch?.(),
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
       serverCode: composition
         .forServerCode({ thread, windowId: "w", ...serverPorts })
-        ?.providerWebSearch?.(),
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
       child: composition
         .forAgentRun({
           run: {
@@ -222,7 +224,7 @@ describe("native harness composition", () => {
           },
           projectRoot: "/unused",
         })
-        ?.providerWebSearch?.(),
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
     };
     expect(offers).toEqual({
       // Chat is decided below Full access: it has no execution policy of its own.
@@ -238,6 +240,7 @@ describe("native harness composition", () => {
   it("decides the provider's own search when the turn is sent, keeping it at Full access on a thread marked after composing", () => {
     const tainted = new Set<string>();
     let codePolicy: ProviderExecutionPolicy = "full-access";
+    let tracked: ((providerInstanceId: typeof thread.providerInstanceId) => unknown) | undefined;
     const composition = createNativeHarnessComposition({
       isChildAuthorityCurrent: () => true,
       authority: {
@@ -257,7 +260,19 @@ describe("native harness composition", () => {
       hostId: authority.hostId,
       readThreadTaint: (threadId) => tainted.has(threadId),
       readCodeExecutionPolicy: () => codePolicy,
-      providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+      // The lead's instance runs its own search; any other instance does not.
+      providerWebSearchFacts: (providerInstanceId) => ({
+        origin:
+          String(providerInstanceId) === String(thread.providerInstanceId)
+            ? "anthropic-api"
+            : undefined,
+        webSearchReady: false,
+      }),
+      providerSearchGrants: {
+        track: (_sessionId, decide) => {
+          tracked = decide;
+        },
+      },
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
       uuid: () => "00000000-0000-4000-8000-000000000099",
       clock: () => "2026-11-15T00:00:00.000Z",
@@ -265,13 +280,23 @@ describe("native harness composition", () => {
     const code = composition.forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" });
     // Marked after its tools were composed, as preparing its context can.
     tainted.add(String(thread.id));
-    const atFullAccess = code?.providerWebSearch?.();
+    const atFullAccess = code?.providerWebSearch?.(
+      decodeProviderSessionId("00000000-0000-4000-8000-000000000077"),
+    );
     codePolicy = "approval-gated";
-    const belowFullAccess = code?.providerWebSearch?.();
+    const belowFullAccess = code?.providerWebSearch?.(
+      decodeProviderSessionId("00000000-0000-4000-8000-000000000077"),
+    );
     expect({ atFullAccess, belowFullAccess }).toEqual({
       atFullAccess: { withdrawAfterFirstStep: false },
       belowFullAccess: undefined,
     });
+    // Sending tracked the session, so its loop asks again per endpoint.
+    codePolicy = "full-access";
+    expect(tracked?.(thread.providerInstanceId)).toEqual({ withdrawAfterFirstStep: false });
+    expect(tracked?.(decodeProviderInstanceId("00000000-0000-4000-8000-0000000000ff"))).toBe(
+      undefined,
+    );
   });
 
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {

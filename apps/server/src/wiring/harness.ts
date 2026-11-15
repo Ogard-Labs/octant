@@ -154,6 +154,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "configuredDriverOptions"
     | "effectiveSkills"
     | "nativeHarnessLeadFallback"
+    | "nativeHarnessProviderSearchGrants"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
     | "providerUsageLimitsService"
@@ -207,6 +208,7 @@ export function wireHarness(deps: HarnessDependencies) {
     shieldHolder,
     spendCeiling,
     nativeHarnessLeadFallback,
+    nativeHarnessProviderSearchGrants,
     nativeHarnessQuestions,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
@@ -1183,6 +1185,7 @@ export function wireHarness(deps: HarnessDependencies) {
     hostId: deriveToolHostId(providerDataDirectory),
     readThreadTaint: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    providerSearchGrants: nativeHarnessProviderSearchGrants,
     providerWebSearchFacts: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
       if (instance === undefined) return undefined;

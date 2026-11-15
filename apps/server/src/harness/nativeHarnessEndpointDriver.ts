@@ -116,6 +116,9 @@ export function runOnNativeHarness(
               ownSearchOn: ({ providerInstanceId }) =>
                 host.harness?.ownSearchOn?.(providerInstanceId) === true,
             }),
+        ...(host.harness?.providerSearch === undefined
+          ? {}
+          : { providerSearch: host.harness.providerSearch }),
         admitTurn,
         contextWindow: (modelId) => {
           const model = host.runtimeRegistry

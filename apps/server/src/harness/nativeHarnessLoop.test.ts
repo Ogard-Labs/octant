@@ -100,7 +100,7 @@ function connect(
   transcripts: NativeHarnessTranscriptStore,
   leadFallback?: NativeHarnessLeadFallback,
   mode: "chat" | "work" | "code" = "code",
-  ownSearchOn?: NativeHarnessConnectionOptions["ownSearchOn"],
+  extra: Partial<Pick<NativeHarnessConnectionOptions, "ownSearchOn" | "providerSearch">> = {},
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return createNativeHarnessConnection({
     instanceId,
@@ -110,7 +110,7 @@ function connect(
     transport,
     transcripts,
     ...(leadFallback === undefined ? {} : { leadFallback }),
-    ...(ownSearchOn === undefined ? {} : { ownSearchOn }),
+    ...extra,
     admitTurn: () => undefined,
     clock: () => now,
     correlationId: () => "80000000-0000-4000-8000-000000000903",
@@ -3547,9 +3547,11 @@ describe("the provider's own web search in a harness turn", () => {
                 }),
               },
               "code",
-              (target) =>
-                ownSearch &&
-                String(target.providerInstanceId) === String(backupTarget.providerInstanceId),
+              {
+                ownSearchOn: (target) =>
+                  ownSearch &&
+                  String(target.providerInstanceId) === String(backupTarget.providerInstanceId),
+              },
             );
             yield* connection.start({
               sessionId,
@@ -3589,6 +3591,61 @@ describe("the provider's own web search in a harness turn", () => {
     const withOwnSearch = { providerWebSearch: true, webSearchTool: false };
     expect(await onFallback(false)).toEqual([withoutOwnSearch, withoutOwnSearch]);
     expect(await onFallback(true)).toEqual([withOwnSearch, withOwnSearch]);
+  });
+
+  it("offers the provider's own search on a fallback that runs it when the lead's endpoint could not", async () => {
+    const offered = [...tools, tool("web-search")];
+    const backup = answeringEndpoint("From the backup");
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => downEndpoint().session },
+            new MemoryNativeHarnessTranscriptStore(),
+            {
+              next: async () => ({
+                status: "switched",
+                target: backupTarget,
+                endpoint: backup.session,
+              }),
+            },
+            "code",
+            {
+              ownSearchOn: () => true,
+              // The host's decision for each endpoint: the lead's has no search
+              // of its own, the fallback's does.
+              providerSearch: {
+                now: (_session, providerInstanceId) => ({
+                  status: "decided",
+                  grant:
+                    String(providerInstanceId) === String(backupTarget.providerInstanceId)
+                      ? { withdrawAfterFirstStep: false }
+                      : undefined,
+                }),
+                release: () => undefined,
+              },
+            },
+          );
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            tools: offered,
+          });
+          const all = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          // Sent without a grant: the lead's endpoint runs no search of its own.
+          yield* connection.send({ sessionId, prompt: "Search", attachments: [], tools: offered });
+          yield* Fiber.join(all);
+        }),
+      ),
+    );
+
+    expect(backup.requests[0]?.providerWebSearch).toBe(true);
+    expect(backup.requests[0]?.tools.map((definition) => definition.name)).not.toContain(
+      "web-search",
+    );
   });
 
   it("offers the provider's own search again on the lead's next turn after a fallback that could not run it", async () => {
@@ -3648,6 +3705,141 @@ describe("the provider's own web search in a harness turn", () => {
     expect(backup.requests[0]?.providerWebSearch).toBeUndefined();
     expect(lead[0]?.providerWebSearch).toBe(true);
     expect(lead[0]?.tools.map((definition) => definition.name)).not.toContain("web-search");
+  });
+
+  it("offers web-search instead on the next request once a Full access turn's level drops below it", async () => {
+    const scripted = scriptedTransport([
+      { text: "", toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }] },
+      { text: "Done", toolCalls: [] },
+    ]);
+    const offered = [...tools, tool("web-search")];
+    // The thread's grant as the host decides it now: Full access at send,
+    // then narrowed below it while the first step's tool runs.
+    let grant: { readonly withdrawAfterFirstStep: boolean } | undefined = {
+      withdrawAfterFirstStep: false,
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            scripted.transport,
+            new MemoryNativeHarnessTranscriptStore(),
+            undefined,
+            "code",
+            {
+              providerSearch: {
+                now: () => ({ status: "decided", grant }),
+                release: () => undefined,
+              },
+            },
+          );
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            tools: offered,
+          });
+          const all = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "Search",
+            attachments: [],
+            tools: offered,
+            providerWebSearch: { withdrawAfterFirstStep: false },
+          });
+          yield* Effect.promise(() => vi.waitFor(() => expect(scripted.requests.length).toBe(1)));
+          yield* Effect.yieldNow();
+          grant = { withdrawAfterFirstStep: true };
+          yield* connection.answerTool({
+            sessionId,
+            requestId: "read-1",
+            resultJson: "{}",
+            isError: false,
+          });
+          yield* Fiber.join(all);
+        }),
+      ),
+    );
+    expect(
+      scripted.requests.map((request) => ({
+        providerWebSearch: request.providerWebSearch,
+        webSearchTool: request.tools.some((definition) => definition.name === "web-search"),
+      })),
+    ).toEqual([
+      { providerWebSearch: true, webSearchTool: false },
+      { providerWebSearch: undefined, webSearchTool: true },
+    ]);
+  });
+
+  it("offers web-search instead on a steering note's request once the thread was marked outside the turn", async () => {
+    let finish: ((response: NativeHarnessResponse) => void) | undefined;
+    const requests: NativeHarnessRequest[] = [];
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async (request) => {
+          requests.push(request);
+          if (requests.length === 1)
+            return await new Promise<NativeHarnessResponse>((resolve) => {
+              finish = resolve;
+            });
+          return { text: "Rechecked", toolCalls: [] };
+        },
+        release: () => undefined,
+      }),
+    };
+    const offered = [...tools, tool("web-search")];
+    let grant: { readonly withdrawAfterFirstStep: boolean } | undefined = {
+      withdrawAfterFirstStep: true,
+    };
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            transport,
+            new MemoryNativeHarnessTranscriptStore(),
+            undefined,
+            "code",
+            {
+              providerSearch: {
+                now: () => ({ status: "decided", grant }),
+                release: () => undefined,
+              },
+            },
+          );
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            tools: offered,
+          });
+          const terminal = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "Review",
+            attachments: [],
+            tools: offered,
+            providerWebSearch: { withdrawAfterFirstStep: true },
+          });
+          const note = yield* Effect.fork(
+            connection.steer?.({ sessionId, message: "Recheck the parser" }) ??
+              Effect.succeed("unsupported"),
+          );
+          yield* Effect.yieldNow();
+          // Something outside this turn marks the thread before the note is sent.
+          grant = undefined;
+          finish?.({ text: "Initial review", toolCalls: [] });
+          expect(yield* Fiber.join(note)).toBe("steered");
+          yield* Fiber.join(terminal);
+        }),
+      ),
+    );
+    expect(requests.map((request) => request.providerWebSearch)).toEqual([true, undefined]);
+    expect(requests[1]?.tools.map((definition) => definition.name)).toContain("web-search");
   });
 
   it("keeps offering it after a tool answer at Full access", async () => {

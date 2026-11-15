@@ -222,6 +222,7 @@ import {
 import {
   type NativeHarnessEndpointHooks,
   NativeHarnessEndpointRegistry,
+  NativeHarnessProviderSearchGrants,
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
   appToolThreadLevel,
@@ -1645,6 +1646,9 @@ export function wireProviders(deps: ProvidersDependencies) {
     // asks the fallback (built below, from the options these hooks are part
     // of) where to go when its own model stays down.
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
+    // Each harness turn's provider-search grant, tracked by the harness
+    // composition (wired later, in the harness area) and asked by the loop.
+    const nativeHarnessProviderSearchGrants = new NativeHarnessProviderSearchGrants();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
       // What a request teaches about its model's window is kept with the
@@ -1660,6 +1664,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         const instance = persistence.readProviderInstance(instanceId);
         return instance !== undefined && providerOwnSearchOrigin(instance) !== undefined;
       },
+      providerSearch: nativeHarnessProviderSearchGrants,
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialBroker =
@@ -2384,6 +2389,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessLeadFallback,
+      nativeHarnessProviderSearchGrants,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,

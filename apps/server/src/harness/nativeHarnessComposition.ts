@@ -69,6 +69,7 @@ import {
   type NativeHarnessSkillPort,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
+import type { NativeHarnessProviderSearchGrants } from "./nativeHarnessEndpointRegistry";
 
 /** Where a Full access tag is journaled, and whose earlier reads count toward it. */
 interface SecretEgressTagScope {
@@ -254,6 +255,12 @@ export interface NativeHarnessCompositionOptions {
         readonly webSearchReady: boolean;
       }
     | undefined;
+  /**
+   * Where a turn's grant is kept decidable for the session it is sent on, so
+   * the session's loop can ask again before each request, for whichever
+   * endpoint the request goes to. Absent, the grant sent with the turn stands.
+   */
+  readonly providerSearchGrants?: Pick<NativeHarnessProviderSearchGrants, "track">;
   /** Questions to the person; absent on a host with no surface to answer them. */
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   /** Where each lead tool call is noted while its turn runs. */
@@ -485,6 +492,9 @@ export function createNativeHarnessComposition(
    * read: the turn runner reads it when it sends the turn, after the turn's
    * context is prepared and any owed outside-content mark is settled, so the
    * taint and level it is decided on are the ones the first request carries.
+   * Reading it also tracks the session, so its loop asks again before each
+   * later request: the endpoint's origin, the thread's taint, and its level
+   * are read again then, for the endpoint that request goes to.
    */
   const withProviderSearch = (
     tools: AppManagedToolSet,
@@ -499,19 +509,23 @@ export function createNativeHarnessComposition(
   ): AppManagedToolSet => {
     if (options.providerWebSearchFacts === undefined) return tools;
     const readFacts = options.providerWebSearchFacts;
+    const decideFor = (providerInstanceId: ProviderInstanceId) => {
+      const facts = readFacts(providerInstanceId);
+      return facts === undefined
+        ? undefined
+        : decideHarnessProviderSearch({
+            research: input.research,
+            routing: input.routing,
+            ...facts,
+            tainted: options.readThreadTaint(input.threadId),
+            fullAccess: input.fullAccess(),
+          });
+    };
     return {
       ...tools,
-      providerWebSearch: () => {
-        const facts = readFacts(input.providerInstanceId);
-        return facts === undefined
-          ? undefined
-          : decideHarnessProviderSearch({
-              research: input.research,
-              routing: input.routing,
-              ...facts,
-              tainted: options.readThreadTaint(input.threadId),
-              fullAccess: input.fullAccess(),
-            });
+      providerWebSearch: (sessionId) => {
+        options.providerSearchGrants?.track(sessionId, decideFor);
+        return decideFor(input.providerInstanceId);
       },
     };
   };

@@ -45,6 +45,7 @@ import type {
   NativeHarnessLeadFallbackOutcome,
   NativeHarnessLeadTarget,
   NativeHarnessMessage,
+  NativeHarnessProviderSearchDecisions,
   NativeHarnessRequest,
   NativeHarnessResponse,
   NativeHarnessStreamEvent,
@@ -170,6 +171,13 @@ export interface NativeHarnessConnectionOptions {
    */
   readonly ownSearchOn?: (target: NativeHarnessLeadTarget) => boolean;
   /**
+   * The running turn's provider-search grant as the host decides it now,
+   * asked before each request: a level lowered or a thread marked mid-turn
+   * withdraws the provider's own search for the rest of the turn. Absent, the
+   * grant the turn was sent with stands.
+   */
+  readonly providerSearch?: NativeHarnessProviderSearchDecisions;
+  /**
    * The model's window as the request-fitting rules settle on it, read when a
    * request is sent; undefined when nothing names one. It gives the lead its
    * window fill when no compaction point carries a window.
@@ -252,9 +260,12 @@ interface SessionState {
   /**
    * The provider's own search is left out of the rest of the turn: below Full
    * access, once the turn searched or answered a tool call, the conversation
-   * may hold outside content a built-in query could carry out unseen.
+   * may hold outside content a built-in query could carry out unseen; and
+   * once the host's grant for the turn no longer offers it.
    */
   providerWebSearchWithdrawn: boolean;
+  /** Whether this turn has searched or answered a tool call yet. */
+  searchedOrAnswered: boolean;
   /**
    * Each built-in search the turn's requests reported, by its id. The
    * endpoint reports a search as soon as its results arrive and again with
@@ -377,9 +388,7 @@ export function createNativeHarnessConnection(
       state: SessionState,
       search: Extract<NativeHarnessStreamEvent, { readonly kind: "provider-web-search" }>,
     ) => {
-      if (state.providerWebSearch?.withdrawAfterFirstStep === true) {
-        state.providerWebSearchWithdrawn = true;
-      }
+      state.searchedOrAnswered = true;
       const query = search.query?.trim().slice(0, 1_024);
       const reported = query === undefined || query.length === 0 ? undefined : query;
       const known = state.providerSearches.get(search.searchId);
@@ -470,6 +479,7 @@ export function createNativeHarnessConnection(
       for (const note of state.steering.splice(0)) note.resolve("unsupported");
       state.fallback?.endpoint.release();
       state.fallback = undefined;
+      options.providerSearch?.release(state.sessionId);
       state.turn = undefined;
       state.messages.length = 0;
       state.pending = undefined;
@@ -533,6 +543,7 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       providerWebSearch: undefined,
       providerWebSearchWithdrawn: false,
+      searchedOrAnswered: false,
       providerSearches: new Map(),
       pending: undefined,
       answered: new Set(),
@@ -815,7 +826,11 @@ export function createNativeHarnessConnection(
           const { tools: _tools, providerWebSearch: _offered, ...unsearched } = current;
           const moved = fitRequest(
             outcome.endpoint,
-            { ...unsearched, modelId: outcome.target.modelId, ...searchOffer(state, ownSearch) },
+            {
+              ...unsearched,
+              modelId: outcome.target.modelId,
+              ...searchOffer(state, { target: outcome.target, ownSearch }),
+            },
             { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
@@ -847,9 +862,7 @@ export function createNativeHarnessConnection(
       // A tool's result may be outside content the host is only now
       // recording; below Full access the provider's own search, whose query
       // Octant never sees first, is not offered on what follows it.
-      if (state.providerWebSearch?.withdrawAfterFirstStep === true) {
-        state.providerWebSearchWithdrawn = true;
-      }
+      state.searchedOrAnswered = true;
       const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
       if (request === undefined) {
         emit(state, {
@@ -1379,17 +1392,66 @@ export function createNativeHarnessConnection(
       options.ownSearchOn?.(target) === true;
 
     /**
-     * A request offers one search: the provider's own while it is offered and
-     * the endpoint the request goes to runs it, Octant's `web-search`
-     * otherwise, never both.
+     * The provider's own search a request may offer, if any. The host's grant
+     * is asked again before each request, for the endpoint the request goes
+     * to: a level lowered or a thread marked mid-turn withdraws it for the
+     * rest of the turn, and a fallback endpoint is judged by its own origin
+     * under the thread's same routing, taint, and level, so a fallback that
+     * runs its own search is offered it even when the lead's endpoint was not.
+     * On the lead's endpoint a grant asked again never offers what the turn
+     * was not sent with. Either grant ends the offer at the turn's first
+     * search or tool answer when it says so. Without the host's answer the
+     * grant the turn was sent with stands, on the lead and on a fallback that
+     * runs its own search.
+     */
+    const offeredProviderSearch = (
+      state: SessionState,
+      endpoint:
+        | { readonly target: NativeHarnessLeadTarget; readonly ownSearch: boolean }
+        | undefined,
+    ): boolean => {
+      if (state.providerWebSearchWithdrawn) return false;
+      const sent = state.providerWebSearch;
+      const asked = options.providerSearch?.now(
+        state.sessionId,
+        endpoint?.target.providerInstanceId ?? options.instanceId,
+      );
+      const now =
+        asked === undefined || asked.status === "untracked"
+          ? endpoint === undefined || endpoint.ownSearch
+            ? sent
+            : undefined
+          : endpoint === undefined && sent === undefined
+            ? undefined
+            : asked.grant;
+      if (now === undefined) {
+        // Withdrawn once it was offered: a revocation is not undone later in
+        // the turn. A turn never offered it has nothing to withdraw, so a
+        // fallback that runs its own search can still be offered it.
+        if (sent !== undefined) state.providerWebSearchWithdrawn = true;
+        return false;
+      }
+      if (
+        (sent?.withdrawAfterFirstStep === true || now.withdrawAfterFirstStep) &&
+        state.searchedOrAnswered
+      ) {
+        state.providerWebSearchWithdrawn = true;
+        return false;
+      }
+      return true;
+    };
+
+    /**
+     * A request offers one search: the provider's own while it is offered
+     * (`offeredProviderSearch`), Octant's `web-search` otherwise, never both.
      */
     const searchOffer = (
       state: SessionState,
-      ownSearch: boolean,
-    ): Pick<NativeHarnessRequest, "tools" | "providerWebSearch"> => {
-      const providerSearch =
-        ownSearch && state.providerWebSearch !== undefined && !state.providerWebSearchWithdrawn;
-      return providerSearch
+      endpoint:
+        | { readonly target: NativeHarnessLeadTarget; readonly ownSearch: boolean }
+        | undefined,
+    ): Pick<NativeHarnessRequest, "tools" | "providerWebSearch"> =>
+      offeredProviderSearch(state, endpoint)
         ? {
             tools: sortToolDefinitionsByName(
               state.tools.filter((tool) => tool.name !== WEB_SEARCH_TOOL_DEFINITION.name),
@@ -1397,7 +1459,6 @@ export function createNativeHarnessConnection(
             providerWebSearch: true,
           }
         : { tools: sortToolDefinitionsByName(state.tools) };
-    };
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(
@@ -1407,7 +1468,7 @@ export function createNativeHarnessConnection(
           modelId: state.modelId,
           system: state.system,
           history,
-          ...searchOffer(state, state.fallback?.ownSearch ?? true),
+          ...searchOffer(state, state.fallback),
         },
         { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
@@ -1532,6 +1593,7 @@ export function createNativeHarnessConnection(
             state.tools = input.tools;
             state.providerWebSearch = input.providerWebSearch;
             state.providerWebSearchWithdrawn = false;
+            state.searchedOrAnswered = false;
             // Each turn starts on the lead's own model again, so its first
             // request is built for the lead's search, not the last fallback's.
             state.fallback?.endpoint.release();

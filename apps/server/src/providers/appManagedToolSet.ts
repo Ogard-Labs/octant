@@ -18,7 +18,9 @@ export interface AppManagedToolSet {
    * Carried through every set that combines or wraps this one; absent offers
    * none.
    */
-  readonly providerWebSearch?: () => ProviderTurnInput["providerWebSearch"];
+  readonly providerWebSearch?: (
+    sessionId: ProviderTurnInput["sessionId"],
+  ) => ProviderTurnInput["providerWebSearch"];
   readonly close?: () => Promise<void>;
   readonly execute: (input: {
     readonly name: string;
@@ -50,8 +52,9 @@ export interface AppManagedToolSet {
  */
 export function providerWebSearchAtSend(
   set: AppManagedToolSet | undefined,
+  sessionId: ProviderTurnInput["sessionId"],
 ): Pick<ProviderTurnInput, "providerWebSearch"> {
-  const providerWebSearch = set?.providerWebSearch?.();
+  const providerWebSearch = set?.providerWebSearch?.(sessionId);
   return providerWebSearch === undefined ? {} : { providerWebSearch };
 }
 

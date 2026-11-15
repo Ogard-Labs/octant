@@ -255,7 +255,10 @@ runner sends the turn, after the turn's context is prepared and any owed
 outside-content mark is settled, not when the turn's tools are composed:
 reading a mentioned thread that is marked, for example, marks the reader in
 between, and a decision taken earlier would offer built-in search beside that
-content. Within a turn the offer ends at the
+content. The loop asks for the decision again before each later request of the
+turn, so lowering a running turn below Full access, or a mark recorded from
+outside the turn, withdraws the provider's own search from the next request
+for the rest of the turn. Within a turn the offer ends at the
 turn's first search or first tool answer: the loop cannot tell which tool
 result was outside content before the host records it, so it withdraws at the
 first one, at the cost of one prompt cache miss in such a turn. A request
@@ -294,11 +297,13 @@ cannot see or refuse a query that runs inside the provider, so a child with
 network authority searches through `web-search` only.
 
 **Fallback model.** When the lead's model keeps failing and the turn moves to
-a fallback model, the offer is decided again for the fallback's endpoint: it
-keeps the provider's own search only when that endpoint is on one of the two
-origins above, and is offered `web-search` otherwise, for the rest of the
-turn. Rationale: the compatible endpoints send their built-in search only on
-their own origin, so carrying the lead's offer over would leave a fallback with
+a fallback model, the offer is decided again for the fallback's endpoint, under
+the thread's same research route, taint, and level: a fallback on one of the
+two origins above is offered the provider's own search, even when the lead's
+endpoint was not, and any other fallback is offered `web-search`, for the rest
+of the turn. A search withdrawn earlier in the turn is not offered again.
+Rationale: the compatible endpoints send their built-in search only on their
+own origin, so carrying the lead's offer over would leave a fallback with
 neither search.
 
 **Journal and usage.** The call is journaled as a `web-search` activity with the
