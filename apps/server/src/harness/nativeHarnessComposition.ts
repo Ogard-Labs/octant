@@ -1230,7 +1230,7 @@ export function createNativeHarnessComposition(
       const planned =
         thread.executionPolicy === "plan" ||
         options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
-      return compose({
+      const composed = compose({
         threadId,
         mode: "code",
         ...(planned ? { executionPolicy: "plan" as const } : {}),
@@ -1270,11 +1270,20 @@ export function createNativeHarnessComposition(
           ...skillsFor("code", thread),
         },
       });
+      // The same grant as a Code thread on this host: the server changes
+      // where the tools act, not which search the lead is offered.
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+      });
     },
     forServerWork: ({ thread, filesystem, shell, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
-      return compose({
+      const composed = compose({
         threadId,
         mode: "work",
         protectedSecretPath: isProtectedPathOnServer,
@@ -1308,6 +1317,14 @@ export function createNativeHarnessComposition(
           }),
           ...skillsFor("work", thread),
         },
+      });
+      // The same grant as a Work thread on this host.
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
     forAgentRun: ({ run, authority, projectRoot }) => {
@@ -1433,6 +1450,11 @@ export function createNativeHarnessComposition(
         },
         uuid: options.uuid,
       });
+      // A child is never granted the provider's own search. Its network reach
+      // is the run's clamped grant, enforced per call and by its shell's
+      // egress rules; a built-in search runs inside the provider, where
+      // neither can see or refuse its query, so a child with network
+      // authority searches through `web-search` only.
       return taintAppManagedToolResults({
         tools,
         threadId: runId,

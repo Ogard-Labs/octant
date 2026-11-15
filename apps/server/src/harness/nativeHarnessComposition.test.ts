@@ -150,6 +150,85 @@ describe("native harness composition", () => {
     },
   );
 
+  it("grants the provider's own search to every lead in Chat, Work, and Code, on this host or a server, and never to a child", () => {
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: () => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: "full-access",
+            approvalSatisfied: true,
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      hostId: authority.hostId,
+      readThreadTaint: () => false,
+      readWorkExecutionPolicy: () => "full-access",
+      readCodeExecutionPolicy: () => "full-access",
+      providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-11-15T00:00:00.000Z",
+    });
+    const workThread = { ...thread, access: "full-access" } as unknown as WorkThread;
+    const chatThread = {
+      ...thread,
+      researchEnabled: true,
+      researchRouting: "automatic",
+    } as unknown as ChatThread;
+    const serverPorts = {
+      filesystem: { root: "/srv/app" } as never,
+      shell: { run: async () => ({ status: "unavailable" }) } as never,
+      server: () => undefined,
+    };
+    const atFullAccess = { withdrawAfterFirstStep: false };
+    const offers = {
+      chat: composition.forChat({ thread: chatThread, windowId: "w" })?.providerWebSearch,
+      work: composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch,
+      code: composition.forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch,
+      serverWork: composition.forServerWork({ thread: workThread, ...serverPorts })
+        ?.providerWebSearch,
+      serverCode: composition.forServerCode({ thread, windowId: "w", ...serverPorts })
+        ?.providerWebSearch,
+      child: composition.forAgentRun({
+        run: {
+          id: thread.id,
+          parentThreadId: "parent",
+          routingReceipt: { mode: "chat", selectedProviderInstanceId: thread.providerInstanceId },
+          workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+        } as never,
+        authority: {
+          filesystem: false,
+          shell: false,
+          git: false,
+          network: true,
+          tools: true,
+          subagents: false,
+          executionPolicy: "full-access",
+          permissionPersistence: "current-session",
+        },
+        projectRoot: "/unused",
+      })?.providerWebSearch,
+    };
+    expect(offers).toEqual({
+      // Chat is decided below Full access: it has no execution policy of its own.
+      chat: { withdrawAfterFirstStep: true },
+      work: atFullAccess,
+      code: atFullAccess,
+      serverWork: atFullAccess,
+      serverCode: atFullAccess,
+      child: undefined,
+    });
+  });
+
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {
     let searxngBaseUrl: string | undefined;
     const asked: Array<{ readonly threadId?: string; readonly toolCallId?: string }> = [];

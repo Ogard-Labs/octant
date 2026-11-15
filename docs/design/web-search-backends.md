@@ -281,6 +281,13 @@ Responses request asks for every source with `include:
 returns page text encrypted, so the Watcher reads only the titles, URLs, and
 cited text, and the journal entry says so.
 
+**Which leads.** A Chat, Work, or Code thread's lead is offered it, on this
+host or in a server Project alike. A Side Chat searches only as its source
+allows, and a child agent is never offered it: a child's network reach is its
+run's clamped grant, enforced per call and by its shell's egress rules, which
+cannot see or refuse a query that runs inside the provider, so a child with
+network authority searches through `web-search` only.
+
 **Fallback model.** When the lead's model keeps failing and the turn moves to
 a fallback model, the offer is decided again for the fallback's endpoint: it
 keeps the provider's own search only when that endpoint is on one of the two
