@@ -820,6 +820,18 @@ describe("NativeHarnessRoutingPanel with providers that are not harness endpoint
     expect(dialog).not.toHaveTextContent(/Planner/);
   });
 
+  it("offers Suggest only on the roles suggestions know, never on the Advisor", async () => {
+    const user = userEvent.setup();
+    renderPanel({ routing: async () => settings(), fixtures: [claude] });
+
+    expect(
+      await screen.findByRole("button", { name: "Suggest a model for Scout" }),
+    ).toBeInTheDocument();
+    await openOtherRoles(user);
+    expect(await screen.findByRole("button", { name: "Advisor model" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Suggest a model for Advisor/ })).toBeNull();
+  });
+
   it("says why a role stays empty when no connected model fits it", async () => {
     const user = userEvent.setup();
     renderPanel({ routing: async () => settings(), fixtures: [local] });
