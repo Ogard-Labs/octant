@@ -64,6 +64,7 @@ import {
 } from "./claudeAgentSdkPort";
 import {
   CLAUDE_CHECKLIST_TOOL,
+  CLAUDE_PLAN_EXIT_TOOL,
   CLAUDE_SUBAGENT_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
@@ -231,6 +232,14 @@ const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
  * A name joins only on such evidence; every other tool keeps asking.
  */
 const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL, "ToolSearch"]);
+/**
+ * The refusal a Plan session's plan tool gets once its plan is captured.
+ * Claude Code's own answer to that tool leaves plan mode for one that edits;
+ * Octant's thread stays in Plan until the person moves it, so the call is
+ * refused and the model is told the plan reached the person.
+ */
+export const CLAUDE_PLAN_CAPTURED_MESSAGE =
+  "The plan was captured and shown to the person; wait for the person. Plan stays read-only until they move the thread out of Plan.";
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
 const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude probe did not initialize its runtime.",
@@ -260,9 +269,11 @@ const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "TaskOutput", "TaskStop"]);
 const CLAUDE_WITHHELD_TOOLS = [
   // The thread's mode is the server's. Claude switching its own permission
   // mode would leave the posture Octant granted mid-session; Plan is a
-  // thread mode with its own read-only tool set, not a runtime switch.
+  // thread mode with its own read-only tool set, not a runtime switch. A Plan
+  // session holds the plan tool to hand its plan over; outside Plan there is
+  // no plan to hand over and nothing to leave.
   "EnterPlanMode",
-  "ExitPlanMode",
+  CLAUDE_PLAN_EXIT_TOOL,
   // A thread is bound to one checkout; a worktree switch moves the session's
   // working directory out of it.
   "EnterWorktree",
@@ -561,7 +572,10 @@ function claudePolicyOptions(
       return {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false,
-        tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL],
+        // Claude Code's plan mode ends a plan by calling its plan tool; the
+        // gate captures that plan and refuses the call, so Plan never ends
+        // from inside the session.
+        tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL, CLAUDE_PLAN_EXIT_TOOL],
         fullToolSet: false,
       };
   }
@@ -2539,6 +2553,12 @@ function makeConnection(
               : undefined;
           if (requestInput === undefined) {
             return deny("Claude tool request has invalid input.");
+          }
+          // The plan already reached the thread as the reply's text from the
+          // call's transcript block. Granting the call would let Claude Code
+          // leave plan mode for one that edits, so it is always refused.
+          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL) {
+            return deny(CLAUDE_PLAN_CAPTURED_MESSAGE);
           }
           // Checked here, before any posture: Full access answers "allow" in
           // this hook and Claude Code then never calls `canUseTool`.

@@ -60,7 +60,12 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
           MCP servers, and plugins load only in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
-            <> Mistral Vibe’s own subagents run only at Full access.</>
+            <>
+              {" "}
+              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
+              name, and a subagent running as one of your own Vibe agents may approve its own tools,
+              as in Vibe.
+            </>
           ) : null}
           {unsupported.length === 0 ? null : (
             <>

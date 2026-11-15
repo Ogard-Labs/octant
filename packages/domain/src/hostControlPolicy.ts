@@ -65,6 +65,12 @@ export interface HostLifecycleControlsInput {
   readonly policy:
     | { readonly kind: "known"; readonly enabled: boolean }
     | { readonly kind: "unavailable" };
+  /**
+   * What starts the host again. `restarts` (the default) is launchd or a
+   * systemd user unit. `logon-entry` is the Windows Run value, which starts
+   * the host only at sign-in and is itself the startup policy.
+   */
+  readonly supervisor?: "restarts" | "logon-entry";
 }
 
 export interface HostLifecycleControls {
@@ -87,10 +93,30 @@ const AVAILABLE: HostLifecycleControlAvailability = { kind: "available" };
  *   recovery path instead of pretending.
  * - `enable`/`disable` mutate the persisted service policy and are withheld
  *   when that policy cannot be read, never guessed.
+ * - A Windows logon entry restarts nothing (a drain would leave the host
+ *   down until sign-in) and is changed by the CLI that wrote its command,
+ *   so both stay with `octant server` there.
  */
 export function deriveHostLifecycleControls(
   input: HostLifecycleControlsInput,
 ): HostLifecycleControls {
+  if (input.supervisor === "logon-entry") {
+    const startup: HostLifecycleControlAvailability = {
+      kind: "unavailable",
+      reason:
+        "On Windows, automatic startup is the logon entry the CLI writes. Use `octant server enable` or `octant server disable` from a local terminal.",
+    };
+    return {
+      stop: AVAILABLE,
+      restart: {
+        kind: "unavailable",
+        reason:
+          "On Windows nothing starts the host again until sign-in. Use `octant server restart` from a local terminal.",
+      },
+      enable: startup,
+      disable: startup,
+    };
+  }
   const policyMutation: HostLifecycleControlAvailability =
     input.policy.kind === "known"
       ? AVAILABLE

@@ -244,7 +244,7 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange"> &
+  Pick<HarnessWiring, "beginGoogleCliChange" | "webSearchSettings"> &
   Pick<
     AuthorityWiring,
     | "browserCaptureStore"
@@ -2477,6 +2477,7 @@ export function wireRemote(deps: RemoteDependencies) {
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,
     memoryLimits: hostMemoryLimits,
+    webSearch: deps.webSearchSettings,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}

@@ -277,7 +277,7 @@ describe("ChatComposer", () => {
     expect(document.querySelector(".chat-composer--running")).toBeNull();
     const prompt = screen.getByLabelText("Message");
     expect(prompt).toHaveAccessibleDescription(
-      "Research uses SearXNG. Enter a message before sending.",
+      "Research uses Octant web search. Enter a message before sending.",
     );
     // The region the prompt names is the one polite status region.
     expect(screen.getByRole("status")).toHaveTextContent("Enter a message before sending.");

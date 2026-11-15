@@ -106,6 +106,7 @@ describe("Codex stable 0.144.4 protocol", () => {
       modelProvider: "openai",
       serviceTier: null,
       cwd: "/tmp/project",
+      reasoningEffort: "medium",
     };
     expect(decodeThreadStartResult(threadResult)).toEqual(expectedThreadResult);
     expect(decodeThreadResumeResult(threadResult)).toEqual(expectedThreadResult);
@@ -728,10 +729,10 @@ describe("Codex stable 0.144.4 protocol", () => {
     expect(
       decodeCodexServerMessage({
         id: 9,
-        method: "item/tool/requestUserInput",
+        method: "mcpServer/elicitation/request",
         params: { questions: [{ id: "secret", question: "Secret?" }] },
       }),
-    ).toEqual({ kind: "unsupported-request", id: 9, method: "item/tool/requestUserInput" });
+    ).toEqual({ kind: "unsupported-request", id: 9, method: "mcpServer/elicitation/request" });
     expect(
       decodeCodexServerMessage({ id: "unknown-1", method: "future/request", params: {} }),
     ).toEqual({ kind: "unsupported-request", id: "unknown-1", method: "future/request" });

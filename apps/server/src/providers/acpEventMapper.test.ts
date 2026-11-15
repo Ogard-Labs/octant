@@ -531,6 +531,57 @@ describe("ACP event normalization", () => {
     }
   });
 
+  it("records which agent a subagent ran as, says it may approve its own unseen calls, and marks the thread unless it only reads", () => {
+    const run = (agent: string) => {
+      const ctx = context({
+        childRunMetaKey: "child_session_id",
+        unseenChildCalls: { readOnlyAgents: ["explore"] },
+        displayName: "Mistral Vibe",
+      });
+      const notify = (update: Record<string, unknown>) =>
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: "acp-session-1", update },
+        });
+      notify({
+        sessionUpdate: "tool_call",
+        toolCallId: "spawn-1",
+        title: "Subagent",
+        status: "pending",
+        _meta: { agent, task: "Check the release" },
+      });
+      return notify({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "spawn-1",
+        status: "in_progress",
+        _meta: { child_session_id: "child-7" },
+      }).flatMap((item) => (item.kind === "event" ? [item.event] : []));
+    };
+    const custom = run("release-bot");
+    expect(custom).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "child-agent-activity",
+          summary:
+            'Mistral Vibe is running its "release-bot" subagent. Octant cannot see its tool calls, and that agent may approve them itself.',
+        }),
+        expect.objectContaining({ kind: "outside-content-read", source: "hosted-tool" }),
+      ]),
+    );
+    for (const item of custom) decodeProviderRuntimeEvent(item);
+    const explore = run("explore");
+    expect(explore.some((item) => item.kind === "outside-content-read")).toBe(false);
+    expect(explore).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          summary:
+            'Mistral Vibe is running its "explore" subagent. Octant cannot see its tool calls.',
+        }),
+      ]),
+    );
+  });
+
   it("reads no child run from an agent that never named where it reports one", () => {
     const result = mapAcpNotification(context(), {
       kind: "notification",

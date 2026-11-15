@@ -1,18 +1,24 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { HostRuntimePaths, HostLogReadResult, HostLogReadOptions } from "@octant/host-runtime";
-import { BoundedHostLogStore } from "@octant/host-runtime";
+import {
+  BoundedHostLogStore,
+  isWindowsSystemRoot,
+  windowsLogonEntryPresent,
+  WINDOWS_LOGON_ENTRY_KEY as WINDOWS_RUN_KEY,
+  WINDOWS_LOGON_ENTRY_VALUE as WINDOWS_RUN_VALUE,
+} from "@octant/host-runtime";
 
 const execFileAsync = promisify(execFile);
 const LAUNCHD_LABEL = "app.octant.server";
 const SYSTEMD_UNIT = "octant.service";
 
-export type ServiceManagerKind = "launchd" | "systemd";
+export type ServiceManagerKind = "launchd" | "systemd" | "run-key";
 export type ServiceSessionState = "active" | "logged-out" | "unknown";
 export type ServiceLingeringState = "enabled" | "disabled" | "unknown";
 export type ManagedOwnerState =
@@ -337,10 +343,11 @@ function resolveServiceInvocation(options: UserServiceManagerOptions): ServiceIn
   return { command, args, environment };
 }
 
-function resolveCurrentCliEntryPoint(): string {
+export function resolveCurrentCliEntryPoint(): string {
   const current = process.argv[1];
   if (current !== undefined && isAbsolute(current)) {
-    const filename = current.slice(current.lastIndexOf("/") + 1);
+    // Windows hands the entry point over with backslashes.
+    const filename = current.split(/[\\/]/).pop() ?? "";
     if (/^(?:bin\.(?:ts|js|mjs)|octant)$/.test(filename)) return current;
   }
   return fileURLToPath(new URL("./bin.ts", import.meta.url));
@@ -588,6 +595,238 @@ function isMissing(error: unknown): boolean {
     "code" in error &&
     (error as { readonly code?: unknown }).code === "ENOENT"
   );
+}
+
+const WINDOWS_POLL_MS = 250;
+const WINDOWS_START_ATTEMPTS = 120;
+const WINDOWS_GRACEFUL_STOP_ATTEMPTS = 40;
+const WINDOWS_FORCED_STOP_ATTEMPTS = 20;
+
+/**
+ * What the native owner lookup proves about the host. `running` carries the
+ * process ID only after the owner answered an authenticated status request
+ * whose PID and process birth match its native record; `unanswered` is a
+ * record whose pipe did not answer, which may be a host still starting or
+ * exiting.
+ */
+export type WindowsHostObservation =
+  | { readonly status: "running"; readonly pid: number }
+  | { readonly status: "absent" }
+  | { readonly status: "unanswered" };
+
+export interface WindowsHostOwnerPort {
+  observe(): Promise<WindowsHostObservation>;
+  /** Sends the authenticated graceful stop; false when no owner accepted it. */
+  requestStop(): Promise<boolean>;
+}
+
+export interface WindowsHostSpawnSpec {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
+
+export interface WindowsUserServiceManagerOptions {
+  /** The Windows folder; reg.exe and taskkill.exe run from its System32 by absolute path. */
+  readonly systemRoot: string;
+  /** The CLI's own `server start`, as an absolute executable and its arguments. */
+  readonly logonCommand: readonly string[];
+  /** The host process a start launches; called once per start for a fresh instance. */
+  readonly host: () => WindowsHostSpawnSpec;
+  readonly owner: WindowsHostOwnerPort;
+  readonly logs: (options?: HostLogReadOptions) => Promise<HostLogReadResult>;
+  readonly runner?: ServiceCommandRunner;
+  readonly spawn?: (spec: WindowsHostSpawnSpec) => { readonly running: () => boolean };
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+}
+
+/**
+ * The per-user logon entry: a value under the current user's Run key that
+ * runs the CLI's own `server start` at sign-in. Writing it needs no
+ * administrator rights. Start launches the host directly, hidden and
+ * detached; stop asks the authenticated owner to stop and ends its whole
+ * process tree only when it outlives that request.
+ */
+export function createWindowsUserServiceManager(
+  options: WindowsUserServiceManagerOptions,
+): UserServiceManager {
+  const runner = options.runner ?? nodeServiceCommandRunner;
+  const spawnHost = options.spawn ?? spawnDetachedWindowsHost;
+  const sleep =
+    options.sleep ??
+    ((milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
+  const system32 = windowsSystem32(options.systemRoot);
+  const reg = win32.join(system32, "reg.exe");
+  const taskkill = win32.join(system32, "taskkill.exe");
+  const [executable] = options.logonCommand;
+  if (executable === undefined || !win32.isAbsolute(executable)) {
+    throw new ServiceManagerError(
+      "unsafe-descriptor",
+      "The logon entry must name an absolute executable path.",
+    );
+  }
+  for (const argument of options.logonCommand) {
+    assertSafeDescriptorValue(argument);
+    // A Windows path never contains a quote, so one here is not a path.
+    if (argument.includes('"')) {
+      throw new ServiceManagerError("unsafe-descriptor", "The logon entry contains a quote.");
+    }
+  }
+  const commandLine = quoteWindowsCommandLine(options.logonCommand);
+
+  const writeRunValue = () =>
+    runManagerCommand(runner, reg, [
+      "add",
+      WINDOWS_RUN_KEY,
+      "/v",
+      WINDOWS_RUN_VALUE,
+      "/t",
+      "REG_SZ",
+      "/d",
+      commandLine,
+      "/f",
+    ]).then(() => undefined);
+  // reg.exe exits 1 when the value is absent, which is the state removal wants.
+  const removeRunValue = () =>
+    runManagerStatusCommand(
+      runner,
+      reg,
+      ["delete", WINDOWS_RUN_KEY, "/v", WINDOWS_RUN_VALUE, "/f"],
+      [1],
+    ).then(() => undefined);
+
+  const stop = async (): Promise<void> => {
+    const first = await options.owner.observe();
+    if (first.status === "absent") return;
+    await options.owner.requestStop();
+    for (let attempt = 0; attempt < WINDOWS_GRACEFUL_STOP_ATTEMPTS; attempt += 1) {
+      await sleep(WINDOWS_POLL_MS);
+      if ((await options.owner.observe()).status === "absent") return;
+    }
+    // Only a PID the owner itself just authenticated is ever ended, and it
+    // is read again right before the call so a stale one is not reused.
+    const remaining = await options.owner.observe();
+    if (remaining.status === "absent") return;
+    if (remaining.status !== "running") {
+      throw new ServiceManagerError(
+        "manager-failed",
+        "The Octant host did not stop and its owner could not be authenticated.",
+      );
+    }
+    await runManagerCommand(runner, taskkill, ["/PID", String(remaining.pid), "/T", "/F"]);
+    for (let attempt = 0; attempt < WINDOWS_FORCED_STOP_ATTEMPTS; attempt += 1) {
+      if ((await options.owner.observe()).status === "absent") return;
+      await sleep(WINDOWS_POLL_MS);
+    }
+    throw new ServiceManagerError("manager-failed", "The Octant host process tree did not end.");
+  };
+
+  return {
+    kind: "run-key",
+    install: writeRunValue,
+    uninstall: async () => {
+      await stop();
+      await removeRunValue();
+    },
+    start: async () => {
+      if ((await options.owner.observe()).status !== "absent") return;
+      const child = spawnHost(options.host());
+      for (let attempt = 0; attempt < WINDOWS_START_ATTEMPTS; attempt += 1) {
+        await sleep(WINDOWS_POLL_MS);
+        if ((await options.owner.observe()).status === "running") return;
+        if (!child.running()) {
+          throw new ServiceManagerError(
+            "manager-failed",
+            "The Octant host exited before it was ready; `octant server logs` has its record.",
+          );
+        }
+      }
+      // Still starting: the lifecycle command reports it as starting.
+    },
+    stop,
+    enable: writeRunValue,
+    disable: removeRunValue,
+    status: async () => {
+      const [value, observation] = await Promise.all([
+        runManagerStatusCommand(
+          runner,
+          reg,
+          ["query", WINDOWS_RUN_KEY, "/v", WINDOWS_RUN_VALUE],
+          [1],
+        ),
+        options.owner.observe(),
+      ]);
+      const installed = value !== undefined && windowsLogonEntryPresent(value.stdout);
+      return {
+        kind: "run-key",
+        installed,
+        enabled: installed,
+        active: observation.status !== "absent",
+        session: "active",
+        lingering: "unknown",
+      };
+    },
+    logs: (readOptions) => options.logs(readOptions),
+  };
+}
+
+/**
+ * One command line that Windows' standard argument parsing splits back into
+ * exactly these arguments: each is quoted, a quote is escaped, and the
+ * backslashes before a quote or the closing quote are doubled.
+ */
+export function quoteWindowsCommandLine(args: readonly string[]): string {
+  return args
+    .map((argument) => {
+      let quoted = '"';
+      let backslashes = 0;
+      for (const character of argument) {
+        if (character === "\\") {
+          backslashes += 1;
+          continue;
+        }
+        if (character === '"') {
+          quoted += "\\".repeat(backslashes * 2 + 1) + '"';
+        } else {
+          quoted += "\\".repeat(backslashes) + character;
+        }
+        backslashes = 0;
+      }
+      return `${quoted}${"\\".repeat(backslashes * 2)}"`;
+    })
+    .join(" ");
+}
+
+export { isWindowsSystemRoot };
+
+/** The System32 folder of a drive-absolute Windows folder, or a refusal. */
+export function windowsSystem32(systemRoot: string): string {
+  if (!isWindowsSystemRoot(systemRoot)) {
+    throw new ServiceManagerError(
+      "manager-unavailable",
+      "The Windows system folder is not a drive-absolute path.",
+    );
+  }
+  return win32.join(systemRoot, "System32");
+}
+
+function spawnDetachedWindowsHost(spec: WindowsHostSpawnSpec): { readonly running: () => boolean } {
+  const child = spawn(spec.command, [...spec.args], {
+    detached: true,
+    env: spec.env,
+    shell: false,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  let running = true;
+  child.once("exit", () => {
+    running = false;
+  });
+  child.once("error", () => {
+    running = false;
+  });
+  child.unref();
+  return { running: () => running };
 }
 
 const LAUNCH_DAEMON_PATH = `/Library/LaunchDaemons/${LAUNCHD_LABEL}.plist`;
