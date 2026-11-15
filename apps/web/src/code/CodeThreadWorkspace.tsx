@@ -36,6 +36,7 @@ import {
 } from "@octant/domain";
 import { ChevronDown, CirclePause, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useEffect,
@@ -2460,6 +2461,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onPolicyChange={continuation.change}
                 onProviderChange={changeProvider}
                 disabled={busy}
+              />
+              <ThreadAccountControl
+                groups={threadModelGroups}
+                providerInstanceId={thread.providerInstanceId}
+                modelId={thread.modelId}
+                usageLimitHandoff={thread.usageLimitHandoff}
+                onMove={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "move-code-thread-account",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    providerInstanceId,
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The conversation could not be moved. Nothing changed.";
+                }}
+                onUsageLimitHandoffChange={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "set-code-thread-usage-limit-handoff",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The choice could not be saved. Nothing changed.";
+                }}
               />
             </ThreadInfo>
           }

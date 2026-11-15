@@ -175,6 +175,7 @@ export * from "./benchmarks";
 export * from "./turnDiagnosticsReport";
 export * from "./hostHealth";
 export * from "./usageResume";
+export * from "./usageLimitHandoff";
 export * from "./usageRpc";
 export * from "./usageDashboard";
 export * from "./spendCeiling";

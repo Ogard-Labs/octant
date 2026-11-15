@@ -194,6 +194,10 @@ import {
 import {
   decideConversationSession,
   decideProviderAccountMove,
+  decideUsageLimitHandoff,
+  decideUsageLimitHandoffSetting,
+  withUsageLimitHandoff,
+  withUsageLimitHandoffOutcome,
   defaultShellSettings,
   reapsStaleProviderSession,
   SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
@@ -1751,6 +1755,10 @@ export class ChatService {
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#moveThreadAccount(command, executionContext?.actor),
           );
+        case "set-chat-thread-usage-limit-handoff":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#updateThread(command, executionContext?.actor),
+          );
         case "update-chat-settings":
           return await this.#updateThread(command, executionContext?.actor);
         case "send-chat-turn":
@@ -2818,6 +2826,30 @@ export class ChatService {
         const { multiModelPool: _clearedPool, ...withoutPool } = next;
         next = decodeChatThread(withoutPool);
       }
+    } else if (command.kind === "set-chat-thread-usage-limit-handoff") {
+      const target =
+        command.providerInstanceId === undefined
+          ? undefined
+          : decodeProviderInstanceId(command.providerInstanceId);
+      const decision = decideUsageLimitHandoffSetting({
+        actor,
+        modelPoolOn: current.multiModelPool !== undefined,
+        from: this.#persistence.readProviderInstance(
+          decodeProviderInstanceId(current.providerInstanceId),
+        ),
+        to: target === undefined ? "off" : this.#persistence.readProviderInstance(target),
+      });
+      if (decision.kind === "refused") {
+        throw new ChatServiceError({
+          category: decision.reason === "unattended" ? "unauthorized" : "unavailable",
+          message: decision.message,
+        });
+      }
+      next = decodeChatThread({
+        ...withUsageLimitHandoff(current, target),
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      });
     } else if (command.kind === "change-chat-research") {
       next = changeChatResearch(current, {
         researchEnabled: command.researchEnabled,
@@ -6935,6 +6967,95 @@ export class ChatService {
       this.#activeAttempts.delete(String(input.attempt.id));
       this.#activeThreadExecutions.delete(String(input.thread.id));
     }
+    await this.#withThreadAdmission(input.thread.id, () =>
+      this.#handOffAfterUsageLimit(input.thread.id, input.attempt.id),
+    ).catch(() => undefined);
+  }
+
+  /**
+   * Carries out the person's "on a usage limit, hand off to" opt-in once the
+   * attempt has stopped. The move is the ordinary provider change, made by
+   * the host under the person's standing choice, so the next turn carries the
+   * disclosed handoff; what happened (or why nothing could) is recorded on
+   * the thread naming both accounts. The stopped attempt is left as it is.
+   * The caller holds the thread's admission, so no command lands in between.
+   */
+  async #handOffAfterUsageLimit(threadId: ChatThreadId, attemptId: ChatAttempt["id"]) {
+    // The thread row's version lags its stream, which turns also append to.
+    const stored = this.#persistence.readChatThread(threadId);
+    const current =
+      stored === undefined ? undefined : withChatThreadHeadVersion(this.#persistence, stored);
+    const handoff = current?.usageLimitHandoff;
+    if (current === undefined || handoff === undefined || current.lifecycle !== "active") return;
+    const attempt = this.#persistence
+      .readChatThreadView(threadId)
+      ?.turns.flatMap((turn) => turn.attempts)
+      .find((candidate) => String(candidate.id) === String(attemptId));
+    const limitStopId =
+      attempt !== undefined &&
+      attempt.usageLimit !== undefined &&
+      (attempt.outcome === "waiting" || attempt.outcome === "failed")
+        ? String(attempt.id)
+        : undefined;
+    const fromId = decodeProviderInstanceId(current.providerInstanceId);
+    const toId = decodeProviderInstanceId(handoff.providerInstanceId);
+    const decision = decideUsageLimitHandoff({
+      targetProviderInstanceId: String(toId),
+      lastStopId: handoff.last?.stopId,
+      limitStopId,
+      modelPoolOn: current.multiModelPool !== undefined,
+      from: this.#persistence.readProviderInstance(fromId),
+      to: this.#persistence.readProviderInstance(toId),
+    });
+    if (decision.kind === "stays" || limitStopId === undefined) return;
+    const host: EventActor = { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
+    let detail = decision.kind === "stopped" ? decision.message : undefined;
+    if (decision.kind === "hands-off") {
+      try {
+        await this.#updateThread(
+          {
+            kind: "change-chat-provider",
+            threadId,
+            expectedVersion: current.version,
+            providerInstanceId: toId,
+            modelId: current.modelId,
+          },
+          host,
+        );
+      } catch (error) {
+        detail = error instanceof Error && error.message.trim() !== "" ? error.message : undefined;
+        detail ??= "The account to hand off to could not take the thread.";
+      }
+    }
+    const latestStored = this.#persistence.readChatThread(threadId);
+    if (latestStored === undefined) return;
+    const latest = withChatThreadHeadVersion(this.#persistence, latestStored);
+    const timestamp = decodeTimestamp(this.#clock());
+    const next = decodeChatThread({
+      ...withUsageLimitHandoffOutcome(latest, {
+        kind: detail === undefined ? "handed-off" : "stopped",
+        stopId: limitStopId,
+        fromProviderInstanceId: fromId,
+        toProviderInstanceId: toId,
+        at: timestamp,
+        ...(detail === undefined ? {} : { detail: detail.slice(0, 512) }),
+      }),
+      version: (latest.version + 1) as AggregateVersion,
+      updatedAt: timestamp,
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+      expectedVersion: latest.version,
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          {
+            actor: host,
+          },
+        ),
+      ],
+    });
   }
 
   #prepareContent(

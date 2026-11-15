@@ -97,6 +97,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -2960,6 +2961,41 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       onPolicyChange={continuation.change}
                       onProviderChange={changeProvider}
                       disabled={providerChanging || creating || completionLocked || turnRunning}
+                    />
+                    <ThreadAccountControl
+                      groups={props.providerGroups ?? []}
+                      providerInstanceId={thread.providerInstanceId}
+                      modelId={thread.modelId}
+                      usageLimitHandoff={thread.usageLimitHandoff}
+                      disabled={creating || completionLocked}
+                      onMove={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "move-work-thread-account",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          providerInstanceId,
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The conversation could not be moved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
+                      onUsageLimitHandoffChange={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "set-work-thread-usage-limit-handoff",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The choice could not be saved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
                     />
                   </ThreadInfo>
                 ),

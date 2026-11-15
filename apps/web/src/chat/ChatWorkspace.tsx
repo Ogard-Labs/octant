@@ -6,6 +6,7 @@ import {
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
@@ -1562,6 +1563,30 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   onPolicyChange={continuation.change}
                   onProviderChange={(selection) => selectProviderModel(selection)}
                   disabled={isSending || branchPending}
+                />
+                {/* Move to account stays in the thread's actions menu. */}
+                <ThreadAccountControl
+                  groups={props.providerGroups ?? []}
+                  providerInstanceId={view.thread.providerInstanceId}
+                  modelId={view.thread.modelId}
+                  usageLimitHandoff={view.thread.usageLimitHandoff}
+                  {...(view.thread.multiModelPool === undefined
+                    ? {}
+                    : {
+                        unavailableReason:
+                          "Turn off the model pool first; its models stay on the current account.",
+                      })}
+                  onUsageLimitHandoffChange={async (providerInstanceId) => {
+                    const result = await props.controller.execute({
+                      kind: "set-chat-thread-usage-limit-handoff",
+                      threadId: view.thread.id,
+                      expectedVersion: view.thread.version,
+                      ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                    });
+                    return result?.kind === "thread-updated"
+                      ? undefined
+                      : "The choice could not be saved. Nothing changed.";
+                  }}
                 />
               </ThreadInfo>
             }

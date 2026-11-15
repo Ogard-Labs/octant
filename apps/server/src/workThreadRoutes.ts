@@ -265,6 +265,23 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // Which account a thread runs on, now or when its account hits its
+      // usage limit, is the person's own choice; a device that acts on this
+      // host without the person's powers may not make it.
+      if (
+        (command.kind === "move-work-thread-account" ||
+          command.kind === "set-work-thread-usage-limit-handoff") &&
+        boundPrincipalIsRestricted(request)
+      ) {
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message: "Move a thread to another account at a window or on a device you paired.",
+          },
+          403,
+          origin,
+        );
+      }
       // Whether a message may start a turn here unattended is the same kind
       // of choice, made where Code's switch is made.
       if (command.kind === "set-work-thread-message-wake" && refusesFullAccessRaise(request)) {

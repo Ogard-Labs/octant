@@ -460,6 +460,12 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /**
+   * The thread's provider turn just stopped on its account's usage limit, as
+   * the provider itself reported it. Fires once the turn has closed. A
+   * rejection is ignored: the stop is journaled and stays.
+   */
+  readonly onUsageLimitStop?: (threadId: CodeThreadId) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -5602,6 +5608,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         attachments,
       }),
     };
+    let stoppedOnUsageLimit = false;
     const folderWatch =
       active.folderCurrent === undefined
         ? undefined
@@ -5859,6 +5866,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                       : boundProviderFailureMessage(
                           sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
+                  if (failure?.usageLimit !== undefined) stoppedOnUsageLimit = true;
                   this.#persistOutcome(
                     active,
                     outcome,
@@ -5926,6 +5934,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
+        if (stoppedOnUsageLimit) {
+          void this.#options.onUsageLimitStop?.(active.thread.id).catch(() => undefined);
+        }
       });
   }
 

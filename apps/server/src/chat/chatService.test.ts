@@ -11818,6 +11818,102 @@ describe("handing a Chat conversation to a new provider session", () => {
       );
       expect(fixture.service.read(threadId).thread).toEqual(before);
     });
+
+    const setHandoff = (
+      fixture: ReturnType<typeof openFixture>,
+      threadId: ChatThreadId,
+      providerInstanceId: string | undefined,
+    ) =>
+      fixture.service.execute(
+        {
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+        },
+        { actor: person },
+      );
+    const limitedAfterFirst = (turnIndex: number) =>
+      turnIndex === 1 ? ("limited" as const) : ("completed" as const);
+
+    it("hands off once to the named account when the account hits its usage limit, and the next turn discloses it", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+      await setHandoff(fixture, threadId, otherNative);
+
+      await sendFollowUp(fixture, threadId);
+      const limitedAttempt = lastAttempt(fixture, threadId);
+      expect(limitedAttempt?.usageLimit).toEqual({ kind: "exhausted" });
+      expect(fixture.service.read(threadId).thread).toMatchObject({
+        providerInstanceId: otherNative,
+        modelId: "model-a",
+        usageLimitHandoff: {
+          providerInstanceId: otherNative,
+          last: {
+            kind: "handed-off",
+            stopId: String(limitedAttempt?.id),
+            fromProviderInstanceId: native,
+            toProviderInstanceId: otherNative,
+          },
+        },
+      });
+
+      await sendFollowUp(fixture, threadId, "Carry on");
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: { reason: "provider-switch", previousProviderInstanceId: native },
+      });
+    });
+
+    it("waits on the usage limit without moving when the person has not opted in", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+
+      await sendFollowUp(fixture, threadId);
+
+      expect(lastAttempt(fixture, threadId)?.usageLimit).toEqual({ kind: "exhausted" });
+      const after = fixture.service.read(threadId).thread;
+      expect(String(after.providerInstanceId)).toBe(native);
+      expect(after.usageLimitHandoff).toBeUndefined();
+    });
+
+    it("refuses the opt-in on a pooled thread and from anyone but the person", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      await expect(
+        fixture.service.execute({
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          providerInstanceId: otherNative,
+        }),
+      ).rejects.toThrow("only when you ask for it");
+      await fixture.service.execute({
+        kind: "select-chat-multi-model-pool",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        pool: {
+          candidates: [
+            { hostId: "local", providerInstanceId: native, modelId: "model-a" },
+            { hostId: "local", providerInstanceId: native, modelId: "model-b" },
+          ],
+          mixedVendorEnabled: false,
+          fallbackAllowed: false,
+          higherCostFallbackAllowed: false,
+        },
+      } as never);
+
+      await expect(setHandoff(fixture, threadId, otherNative)).rejects.toThrow(
+        "Turn off the model pool",
+      );
+      expect(fixture.service.read(threadId).thread.usageLimitHandoff).toBeUndefined();
+    });
   });
 
   it("lets a provider that keeps its own session give way to a host-held one without a handoff", async () => {

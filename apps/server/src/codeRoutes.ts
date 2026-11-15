@@ -851,6 +851,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // Which account a thread runs on, now or when its account hits its
+          // usage limit, is the person's own choice; a device that acts on
+          // this host without the person's powers may not make it.
+          if (
+            callerAuthority !== "local-window" &&
+            (command?.kind === "move-code-thread-account" ||
+              command?.kind === "set-code-thread-usage-limit-handoff")
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: ACCOUNT_MOVE_PERSON_ONLY },
+              403,
+              origin,
+            );
+          }
           if (command?.kind === "change-code-thread-browser-profile") {
             return failureResponse(
               {
@@ -3346,3 +3360,6 @@ function raisesToFullAccess(command: CodeCommand): boolean {
       return false;
   }
 }
+
+const ACCOUNT_MOVE_PERSON_ONLY =
+  "Move a thread to another account at a window or on a device you paired.";
