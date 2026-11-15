@@ -161,6 +161,33 @@ describe("web search fallback", () => {
     ]);
   });
 
+  it("counts a key the broker is slow to hand over against the backend's time and moves on", async () => {
+    const fetch = vi.fn<Fetch>(async () => answer("searx"));
+    const { run, routed } = route([brave, searx], fetch, {
+      backendTimeoutMs: 20,
+      resolveKey: () => new Promise<string>(() => undefined),
+    });
+    expect((await run).results.map((result) => result.title)).toEqual(["searx"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(routed[0]?.failed).toEqual([
+      { entryId: brave.id, backend: "brave", failure: "timeout" },
+    ]);
+  });
+
+  it("stops waiting for a key when the turn is cancelled", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn<Fetch>(async () => answer("searx"));
+    const { run } = route([brave, searx], fetch, {
+      search: { query: "octant", limit: 5, signal: controller.signal },
+      resolveKey: () => {
+        setTimeout(() => controller.abort(), 5);
+        return new Promise<string>(() => undefined);
+      },
+    });
+    await expect(run).rejects.toBeInstanceOf(WebSearchInterrupted);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("sends nothing when the turn was cancelled before the search began", async () => {
     const controller = new AbortController();
     controller.abort();

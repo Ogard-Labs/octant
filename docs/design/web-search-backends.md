@@ -136,8 +136,11 @@ vendors than it has to. When every backend fails, the model gets
 `search-failed`, as it does today.
 
 One call has a 20-second budget inside the turn's own cancellation. Each
-backend gets the time left in it, at most 15 seconds, today's SearXNG timeout;
-a backend the budget does not reach is journaled as not tried. Rationale: a
+backend gets the time left in it, at most 15 seconds, today's SearXNG timeout,
+and reading its key from the credential broker spends that same time; a
+backend the budget does not reach is journaled as not tried. A turn cancelled
+before or between backends sends nothing more, and the backends already asked
+are still journaled. Rationale: a
 per-backend timeout alone lets three slow backends hold a turn for most of a
 minute, and the turn runner's inactivity window is the wrong place to learn
 that.

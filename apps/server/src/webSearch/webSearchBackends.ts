@@ -77,19 +77,40 @@ function searxngFailure(error: SearxngSearchFailed): WebSearchBackendFailure {
   return error.category === "unavailable" ? "network" : "server-error";
 }
 
+/**
+ * The entry's key, or undefined once `signal` aborts: the broker's own fetch
+ * has no deadline, so the backend's timer and the turn's cancellation bound
+ * the wait here instead.
+ */
+async function keyWithin(
+  routing: WebSearchRouting,
+  entry: WebSearchBackendEntry,
+  signal: AbortSignal,
+): Promise<string | undefined> {
+  if (signal.aborted) return undefined;
+  let onAbort = () => {};
+  const stopped = new Promise<undefined>((resolve) => {
+    onAbort = () => resolve(undefined);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([
+      (routing.resolveKey?.(entry) ?? Promise.resolve(undefined)).catch(() => undefined),
+      stopped,
+    ]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
 async function searchOne(
   entry: WebSearchBackendEntry,
   routing: WebSearchRouting,
   timeoutMs: number,
 ): Promise<BackendOutcome> {
   const offer = WEB_SEARCH_BACKEND_OFFERS[entry.kind];
-  let key: string | undefined;
-  if (offer.takesKey) {
-    key = await routing.resolveKey?.(entry).catch(() => undefined);
-    // The turn may have stopped while the broker answered; nothing is sent then.
-    if (routing.search.signal?.aborted === true) throw new WebSearchInterrupted();
-    if (key === undefined) return { kind: "failed", failure: "needs-key" };
-  }
+  // The backend's time starts before its key is read: a broker that is slow
+  // to answer spends this backend's share of the budget, not the turn's.
   const lifecycle = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -104,6 +125,14 @@ async function searchOne(
     signal: lifecycle.signal,
   };
   try {
+    let key: string | undefined;
+    if (offer.takesKey) {
+      key = await keyWithin(routing, entry, lifecycle.signal);
+      // The turn may have stopped while the broker answered; nothing is sent then.
+      if (routing.search.signal?.aborted === true) throw new WebSearchInterrupted();
+      if (timedOut) return { kind: "failed", failure: "timeout" };
+      if (key === undefined) return { kind: "failed", failure: "needs-key" };
+    }
     if (entry.kind === "searxng") {
       if (entry.address === undefined) return { kind: "failed", failure: "server-error" };
       const found = await new SearxngClient({
