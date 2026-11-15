@@ -114,7 +114,7 @@ const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} &   Pick<
+} & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
@@ -631,7 +631,8 @@ export function wireChat(deps: ChatDependencies) {
                         const attachment = persistence
                           .readChatThreadView(thread.id)
                           ?.attachments.find(
-                            (item) => String(item.id) === attachmentId && item.status === "finalized",
+                            (item) =>
+                              String(item.id) === attachmentId && item.status === "finalized",
                           );
                         if (attachment === undefined) return undefined;
                         const bytes = await chatAttachmentStore.read({

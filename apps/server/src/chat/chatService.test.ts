@@ -3010,15 +3010,19 @@ describe("ChatService", () => {
         nativeAttachments: "unsupported",
       },
     });
-    const describeImages = vi.fn(async (input: { readonly images: ReadonlyArray<{ attachmentId: string; name: string }> }) => ({
-      status: "described" as const,
-      images: input.images.map((image) => ({
-        attachmentId: image.attachmentId,
-        name: image.name,
-        describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
-        text: "A sign-in form with a red error.",
-      })),
-    }));
+    const describeImages = vi.fn(
+      async (input: {
+        readonly images: ReadonlyArray<{ attachmentId: string; name: string }>;
+      }) => ({
+        status: "described" as const,
+        images: input.images.map((image) => ({
+          attachmentId: image.attachmentId,
+          name: image.name,
+          describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+          text: "A sign-in form with a red error.",
+        })),
+      }),
+    );
     const { service, fakeDriver } = openFixture({ probe: textOnly, describeImages });
     const created = await service.execute({
       kind: "create-chat-thread",

@@ -539,8 +539,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         : supportsAttachmentFile(threadObservation, view.thread.modelId, { type: "image/png" }),
     serverUrl: props.serverUrl,
     windowCapability: props.windowCapability,
-    projectId:
-      view?.thread.projectId === undefined ? undefined : String(view.thread.projectId),
+    projectId: view?.thread.projectId === undefined ? undefined : String(view.thread.projectId),
     providerInstanceId: view === undefined ? undefined : String(view.thread.providerInstanceId),
     modelId: view === undefined ? undefined : String(view.thread.modelId),
   });

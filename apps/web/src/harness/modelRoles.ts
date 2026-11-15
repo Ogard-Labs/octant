@@ -49,7 +49,7 @@ export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
     id: "vision",
     label: "Sees images",
     meaning:
-      "Describes an attached image, or one a thread asks about, for a model that cannot read images. Empty, such images are refused. It needs a model that reads images on a connection that takes images from Octant, such as an agent runtime or an Ollama vision model.",
+      "Describes an attached image, or one a thread asks about, for a model that cannot read images. Empty, such images are refused. It needs a model that reads images on a connection that takes images from Octant.",
   },
   {
     id: "smol",

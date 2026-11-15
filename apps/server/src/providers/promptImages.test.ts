@@ -5,7 +5,10 @@ describe("images a direct endpoint sends", () => {
   it("claims attachments only when one of the endpoint's models reads images", () => {
     expect(attachedImagesSupport([{ inputModalities: ["text"] }])).toBe("unsupported");
     expect(
-      attachedImagesSupport([{ inputModalities: ["text"] }, { inputModalities: ["text", "image"] }]),
+      attachedImagesSupport([
+        { inputModalities: ["text"] },
+        { inputModalities: ["text", "image"] },
+      ]),
     ).toBe("supported");
   });
 

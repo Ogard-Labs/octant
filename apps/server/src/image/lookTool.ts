@@ -31,7 +31,7 @@ const MEDIA_BY_EXTENSION: Readonly<Record<string, string>> = {
 };
 
 const DESCRIPTION =
-  "Your model cannot read images. Ask the Sees images model to look at one for you: an image attached to this thread, by the attachment id its description names (\"[Image <name> (attachment <id>), …]\"), or an image file inside this thread's folder, by a path relative to it, with an optional question. You get its description in words, marked with the model that described it. No URLs and no paths outside the folder.";
+  'Your model cannot read images. Ask the Sees images model to look at one for you: an image attached to this thread, by the attachment id its description names ("[Image <name> (attachment <id>), …]"), or an image file inside this thread\'s folder, by a path relative to it, with an optional question. You get its description in words, marked with the model that described it. No URLs and no paths outside the folder.';
 
 const inputSchema = {
   type: "object",

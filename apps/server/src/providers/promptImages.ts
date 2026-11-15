@@ -15,7 +15,9 @@ export interface PromptImage {
 }
 
 export function promptImagesOf(
-  attachments: ReadonlyArray<{ readonly mediaType: string; readonly bytes: Uint8Array }> | undefined,
+  attachments:
+    | ReadonlyArray<{ readonly mediaType: string; readonly bytes: Uint8Array }>
+    | undefined,
 ): ReadonlyArray<PromptImage> {
   return (attachments ?? [])
     .filter((attachment) => SENT_IMAGE_TYPES.has(attachment.mediaType))

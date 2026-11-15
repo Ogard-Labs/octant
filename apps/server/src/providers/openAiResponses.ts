@@ -260,7 +260,12 @@ async function runResponsesTurn(
         ];
       }),
       ...(includeUserPrompt
-        ? [{ role: "user" as const, content: responsesUserContent(input.prompt, input.promptImages) }]
+        ? [
+            {
+              role: "user" as const,
+              content: responsesUserContent(input.prompt, input.promptImages),
+            },
+          ]
         : []),
       ...(toolAnswers === undefined ? [] : toolAnswers),
     ],

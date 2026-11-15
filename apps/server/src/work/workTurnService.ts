@@ -3092,27 +3092,25 @@ export class WorkTurnService {
       // the person's message said to the model, so a rebuilt history and a
       // compaction read them with it.
       const described = describedImageLines(turn.describedImages);
-      return turn.transcript.flatMap(
-        (entry, index): ReadonlyArray<SessionConversationMessage> => {
-          const text =
-            index === 0 && entry.role === "user" && described.length > 0
-              ? [...described, entry.text].join("\n\n")
-              : entry.text;
-          return text.trim() === ""
-            ? []
-            : [
-                {
-                  source: {
-                    kind: "message",
-                    referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
-                  },
-                  role: entry.role,
-                  exchangeKey: String(turn.turnId),
-                  content: text,
+      return turn.transcript.flatMap((entry, index): ReadonlyArray<SessionConversationMessage> => {
+        const text =
+          index === 0 && entry.role === "user" && described.length > 0
+            ? [...described, entry.text].join("\n\n")
+            : entry.text;
+        return text.trim() === ""
+          ? []
+          : [
+              {
+                source: {
+                  kind: "message",
+                  referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
                 },
-              ];
-        },
-      );
+                role: entry.role,
+                exchangeKey: String(turn.turnId),
+                content: text,
+              },
+            ];
+      });
     });
   }
 
