@@ -223,6 +223,12 @@ export function createCodeAgentResultDeliveryPort(
 export function createAgentResultSteering(input: {
   readonly liveTurn: (threadId: string) => LiveTurnConnection | undefined;
   readonly resultText: (runId: AgentRunId) => string | undefined;
+  /**
+   * Records the steered results on the parent's running turn, so its
+   * transcript shows them. Called only once the runtime took them; a record
+   * that cannot be written leaves the results steered all the same.
+   */
+  readonly recordSteered?: (runs: ReadonlyArray<AgentRun>, message: string) => void;
 }): (runs: ReadonlyArray<AgentRun>) => Promise<"steered" | "not-steered"> {
   return async (runs) => {
     const run = runs[0];
@@ -232,13 +238,19 @@ export function createAgentResultSteering(input: {
     if (live === undefined || steer === undefined || !live.takesSteeredResults) {
       return "not-steered";
     }
+    const message = agentResultDeliveryBatchPrompt(runs, input.resultText);
     const outcome = await Effect.runPromise(
-      steer({
-        sessionId: live.sessionId,
-        message: agentResultDeliveryBatchPrompt(runs, input.resultText),
-        source: "agent-result",
-      }).pipe(Effect.catchAll(() => Effect.succeed("unsupported" as const))),
+      steer({ sessionId: live.sessionId, message, source: "agent-result" }).pipe(
+        Effect.catchAll(() => Effect.succeed("unsupported" as const)),
+      ),
     );
-    return outcome === "steered" ? "steered" : "not-steered";
+    if (outcome !== "steered") return "not-steered";
+    try {
+      input.recordSteered?.(runs, message);
+    } catch {
+      // The runtime already took the results; refusing now would deliver
+      // them a second time as a turn of their own.
+    }
+    return "steered";
   };
 }

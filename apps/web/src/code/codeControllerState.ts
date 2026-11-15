@@ -97,6 +97,8 @@ export interface CodeConversationMessage {
    * a person merged it back, as the host journaled them.
    */
   readonly forkMergeBacks?: ReadonlyArray<CodeForkMergeBack>;
+  /** On a reply: finished subagents' results the host steered into its turn while it ran. */
+  readonly steeredResults?: CodeConversationTurn["steeredResults"];
 }
 
 function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderRequest | undefined {
@@ -569,6 +571,7 @@ async function projectConversationTurns(
       ...(turn.reviewPreview === undefined ? {} : { reviewPreview: turn.reviewPreview }),
       ...(turn.handoff === undefined ? {} : { handoff: turn.handoff }),
       ...(turn.forkMergeBacks === undefined ? {} : { forkMergeBacks: turn.forkMergeBacks }),
+      ...(turn.steeredResults === undefined ? {} : { steeredResults: turn.steeredResults }),
     });
     const steps = turn.steps ?? [];
     if (steps.length === 0 && turn.stepsTruncated !== true) continue;

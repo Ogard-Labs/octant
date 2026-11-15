@@ -10,6 +10,10 @@ import {
   type ChatThread,
 } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  AGENT_RESULT_STEERED,
+  AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+} from "../agentRun/agentResultSteeredRecord";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { rebuildProjection } from "./projection";
@@ -519,6 +523,119 @@ describe("ChatProjection", () => {
     purgeThreadContent(connection, ids.thread);
 
     expect(routeCount()).toBe(0);
+    connection.close();
+  });
+
+  it("shows a child result steered into a running turn on that turn, through replay and a rebuild", () => {
+    const connection = openConnection();
+    const store = journal(connection);
+    const { projection } = chatRuntime();
+    const runId = "82000000-0000-4000-8000-000000000060";
+    const record = {
+      kind: "agent-result-steered",
+      threadId: ids.thread,
+      turnKey: ids.turn,
+      delivery: {
+        kind: "agent-result",
+        runId,
+        runIds: [runId],
+        runGenerations: [{ runId, generation: 1 }],
+      },
+      body: "A delegated subagent has finished.",
+      steeredAt: now,
+    };
+    const steer = () =>
+      store.append({
+        aggregate: {
+          aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+          aggregateId: crypto.randomUUID(),
+        },
+        expectedVersion: 0,
+        events: [pending(AGENT_RESULT_STEERED, record)],
+      });
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    const attempt = {
+      id: ids.attempt,
+      turnId: ids.turn,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      modelId: "model-a",
+      contextManifestId: ids.manifest,
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: {
+                contentId: ids.content,
+                digest: digest("delegate it"),
+                byteLength: "delegate it".length,
+              },
+              attachmentIds: [],
+              attempts: [attempt],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "delegate it",
+            digest: digest("delegate it"),
+            byteLength: "delegate it".length,
+          });
+        },
+      },
+    );
+    steer();
+    // The turn ends after the result entered it; the card stays.
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: { ...attempt, outcome: "completed" },
+        }),
+      ],
+    });
+    // The same delivery read again shows once.
+    steer();
+
+    const expected = [
+      { delivery: record.delivery, body: record.body, steeredAt: record.steeredAt },
+    ];
+    expect(
+      readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]?.steeredResults,
+    ).toEqual(expected);
+
+    rebuildProjection({ connection, journal: store, projection, clock: () => now });
+
+    expect(
+      readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]?.steeredResults,
+    ).toEqual(expected);
     connection.close();
   });
 

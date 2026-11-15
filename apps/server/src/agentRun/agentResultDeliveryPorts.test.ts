@@ -297,9 +297,11 @@ describe("steering a child's result into the parent's running turn", () => {
 
   it("hands the framed result to the turn's session as a relayed result", async () => {
     const steer = vi.fn(() => Effect.succeed("steered" as const));
+    const recordSteered = vi.fn();
     const steering = createAgentResultSteering({
       liveTurn: (threadId) => (threadId === String(run.parentThreadId) ? live(steer) : undefined),
       resultText: () => "The answer.",
+      recordSteered,
     });
     await expect(steering([run])).resolves.toBe("steered");
     expect(steer).toHaveBeenCalledWith(
@@ -309,6 +311,20 @@ describe("steering a child's result into the parent's running turn", () => {
         message: expect.stringContaining("The answer."),
       }),
     );
+    // The turn records the same text the runtime took, so the thread shows it.
+    expect(recordSteered).toHaveBeenCalledWith([run], expect.stringContaining("The answer."));
+  });
+
+  it("keeps a result steered when its record on the running turn cannot be written", async () => {
+    const steer = vi.fn(() => Effect.succeed("steered" as const));
+    const steering = createAgentResultSteering({
+      liveTurn: () => live(steer),
+      resultText: () => "The answer.",
+      recordSteered: () => {
+        throw new Error("journal closed");
+      },
+    });
+    await expect(steering([run])).resolves.toBe("steered");
   });
 
   it("leaves the result to its own turn when no turn runs, the turn opts out, or the runtime refuses it", async () => {
@@ -317,9 +333,13 @@ describe("steering a child's result into the parent's running turn", () => {
     await expect(
       createAgentResultSteering({ liveTurn: () => undefined, resultText })([run]),
     ).resolves.toBe("not-steered");
+    const recordSteered = vi.fn();
     await expect(
-      createAgentResultSteering({ liveTurn: () => live(steer, false), resultText })([run]),
+      createAgentResultSteering({ liveTurn: () => live(steer, false), resultText, recordSteered })([
+        run,
+      ]),
     ).resolves.toBe("not-steered");
+    expect(recordSteered).not.toHaveBeenCalled();
     expect(steer).not.toHaveBeenCalled();
     await expect(
       createAgentResultSteering({ liveTurn: () => live(undefined), resultText })([run]),

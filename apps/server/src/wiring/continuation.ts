@@ -55,6 +55,8 @@ import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencySched
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
+import { journalAgentResultSteered } from "../agentRun/agentResultSteeredRecord";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
 import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
@@ -223,6 +225,37 @@ export function wireContinuation(deps: ContinuationDependencies) {
       steer: createAgentResultSteering({
         liveTurn: (threadId) => deps.liveTurns.connection(threadId),
         resultText: (id) => agentRunPersistence.resultText(id),
+        // The turn that took the results is the parent's newest: it was
+        // running when the runtime accepted them.
+        recordSteered: (runs, message) => {
+          const run = runs[0];
+          if (run === undefined) return;
+          const threadId = String(run.parentThreadId);
+          const turnKey =
+            run.workspaceReceipt.mode === "chat"
+              ? persistence.readChatThreadView(decodeChatThreadId(threadId))?.turns.at(-1)?.id
+              : run.workspaceReceipt.mode === "work"
+                ? workTurnProjection.latestForThread(decodeWorkThreadId(threadId))?.requestId
+                : run.workspaceReceipt.mode === "code"
+                  ? persistence.journal.latestThreadEvents({
+                      aggregateType: "code-operation",
+                      threadId,
+                      kind: "conversation-turn-started",
+                      limit: 1,
+                    })[0]?.aggregateId
+                  : undefined;
+          if (turnKey === undefined) return;
+          const record = journalAgentResultSteered(persistence.journal, {
+            runs,
+            body: message,
+            turnKey: String(turnKey),
+            steeredAt: new Date().toISOString(),
+            uuid: randomUUID,
+            actorId: OCTANT_LOCAL_ACTOR_ID,
+          });
+          // Work keeps its turns in memory; the journal rebuilds them at start.
+          if (run.workspaceReceipt.mode === "work") workTurnProjection.applySteered(record);
+        },
       }),
       ports: {
         chat: createChatAgentResultDeliveryPort({

@@ -16,7 +16,11 @@ import { ProviderChildActivityEvent } from "./providers";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
+import {
+  AgentResultsSteeredIntoTurn,
+  AgentRunResultDeliveryMark,
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
+} from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest } from "./appleToolchain";
@@ -2401,6 +2405,11 @@ export const CodeConversationTurn = Schema.Struct({
    * still running, and every turn journaled before the host kept the record.
    */
   changedFiles: Schema.optional(CodeTurnChangedFiles),
+  /**
+   * Finished children's results the host steered into this turn while it
+   * ran, in arrival order. Absent on a turn that took none.
+   */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
    * Why a failed turn failed, as the provider or the host reported it. Absent

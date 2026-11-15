@@ -35,6 +35,11 @@ import {
   type ProviderInstanceId,
   type ProviderSessionId,
 } from "@octant/contracts";
+import type { AgentResultSteered } from "@octant/contracts";
+import {
+  agentResultsSteeredInto,
+  readAgentResultsSteered,
+} from "../agentRun/agentResultSteeredRecord";
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -1237,10 +1242,11 @@ export class CodeOperationEventStore {
       .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
       .map((entry) => entry.limit);
 
+    const steered = turns.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
     return decodeCodeConversationPage({
       version: 3,
       threadId,
-      turns: turns.map(finishTurn),
+      turns: turns.map((builder) => withSteeredResults(finishTurn(builder), steered)),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
@@ -1448,9 +1454,10 @@ export class CodeOperationEventStore {
     const turns: Array<CodeConversationTurn> = [];
     let bytes = 0;
     let included = 0;
+    const steered = starts.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
     for (const { envelope, builder } of starts.slice(0, request.limit)) {
       this.#foldTurn(envelope, builder, decode);
-      const turn = finishTurn(builder);
+      const turn = withSteeredResults(finishTurn(builder), steered);
       const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
       if (included > 0 && bytes + size > CODE_CONVERSATION_WINDOW_BYTES) break;
       bytes += size;
@@ -1815,6 +1822,19 @@ function startTurn(
     startedAt: frame.occurredAt,
     updatedAt: frame.occurredAt,
   };
+}
+
+/**
+ * The turn with the children's results the host steered into it while it ran.
+ * Those records are journaled apart from the turn's own operation, so its
+ * writers never contend with them, and are read beside the turn.
+ */
+function withSteeredResults(
+  turn: CodeConversationTurn,
+  records: ReadonlyArray<AgentResultSteered>,
+): CodeConversationTurn {
+  const steeredResults = agentResultsSteeredInto(records, String(turn.operationId));
+  return steeredResults.length === 0 ? turn : { ...turn, steeredResults };
 }
 
 /** The turn as a page or a window carries it. */

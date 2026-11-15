@@ -446,6 +446,48 @@ export const AgentRunResultDeliveryMark = Schema.Struct({
   );
 export type AgentRunResultDeliveryMark = typeof AgentRunResultDeliveryMark.Type;
 
+/** The framed text a steered delivery carried; the host's own batch prompt stays well inside it. */
+export const MAX_AGENT_RESULT_STEERED_BODY_CHARACTERS = 65_536;
+/** One running turn can take this many steered deliveries before the turn stops listing more. */
+export const MAX_AGENT_RESULTS_STEERED_PER_TURN = 32;
+
+/**
+ * A finished child's result the host steered into its parent's running turn,
+ * as that turn carries it. A queued delivery is a turn of its own, marked with
+ * `delivery`; a steered one entered a turn that was already running, so the
+ * transcript shows it inside that turn, with the same framed text the provider
+ * was sent. It stays on the turn even when the turn ended before the provider
+ * read it: the result settled as delivered when it was steered.
+ */
+export const AgentResultSteeredIntoTurn = Schema.Struct({
+  delivery: AgentRunResultDeliveryMark,
+  body: Schema.String.pipe(
+    Schema.minLength(1),
+    Schema.maxLength(MAX_AGENT_RESULT_STEERED_BODY_CHARACTERS),
+  ),
+  steeredAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentResultSteeredIntoTurn = typeof AgentResultSteeredIntoTurn.Type;
+
+export const AgentResultsSteeredIntoTurn = Schema.Array(AgentResultSteeredIntoTurn).pipe(
+  Schema.maxItems(MAX_AGENT_RESULTS_STEERED_PER_TURN),
+);
+
+/**
+ * The journaled record of one steered delivery: the parent thread, the turn it
+ * entered (a Chat turn id, a Work request id, or a Code operation id), and
+ * what it carried. Host-authored; each mode's transcript read attaches it to
+ * the named turn.
+ */
+export const AgentResultSteered = Schema.Struct({
+  kind: Schema.Literal("agent-result-steered"),
+  threadId: AgentRunParentThreadId,
+  turnKey: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+  ...AgentResultSteeredIntoTurn.fields,
+}).annotations(strict);
+export type AgentResultSteered = typeof AgentResultSteered.Type;
+export const decodeAgentResultSteered = Schema.decodeUnknownSync(AgentResultSteered);
+
 /**
  * How the host settled one finished run's result delivery. `delivered` means
  * a journaled turn now carries the result into the parent thread; `consumed`
