@@ -100,6 +100,8 @@ import {
 } from "../settings/runtimeCompactionDefaults";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
+import { OctantInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
@@ -289,6 +291,8 @@ export interface SettingsViewProps {
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
+  /** Your instructions for Octant, under Your identity. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -2486,6 +2490,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               profile={props.settings.userProfile}
             />
           </SettingRow>
+          <OctantInstructionsSettings
+            client={props.octantInstructionsClient}
+            focusedSetting={focusedSetting}
+          />
         </div>
       </SettingsSection>
       <SettingsSection title="Available modes">
