@@ -130,7 +130,14 @@ switch. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
-id and are answered through the parent's session. Each runtime's own web
+id and are answered through the parent's session. With Run as itself off for
+the account, the resolved setup has `subagents` off in Chat, in Plan, and at
+Guarded, Accept edits, and Reviewed, unless the thread chose On or the Project
+trusts Codex; Full access in Work and Code still turns it on, and a thread's
+Off keeps it off everywhere. Where `subagents` is off, Codex's app-server is
+leased with `features.multi_agent=false`, `features.multi_agent_v2=false`, and,
+from 0.145.0, `agents.enabled=false` (`codexAppServerArgs`), so Codex's own
+subagents never start. Each runtime's own web
 search and fetch run only where the setup has `webTools` on: Claude Code gains
 `WebSearch` and `WebFetch`, Codex starts without `web_search = "disabled"`,
 OpenCode stops denying `websearch` and `webfetch`, and Mistral Vibe launches

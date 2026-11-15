@@ -35,8 +35,9 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
  * The person's switch for one key provider account running as it does in its
  * own app: its own subagents, web tools, skills, and home configuration. On by
  * default; turning it off keeps them unloaded below Full access, and the web
- * tools at every level and in every mode. Only a
- * window on this host may change it (the server refuses others). The line
+ * tools at every level and in every mode. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device). The line
  * under the switch says which of those this provider's driver can load at
  * all, so a feature Octant cannot see is never implied.
  */
@@ -58,9 +59,10 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}
-              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
-              name, and a subagent running as one of your own Vibe agents may approve its own tools,
-              as in Vibe.
+              Vibe’s subagents, and your own Vibe agents they run as, work in Work and Code outside
+              Plan, at every level there. Vibe doesn’t say which tool its subagents ask to run, so
+              their approvals show no tool name, and a subagent running as one of your own Vibe
+              agents may approve its own tools, as in Vibe.
             </>
           ) : null}
           {unsupported.length === 0 ? null : (
@@ -103,8 +105,9 @@ export interface ProviderOwnMemorySettingProps {
  * The person's switch for one Claude Code or Codex account's own memory, on
  * by default and apart from "Run as itself": that switch and Full access never
  * turn memory on once the person turned it off. The text says what Octant does
- * not control while it is on, and where it stays off. Only a window on this host may change it (the
- * server refuses others).
+ * not control while it is on, and where it stays off. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device).
  */
 export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
   const name = keyProviderLabel(props.instance.driverKind);
