@@ -803,8 +803,17 @@ describe("Claude execution policy", () => {
         await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
         const open = f.opens[0]!;
         expect(open.withheldTools).toEqual(
-          expect.arrayContaining(["EnterPlanMode", "EnterWorktree", "Monitor", "REPL"]),
+          expect.arrayContaining([
+            "EnterPlanMode",
+            "EnterWorktree",
+            "Workflow",
+            "CronCreate",
+            "ScheduleWakeup",
+            "REPL",
+          ]),
         );
+        // A background command or a command watch is held inside its turn.
+        expect(open.withheldTools).not.toContain("Monitor");
         // With the person's setup off, its features stay withheld too.
         expect(open.withheldTools).toEqual(
           expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill", "Artifact"]),
@@ -838,6 +847,10 @@ describe("Claude execution policy", () => {
         // Reading a background task's output takes the shell's rules.
         await expect(
           tool("TaskOutput", { task_id: "t1", block: false, timeout: 1 }, "output"),
+        ).resolves.toEqual({ behavior: asked });
+        // A command watch is a shell command and takes the shell's rules.
+        await expect(
+          tool("Monitor", { description: "tail", timeout_ms: 60_000, command: "tail" }, "watch"),
         ).resolves.toEqual({ behavior: asked });
         // A notebook edit is a file edit inside the Project, and nothing more.
         const notebook = { notebook_path: `${projectRoot}/analysis.ipynb`, new_source: "1" };
@@ -6868,5 +6881,167 @@ describe("compacting a Claude session", () => {
       }),
     ]);
     await session.close();
+  });
+});
+
+describe("Claude background work", () => {
+  const sdk = "sdk-session-1";
+  const backgroundStarted: ClaudeDecodedMessage = {
+    kind: "task",
+    sessionId: sdk,
+    subtype: "task_started",
+    taskId: "bash-1",
+    background: true,
+    description: "npm test",
+  };
+  const backgroundEnded: ClaudeDecodedMessage = {
+    kind: "task",
+    sessionId: sdk,
+    subtype: "task_notification",
+    taskId: "bash-1",
+    status: "completed",
+    summary: "npm test finished",
+  };
+  const state = (value: "idle" | "running"): ClaudeDecodedMessage => ({
+    kind: "session-state",
+    sessionId: sdk,
+    state: value,
+  });
+  const text = (value: string): ClaudeDecodedMessage => ({
+    kind: "stream-event",
+    sessionId: sdk,
+    event: { kind: "text-delta", index: 0, text: value },
+  });
+
+  async function startTurn() {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const collected = Effect.runPromise(
+      Stream.runForEach(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.sessionId === sessionId),
+          Stream.takeUntil((event) =>
+            ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+          ),
+        ),
+        (event) => Effect.sync(() => seen.push(event)),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "run the tests", attachments: [], tools: [] }),
+    );
+    const query = f.queries[0]!;
+    await query.emit(state("running"));
+    return { acquired, query, seen, collected };
+  }
+
+  it("counts what the runtime's own turn used on top of the person's turn it folds into", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    const costing = (costUsd: number): ClaudeDecodedMessage => {
+      const result = completed(sdk);
+      if (result.kind !== "result") throw new Error("expected a result");
+      return { ...result, costUsd };
+    };
+    await query.emit(backgroundStarted);
+    await query.emit(costing(0.02));
+    await query.emit(state("idle"));
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(costing(0.01));
+    await query.emit(state("idle"));
+    await collected;
+
+    const usage = seen.filter((event) => event.kind === "usage");
+    expect(usage.at(-1)).toMatchObject({ inputTokens: 6, outputTokens: 10, costUsd: 0.03 });
+    await acquired.close();
+  });
+
+  it("holds the person's turn while a background command runs and folds the runtime's own turn into it", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    // The command still runs, so the person's turn is not over.
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await expect(
+      Effect.runPromise(
+        Effect.flip(
+          acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
+        ),
+      ),
+    ).resolves.toMatchObject({ category: "unavailable" });
+
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(text("The tests passed."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    const kinds = seen.map((event) => event.kind);
+    expect(kinds.filter((kind) => kind === "completed")).toHaveLength(1);
+    const started = kinds.indexOf("runtime-turn-started");
+    expect(started).toBeGreaterThan(kinds.lastIndexOf("task-progress"));
+    expect(kinds.indexOf("text-delta")).toBeGreaterThan(started);
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "background-task",
+    });
+    expect(seen.filter((event) => event.kind === "task-progress")).toEqual([
+      expect.objectContaining({ status: "in-progress", summary: "npm test" }),
+      expect.objectContaining({ status: "completed", summary: "npm test finished" }),
+    ]);
+    const sequences = seen.map((event) => event.sequence);
+    expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+    expect(new Set(sequences).size).toBe(sequences.length);
+    await acquired.close();
+  });
+
+  it("stops the runtime's turns and its background work when the person stops the held turn", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    await Effect.runPromise(acquired.connection.interrupt(sessionId));
+    await collected;
+
+    expect(seen.at(-1)).toMatchObject({ kind: "interrupted" });
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    // The idle runtime had no turn to abort; its process, and the command in
+    // it, ended with the session.
+    expect(query.interrupt).not.toHaveBeenCalled();
+    expect(query.close).toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("ends the person's turn once the runtime has started as many turns of its own as it may", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    // A watch that keeps reporting wakes the model on every line.
+    for (let line = 0; line < 20; line += 1) {
+      await query.emit(state("running"));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+    }
+    await collected;
+
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(16);
+    expect(seen.at(-1)).toMatchObject({ kind: "completed" });
+    expect(query.close).toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("completes a turn without background work as soon as the runtime's result arrives", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(completed(sdk));
+    await collected;
+    expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
+    await acquired.close();
   });
 });

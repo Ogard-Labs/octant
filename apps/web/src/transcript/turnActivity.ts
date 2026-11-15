@@ -65,6 +65,11 @@ export interface TurnActivity {
   readonly writtenPaths?: ReadonlyArray<string>;
   /** The endpoint retry in progress, cleared by the next content or tool call, or the turn settling. */
   readonly retrying?: HarnessRetryNotice;
+  /**
+   * How many times the runtime started a turn by itself inside this one, to
+   * act on background work the turn started. Absent when it never did.
+   */
+  readonly runtimeTurns?: number;
 }
 
 export const EMPTY_TURN_ACTIVITY: TurnActivity = { rows: [], reasoning: "" };
@@ -173,6 +178,14 @@ export function settledTurnActivitySummary(activity: TurnActivity): string {
   }
   if (thinking && (parts.length === 0 || (toolCalls === 0 && filesEdited === 0))) {
     parts.push("Thinking");
+  }
+  const runtimeTurns = activity.runtimeTurns ?? 0;
+  if (runtimeTurns > 0) {
+    parts.push(
+      runtimeTurns === 1
+        ? "Continued after background work"
+        : `Continued ${runtimeTurns} times after background work`,
+    );
   }
   return parts.join(" · ");
 }

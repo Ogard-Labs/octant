@@ -499,19 +499,22 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                              | Why                                                                                                                                                  |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)              |
-| `EnterWorktree`, `ExitWorktree`                       | The thread is bound to one checkout                                                                                                                  |
-| `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup` | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
-| `REPL`                                                | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill`             | Only while the person's own setup has that feature off                                                                                               |
-| `Artifact`                                            | Unless the session offers Claude artifacts                                                                                                           |
+| Withheld                                  | Why                                                                                                                                                                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`           | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)                                                                                 |
+| `EnterWorktree`, `ExitWorktree`           | The thread is bound to one checkout                                                                                                                                                                                     |
+| `Workflow`                                | A workflow's agents report under the `Workflow` call rather than an `Agent` call, so the child-run display cannot show them, and the decoder refuses `local_workflow` task frames                                       |
+| `CronCreate`, `ScheduleWakeup`            | Each wakes the model at a later time. A session lasts one turn, so a wake-up kept in memory never fires and the call's success would be untrue; a durable one is written to the Project's Claude files and fires unseen |
+| `REPL`                                    | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                                                                                      |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill` | Only while the person's own setup has that feature off                                                                                                                                                                  |
+| `Artifact`                                | Unless the session offers Claude artifacts                                                                                                                                                                              |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
 inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
-to the Project and the secret guard, and `Bash`, `TaskOutput`, and
-`TaskStop` take the shell's approval rules. Session-internal tools that read
+to the Project and the secret guard, and `Bash`, `Monitor`, `TaskOutput`,
+and `TaskStop` take the shell's approval rules; a `Monitor` command, like a
+`Bash` one, is named in its prompt and marks the thread when it reaches a
+server. Session-internal tools that read
 no file, write nothing, and reach no network run unasked at every level, as
 in Claude Code: the checklist (`TodoWrite`) and `ToolSearch`, which only
 loads deferred tool definitions (the bundled 2.1.211 runtime marks it
@@ -558,10 +561,52 @@ pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
 again. Rationale: the earlier caps of 64 calls a turn and 256 a session
 failed long turns that Claude Code runs to the end in its own app.
 
-Not built yet: background commands. `Bash` with `run_in_background` stays
-refused before the gate and `Monitor` stays withheld, because a finished
-background command wakes the model in a turn Octant never sent, and the
-decoder refuses the background task frames they report. The task tools
+#### Background commands and runtime-started turns
+
+`Bash` with `run_in_background` and `Monitor` command watches run outside
+Plan (maintainer decision, 2026-11-14: Octant adds capabilities to a
+provider and never takes its core features away). Claude Code reports each
+as a `local_bash` task: the decoder reads its `task_started`,
+`task_updated`, `task_progress`, and `task_notification` frames (a
+`skip_transcript` hint included) and the mapper shows each as a
+`task-progress` row, as it does a subagent's. When such a task ends, or a
+watch prints a line, the runtime wakes the model and starts a turn by itself.
+
+A session lasts one person's turn, so the driver holds that turn open
+instead of letting such a turn start after the runner has stopped the
+session. When the runtime's result arrives while a background task the turn
+started still runs, or before the runtime says it is idle, the completion is
+held. Each turn the runtime then starts is folded into the person's turn,
+opened by a `runtime-turn-started` event (`trigger: "background-task"`); its
+tool calls pass the same gate at the same level, and its result replaces the
+held completion. Its tokens and cost are added to what the person's turn used
+before it, so each usage report still covers the whole turn; its cost is
+measured from the session total at the result before it. A state the runtime
+reports before it initializes is kept, so it still counts as reporting. The completion goes out once no background task runs and
+the runtime has gone idle (`session_state_changed`, which the port asks for
+with `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`; a runtime that never reports
+its state is taken as idle after each result, and only a task's end makes it
+wait again). Code journals the event as the operation's
+`runtime-turn-started` frame, and the transcript's summary line says the
+turn continued after background work. Work and Chat fold the runtime's text,
+tool steps, and task rows into the person's turn without a separate marker
+(not built yet).
+
+The hold is bounded. The stalled-turn limit counts its silence as it counts
+any other; the person's stop ends it, and on an idle runtime the driver
+reports the turn interrupted and stops the session, which ends every
+background task in it; at the 17th turn the runtime starts by itself, the
+person's turn completes and the session is stopped. A new turn is refused
+while one is held. A `Monitor` call that asks for a WebSocket (opened by the
+runtime process, outside the command sandbox and its network rules) or a
+watch for the whole session is refused before the gate. Plan keeps its
+read-only commands in the foreground: `run_in_background` is refused there.
+Rationale: holding the person's turn keeps one journaled turn per send and
+reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
+host-side runner for turns that start on an idle thread would add a second
+turn lifecycle the thread model does not have.
+
+The task tools
 (`TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`) stay off through
 `CLAUDE_CODE_ENABLE_TASKS: "false"`: the panel needs the whole list each
 call, which `TodoWrite` gives, while a task list carries runtime-assigned

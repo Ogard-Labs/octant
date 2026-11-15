@@ -256,9 +256,10 @@ const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write", "NotebookEdit"]);
 /**
  * Claude Code's tools that run or manage its shell commands: each takes the
  * shell's approval rules, so it asks below Full access and runs in the
- * Project root, where the command sandbox holds it.
+ * Project root, where the command sandbox holds it. `Monitor` keeps a command
+ * running and reads each line it prints, so it is a shell command too.
  */
-const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "TaskOutput", "TaskStop"]);
+const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "Monitor", "TaskOutput", "TaskStop"]);
 /**
  * Claude Code's built-in tools a Work or Code session outside Plan does not
  * hold. Octant adds to Claude Code and does not take its core features away
@@ -278,12 +279,16 @@ const CLAUDE_WITHHELD_TOOLS = [
   // working directory out of it.
   "EnterWorktree",
   "ExitWorktree",
-  // Each of these wakes the model later and starts a turn Octant never sent,
-  // which the journal cannot hold: a result with no turn pending ends the
-  // session. The decoder also refuses every background task frame but a
-  // subagent's, and a workflow's outright, so a granted call fails the turn.
-  "Monitor",
+  // A workflow's agents report under the `Workflow` call, not an `Agent`
+  // call, so the child-run display cannot show them and the decoder refuses
+  // their task frames; offering it waits on that display.
   "Workflow",
+  // Each of these wakes the model at a later time. A session lasts one turn,
+  // so a wake-up kept in memory never fires and the call's success would be
+  // untrue, and a durable one is written to the Project's own Claude files
+  // and fires in whatever later session opens there, unseen by this thread.
+  // Background commands and `Monitor` watches are held instead: the turn that
+  // started them stays open until they end (see `ClaudeHeldTurn`).
   "CronCreate",
   "ScheduleWakeup",
   // Runs JavaScript inside the runtime process, outside the command sandbox
@@ -295,6 +300,12 @@ const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
 const MAX_PENDING_APPROVALS = 4;
+/**
+ * How many turns the runtime may start by itself inside one person's turn.
+ * A watch that keeps printing wakes the model on every line; past this the
+ * person's turn completes and its session, with the watch, is stopped.
+ */
+const MAX_RUNTIME_TURNS = 16;
 const MAX_PRE_TOOL_GRANTS = 16;
 /**
  * How many tool-use ids a session remembers. Settled ids are forgotten oldest
@@ -1010,7 +1021,95 @@ interface SessionState {
   releasePromise?: Promise<void>;
   /** The compaction `compact` asked for, until the runtime reports how it ended. */
   compaction?: ClaudePendingCompaction | undefined;
+  /** The runtime's background tasks still running, by its own task id. */
+  readonly backgroundTasks: Set<string>;
+  /** Whether the person's current turn started any background task. */
+  startedBackgroundWork: boolean;
+  /** Whether this runtime reports when it goes idle (`session_state_changed`). */
+  reportsSessionState: boolean;
+  heldTurn?: ClaudeHeldTurn | undefined;
+  /** The person's turn's latest usage report as published, for a held turn to build on. */
+  turnUsage?: ClaudeUsageEvent | undefined;
 }
+
+/**
+ * A person's turn the runtime finished while background work it started
+ * still runs (maintainer decision, 2026-11-14). A background command or a
+ * `Monitor` watch wakes the model when it ends or reports, and the runtime
+ * then starts a turn by itself. A session lasts one turn, so that turn would
+ * otherwise start with nothing to journal it, after the runner had stopped the
+ * session. Instead the completion is held: the runtime's turns are folded into
+ * the person's turn, each opened by a `runtime-turn-started` event, and pass
+ * the same gate at the same level. The completion goes out once no background
+ * task runs and the runtime has gone idle; the stalled-turn limit, the
+ * person's stop, and {@link MAX_RUNTIME_TURNS} end it sooner.
+ */
+interface ClaudeHeldTurn {
+  /** The completion the runtime's last result made, without its envelope. */
+  completion: Omit<
+    Extract<ProviderRuntimeEvent, { readonly kind: "completed" }>,
+    "sequence" | "occurredAt"
+  >;
+  /**
+   * Nothing queued can wake the model: the runtime said it went idle after
+   * that result, and no background task ended since.
+   */
+  idle: boolean;
+  /** The runtime is running a turn it started itself. */
+  runtimeTurnOpen: boolean;
+  runtimeTurns: number;
+  /**
+   * What the person's turn used up to the last result, the runtime's earlier
+   * turns included. Each runtime turn counts only its own requests and cost,
+   * so its reports are added to this: a usage report covers the whole turn.
+   */
+  usageBase?: ClaudeUsageEvent | undefined;
+}
+
+type ClaudeUsageEvent = Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>;
+
+/** A runtime turn's own usage report, carried on from what the person's turn used before it. */
+function foldedUsage(base: ClaudeUsageEvent, own: ClaudeUsageEvent): ClaudeUsageEvent {
+  const sum = (first: number | undefined, second: number | undefined) =>
+    first === undefined && second === undefined ? undefined : (first ?? 0) + (second ?? 0);
+  const reasoningTokens = sum(base.reasoningTokens, own.reasoningTokens);
+  const cacheReadInputTokens = sum(base.cacheReadInputTokens, own.cacheReadInputTokens);
+  const cacheWriteInputTokens = sum(base.cacheWriteInputTokens, own.cacheWriteInputTokens);
+  const providerExecutionDurationMs = sum(
+    base.providerExecutionDurationMs,
+    own.providerExecutionDurationMs,
+  );
+  const costUsd = sum(base.costUsd, own.costUsd);
+  const {
+    reasoningTokens: _reasoning,
+    cacheReadInputTokens: _cacheRead,
+    cacheWriteInputTokens: _cacheWrite,
+    providerExecutionDurationMs: _duration,
+    costUsd: _cost,
+    ...rest
+  } = own;
+  return {
+    ...rest,
+    inputTokens: base.inputTokens + own.inputTokens,
+    outputTokens: base.outputTokens + own.outputTokens,
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(providerExecutionDurationMs === undefined ? {} : { providerExecutionDurationMs }),
+    ...(costUsd === undefined ? {} : { costUsd }),
+  };
+}
+
+/** What the runtime sends while running a turn, which opens one when a turn is held. */
+const CLAUDE_TURN_MESSAGE_KINDS: ReadonlySet<ClaudeDecodedMessage["kind"]> = new Set([
+  "assistant",
+  "stream-event",
+  "tool-results",
+  "tool-progress",
+  "tool-summary",
+  "child-assistant",
+  "result",
+]);
 
 interface ClaudePendingCompaction {
   /** The runtime marked the cut, so the session holds the summary now. */
@@ -1946,6 +2045,87 @@ function makeConnection(
       deactivate(state);
       scheduleRelease(state);
     };
+    /**
+     * Holds the person's turn the runtime just finished while its background
+     * work runs. The next events are numbered from the completion's own
+     * number, which never went out, and the runtime's task ids carry over so
+     * a background task's end still names the row its start opened.
+     */
+    const holdTurn = (
+      state: SessionState,
+      completed: Extract<ProviderRuntimeEvent, { readonly kind: "completed" }>,
+    ) => {
+      const previous = state.context;
+      if (previous === undefined) return;
+      const { sequence, occurredAt: _unsent, ...completion } = completed;
+      state.heldTurn = {
+        completion,
+        // A runtime that never reports its state is taken as idle after each
+        // result; only a background task's end then makes it wait again.
+        idle: !state.reportsSessionState,
+        runtimeTurnOpen: false,
+        runtimeTurns: state.heldTurn?.runtimeTurns ?? 0,
+        usageBase: state.turnUsage,
+      };
+      state.context = makeEventContext(state, previous.claudeSessionId, sequence);
+      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      settleHeldTurn(state);
+    };
+    const releaseHeldTurn = (state: SessionState, held: ClaudeHeldTurn) => {
+      state.heldTurn = undefined;
+      state.turnUsage = undefined;
+      state.startedBackgroundWork = false;
+      const context = state.context;
+      if (context === undefined) return;
+      context.terminal = true;
+      publish({
+        ...held.completion,
+        sequence: context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
+      state.terminalResult.resolve(undefined);
+      clearAuthorityState(state);
+      state.pendingTurns = Math.max(0, state.pendingTurns - 1);
+      state.hookDeliveries.shift();
+      state.outputAccepted = false;
+    };
+    /** Sends the held completion once nothing the runtime runs can wake it again. */
+    const settleHeldTurn = (state: SessionState) => {
+      const held = state.heldTurn;
+      if (
+        held === undefined ||
+        held.runtimeTurnOpen ||
+        state.backgroundTasks.size > 0 ||
+        !held.idle
+      ) {
+        return;
+      }
+      releaseHeldTurn(state, held);
+    };
+    const openRuntimeTurn = (state: SessionState, held: ClaudeHeldTurn) => {
+      const context = state.context;
+      if (context === undefined) return;
+      // A runtime that keeps waking itself ends with the person's turn: the
+      // completion goes out, and the session, with its background work, is
+      // stopped rather than left running turns nobody reads.
+      if (held.runtimeTurns >= MAX_RUNTIME_TURNS) {
+        releaseHeldTurn(state, held);
+        closeAfterPublishedTerminal(state);
+        return;
+      }
+      held.runtimeTurns += 1;
+      held.runtimeTurnOpen = true;
+      held.idle = false;
+      publish({
+        kind: "runtime-turn-started",
+        trigger: "background-task",
+        instanceId: options.instanceId,
+        sessionId: state.sessionId,
+        correlationId: state.correlationId,
+        sequence: context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
+    };
     const handleMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
       if (state.terminal) return;
       if (state.context === undefined) {
@@ -1993,9 +2173,29 @@ function makeConnection(
           };
         }
       }
+      if (message.kind === "session-state") {
+        state.reportsSessionState = true;
+        const held = state.heldTurn;
+        if (held === undefined) return;
+        if (message.state === "idle") {
+          held.idle = true;
+          settleHeldTurn(state);
+        } else if (!held.runtimeTurnOpen) {
+          openRuntimeTurn(state, held);
+        }
+        return;
+      }
+      if (state.heldTurn !== undefined && CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)) {
+        if (!state.heldTurn.runtimeTurnOpen) openRuntimeTurn(state, state.heldTurn);
+        if (state.terminal) return;
+      }
       if (message.kind === "result" && state.pendingTurns === 0) {
         closeAfterPublishedTerminal(state);
         return;
+      }
+      if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
+        state.backgroundTasks.add(message.taskId);
+        state.startedBackgroundWork = true;
       }
       for (const mapped of mapClaudeMessage(
         state.context,
@@ -2013,8 +2213,27 @@ function makeConnection(
           });
           return;
         }
-        publish(withHookDelivery(state, mapped.event));
+        if (
+          mapped.event.kind === "completed" &&
+          state.pendingTurns > 0 &&
+          (state.heldTurn !== undefined ||
+            (state.startedBackgroundWork &&
+              (state.backgroundTasks.size > 0 || state.reportsSessionState)))
+        ) {
+          holdTurn(state, mapped.event);
+          continue;
+        }
+        let next = mapped.event;
+        if (next.kind === "usage") {
+          const base = state.heldTurn?.usageBase;
+          if (base !== undefined) next = foldedUsage(base, next);
+          state.turnUsage = next;
+        }
+        publish(withHookDelivery(state, next));
         if (isTerminalEvent(mapped.event)) {
+          state.heldTurn = undefined;
+          state.turnUsage = undefined;
+          state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
           state.pendingTurns = Math.max(0, state.pendingTurns - 1);
@@ -2038,6 +2257,21 @@ function makeConnection(
           return;
         }
         state.outputAccepted = true;
+      }
+      if (
+        message.kind === "task" &&
+        (message.subtype === "task_notification" ||
+          (message.subtype === "task_updated" &&
+            (message.status === "completed" ||
+              message.status === "failed" ||
+              message.status === "killed")))
+      ) {
+        // A task that ended hands the model a notice, so the runtime starts
+        // a turn for it unless the turn running now takes it in.
+        if (state.backgroundTasks.delete(message.taskId) && state.heldTurn !== undefined) {
+          state.heldTurn.idle = false;
+        }
+        settleHeldTurn(state);
       }
       // The boundary's event is out now; a status that already said the
       // compaction succeeded was only waiting for it.
@@ -2785,6 +3019,9 @@ function makeConnection(
           active: true,
           releasing: false,
           released: false,
+          backgroundTasks: new Set(),
+          startedBackgroundWork: false,
+          reportsSessionState: false,
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
@@ -3012,6 +3249,12 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
+        // The runtime may still start turns of its own inside the held one.
+        if (state.heldTurn !== undefined) {
+          return Effect.fail(
+            failure("unavailable", "Claude is still finishing background work from the last turn."),
+          );
+        }
         if ((input.tools.length > 0 || state.appToolsEnabled) && state.pendingTurns > 0) {
           return Effect.fail(
             failure("unavailable", "The previous tool-enabled turn is still active."),
@@ -3178,6 +3421,20 @@ function makeConnection(
         const state = sessions.get(sessionId);
         if (state === undefined || state.terminal || state.released || state.pendingTurns === 0) {
           return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        // An idle runtime has no turn to abort. Stopping the held turn ends
+        // the session, and with it every background task it still runs.
+        if (state.heldTurn !== undefined && !state.heldTurn.runtimeTurnOpen) {
+          return Effect.tryPromise({
+            try: async () => {
+              terminal(state, {
+                kind: "interrupted",
+                message: "Claude's background work was stopped.",
+              });
+              await release(state);
+            },
+            catch: () => failure("interrupted", "Claude interruption cleanup did not complete."),
+          });
         }
         return state.query.interrupt().pipe(
           Effect.flatMap(() =>
