@@ -331,7 +331,10 @@ default (absent is on). The person's fallback list is their consent
   hand-off record, and the transcript shows "Octant moved this thread:
   <reason>" after the turn that stopped, whether or not the continuing turn
   was admitted. The worker row shows "fallback: <reason>", and the
-  coordinator gets a `continued-on-fallback` notice (below).
+  coordinator gets a `continued-on-fallback` notice (below). The transcript
+  line follows the thread's latest hand-off, so a later move or a person's
+  model change replaces it; every move stays in the thread's journal and in
+  the coordinator's notices.
 - **Propose for approval.** The Starting workers setting covers starting new
   workers only; it does not stop a running worker continuing on its role's
   fallback, since the role's list is the person's consent (maintainer

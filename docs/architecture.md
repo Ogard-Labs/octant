@@ -3618,7 +3618,10 @@ into a proposal. With no roles set up, a worker starts on the coordinator's
 own model as before. Availability marks (5 minutes after an availability
 failure, or until a usage limit's reset) are host memory fed by the shared
 runtime-event tap, and a worker whose first request failed before any work
-starts again on the next model; a running worker keeps its model
+starts again on the next model. A running worker whose model stops on a usage
+limit or an outage continues on its role's next model under the role's
+**Continue on the fallback** setting
+([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers))
 (maintainer decision, 2026-11-15). The rules are in
 [Coordinator threads](design/coordinator-threads.md).
 
@@ -9870,10 +9873,11 @@ the model at another size.
   slot through `admitAgentRunControlRequest`, the one path that starts a
   subagent. The built-in slots include `quick` and `deep` beside the earlier
   seven, and a slot may carry two person-set flags, `askBeforeUsing` (absent
-  means off) and `continueOnFallback` (absent means on); the resolver does not
-  read them yet (designed, not built: a start in an ask-first role becomes a
-  proposal, and a thread with the role carries on with its next model when its
-  own stops). A Project override is per role: a slot it lists replaces Settings'
+  means off) and `continueOnFallback` (absent means on). The harness resolver
+  reads neither; a coordinator worker's start reads `askBeforeUsing` (an
+  ask-first role turns the start into a proposal), and a running coordinator
+  worker reads `continueOnFallback` (it carries on with the role's next model
+  when its own stops). A Project override is per role: a slot it lists replaces Settings'
   for that role and an unlisted role uses Settings, still only with models
   Settings lists for that role (`not-a-subset`). Only a person's window changes
   either layer (maintainer decision, 2026-11-15). A slot's candidates may name a
