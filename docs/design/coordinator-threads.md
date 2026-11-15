@@ -323,11 +323,19 @@ default (absent is on). The person's fallback list is their consent
   uses. Then one host turn continues the work, under the ordinary admission
   (spend ceilings, capacity, the Done lock; approvals still wait for a
   person). Its message names the old and new model and account and why, and
-  tells the model to continue where it left off; that message is the
-  transcript's marker. A refused turn is an ordinary refusal: the worker stays
-  idle on its new model.
-- **Disclosure.** The worker row shows "fallback: <reason>", and the
+  tells the model to continue where it left off. The move only counts for
+  the turn that stopped, on the model it ran on: when a person's turn started
+  or anyone changed the model since, the host does nothing. A refused turn is
+  an ordinary refusal: the worker stays idle on its new model.
+- **Disclosure.** The provider change records the reason on the thread's
+  hand-off record, and the transcript shows "Octant moved this thread:
+  <reason>" after the turn that stopped, whether or not the continuing turn
+  was admitted. The worker row shows "fallback: <reason>", and the
   coordinator gets a `continued-on-fallback` notice (below).
+- **Propose for approval.** The Starting workers setting covers starting new
+  workers only; it does not stop a running worker continuing on its role's
+  fallback, since the role's list is the person's consent (maintainer
+  decision, 2026-11-15). **Ask before using** on a role does stop it.
 - **Bounds.** The walk only goes forward and passes over every model it
   already reached, so a worker moves through its lists at most once and never
   back; one stop moves it once. With nothing eligible left it pauses as

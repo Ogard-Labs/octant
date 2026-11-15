@@ -2820,6 +2820,16 @@ export class CodeService {
                                     nextModelId: command.modelId,
                                     changedAt: updatedAt,
                                     ...(releasedStopId === undefined ? {} : { releasedStopId }),
+                                    // Only the host's own continued-on-fallback move carries it.
+                                    ...(current.coordinatorChoice !== undefined &&
+                                    executionContext?.coordinatorChoice?.move ===
+                                      "continued-on-fallback" &&
+                                    executionContext.coordinatorChoice.reason !== undefined
+                                      ? {
+                                          continuedOnFallback:
+                                            executionContext.coordinatorChoice.reason,
+                                        }
+                                      : {}),
                                   },
                                 }),
                             version: command.expectedVersion + 1,

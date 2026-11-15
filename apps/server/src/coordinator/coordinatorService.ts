@@ -1063,6 +1063,11 @@ export class CoordinatorService {
   async continueOnFallback(
     workerId: string,
     availability: WorkerStop | undefined,
+    stopped: {
+      readonly operationId: string;
+      readonly providerInstanceId: string;
+      readonly modelId: string;
+    },
   ): Promise<"continued" | "stays"> {
     const worker = this.#ports.readThread(workerId);
     const choice = worker?.coordinatorChoice;
@@ -1081,8 +1086,18 @@ export class CoordinatorService {
     ) {
       return "stays";
     }
-    const operationId = this.#ports.latestTurnId(workerId);
-    if (operationId === undefined || this.#continuedStops.has(operationId)) return "stays";
+    // Only the turn that stopped, on the model it ran on: a turn a person
+    // started since, or a model anyone picked since, owns the next step.
+    const operationId = stopped.operationId;
+    if (
+      this.#ports.latestTurnId(workerId) !== operationId ||
+      String(worker.providerInstanceId) !== stopped.providerInstanceId ||
+      String(worker.modelId) !== stopped.modelId ||
+      this.#ports.threadState(workerId) === "working" ||
+      this.#continuedStops.has(operationId)
+    ) {
+      return "stays";
+    }
     // A first turn that failed before any work is still the start; the
     // first-request watch moves it.
     const watch = this.#firstTurns.get(workerId);

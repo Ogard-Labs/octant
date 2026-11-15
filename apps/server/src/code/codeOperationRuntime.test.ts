@@ -5984,11 +5984,11 @@ describe("CodeOperationRuntime", () => {
     async (failure, availability) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       const connection = providerConnection(queue);
-      const stops: Array<readonly [string, string | undefined]> = [];
+      const stops: Array<readonly [string, string | undefined, string]> = [];
       const fixture = runtimeFixture({
         provider: providerDriver(connection),
-        onProviderStop: async (stopped, said) => {
-          stops.push([String(stopped), said]);
+        onProviderStop: async (stoppedThread, said, stopped) => {
+          stops.push([String(stoppedThread), said, stopped.operationId]);
         },
       });
       await fixture.runtime.execute(windowId, {
@@ -6001,7 +6001,10 @@ describe("CodeOperationRuntime", () => {
       });
       await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
       await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "failed", failure })));
-      await vi.waitFor(() => expect(stops).toEqual([[String(threadId), availability]]));
+      // It names the turn that stopped, so a reader never acts on a later one.
+      await vi.waitFor(() =>
+        expect(stops).toEqual([[String(threadId), availability, String(operationId(45))]]),
+      );
       fixture.close();
     },
   );

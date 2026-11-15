@@ -1132,6 +1132,48 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
+  it("says where and why the host moved a worker on to its fallback, even with no turn after the move", () => {
+    const base = controller();
+    const reason = "Opus 5.5 (Work) at usage limit; continued on Astra (Personal)";
+    render(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...base,
+            conversation: [
+              { id: "ask", role: "user", text: "Fix the test", at: "2026-11-15T12:00:00.000Z" },
+              {
+                id: "stopped",
+                role: "assistant",
+                text: "Looking at it",
+                status: "waiting",
+                at: "2026-11-15T12:01:00.000Z",
+              },
+            ],
+            activeView: {
+              ...base.activeView!,
+              thread: {
+                ...base.activeView!.thread,
+                providerHandoff: {
+                  previousProviderInstanceId: providerId,
+                  previousModelId: modelId,
+                  nextProviderInstanceId: providerId,
+                  nextModelId: modelId,
+                  changedAt: "2026-11-15T12:02:00.000Z",
+                  continuedOnFallback: reason,
+                },
+              },
+            },
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByLabelText("Continued on the fallback")).toHaveTextContent(
+      `Octant moved this thread: ${reason}`,
+    );
+  });
+
   it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
     const user = userEvent.setup();
     const stopId = "30000000-0000-4000-8000-0000000000e1";

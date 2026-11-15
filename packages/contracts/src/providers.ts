@@ -49,6 +49,14 @@ export const ThreadProviderHandoff = Schema.Struct({
    * the host's admission and the composer read this to stop waiting on it.
    */
   releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  /**
+   * Set when the host moved a coordinator's running worker on to its role's
+   * next model because its own stopped: the host-written reason, naming the
+   * old and new model and account and why. The transcript shows it where
+   * the move happened, whether or not the turn that continues the work was
+   * admitted.
+   */
+  continuedOnFallback: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400))),
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 

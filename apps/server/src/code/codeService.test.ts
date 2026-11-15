@@ -1300,6 +1300,66 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("records the host's continued-on-fallback reason on the hand-off, and only the host's", async () => {
+    const worker = () =>
+      thread({
+        coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+        coordinatorChoice: { role: "default", rank: "main" },
+      });
+    const reason = "model-a (Work) at usage limit; continued on model-b (Work)";
+    const continued = await serviceFixture({ threads: [worker()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason,
+          move: "continued-on-fallback",
+        },
+      },
+    );
+    expect(continued).toMatchObject({
+      thread: { providerHandoff: { nextModelId: "model-b", continuedOnFallback: reason } },
+    });
+    // A person's own move carries no reason, and neither does a thread a person started.
+    const byPerson = await serviceFixture({ threads: [worker()] }).service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(
+      byPerson.kind === "thread-updated" && byPerson.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
+    const personThread = await serviceFixture({ threads: [thread()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: { role: "default", rank: "main", reason, move: "continued-on-fallback" },
+      },
+    );
+    expect(
+      personThread.kind === "thread-updated" &&
+        personThread.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
+  });
+
   it("returns to provider defaults when a reasoning choice is cleared or the model changes", async () => {
     const fixture = serviceFixture({
       threads: [thread({ modelOptionValues: { effort: "high" } })],
