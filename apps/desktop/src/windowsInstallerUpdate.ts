@@ -21,10 +21,12 @@ export const OCTANT_WINDOWS_PUBLISHER = "Ogard Labs";
 export const WINDOWS_UPDATE_INSTALLER_ARGUMENTS: ReadonlyArray<string> = ["/S", "/relaunch"];
 
 /**
- * How long the signature check may take. It reads one local file; past this
- * the check is unavailable, never passed.
+ * How long the signature check may take; past this it is unavailable, never
+ * passed. A cold Windows PowerShell start took past 30 seconds on a hosted
+ * runner when it had to discover modules without its cache, so the bound
+ * leaves room for a slow first start.
  */
-const AUTHENTICODE_CHECK_TIMEOUT_MS = 30_000;
+const AUTHENTICODE_CHECK_TIMEOUT_MS = 60_000;
 
 export type WindowsInstallLocation =
   | { readonly kind: "installed"; readonly installDirectory: string }
@@ -221,11 +223,13 @@ export async function runVerifiedInstaller(input: {
  * The PowerShell that asks Windows for one file's signature.
  *
  * The path arrives in an environment variable, never in the script text, so
- * nothing about the file name is parsed as code. The cmdlet is named with its
- * module so a same-named command earlier on the module path is not run.
+ * nothing about the file name is parsed as code. The module is loaded from
+ * Windows' own PowerShell folder and the cmdlet named with it, so no
+ * same-named command elsewhere is run and no module search is needed.
  */
 const AUTHENTICODE_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
+  "Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1')",
   "$s = Microsoft.PowerShell.Security\\Get-AuthenticodeSignature -LiteralPath $env:OCTANT_AUTHENTICODE_TARGET",
   "$p = $null",
   "if ($s.SignerCertificate) { $p = $s.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) }",
@@ -258,6 +262,18 @@ export function createAuthenticodeReader(
           env: {
             SystemRoot: systemRoot,
             windir: systemRoot,
+            // Only Windows' own modules, so start-up does not search the
+            // person's module folders.
+            PSModulePath: win32.join(
+              systemRoot,
+              "System32",
+              "WindowsPowerShell",
+              "v1.0",
+              "Modules",
+            ),
+            // Where PowerShell keeps its caches and temporary files; without
+            // them every start rebuilds what it would otherwise reuse.
+            ...pick(environment, ["TEMP", "TMP", "LOCALAPPDATA", "APPDATA", "USERPROFILE"]),
             OCTANT_AUTHENTICODE_TARGET: path,
           },
           timeout: AUTHENTICODE_CHECK_TIMEOUT_MS,
@@ -273,6 +289,18 @@ export function createAuthenticodeReader(
 }
 
 const unavailable: AuthenticodeReport = { kind: "unavailable" };
+
+function pick(
+  environment: Readonly<Record<string, string | undefined>>,
+  names: ReadonlyArray<string>,
+): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of names) {
+    const value = environment[name];
+    if (value !== undefined && value !== "") picked[name] = value;
+  }
+  return picked;
+}
 
 export function createNodeWindowsInstallerFiles(): WindowsInstallerFiles {
   return {
