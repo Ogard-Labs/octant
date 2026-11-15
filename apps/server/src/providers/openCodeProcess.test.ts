@@ -32,6 +32,7 @@ import {
   type OpenCodeProcessPort,
 } from "./openCodeProcess";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
+import { applyProtectedFilesChoice } from "../process/secretGuard";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeOpenCodeCli.ts", import.meta.url));
 const directories: string[] = [];
@@ -86,7 +87,7 @@ function environmentRecordingWrapper(): {
   const environmentPath = join(root, ".fake-opencode-environment");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude-skills=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, environmentPath, root };
@@ -390,7 +391,6 @@ describe("probeOpenCodeBinary", () => {
   it("keeps OpenCode's own skill discovery only for a launch whose person allowed it, and every other guard", () => {
     const root = fixtureRoot();
     const skillSwitches = [
-      "OPENCODE_DISABLE_CLAUDE_CODE",
       "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
       "OPENCODE_DISABLE_EXTERNAL_SKILLS",
     ];
@@ -409,7 +409,6 @@ describe("probeOpenCodeBinary", () => {
       }
       for (const name of [
         "OPENCODE_DISABLE_AUTOUPDATE",
-        "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
         "OPENCODE_DISABLE_DEFAULT_PLUGINS",
         "OPENCODE_DISABLE_PROJECT_CONFIG",
         "OPENCODE_DISABLE_MODELS_FETCH",
@@ -426,6 +425,37 @@ describe("probeOpenCodeBinary", () => {
     } finally {
       locked.cleanup();
       own.cleanup();
+    }
+  });
+
+  it("lets OpenCode read CLAUDE.md as it does on its own, while its .claude skills stay off until the person allows them", () => {
+    const root = fixtureRoot();
+    const launches = [
+      createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root),
+      createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root, undefined, true),
+      createPrivateOpenCodeProfile(
+        { content: "{}" },
+        { HOME: root },
+        () => root,
+        undefined,
+        false,
+        undefined,
+        true,
+      ),
+    ];
+    try {
+      for (const profile of launches) {
+        // opencode 1.18.21 drops `CLAUDE.md` from its instruction files when
+        // either switch is set; the broad one also turns off `.claude` skills.
+        expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE");
+        expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT");
+      }
+      const [locked, own, projectConfig] = launches;
+      expect(locked?.environment.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS).toBe("1");
+      expect(projectConfig?.environment.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS).toBe("1");
+      expect(own?.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS");
+    } finally {
+      for (const profile of launches) profile.cleanup();
     }
   });
 
@@ -644,7 +674,7 @@ describe("probeOpenCodeBinary", () => {
     // credential in the server's environment cannot reach a replaced binary.
     // OpenCode's own static switches (no updater, no default plugins) stay.
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
@@ -1252,6 +1282,129 @@ describe("OpenCodeProcessPort", () => {
     expect(rules.some((rule) => rule.includes(`(subpath "${resolvedHome}`))).toBe(false);
   });
 
+  describe("the person's global CLAUDE.md under confinement", () => {
+    function claudeHome(): { readonly home: string; readonly file: string } {
+      const home = mkdtempSync(join(tmpdir(), "octant-opencode-claude-home-"));
+      directories.push(home);
+      mkdirSync(join(home, ".claude", "projects"), { recursive: true });
+      writeFileSync(join(home, ".claude", "CLAUDE.md"), "Prefer small diffs.\n");
+      writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+      writeFileSync(join(home, ".claude", "settings.json"), "{}");
+      return { home, file: join(realpathSync(home), ".claude", "CLAUDE.md") };
+    }
+
+    async function confinedLaunch(
+      home: string,
+      platform: NodeJS.Platform,
+      mode = "isolation-supported",
+    ): Promise<Parameters<ProcessConfinementPort["prepare"]>[0]> {
+      const fixture = profileRecordingWrapper(mode);
+      let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+      await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement: {
+              prepare: (input) => {
+                captured = input;
+                return { command: input.executable, args: input.args };
+              },
+            },
+            platform,
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+            inheritedEnvironment: { ...process.env, HOME: home },
+          }).start({
+            binaryPath: fixture.binaryPath,
+            cwd: fixture.root,
+            mode: "work",
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      );
+      if (captured === undefined) throw new Error("the launch was never confined");
+      return captured;
+    }
+
+    it("lets an OpenCode 1.x launch read exactly that file on macOS, and nothing else in .claude", async () => {
+      const { home, file } = claudeHome();
+      const claudeFolder = join(realpathSync(home), ".claude");
+      const input = await confinedLaunch(home, "darwin");
+      // The folder's own node (which the provider listing also resolves) and
+      // the one file; no subtree and no sibling such as `.credentials.json`.
+      const claudeRules = new Set(
+        (input.extraRules ?? []).filter((rule) => rule.includes(claudeFolder)),
+      );
+      expect(claudeRules).toEqual(
+        new Set([
+          `(allow file-read-metadata (literal "${claudeFolder}"))`,
+          `(allow file-read-data (literal "${claudeFolder}"))`,
+          `(allow file-read* (literal "${file}"))`,
+        ]),
+      );
+      // `.claude` stays denied as a whole, so a sign-in written after launch
+      // is denied too: the file is not an allowed path that would split it.
+      expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
+      expect(
+        (input.privateHomeAllowPaths ?? []).some((path) => path.startsWith(claudeFolder)),
+      ).toBe(false);
+      expect((input.readRoots ?? []).some((path) => path.startsWith(claudeFolder))).toBe(false);
+    });
+
+    it("binds exactly that file read-only into an OpenCode 1.x launch on Linux", async () => {
+      const { home, file } = claudeHome();
+      const claudeFolder = join(realpathSync(home), ".claude");
+      const input = await confinedLaunch(home, "linux");
+      const granted = [...(input.privateHomeAllowPaths ?? []), ...(input.readRoots ?? [])];
+      expect(input.privateHomeAllowPaths).toContain(file);
+      expect(granted.filter((path) => path.startsWith(claudeFolder))).toEqual([file]);
+      expect(input.additionalWriteRoots ?? []).not.toContain(file);
+    });
+
+    it("keeps a CLAUDE.md the person protected denied", async () => {
+      const { home, file } = claudeHome();
+      applyProtectedFilesChoice({ added: [file], removed: [] });
+      try {
+        for (const platform of ["darwin", "linux"] as const) {
+          const input = await confinedLaunch(home, platform);
+          expect((input.extraRules ?? []).some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
+          expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
+        }
+      } finally {
+        applyProtectedFilesChoice({ added: [], removed: [] });
+      }
+    });
+
+    it("refuses a CLAUDE.md that is a link to another file", async () => {
+      const { home } = claudeHome();
+      const elsewhere = join(realpathSync(home), "private-notes.md");
+      writeFileSync(elsewhere, "not instructions\n");
+      const link = join(home, ".claude", "CLAUDE.md");
+      rmSync(link);
+      symlinkSync(elsewhere, link);
+      for (const platform of ["darwin", "linux"] as const) {
+        const input = await confinedLaunch(home, platform);
+        const rules = input.extraRules ?? [];
+        expect(rules.some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
+        expect(rules.some((rule) => rule.includes("private-notes.md"))).toBe(false);
+        expect(
+          (input.privateHomeAllowPaths ?? []).some(
+            (path) => path.endsWith("CLAUDE.md") || path === elsewhere,
+          ),
+        ).toBe(false);
+      }
+    });
+
+    // OpenCode 2.x reads only AGENTS.md, so its wall gains nothing.
+    it("opens nothing in .claude for an OpenCode 2.x launch", async () => {
+      const { home, file } = claudeHome();
+      for (const platform of ["darwin", "linux"] as const) {
+        const input = await confinedLaunch(home, platform, "v2-0-1-ready");
+        expect((input.extraRules ?? []).some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
+        expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
+      }
+    });
+  });
+
   it("starts with a private config profile while withholding isolation without an OS receipt", async () => {
     const fixture = profileRecordingWrapper("isolation-supported");
     const inheritedEnvironment = {
@@ -1484,7 +1637,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     );
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");

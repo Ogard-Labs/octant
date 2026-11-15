@@ -68,6 +68,33 @@ every level; the person turns it off per account or per thread):
 | Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                             |
 | OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
 
+OpenCode reads its instruction files as it does on its own, at every level
+and with the setup on or off: no launch sets `OPENCODE_DISABLE_CLAUDE_CODE`
+or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` (maintainer decision, 2026-11-15).
+Read from the opencode 1.18.21 source, either switch drops `CLAUDE.md` from
+its instruction files: the global `~/.claude/CLAUDE.md`, read when no global
+`AGENTS.md` exists, and the Project's `CLAUDE.md`, read when no Project
+`AGENTS.md` exists. The broad switch also turns off `.claude` skills, so the
+launch keeps `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` for that alone, unset only
+with the person's own setup on. OpenCode 2.x (2.0.22, 2.2.0 and 2.3.0 read)
+reads only `AGENTS.md` and has no prompt switch; the 2.2.0 and 2.3.0
+servers gate `.claude` skills on either switch, which the skills switch
+still covers, and 2.0.22 reads neither switch. The 1.x
+server reads the Project's instruction files only without
+`OPENCODE_DISABLE_PROJECT_CONFIG`, so in Plan, Chat and an untrusted Project
+it reads the global file alone. Its global configuration folder is the
+launch's private one, so the person's own global `AGENTS.md` is not found
+there and `~/.claude/CLAUDE.md` is (not built yet: linking that `AGENTS.md`
+in, which OpenCode on its own would prefer). Below Full access the 1.x
+launch's wall opens that one file for reading and nothing else in
+`~/.claude`: a literal Seatbelt rule on macOS, under the `~/.claude` denial
+that stays whole, and a read-only bind on Linux. The file is found at
+`~/.claude/CLAUDE.md` in the launch's home, as OpenCode looks for it
+(`CLAUDE_CONFIG_DIR` is not consulted); a protected file, a link, or a file
+reached through a linked `.claude` is not opened. A 2.x launch opens nothing
+there. The text grants nothing: Plan stays read-only, and the protected-file
+rules and the account's sign-in file exemptions apply to reads as before.
+
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
 `WebSearch`, `WebFetch`, and `Skill` tools, with every hook off by flag in Chat
