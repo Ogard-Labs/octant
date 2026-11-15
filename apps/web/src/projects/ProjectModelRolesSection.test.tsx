@@ -265,6 +265,28 @@ describe("ProjectModelRolesSection", () => {
     });
   });
 
+  it("changes nothing when the model an added one would replace left the role first", async () => {
+    const user = userEvent.setup();
+    const updateRouting = vi.fn();
+    const setProjectRouting = savedOverride(configuration({ default: ["scribe-1"] }), 2);
+    renderSection({
+      host: configuration({ default: ["scribe-1", "scribe-2"] }),
+      project: configuration({ default: ["scribe-1", "scribe-2"] }),
+      setProjectRouting,
+      updateRouting,
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Builder, fallback 1" }));
+    await user.click(await screen.findByRole("option", { name: "Scribe 3" }));
+    await user.click(screen.getByRole("button", { name: "Remove scribe-2 from Builder" }));
+    await waitFor(() => expect(setProjectRouting).toHaveBeenCalledOnce());
+    const add = screen.queryByRole("button", { name: "Add in Settings too" });
+    if (add !== null) await user.click(add);
+
+    expect(updateRouting).not.toHaveBeenCalled();
+    expect(setProjectRouting).toHaveBeenCalledOnce();
+  });
+
   it("says a Project change made elsewhere won and reloads", async () => {
     const user = userEvent.setup();
     const setProjectRouting = vi.fn(async () => ({
