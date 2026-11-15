@@ -138,11 +138,15 @@ try {
     homeRead,
   );
 
-  const cookies = run(cmd, shell(`type ${join(granted, "profile", "Cookies")}`));
+  const cookiesPath = join(granted, "profile", "Cookies");
+  const cookiesLaunch = prepare(cmd, shell(`type ${cookiesPath}`));
+  const cookies = run(cmd, shell(`type ${cookiesPath}`));
+  // While a launch runs, the store's own DACL shows whether the deny landed.
+  const cookiesAcl = run(cmd, shell(`icacls ${cookiesPath}`));
   check(
     "denies a browser store found beneath a grant",
     cookies.status !== 0 && accessDenied(cookies) && !cookies.stdout.includes("cookie-content"),
-    cookies,
+    { cookies, denies: cookiesLaunch.args.includes("--deny"), acl: cookiesAcl.stdout },
   );
 
   const nested = run(cmd, shell("cmd /d /c echo nested-ran"));
