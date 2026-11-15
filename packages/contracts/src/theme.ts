@@ -430,11 +430,14 @@ export type ThemeSettings = typeof ThemeSettings.Type;
 
 /**
  * The coat each glass level lays over the window until a person sets a Tint, by
- * theme mode: one coat of the workspace colour, in percent.
+ * theme mode: one coat of the workspace colour, in percent. Raised from 84/70
+ * (light) and 66/50 (dark) because the text of apps behind the window read
+ * through the thinner coat (maintainer request, 2026-11-15); a stored Tint is
+ * kept as the person set it.
  */
 export const GLASS_TINT_DEFAULTS = {
-  light: { subtle: 84, strong: 70 },
-  dark: { subtle: 66, strong: 50 },
+  light: { subtle: 88, strong: 76 },
+  dark: { subtle: 74, strong: 58 },
 } as const;
 
 /**

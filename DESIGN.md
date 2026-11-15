@@ -223,9 +223,13 @@ nearly opaque where surfaces nest.
 
 | Level  | Coat (`--octant-window-surface`)                                                   | Dark | Light |
 | ------ | ---------------------------------------------------------------------------------- | ---- | ----- |
-| Subtle | workspace colour at the level's alpha (`--octant-workspace-translucent-subtle`)    | 66%  | 84%   |
-| Strong | `--octant-workspace-translucent-strong`                                            | 50%  | 70%   |
+| Subtle | workspace colour at the level's alpha (`--octant-workspace-translucent-subtle`)    | 74%  | 88%   |
+| Strong | `--octant-workspace-translucent-strong`                                            | 58%  | 76%   |
 | Tint   | the person's Tint (0 to 90) replaces the level's alpha, clamped to the floor below |      |       |
+
+The default coats were 66% and 50% in dark and 84% and 70% in light until
+2026-11-15, when the text of apps behind the window read through them too
+clearly (maintainer request); a Tint a person stored is kept as set.
 
 **Contrast floor.** The coat must hold text over whatever the desktop shows. The
 bound used is the native material at its worst: a white desktop behind a dark
@@ -245,7 +249,7 @@ own tint. Computed from the role colours:
   light, lightens) what is behind; primary text is checked at 4.5:1 over the
   material as it actually draws, in the packaged app on a white and a black
   desktop. The saved value is kept, so moving the floor needs no migration.
-- Where the coat is under the secondary floor (every dark level, light Strong, or a low Tint), the
+- Where the coat is under the secondary floor (every dark level, or a low Tint), the
   muted role inside the shell takes the secondary ink, so meta text stays
   readable at the cost of one step of hierarchy.
 - Secondary and muted text are held at 4.5:1 over the native material as it

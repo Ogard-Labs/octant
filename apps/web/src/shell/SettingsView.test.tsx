@@ -1059,7 +1059,7 @@ describe("SettingsView", () => {
     });
     navigateTo("Appearance");
     const tint = screen.getByRole("slider", { name: "Glass tint" });
-    expect(tint).toHaveValue("66");
+    expect(tint).toHaveValue("74");
     fireEvent.change(tint, { target: { value: "12" } });
     expect(applyPatch).toHaveBeenLastCalledWith({ glassTint: 12 });
   });
