@@ -2,7 +2,7 @@ import {
   Blocks,
   Bot,
   CalendarClock,
-  CircleCheckBig,
+  SquareCheck,
   CircleDot,
   Folders,
   GitPullRequestArrow,
@@ -180,7 +180,7 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Inbox;
     case "todos":
       // The tick leaves the circle, so it does not read as Done today's mark.
-      return CircleCheckBig;
+      return SquareCheck;
     case "artifact-library":
       return Layers;
     case "image-library":

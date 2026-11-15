@@ -233,10 +233,20 @@ function collectSourceFiles(root: string): ReadonlyArray<string> {
 }
 
 describe("icon weight", () => {
-  it("draws a 20px rail glyph at the same regular weight as a 16px one, never thin", () => {
-    const shape = (size: number) =>
-      /<path[^>]*>/.exec(renderToStaticMarkup(createElement(Search, { size })))?.[0];
-    expect(shape(20)).toBeDefined();
-    expect(shape(20)).toBe(shape(16));
+  const shape = (props: Record<string, unknown>) =>
+    /<path[^>]*>/.exec(renderToStaticMarkup(createElement(Search, props)))?.[0];
+
+  it("draws 12, 14 and 16px glyphs bold and 20 and 24px glyphs regular", () => {
+    expect(shape({ size: 12 })).toBeDefined();
+    expect(shape({ size: 12 })).toBe(shape({ size: 16 }));
+    expect(shape({ size: 20 })).toBe(shape({ size: 24 }));
+    expect(shape({ size: 16 })).toBe(shape({ size: 16, weight: "bold" }));
+    expect(shape({ size: 20 })).toBe(shape({ size: 20, weight: "regular" }));
+    expect(shape({ size: 16 })).not.toBe(shape({ size: 20 }));
+  });
+
+  it("draws the fill weight for a selected glyph at any size", () => {
+    expect(shape({ size: 20, weight: "fill" })).not.toBe(shape({ size: 20 }));
+    expect(shape({ size: 20, weight: "fill" })).toBe(shape({ size: 16, weight: "fill" }));
   });
 });

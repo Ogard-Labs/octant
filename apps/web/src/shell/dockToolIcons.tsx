@@ -16,7 +16,7 @@ import {
   Monitor,
   Smartphone,
   Tablet,
-  SlidersHorizontal,
+  HostTower,
   SquareTerminal,
   Truck,
   type IconComponent,
@@ -24,7 +24,7 @@ import {
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 const ICONS: Readonly<Record<RightUtilityDockSurfaceId, IconComponent>> = {
-  environment: SlidersHorizontal,
+  environment: HostTower,
   browser: Globe2,
   canvas: FileStack,
   review: GitCompareArrows,

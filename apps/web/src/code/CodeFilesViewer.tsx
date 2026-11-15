@@ -5,7 +5,7 @@ import { useDockBarControls, useDockBarLead, useDockBarPlacement } from "../shel
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { PanelTab, PanelTabStrip } from "../shell/PanelTabs";
-import { File, PanelRight, PanelRightOpen } from "../ui/icons";
+import { File, ListTree } from "../ui/icons";
 import { pathBasename } from "../lib/fileName";
 import type { CodeFileChange } from "./CodeFileExplorer";
 import { CodeFileExplorerPanel, type CodeFileExplorerPanelProps } from "./CodeFileExplorerPanel";
@@ -200,7 +200,8 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
             kind: "button",
             id: "files-tree",
             label: treeOpen ? "Hide file tree" : "Show file tree",
-            icon: treeOpen ? PanelRightOpen : PanelRight,
+            icon: ListTree,
+            pressed: treeOpen,
             onSelect: toggleTree,
           },
         ],
@@ -242,11 +243,7 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
               label={treeOpen ? "Hide file tree" : "Show file tree"}
               onClick={toggleTree}
             >
-              {treeOpen ? (
-                <PanelRightOpen aria-hidden="true" size={16} />
-              ) : (
-                <PanelRight aria-hidden="true" size={16} />
-              )}
+              <ListTree aria-hidden="true" size={16} weight={treeOpen ? "fill" : "bold"} />
             </OctantIconButton>
           )}
         </div>

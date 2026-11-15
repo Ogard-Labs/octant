@@ -500,10 +500,31 @@ compact field heights; a new desktop control takes a recipe height.
 
 Phosphor, imported only through the app's icon module (`apps/web/src/ui/icons`),
 which keeps the names call sites use. The family is drawn as filled outlines at
-fixed weights: regular at every size (light at 20px read thin and soft beside
-its text), bold for a tick inside a filled mark, fill for a selected state. A few
-glyphs have no exact match (a folder's git badge, a plus on a branch or an
-image) and draw the plain glyph.
+fixed weights, chosen by the module, never by a call site's stroke:
+
+| State                                      | Weight  | Ink                        |
+| ------------------------------------------ | ------- | -------------------------- |
+| 12, 14 and 16px (regular stroke read weak) | bold    | the control's own ink      |
+| 20 and 24px (bold there reads heavy)       | regular | the control's own ink      |
+| The selected destination in the icon rail  | fill    | primary ink; muted at rest |
+| A pressed tool whose glyph is a toggle     | fill    | primary ink; muted at rest |
+
+A call site passes `weight="fill"` only to mark the selected or pressed state;
+everything else follows the size. A few glyphs have no exact match (a folder's
+git badge, a plus on a branch or an image) and draw the plain glyph.
+
+Each destination or tool has its own silhouette. Pairs that read alike at 16px
+were split:
+
+- To-dos: a tick in a square (`SquareCheck`), apart from Done today's tick in a
+  circle.
+- Linear issues: bulleted list (`ListTodo`), apart from the plan's tick list.
+- File tree toggle: indented tree list (`ListTree`, filled while the tree
+  shows), apart from the panel glyphs beside it.
+- Arrange (a tool's tile layout): four squares (`LayoutGrid`), not a panel.
+- Goal: crosshair (`Target`), apart from the concentric issue dot.
+- Environment dock tool: a tower (`HostTower`, the computer the thread runs
+  on), apart from the sliders of Settings and the composer's options.
 
 | Size | Token           | Where                                                            |
 | ---- | --------------- | ---------------------------------------------------------------- |
@@ -512,8 +533,8 @@ image) and draw the plain glyph.
 | 16   | `--oct-icon-md` | The default: buttons, menu rows, navigation rows, tool buttons   |
 | 20   | `--oct-icon-lg` | An empty state, a dialog header, a page's empty mark             |
 
-A tick of 16px or less inside a filled mark asks for `MARK_TICK_STROKE_WIDTH`
-(2.5), which the module draws as the bold weight. In a button pass the glyph with `data-icon` and let the recipe size it.
+A tick inside a filled mark asks for `MARK_TICK_STROKE_WIDTH` (2.5), which the
+module draws as the bold weight at any size. In a button pass the glyph with `data-icon` and let the recipe size it.
 Provider marks are bundled, licensed artwork from `ProviderGlyph`, never
 fetched, never emoji.
 

@@ -1,4 +1,4 @@
-import { LayoutPanelLeft, X } from "../ui/icons";
+import { LayoutGrid, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -631,7 +631,7 @@ function Tile(props: {
                 className="shell-icon-button dock-tile__control window-no-drag"
                 title={`Arrange ${content.label}`}
               >
-                <LayoutPanelLeft aria-hidden="true" size={16} />
+                <LayoutGrid aria-hidden="true" size={16} />
               </OctantMenuTrigger>
               <OctantMenuPortal>
                 <OctantMenuPositioner>
@@ -701,7 +701,7 @@ function Tile(props: {
             <IconButton
               className="dock-tile__control text-muted-foreground"
               disabled
-              icon={LayoutPanelLeft}
+              icon={LayoutGrid}
               label={`Arrange ${content.label}`}
             />
           )}

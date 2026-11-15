@@ -8,6 +8,9 @@ export type { IconProps };
 /** The stroke at which a call site asked for a bold tick (see MARK_TICK_STROKE_WIDTH). */
 const BOLD_FROM_STROKE = 2.5;
 
+/** The largest size drawn bold: the 12, 14 and 16 steps of the icon scale. */
+const BOLD_UP_TO_SIZE = 16;
+
 /** The size the previous family drew an icon at when none was given. */
 const DEFAULT_SIZE = 24;
 
@@ -19,10 +22,11 @@ function weightFor(props: IconProps): IconWeight {
   // The previous family drew a tick inside a small filled mark with a heavier
   // stroke; the family's own bold weight is that request.
   if (Number(props.strokeWidth) >= BOLD_FROM_STROKE) return "bold";
-  // Every size draws regular. The light weight at 20px and up left the rail's
-  // glyphs thin and soft beside the text they stand for, and blurred on a
-  // display that does not draw a half-pixel stroke crisply.
-  return "regular";
+  // Bold at 16px and below, regular above. A regular stroke at 12 to 16px read
+  // weak and soft beside 13px text; at 20 and 24 the same stroke is already
+  // strong, and bold there reads heavy. A selected destination asks for fill.
+  const size = Number(props.size ?? DEFAULT_SIZE);
+  return size <= BOLD_UP_TO_SIZE ? "bold" : "regular";
 }
 
 /**

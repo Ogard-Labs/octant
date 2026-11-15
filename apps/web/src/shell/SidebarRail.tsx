@@ -352,7 +352,9 @@ function RailButton(props: {
         variant="rail"
       >
         <span aria-hidden="true" className="sidebar-rail__face">
-          {Icon === undefined ? null : <Icon size={20} />}
+          {Icon === undefined ? null : (
+            <Icon size={20} weight={props.active === true ? "fill" : "regular"} />
+          )}
           {props.children}
           {props.badge === undefined || props.badge === 0 ? null : (
             <span className="sidebar-rail__badge">{props.badge > 99 ? "99+" : props.badge}</span>

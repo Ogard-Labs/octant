@@ -1366,6 +1366,13 @@
   background: var(--octant-control);
 }
 
+/* A toggle that is on (the file tree shown, whitespace ignored) keeps the
+   chosen wash and the primary ink. */
+.dock-tile__control[aria-pressed="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fill-2);
+}
+
 /* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
    stays whole and clear of the next tab and the New page button. The select
    was shrink-0, so the tab's box shrank around it and the close mark ran under
