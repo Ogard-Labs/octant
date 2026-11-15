@@ -1,5 +1,11 @@
 import { runStatusCommand } from "./status";
-import { runWebCommand } from "./web";
+import { defaultOpenBrowser, runWebCommand } from "./web";
+import {
+  createWindowsCliServiceManager,
+  createWindowsHostLifecycleControl,
+  openWindowsCliHost,
+  runWindowsWebCommand,
+} from "./windowsHost";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
 import {
   resolveHostRuntimePaths,
@@ -202,6 +208,13 @@ export async function runCli(
     mayStartHost: target.kind === "own-host",
     version: cliVersion(process.env),
   };
+  if (process.platform === "win32") {
+    const windowsRefusal = refusesOnWindows(args);
+    if (windowsRefusal !== undefined) {
+      process.stderr.write(`${windowsRefusal}\n`);
+      return 1;
+    }
+  }
   const refusal = refusesHostAdministration(context, args);
   if (refusal !== undefined) {
     process.stderr.write(`${refusal}\n`);
@@ -210,6 +223,21 @@ export async function runCli(
   if (hasInvalidLifecyclePositionals(args.command, args.positional)) {
     printUsage(identity);
     return 1;
+  }
+  if (args.command === "web" && process.platform === "win32") {
+    const host = openWindowsCliHost({ env: context.environment });
+    if (host.status === "refused") {
+      process.stderr.write(`${host.message}\n`);
+      return 1;
+    }
+    const result = await runWindowsWebCommand({
+      host,
+      noOpen: args.flags["no-open"] === true,
+      openBrowser: defaultOpenBrowser,
+      stdout: process.stdout,
+      stderr: process.stderr,
+    });
+    return result.kind === "opened" || result.kind === "served" ? 0 : 1;
   }
   if (args.command === "web") {
     const result = await runWebCommand({
@@ -262,7 +290,6 @@ export async function runCli(
     if (action === "start" || action === "restart" || action === "enable")
       warnAboutLinuxHostTools();
     try {
-      const paths = resolveCliHostRuntimePaths(context);
       const followAbortController = logs?.follow === true ? new AbortController() : undefined;
       const stopFollowing = () => followAbortController?.abort();
       if (followAbortController !== undefined) {
@@ -273,8 +300,7 @@ export async function runCli(
       try {
         report = await runServerLifecycleCommand({
           action,
-          paths,
-          policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }),
+          ...lifecycleHostDependencies(context),
           stdout: process.stdout,
           ...(logs === undefined ? {} : { logs }),
           ...(followAbortController === undefined ? {} : { signal: followAbortController.signal }),
@@ -832,6 +858,21 @@ async function runProviderSignInFlow(
   }
 }
 
+/** Where the lifecycle command finds its host: the native Windows profile, or the POSIX paths. */
+function lifecycleHostDependencies(context: CliContext) {
+  if (process.platform === "win32") {
+    const host = openWindowsCliHost({ env: context.environment });
+    if (host.status === "refused") throw new Error(host.message);
+    return {
+      policyStore: host.startup.servicePolicy,
+      serviceManager: createWindowsCliServiceManager(host, { env: context.environment }),
+      control: createWindowsHostLifecycleControl(host),
+    };
+  }
+  const paths = resolveCliHostRuntimePaths(context);
+  return { paths, policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }) };
+}
+
 function resolveCliHostRuntimePaths(context: CliContext) {
   return resolveHostRuntimePaths({
     env: context.environment,
@@ -983,6 +1024,33 @@ function printUsage(identity: DesktopIdentity): void {
 function cliVersion(environment: Readonly<Record<string, string | undefined>>): string {
   const stamped = environment.OCTANT_CLI_VERSION;
   return stamped !== undefined && /^[0-9A-Za-z.+-]{1,64}$/.test(stamped) ? stamped : "development";
+}
+
+const WINDOWS_SERVER_ACTIONS = new Set([
+  "start",
+  "stop",
+  "restart",
+  "status",
+  "enable",
+  "disable",
+  "logs",
+  "run",
+]);
+
+/**
+ * On Windows the CLI reaches its host through the native profile and pipe,
+ * which so far serve the service commands, the foreground host and the web
+ * launcher. Every other command reads POSIX host paths, so it refuses here
+ * by name rather than failing on a path it cannot resolve.
+ */
+export function refusesOnWindows(args: ParsedArgs): string | undefined {
+  const supported =
+    (args.command === "server" &&
+      WINDOWS_SERVER_ACTIONS.has(args.positional[0] ?? "") &&
+      !("pair" in args.flags)) ||
+    (args.command === "web" && Object.keys(args.flags).every((flag) => flag === "no-open"));
+  if (supported) return undefined;
+  return "This command is not available on Windows yet. On Windows, `octant server start|stop|restart|status|enable|disable|logs|run` and `octant web [--no-open]` are.";
 }
 
 const HOST_ADMINISTRATION_ACTIONS = new Set([
