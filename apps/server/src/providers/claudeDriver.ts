@@ -2553,6 +2553,7 @@ function makeConnection(
                 servers,
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
+              ...(keepsOwnMemory ? { ownMemory: true as const } : {}),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,

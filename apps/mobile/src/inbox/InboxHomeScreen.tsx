@@ -56,6 +56,8 @@ export interface InboxHomeScreenProps {
   readonly arrangement: MobileThreadArrangement;
   readonly onSelectArrangement: (arrangement: MobileThreadArrangement) => void;
   readonly onOpenAgents: (view: AgentListView) => void;
+  /** The person's to-do list on the connected computer. */
+  readonly onOpenTodos?: () => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
   /** Opens the pairing screen with the QR scanner already open. */
@@ -727,6 +729,19 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                 testID="mobile-tile-review"
               />
             </View>
+
+            {props.onOpenTodos === undefined || transports.length === 0 ? null : (
+              <ListSection testID="mobile-home-todos">
+                <ListRow
+                  accessory="chevron"
+                  icon="checkmark-circle-outline"
+                  label={MOBILE_COPY.todosTitle}
+                  last
+                  onPress={props.onOpenTodos}
+                  testID="mobile-home-open-todos"
+                />
+              </ListSection>
+            )}
 
             {priorityRows.length > 0 ? (
               <ListSection

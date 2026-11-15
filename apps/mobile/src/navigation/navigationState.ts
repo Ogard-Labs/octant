@@ -29,6 +29,7 @@ export function backMobileRoute(
       return threadReturnRoute ?? "agents";
     case "agents":
     case "hosts":
+    case "todos":
       return "home";
     case "home":
       return undefined;

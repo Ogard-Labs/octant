@@ -2701,7 +2701,7 @@ function SkillsSection({
                               id: String(instance.id),
                               displayName: instance.displayName,
                               driverKind: instance.driverKind,
-                              nativeSetup: instance.nativeSetup === true,
+                              nativeSetup: instance.nativeSetup !== false,
                             },
                           ]
                         : [],

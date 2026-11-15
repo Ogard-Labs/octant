@@ -221,7 +221,7 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
 
   const product = PRODUCT[account.driverKind];
   const listing = loaded.kind === "ready" ? loaded.listing : undefined;
-  const runsAsItself = listing?.runsAsItself ?? account.nativeSetup === true;
+  const runsAsItself = listing?.runsAsItself ?? account.nativeSetup !== false;
   const sections = listing?.sections ?? [];
   const sectionOf = (kind: ProviderToolingSectionKind) =>
     sections.find((section) => section.kind === kind);

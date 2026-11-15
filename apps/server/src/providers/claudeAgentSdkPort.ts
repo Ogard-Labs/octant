@@ -147,6 +147,8 @@ export interface ClaudeOpenQueryInput {
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
+  readonly ownMemory?: true;
   /**
    * The auto-compact window for this query alone, from the person's
    * compaction point; absent leaves the runtime its own.
@@ -634,10 +636,11 @@ export interface ClaudeNativeQueryOptions {
  * starts the account's MCP servers without also reading a Project's
  * `.mcp.json` (`strictMcpConfig` governs both), so MCP servers start only
  * with the Project's code. Claude's own memory stays off by flag as well as
- * by its environment switch.
+ * by its environment switch, unless the account keeps its own memory.
  */
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
+  ownMemory = false,
 ): ClaudeNativeQueryOptions {
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
@@ -652,7 +655,9 @@ export function claudeNativeQueryOptions(
     strictMcpConfig: !setup.projectCode,
     settings: {
       ...(readsHome && !setup.hooks ? { disableAllHooks: true as const } : {}),
-      ...(readsHome ? { autoMemoryEnabled: false as const } : {}),
+      // Home settings could turn auto-memory on behind the account's switch,
+      // so they are held to it; an account that keeps its own memory is not.
+      ...(readsHome && !ownMemory ? { autoMemoryEnabled: false as const } : {}),
     },
   };
 }
@@ -1290,7 +1295,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
-            const native = claudeNativeQueryOptions(input.nativeSetup);
+            const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is

@@ -30,7 +30,9 @@ export function classifyProviderStderr(value: string): ProviderProcessDiagnostic
   if (/not authenticated|authentication required|login required|unauthorized/i.test(value)) {
     return "Provider authentication is required.";
   }
-  if (/certificate|tls|osstatus\s+-26276/i.test(value)) {
+  // "tls" must stand alone: a random base64url token (a server password the
+  // process echoed) once contained it and was misread as a trust failure.
+  if (/certificate|(?<![\w-])tls(?![\w-])|osstatus\s+-26276/i.test(value)) {
     return "Provider TLS trust verification failed.";
   }
   if (

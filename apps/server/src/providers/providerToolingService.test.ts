@@ -208,7 +208,8 @@ describe("provider tooling service", () => {
     ]);
     expect(claude.sections[0]?.entries[0]).toMatchObject({ name: "files" });
     expect(claude.accountDirectory).toBe(claudeHome);
-    expect(claude.runsAsItself).toBe(false);
+    // An account the person never changed runs as itself, the default.
+    expect(claude.runsAsItself).toBe(true);
     expect(readFileSync(`${log}.claude.dirs`, "utf8")).toBe(`${claudeHome}|`);
     expect(readFileSync(`${log}.claude.canary`, "utf8")).toBe("");
     expect(readFileSync(`${log}.claude.cwd`, "utf8").trim()).toContain("work");
