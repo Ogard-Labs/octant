@@ -154,6 +154,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     journal: persistence.journal,
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
+    projectExists: (projectId) => persistence.readProject(decodeProjectId(projectId)) !== undefined,
   });
   const codeApprovalStore = new CodeOperationApprovalStore({
     uuid: randomUUID,

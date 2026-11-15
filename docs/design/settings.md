@@ -47,8 +47,8 @@ group had grown to seven pages answering three different questions, Modes stood
 apart from the models its pages choose, and Advanced held two pages. General
 opens on Your identity (the profile), followed by Your instructions (a
 multi-line field with its count, limit, a likely-secret warning, and Save,
-read-only where the window cannot change it) and Orchestration (designed, not
-built: [Octant instructions](octant-instructions.md#settings)),
+read-only where the window cannot change it) and Orchestration, the same field
+for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
 and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
