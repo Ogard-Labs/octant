@@ -242,6 +242,23 @@ describe("web search keys", () => {
     expect(JSON.stringify(events)).not.toContain("brave-secret");
   });
 
+  it("records nothing when a list with a keyed vendor is saved again unchanged", async () => {
+    const { keys } = memoryKeys();
+    const { service, journal } = openHarness({ value: undefined }, { keys });
+    const settings = { policy: "any" as const, backends: [braveEntry] };
+    await service.set({ settings }, "local-window");
+    const credentialRef = service.read().settings.backends[0]?.credentialRef;
+    await service.set({ settings }, "local-window");
+    expect(service.read().settings.backends[0]?.credentialRef).toBe(credentialRef);
+    expect(
+      journal.replayAggregateType({
+        aggregateType: "web-search-settings",
+        afterSequence: 0,
+        limit: 10,
+      }),
+    ).toHaveLength(1);
+  });
+
   it("refuses a key from a device another person introduced, for an unsaved entry, and for SearXNG", async () => {
     const { keys, stored } = memoryKeys();
     const { service } = openHarness({ value: "https://search.example/" }, { keys });

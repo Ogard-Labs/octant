@@ -18,7 +18,7 @@ import {
   type WebSearchBackendEntry,
   type WebSearchBackendState,
   type WebSearchCallRouted,
-  type WebSearchSettings,
+  WebSearchSettings,
   type WebSearchSettingsView,
 } from "@octant/contracts";
 import {
@@ -57,6 +57,13 @@ const decodeAggregateIdOption = Schema.decodeUnknownOption(AggregateId);
 const decodeToolCallIdOption = Schema.decodeUnknownOption(
   Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
 );
+
+/**
+ * Field by field, not by serialized text: the saved list comes back from the
+ * projection in the schema's key order, and a rebuilt entry carries its
+ * credential reference last, so equal lists serialize differently.
+ */
+const sameWebSearchSettings = Schema.equivalence(WebSearchSettings);
 
 /** The id the entry migrated from Chat's SearXNG address keeps once saved. */
 export const MIGRATED_SEARXNG_ENTRY_ID = decodeWebSearchBackendId(
@@ -322,7 +329,7 @@ export class WebSearchSettingsService {
         staleKeys.push(entry.credentialRef);
       }
     }
-    if (previous.source === "saved" && JSON.stringify(previous.settings) === JSON.stringify(next)) {
+    if (previous.source === "saved" && sameWebSearchSettings(previous.settings, next)) {
       return { kind: "saved", view: await this.view() };
     }
     const changedAt = decodeTimestamp(this.#clock());
