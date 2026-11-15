@@ -10,7 +10,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
+import { readProcessIdentity } from "../process/nodeOwnedProcessReceipt";
+import { stopWindowsProcessTree, windowsSystemProgram } from "../process/windowsProcessTree";
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessShell } from "./nativeHarnessShell";
 import {
@@ -25,6 +28,34 @@ afterEach(() => {
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
+
+function running_(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every shell and ping with its parent, so a failed run shows what survived and under whom. */
+function windowsProcessList(): string {
+  try {
+    return execFileSync(
+      windowsSystemProgram("WindowsPowerShell\\v1.0\\powershell.exe"),
+      [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'powershell|pwsh|ping|cmd' } | ForEach-Object { \"$($_.ProcessId) parent=$($_.ParentProcessId) $($_.Name) $($_.CreationDate)\" }",
+      ],
+      { encoding: "utf8", windowsHide: true },
+    );
+  } catch (error) {
+    return `process list failed: ${String(error)}`;
+  }
+}
 
 function fixture(windowsShell: "powershell" | "cmd" = "powershell") {
   const root = mkdtempSync(join(tmpdir(), "octant-windows-harness-"));
@@ -129,16 +160,40 @@ describe("the harness shell at Full access on a Windows host", () => {
         timeout: 30_000,
       });
       const childPid = Number(readFileSync(join(checkout, "child.pid"), "utf8").trim());
-      // The restart: a fresh port over the same receipts, as the next start builds.
-      await createWindowsFullAccessShellPort({
-        shell,
-        scriptDirectory,
-        receiptDirectory,
-      }).reconcile();
-      const ended = await running;
-      expect(ended.status).not.toBe("timed-out");
-      expect(() => process.kill(childPid, 0)).toThrow();
-      expect(readdirSync(receiptDirectory)).toEqual([]);
+      const receiptName = readdirSync(receiptDirectory)[0] ?? "";
+      const receipt = JSON.parse(readFileSync(join(receiptDirectory, receiptName), "utf8")) as {
+        readonly pid: number;
+        readonly processIdentity: string;
+      };
+      const evidence: Record<string, unknown> = {
+        receiptPid: receipt.pid,
+        receiptIdentity: receipt.processIdentity,
+        identityBeforeRestart: await readProcessIdentity(receipt.pid),
+        childPid,
+      };
+      onTestFailed(() => {
+        console.log(JSON.stringify(evidence));
+        console.log(windowsProcessList());
+      });
+      try {
+        // The restart: a fresh port over the same receipts, as the next start builds.
+        await createWindowsFullAccessShellPort({
+          shell,
+          scriptDirectory,
+          receiptDirectory,
+        }).reconcile();
+        evidence.identityAfterRestart = await readProcessIdentity(receipt.pid);
+        evidence.receiptsAfterRestart = readdirSync(receiptDirectory);
+        await vi.waitFor(() => expect(running_(childPid)).toBe(false), { timeout: 20_000 });
+        expect(running_(receipt.pid)).toBe(false);
+        expect(readdirSync(receiptDirectory)).toEqual([]);
+        const ended = await running;
+        expect(ended.status).not.toBe("timed-out");
+      } finally {
+        // Whatever the outcome, nothing of the fixture outlives the test.
+        await stopWindowsProcessTree(receipt.pid);
+        await stopWindowsProcessTree(childPid);
+      }
     },
     120_000,
   );
