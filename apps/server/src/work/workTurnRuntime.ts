@@ -422,6 +422,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           onApprovalReviewed: showShieldReview,
         },
       });
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.providerSessionId,
+        providerInstanceId: input.command.authority.providerInstanceId,
+        takesSteeredResults: true,
+      });
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if (!reachedTerminalEvent) {

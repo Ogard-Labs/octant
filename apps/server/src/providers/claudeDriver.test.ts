@@ -146,6 +146,7 @@ class FakeQuery implements ClaudeQueryPort {
   readonly compactionRequests = vi.fn(() => Effect.void);
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
+  readonly stopTask = vi.fn((_taskId: string) => Effect.succeed("requested" as const));
   readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -1150,6 +1151,70 @@ describe("Claude execution policy", () => {
 
     await acquired.close();
     wallClock.mockRestore();
+  });
+
+  it("stops one running subagent by its runtime task and leaves the turn running", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    const children: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "child-agent-activity") children.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Delegate", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      await query.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent-use",
+            toolName: "Agent",
+            input: { description: "Read the notes" },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(children.length).toBeGreaterThan(0));
+      const child = children[0];
+      if (child?.kind !== "child-agent-activity") throw new Error("Expected a subagent");
+      const stopChild = acquired.connection.stopChildAgent;
+      if (stopChild === undefined) throw new Error("Expected a single-child stop");
+      // Not started as a runtime task yet: nothing to stop.
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("not-found");
+      await query.emit({
+        kind: "task",
+        sessionId: "sdk-session-1",
+        subtype: "task_started",
+        taskId: "sdk-runtime-task",
+        toolUseId: "sdk-agent-use",
+        description: "Read the notes",
+      });
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("stopped");
+      expect(query.stopTask).toHaveBeenCalledWith("sdk-runtime-task");
+      expect(query.interrupt).not.toHaveBeenCalled();
+      await expect(
+        Effect.runPromise(stopChild({ sessionId, childAgentId: "another-child" })),
+      ).resolves.toBe("not-found");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
   });
 
   it("tombstones an unmatched pre-tool grant when its turn completes", async () => {

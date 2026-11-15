@@ -109,6 +109,19 @@ export class OpenCodeChildSessions {
     return this.#child(source, status);
   }
 
+  /**
+   * Whether `child` is a subagent session of the session `rootSource` that
+   * has not reported finishing. A stop names a child by its session id, and
+   * aborting a session that belongs to another root would stop work this
+   * session never started.
+   */
+  runsUnder(child: string, rootSource: string): boolean {
+    const owner = this.#owners.get(child);
+    if (owner === undefined || owner.root !== rootSource) return false;
+    const status = this.#statuses.get(child);
+    return status !== "completed" && status !== "failed";
+  }
+
   /** Forgets the children of a session that ended. */
   forget(rootSource: string): void {
     for (const [child, owner] of this.#owners) {

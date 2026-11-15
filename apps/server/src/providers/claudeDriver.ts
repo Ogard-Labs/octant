@@ -1757,6 +1757,7 @@ function makeConnection(
       requestIds: new Map(),
       taskIds: new Map(),
       todoTaskIds: new Map(),
+      subagentTaskIds: new Map(),
       toolStates: new Map(),
       makeRequestId: factories.makeRequestId,
       makeTaskId: factories.makeTaskId,
@@ -3009,6 +3010,29 @@ function makeConnection(
             if (state.compaction === pending) state.compaction = undefined;
           });
         });
+      },
+      stopChildAgent: ({ sessionId, childAgentId }) => {
+        const state = sessions.get(sessionId);
+        const context = state?.context;
+        if (state === undefined || state.terminal || state.released || context === undefined) {
+          return Effect.succeed("not-found" as const);
+        }
+        // The child id is Octant's id for the subagent's tool call; the
+        // runtime stops a task by its own id, recorded when the task started.
+        const taskId = context.subagentTaskIds.get(childAgentId);
+        const task = taskId === undefined ? undefined : context.taskIds.get(taskId);
+        if (
+          taskId === undefined ||
+          task === undefined ||
+          task.lifecycle === "completed" ||
+          task.lifecycle === "failed"
+        ) {
+          return Effect.succeed("not-found" as const);
+        }
+        return state.query.stopTask(taskId).pipe(
+          Effect.map((outcome) => (outcome === "requested" ? "stopped" : "unsupported")),
+          Effect.mapError((providerFailure) => sanitizeFailure(providerFailure)),
+        );
       },
       interrupt: (sessionId) => {
         const state = sessions.get(sessionId);

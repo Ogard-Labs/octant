@@ -365,6 +365,8 @@ class ConformanceQuery implements ClaudeQueryPort {
       catch: () => ({ category: "provider-failed", message: "Claude fixture failed." }),
     });
 
+  readonly stopTask = () => Effect.succeed("unsupported" as const);
+
   readonly interrupt = () =>
     Effect.promise(async () => {
       await this.emit({

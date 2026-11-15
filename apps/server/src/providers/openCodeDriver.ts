@@ -2543,6 +2543,24 @@ function makeConnection(
             },
           ),
         ),
+      stopChildAgent: ({ sessionId, childAgentId }) =>
+        usableStateFor(sessionId).pipe(
+          Effect.flatMap(([source]) => {
+            const activeClient = client;
+            // OpenCode runs a subagent as its own session, so aborting that
+            // session stops the child and leaves the parent's turn running.
+            if (activeClient === undefined || !childSessions.runsUnder(childAgentId, source)) {
+              return Effect.succeed("not-found" as const);
+            }
+            return request(() => activeClient.abort(childAgentId)).pipe(
+              Effect.as("stopped" as const),
+            );
+          }),
+          Effect.catchIf(
+            (providerFailure) => providerFailure.category === "protocol",
+            () => Effect.succeed("not-found" as const),
+          ),
+        ),
       interrupt: (sessionId) =>
         usableStateFor(sessionId).pipe(
           Effect.flatMap(([source, state]) => {

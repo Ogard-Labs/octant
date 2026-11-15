@@ -734,6 +734,12 @@ export class ChatTurnRunner {
           ),
           Effect.catchAll(persistProviderFailure),
         );
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.attempt.providerSessionId,
+        providerInstanceId: input.providerInstanceId,
+        takesSteeredResults: true,
+      });
       const cleanup = { released: false };
       const killSession = connection.forceStop;
       if (killSession !== undefined) {

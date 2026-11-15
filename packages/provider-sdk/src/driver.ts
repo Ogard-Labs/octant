@@ -339,11 +339,30 @@ export interface ProviderConnection {
     input: ProviderSessionResume,
   ) => Effect.Effect<ProviderSessionHandle, ProviderFailure>;
   readonly send: (input: ProviderTurnInput) => Effect.Effect<void, ProviderFailure>;
-  /** Delivers a person-authored note to the current turn without starting another turn. */
+  /**
+   * Delivers a note to the current turn without starting another turn. The
+   * note is person-authored unless `source` says it is a finished subagent's
+   * result the host relays; a driver that frames the two differently reads
+   * it, and one that does not delivers both as text. `unsupported` when no
+   * turn is running or the note does not fit what the runtime takes.
+   */
   readonly steer?: (input: {
     readonly sessionId: ProviderSessionId;
     readonly message: string;
+    readonly source?: "person" | "agent-result";
   }) => Effect.Effect<"steered" | "unsupported", ProviderFailure>;
+  /**
+   * Stops one subagent the runtime itself started in this session, by the
+   * `childAgentId` its `child-agent-activity` events carry, and leaves the
+   * turn that started it running. Present only on a connection whose runtime
+   * can stop one child alone. `stopped` means the stop was asked for; the
+   * child is shown stopped only once the runtime reports a terminal child
+   * event. `not-found` when the session holds no running child of that id.
+   */
+  readonly stopChildAgent?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly childAgentId: string;
+  }) => Effect.Effect<"stopped" | "unsupported" | "not-found", ProviderFailure>;
   /**
    * Asks the runtime to compact a session it holds, outside any turn. Present
    * only on a connection whose mode's sessions the runtime can compact; a

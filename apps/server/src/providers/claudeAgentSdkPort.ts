@@ -492,6 +492,13 @@ export interface ClaudeQueryPort {
   readonly requestCompaction: () => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
   /**
+   * Stops one task the runtime started, such as a subagent, by the runtime's
+   * own task id, and leaves the turn that started it running. The runtime
+   * reports the stop with a task notification; this only asks for it.
+   * `unsupported` when the runtime offers no single-task stop.
+   */
+  readonly stopTask: (taskId: string) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -730,6 +737,8 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
     servers: Record<string, McpSdkServerConfigWithInstance>,
   ) => Promise<McpSetServersResult>;
   readonly interrupt: () => Promise<unknown>;
+  /** Older runtimes cannot stop one task without interrupting the turn. */
+  readonly stopTask?: (taskId: string) => Promise<void>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -1701,6 +1710,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     throw error;
                   }
                 }, "interruption"),
+              stopTask: (taskId) =>
+                request(async () => {
+                  const stop = query?.stopTask;
+                  if (stop === undefined) return "unsupported" as const;
+                  await stop.call(query, taskId);
+                  return "requested" as const;
+                }, "task stop"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>

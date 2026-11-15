@@ -44,4 +44,24 @@ describe("observed child reads", () => {
       observedChildren({ parentThreadId: root, mode: "chat", events: [...events, ...events] }),
     ).toEqual(chat);
   });
+
+  it("offers stop only for an unfinished child the live turn can stop", () => {
+    const finished = decodeProviderRuntimeEvent({
+      ...report("done", 2),
+      status: "completed",
+      summary: "Finished",
+    });
+    if (finished.kind !== "child-agent-activity") throw new Error("Invalid fixture");
+    const read = observedChildren({
+      parentThreadId: root,
+      mode: "work",
+      events: [report("working", 1), finished, report("elsewhere", 3)],
+      stoppable: (child) => child.childAgentId !== "elsewhere",
+    });
+    expect(read.observations.map((child) => [child.childAgentId, child.control])).toEqual([
+      ["working", "stop"],
+      ["done", "unavailable"],
+      ["elsewhere", "unavailable"],
+    ]);
+  });
 });

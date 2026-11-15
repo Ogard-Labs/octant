@@ -26,6 +26,20 @@ describe("OpenCodeChildSessions", () => {
     });
   });
 
+  it("lets a stop reach only a running child of the session that asks", () => {
+    const children = new OpenCodeChildSessions();
+    const isEitherRoot = (source: string) => source === "root" || source === "other-root";
+    children.route(created("child", "root"), "child", isEitherRoot);
+    children.route(created("grandchild", "child"), "grandchild", isEitherRoot);
+    children.route(created("foreign", "other-root"), "foreign", isEitherRoot);
+    expect(children.runsUnder("child", "root")).toBe(true);
+    expect(children.runsUnder("grandchild", "root")).toBe(true);
+    expect(children.runsUnder("foreign", "root")).toBe(false);
+    expect(children.runsUnder("root", "root")).toBe(false);
+    children.route(event("session.idle", { sessionID: "child" }), "child", isEitherRoot);
+    expect(children.runsUnder("child", "root")).toBe(false);
+  });
+
   it("does not claim a session whose parent is not one it started", () => {
     const children = new OpenCodeChildSessions();
     expect(

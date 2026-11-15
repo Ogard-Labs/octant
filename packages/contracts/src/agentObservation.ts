@@ -21,10 +21,45 @@ export const AgentObservedChild = Schema.Struct({
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
   mode: OctantMode,
-  control: Schema.Literal("unavailable"),
+  /**
+   * `stop` only while the thread's running turn holds a connection that can
+   * stop this one child without stopping the turn, and the child has not
+   * finished; everything else is read-only.
+   */
+  control: Schema.Literal("unavailable", "stop"),
 }).annotations(strict);
 export type AgentObservedChild = typeof AgentObservedChild.Type;
 export const decodeAgentObservedChild = Schema.decodeUnknownSync(AgentObservedChild);
+
+/** Asks the thread's running turn to stop one subagent its runtime started. */
+export const AgentObservedChildStopRequest = Schema.Struct({
+  parentThreadId: AgentRunParentThreadId,
+  observationId: AgentObservedChild.fields.observationId,
+}).annotations(strict);
+export type AgentObservedChildStopRequest = typeof AgentObservedChildStopRequest.Type;
+export const decodeAgentObservedChildStopRequest = Schema.decodeUnknownSync(
+  AgentObservedChildStopRequest,
+);
+
+/**
+ * How a stop request settled. `stop-requested` means the runtime was asked;
+ * the child reads as stopped only once the runtime reports it finished.
+ * `not-live` when the thread has no running turn or the child belongs to an
+ * earlier one, `unsupported` when the runtime cannot stop one child alone,
+ * `not-found` when no running child matches, and `unauthorized` when the
+ * window does not hold the thread.
+ */
+export const AgentObservedChildStopResponse = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("stop-requested") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal("not-found", "unsupported", "not-live", "unauthorized"),
+  }).annotations(strict),
+);
+export type AgentObservedChildStopResponse = typeof AgentObservedChildStopResponse.Type;
+export const decodeAgentObservedChildStopResponse = Schema.decodeUnknownSync(
+  AgentObservedChildStopResponse,
+);
 export const MAX_AGENT_RESULT_PACKETS = 16;
 export const MAX_AGENT_RESULT_SUMMARY_CHARACTERS = 4096;
 export const AgentRunResultPacket = Schema.Struct({

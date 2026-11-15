@@ -153,6 +153,12 @@ export interface ClaudeEventContext {
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
   /**
+   * The runtime's task id of each subagent, by the Octant child id its
+   * activity is reported under. Stopping one subagent names the runtime's
+   * task, while the person only ever sees the child id.
+   */
+  readonly subagentTaskIds: Map<string, string>;
+  /**
    * The task id of each checklist position. Claude restates the whole list on
    * every `TodoWrite`, and the task panel keeps a task's first-seen place, so
    * keying by position keeps the panel in Claude's latest order and wording
@@ -1089,6 +1095,12 @@ function mapTask(
     }
   }
   context.taskIds.set(message.taskId, next);
+  if (message.subtype === "task_started" && message.toolUseId !== undefined) {
+    const parent = context.toolStates.get(message.toolUseId);
+    if (parent?.toolName === CLAUDE_SUBAGENT_TOOL) {
+      context.subagentTaskIds.set(parent.toolCallId, message.taskId);
+    }
+  }
   return [
     event(context, {
       kind: "task-progress",

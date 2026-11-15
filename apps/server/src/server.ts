@@ -353,6 +353,7 @@ export function startOctantServer(
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       isProjectPolicyTargetAllowed,
+      liveTurns,
       nativeHarnessSessions,
       nativeHarnessApprovals,
       agentRunInteractions,

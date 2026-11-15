@@ -55,6 +55,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     requestIds: new Map(),
     taskIds: new Map(),
     todoTaskIds: new Map(),
+    subagentTaskIds: new Map(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
     makeTaskId: () => `task-${++task}`,

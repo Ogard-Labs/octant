@@ -28,6 +28,7 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type OctantMode,
   type ProjectId,
+  type ProviderChildObservation,
   type ProviderContextBlock,
   type UtcTimestamp,
   type WindowId,
@@ -575,6 +576,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
+    | "liveTurns"
     | "onAgentRunExecutionAccepted"
     | "toolEffectLedger"
     | "windowAuthorityStore"
@@ -610,6 +612,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
+    liveTurns,
     nativeHarnessApprovals,
     nativeHarnessSessions,
     onAgentRunExecutionAccepted,
@@ -1366,10 +1369,25 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       uuid: randomUUID,
     });
   };
+  // A child can be stopped only through the turn that is running now, by a
+  // runtime that stops one child alone, and only a child of that turn's own
+  // session.
+  const stoppableByLiveTurn =
+    (threadId: string) =>
+    (child: ProviderChildObservation): boolean => {
+      const live = liveTurns.connection(threadId);
+      return (
+        live?.connection.stopChildAgent !== undefined &&
+        String(live.providerInstanceId) === String(child.providerInstanceId) &&
+        String(live.sessionId) === String(child.sessionId)
+      );
+    };
   // The routes are built where they are dispatched, with the Canvas snapshot
   // the Canvas area provides.
   const agentRunRouteDependencies: Omit<AgentRunRouteDependencies, "snapshotCanvas"> = {
+    liveTurnConnection: (threadId) => liveTurns.connection(threadId),
     readObservations: ({ parentThreadId }) => {
+      const stoppable = stoppableByLiveTurn(String(parentThreadId));
       const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
       const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
       const code = persistence.readCodeThread(decodeCodeThreadId(String(parentThreadId)));
@@ -1380,6 +1398,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const view = persistence.readChatThreadView(chat.id);
         return observedChildren({
           parentThreadId,
+          stoppable,
           mode: "chat",
           states:
             view?.turns
@@ -1396,6 +1415,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const turns = workTurnProjection.listForThread(work.id);
         return observedChildren({
           parentThreadId,
+          stoppable,
           mode: "work",
           states: turns
             .slice(-64)
@@ -1410,6 +1430,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       );
       return observedChildren({
         parentThreadId,
+        stoppable,
         mode: "code",
         truncated: history.status !== "ok",
         events:

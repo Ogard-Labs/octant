@@ -17,6 +17,11 @@ export function observedChildren(input: {
   readonly states?: ReadonlyArray<ProviderChildObservationState>;
   readonly events?: ReadonlyArray<ProviderChildActivityEvent>;
   readonly truncated?: boolean;
+  /**
+   * Whether the thread's running turn can stop this child alone. Asked only
+   * for a child that has not finished; absent, every child is read-only.
+   */
+  readonly stoppable?: (child: ProviderChildObservation) => boolean;
 }): {
   readonly observations: ReadonlyArray<AgentObservedChild>;
   readonly observationsTruncated: boolean;
@@ -84,7 +89,13 @@ export function observedChildren(input: {
     observations.push({
       ...child,
       kind: "observed",
-      control: "unavailable",
+      control:
+        child.lifecycleStatus !== "completed" &&
+        child.lifecycleStatus !== "failed" &&
+        child.historyStatus !== "conflicted" &&
+        input.stoppable?.(child) === true
+          ? "stop"
+          : "unavailable",
       mode: input.mode,
       parentThreadId: input.parentThreadId,
       ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
