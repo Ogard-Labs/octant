@@ -1164,6 +1164,7 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({
             root: projectRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+            fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
           }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
@@ -1223,6 +1224,8 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({
             root: checkoutRoot,
             ...(extraFolders === undefined ? {} : { extraRoots: extraFolders }),
+            fullAccess: () =>
+              options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
           }),
           readsImages: () => options.readsImages?.(thread) === true,
           ...(shell === undefined ? {} : { shell }),
@@ -1470,7 +1473,10 @@ export function createNativeHarnessComposition(
           },
           ...(authority.filesystem && mode !== "chat"
             ? {
-                filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
+                filesystem: new NativeHarnessFileSystem({
+                  root: projectRoot,
+                  fullAccess: () => authority.executionPolicy === "full-access",
+                }),
                 readsImages: () => options.readsImages?.(target) === true,
               }
             : {}),

@@ -171,11 +171,31 @@ export function secretGuardMediationPolicy(input: {
 }
 
 /**
+ * What Octant's own file tools still refuse at Full access. Full access is
+ * full access for secret files too (maintainer decisions, 2026-10-31 and
+ * 2026-11-15): Claude Code's file tools read any path there, and Octant's own
+ * now read every other group, the person's added paths included. The
+ * protected provider-account credentials stay refused at every level, the one
+ * thing principle 6 lets Octant hold back from a provider's own app, as the
+ * account's sign-in stays out of the instruction files Octant reads for
+ * Claude at Full access: each provider's stored sign-in and Octant's managed
+ * account homes. A runtime's own sign-in is still left to that runtime
+ * through `ownAccountPaths`.
+ */
+const FULL_ACCESS_PROTECTED_RULES: ReadonlySet<ResolvedProtectedEntry["ruleId"]> = new Set([
+  "provider-sign-ins" satisfies BuiltInProtectedFilesId,
+]);
+
+/**
  * The refusal for a file tool that names a protected path, or undefined. The
  * OS rule refuses the read anyway; this answers first so the agent and the
  * person read which rule refused it and which channel to use, instead of a
  * bare "Operation not permitted". The path is judged in every form it
  * resolves to, so a link out of the Project to a key is caught.
+ *
+ * `fullAccess` is a Full access caller's own file tool: there the guard is
+ * soft and only the provider sign-ins stay refused (see
+ * {@link FULL_ACCESS_PROTECTED_RULES}).
  */
 export function secretGuardRefusal(
   path: string,
@@ -183,13 +203,18 @@ export function secretGuardRefusal(
     readonly ownAccountPaths?: ReadonlyArray<string>;
     readonly platform?: NodeJS.Platform;
     readonly homeDirectory?: string;
+    readonly fullAccess?: boolean;
   } = {},
 ): string | undefined {
   const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
   const unjudged = unjudgedPathRefusal(path, platform, homeDirectory);
   if (unjudged !== "judge") return unjudged;
-  const entries = secretGuardEntries({ platform, homeDirectory });
+  const listed = secretGuardEntries({ platform, homeDirectory });
+  const entries =
+    options.fullAccess === true
+      ? listed.filter((entry) => FULL_ACCESS_PROTECTED_RULES.has(entry.ruleId))
+      : listed;
   const entry = protectedEntryFor(
     pathForms(path, platform),
     withResolvedForms(entries, platform),

@@ -13632,12 +13632,12 @@ mechanisms are:
   exception to the wider one. Full access shows a one-time warning the first
   time a machine or a Project picks it.
 
-  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                               | Git and pull requests                                                                                      | Default for                                                               |
-  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                           | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
-  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                          | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
-  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                          | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
-  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by Octant's own tools and redaction only | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
+  | Level                                    | Who approves tool calls                                                                                                | Prompt-injection gate                                       | Sandbox                                                                                                                                         | Git and pull requests                                                                                      | Default for                                                               |
+  | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Guarded (Ask first)                      | The person, for anything with effects                                                                                  | On: fresh confirmation after reading outside content        | Octant's OS confinement plus the provider's                                                                                                     | Opens and updates pull requests after asking; merges only when the person asked                            | Ask first in the first-run picker; the fallback where no reviewer can run |
+  | Guarded with edits waived (Accept edits) | The person, except file edits inside the folder                                                                        | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded                                                                                                 | Accept edits in the first-run picker                                      |
+  | Reviewed (Auto)                          | A reviewer the person chooses: the provider's own or [Octant Shield](#octant-shield); the person for what it escalates | On                                                          | Octant's plus the provider's                                                                                                                    | As Guarded, with the reviewer standing in for the person's click                                           | Auto in the first-run picker, pre-selected                                |
+  | Full access                              | Nobody: no prompts, every approval answered allow                                                                      | Off: outside content is recorded and marked, never a prompt | None: no Octant sandbox and no provider sandbox; protected files are guarded by redaction, and Octant's own tools refuse only provider sign-ins | Opens, updates, merges, and force-pushes the pull requests and branches the person asked for in the thread | Full access in the first-run picker, never pre-selected                   |
   - **Full access means no sandbox and no prompts,** as in the providers'
     own apps (maintainer decision, 2026-10-31). Per runtime: Claude Code
     runs `permissionMode: "bypassPermissions"`; Codex runs
@@ -13837,12 +13837,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell
     command can read a protected file. The [secret guard](#secret-guard) is
-    soft there: Octant's own file tools (the Octant Harness's and the ACP
-    client's host-side file operations) still refuse a protected path with
-    the same plain message. Claude Code's own file tools are Claude's, not
-    Octant's: at Full access its gate allows any path, outside the Project's
-    folders and protected files included, as Claude Code does on its own
-    (maintainer decision, 2026-11-14). Below Full access it keeps every
+    soft there. Claude Code's own file tools are Claude's, not Octant's: at
+    Full access its gate allows any path, outside the Project's folders and
+    protected files included, as Claude Code does on its own (maintainer
+    decision, 2026-11-14). Octant's own file tools (the Octant Harness's and
+    the ACP client's host-side file operations) follow the same rule
+    (maintainer decision, 2026-11-15): at Full access they read and write a
+    protected path, and refuse only the protected provider-account
+    credentials, the Provider sign-ins group (each provider's stored sign-in
+    and Octant's managed account homes), with the same plain message, as the
+    account's sign-in stays out of the instruction files Octant reads for
+    Claude at every level. Below Full access they refuse every protected path.
+    Not built yet: a server Project's file tools, which match the list on the
+    server in a shell script, still refuse every protected path at Full
+    access. Below Full access it keeps every
     secret-path refusal, and a path outside the Project's folders asks
     through the gate (Reviewed's reviewer decides it) rather than being
     refused; Plan refuses it (maintainer decision, 2026-11-14;
@@ -13859,13 +13867,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and export. It never prompts and never blocks
     ([Octant Shield's Watcher](#octant-shield) does this tagging).
   - **The one-time warning** reads: agents can change any file and run any
-    command without asking, with no sandbox. Protected files, such as SSH and
-    cloud keys, are guarded by Octant's own tools and redaction only, and a
-    shell command can read them.
+    command without asking, with no sandbox, and can read protected files such
+    as SSH and cloud keys. Secret values are redacted from what Octant records.
   - **Every level keeps the hard lines** in
     [Overview and principles](#overview-and-principles): no telemetry and the
     provider telemetry guards, the journal of every tool call and level
-    change, the secret guard's refusal in Octant's own file tools and its redaction in tool
+    change, the secret guard's refusal of provider sign-ins in Octant's own
+    file tools and its redaction in tool
     output, transcripts, logs, the journal, and exports, spend
     ceilings, remote clients never exceeding the host, an agent never
     marking a thread Done, credentials reaching providers only through the
@@ -14109,8 +14117,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   and the Octant harness launch outside Octant's OS sandbox with the network
   open, and Octant answers every approval allow; an ACP agent also launches
   unconfined with no sandbox denials, because Full access means what it means
-  in the provider's own app; Octant's own file tools still refuse protected
-  paths. No call asks at Full access in Code, irreversible actions and
+  in the provider's own app; Octant's own file tools read protected paths
+  there and still refuse provider sign-ins. No call asks at Full access in Code, irreversible actions and
   publish-to-target included (`resolveToolCall`): the agent pushes, merges or
   publishes because the person asked in the thread, and the journal records
   the call. Outside content is recorded only: the thread keeps its taint for
@@ -17802,12 +17810,15 @@ cards; general Azure CLI credentials remain unavailable by design.
     every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
-  read and write) answer a protected path at every level, Full access
-  included, and Claude Code's file tools, through Octant's tool gate, at
-  every level below Full access (at Full access Claude reads and writes any
-  file, as it does on its own; maintainer decision, 2026-11-14), with the
-  group, the path, and the channel to use instead (`protectedFileRefusal`). The Octant Harness's
-  search across a folder skips protected files without opening them.
+  read and write) and Claude Code's file tools, through Octant's tool gate,
+  answer a protected path at every level below Full access, with the group,
+  the path, and the channel to use instead (`protectedFileRefusal`). At Full
+  access Claude reads and writes any file, as it does on its own (maintainer
+  decision, 2026-11-14), and Octant's own file tools read and write any
+  protected path except a provider sign-in, which they refuse the same way
+  at every level (`secretGuardRefusal` with `fullAccess`; maintainer
+  decision, 2026-11-15). The Octant Harness's search across a folder skips
+  the files it would refuse without opening them.
   Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
   where the runtime runs outside Octant's profile below Full access
   (approval-gated and auto-accept-edits), run in its unwrapped process, so a search rooted at or
@@ -17892,8 +17903,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   for an SSH remote. Not measured: a push over SSH or HTTPS to a real server,
   a real publish, and a container pull.
 - **Known gaps.** At Full access a shell command, or any program the agent
-  starts, can read a protected file: only Octant's own file tools and
-  redaction stand in the way, by decision. On Linux a protected file absent
+  starts, can read a protected file, and so can Octant's own file tools,
+  which refuse only provider sign-ins there: redaction stands in the way, by
+  decision. On Linux a protected file absent
   when a confined runtime starts is not covered, because Bubblewrap would
   have to create a placeholder in the person's home folder first; a file
   created mid-session is covered from the next launch. Below Full access
