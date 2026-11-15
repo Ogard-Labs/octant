@@ -1164,21 +1164,38 @@ profile allows and why. The wire mapping that follows from it:
   `sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" }`.
   macOS refuses Codex's own Seatbelt inside Octant's, so Codex is told the
   sandbox is outside it.
-- Approval-gated and auto-accept-edits send `approvalPolicy: "untrusted"`.
-  Under an external sandbox `on-request` runs every command without asking
-  (codex-rs `exec_policy.rs`, rust-v0.164.0); `untrusted` asks for each command
-  Codex does not know to be read-only and for every patch. On an
+- Auto (approval-gated with `autoApprove`) runs as Codex's own Auto:
+  `approvalPolicy: "on-request"` with `approvalsReviewer: "auto_review"`
+  (maintainer decision, 2026-11-14). Codex's own Auto pairs that with its
+  workspace-write sandbox; here the sandbox is Octant's profile, named
+  external. Under an external sandbox `on-request` runs a command without
+  asking unless Codex flags it as dangerous, and applies an in-root patch
+  without asking (codex-rs `exec_policy.rs`
+  `render_decision_for_unmatched_command_for_platform` and `safety.rs`
+  `assess_patch_safety`, rust-v0.169.0); whatever still prompts goes to the
+  reviewer. So a command runs unasked inside Octant's wall, as it runs
+  unasked inside Codex's own sandbox in Codex's own Auto. When delegation is
+  withdrawn (outside content, capability), the turn runs as Ask first.
+- Not built yet: a command that needs to leave Octant's wall asking for it,
+  as Claude's sandbox escape does. Codex cannot raise that ask under an
+  external sandbox: `exec_policy.rs` prompts for a `require_escalated`
+  command only under a restricted sandbox and allows it unasked under an
+  external one, its sandbox bypass removes only Codex's own sandbox, which is
+  not running, and `orchestrator.rs` never retries a denied command without
+  the sandbox under `on-request` (rust-v0.169.0, unchanged on the main
+  branch read 2026-11-15). Such a command fails at the wall. Carrying the ask
+  needs Codex to escalate under an external sandbox, or a launch where Codex
+  sees a restricted sandbox without starting its own Seatbelt.
+- Ask first (approval-gated without the reviewer) and Accept edits
+  (auto-accept-edits) send `approvalPolicy: "untrusted"`, the strictest mode
+  Codex has, matching the strictest mode elsewhere. Under an external sandbox
+  `on-request` would run every command without asking; `untrusted` asks for
+  each command Codex does not know to be read-only and for every patch. On an
   auto-accept-edits thread the driver answers each file-change request itself,
-  so the person is asked for commands and not for patches. Plan and Chat keep
-  `never`, so a write fails at the profile rather than at a prompt.
-- Ask first stays `untrusted`, the strictest mode Codex has, matching the
-  strictest mode elsewhere. Auto is decided to run `on-request` with Codex's
-  own reviewer, as Codex's own automatic mode does (maintainer decision,
-  2026-11-14); not built yet: Auto still sends `untrusted` with
-  `approvalsReviewer: "auto_review"`, because under the external sandbox
-  Octant names, `on-request` runs every command without asking and so would
-  never reach the reviewer. Building it needs a launch where `on-request`
-  still escalates to the reviewer.
+  so the person is asked for commands and not for patches; one that also
+  carries `autoApprove` still reads as Accept edits, keeps `untrusted`, and
+  hands its prompts to the reviewer. Plan and Chat keep `never`, so a write
+  fails at the profile rather than at a prompt.
 - Full access keeps `danger-full-access` and an unwrapped process.
 - A Plan session runs in Codex's own Plan mode: every `turn/start` carries the
   experimental `collaborationMode` with `mode: "plan"` and settings naming the
