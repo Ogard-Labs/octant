@@ -6679,7 +6679,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   account is missing, turned off, cannot take the model, or is the account
   that just hit its limit (so it is limited too), the host does not move the
   thread and records why, and the thread info panel shows it. It never starts
-  the next turn itself. Without the opt-in a limited thread waits on its
+  the next turn itself. Either move, the person's or the opt-in's, made while
+  the latest turn is parked on the old account's usage limit records that
+  turn as released on the provider change (`releasedStopId`): the turn keeps
+  its limit in history, and the message queue, the composer and the thread
+  view stop treating it as waiting, so the next message goes to the new
+  account. Without the opt-in a limited thread waits on its
   account as before, so there is no silent, unchosen or open-ended failover,
   rotation, or load-balancing between accounts (maintainer decision,
   2026-11-14).

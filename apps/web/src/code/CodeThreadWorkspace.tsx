@@ -28,6 +28,7 @@ import {
 import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
 import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
+  parkedStopReleased,
   decidesCodeEffectsByApproval,
   permissionModeOf,
   startedCodeThreadPickerGroups,
@@ -779,10 +780,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.turnStatus === "waiting" &&
     (props.controller.turnErrorCategory === "stale" ||
       props.controller.turnErrorCategory === "tools-changed");
+  // A turn parked on a usage limit stops holding the composer once the thread
+  // has moved off that account: the host records the released stop on the
+  // move, and the queue reads the same record.
+  const releasedStop = parkedStopReleased(
+    thread,
+    props.controller.latestProviderTurnOperationId === undefined
+      ? undefined
+      : String(props.controller.latestProviderTurnOperationId),
+  );
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
-    (props.controller.turnStatus === "waiting" && !parkedTurn);
+    (props.controller.turnStatus === "waiting" && !parkedTurn && !releasedStop);
   const queueFollowUp =
     busy ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||

@@ -218,3 +218,25 @@ export function withUsageLimitHandoffOutcome<T extends WithUsageLimitHandoff>(
   if (thread.usageLimitHandoff === undefined) return thread;
   return { ...thread, usageLimitHandoff: { ...thread.usageLimitHandoff, last } };
 }
+
+/**
+ * Whether the thread has moved off the account its latest turn stopped on for
+ * a usage limit. Such a stop parks the turn as waiting, and everything that
+ * waits on a parked turn (the queue, the composer, the board) would keep
+ * waiting on an account the thread no longer uses: the observed case was a
+ * hand-off that reported success while the next message stayed queued. The
+ * host records the released stop on the provider change, so every reader
+ * answers from the same journaled fact.
+ */
+export function parkedStopReleased(
+  thread: {
+    readonly providerHandoff?: { readonly releasedStopId?: string | undefined } | undefined;
+  },
+  stopId: string | undefined,
+): boolean {
+  return (
+    stopId !== undefined &&
+    thread.providerHandoff?.releasedStopId !== undefined &&
+    thread.providerHandoff.releasedStopId === stopId
+  );
+}

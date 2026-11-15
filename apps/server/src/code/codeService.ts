@@ -2576,6 +2576,12 @@ export class CodeService {
           throw this.#failure("invalid", "Code working directory is unavailable.");
         }
       }
+      // A provider change while the latest provider turn is parked on its
+      // account's usage limit releases that stop; see `parkedStopReleased`.
+      const releasedStopId =
+        command.kind === "change-code-thread-provider"
+          ? this.#limitParkedStopId(current.id)
+          : undefined;
       if (command.kind === "change-code-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,
@@ -2772,6 +2778,7 @@ export class CodeService {
                                     nextProviderInstanceId: command.providerInstanceId,
                                     nextModelId: command.modelId,
                                     changedAt: updatedAt,
+                                    ...(releasedStopId === undefined ? {} : { releasedStopId }),
                                   },
                                 }),
                             version: command.expectedVersion + 1,
@@ -4337,6 +4344,19 @@ export class CodeService {
         payload,
       })),
     });
+  }
+
+  /** The thread's latest provider turn, when it is parked on a usage limit. */
+  #limitParkedStopId(threadId: CodeThreadId): string | undefined {
+    const providerTurn = this.#persistence
+      .readCodeRuntimeWorks(threadId)
+      .filter(({ work }) => work.kind === "provider-turn")
+      .at(-1);
+    if (providerTurn === undefined || providerTurn.work.state !== "waiting") return undefined;
+    const stopped = this.#latestProviderTurnState(providerTurn.work.id);
+    return stopped?.state === "waiting" && stopped.failure?.usageLimit !== undefined
+      ? String(providerTurn.work.id)
+      : undefined;
   }
 
   /**

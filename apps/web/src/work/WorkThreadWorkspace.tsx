@@ -46,6 +46,7 @@ import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/Perm
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
+  parkedStopReleased,
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
@@ -983,9 +984,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     client: props.messageQueueClient,
   });
-  const latestStatus = turns.at(-1)?.status;
+  const latestTurn = turns.at(-1);
+  const latestStatus = latestTurn?.status;
+  // A turn parked on a usage limit stops holding the thread once it has moved
+  // off that account: the host records the released stop on the move, and the
+  // queue reads the same record.
+  const latestStopReleased =
+    thread !== undefined &&
+    latestTurn !== undefined &&
+    parkedStopReleased(thread, String(latestTurn.turnId));
   const turnRunning =
-    latestStatus === "accepted" || latestStatus === "running" || latestStatus === "waiting";
+    latestStatus === "accepted" ||
+    latestStatus === "running" ||
+    (latestStatus === "waiting" && !latestStopReleased);
   // A rewind or fork acts on settled turns only, so either waits while any
   // turn of the thread is still going.
   const anyTurnActive = turns.some(

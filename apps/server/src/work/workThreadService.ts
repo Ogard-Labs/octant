@@ -1243,6 +1243,16 @@ export class WorkThreadService {
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
+      // A provider change while the latest turn is parked on its account's
+      // usage limit releases that stop; see `parkedStopReleased`.
+      const limitParked =
+        command.kind === "change-work-thread-provider"
+          ? this.#turnProjection.listForThread(current.id).at(-1)
+          : undefined;
+      const releasedStopId =
+        limitParked?.status === "waiting" && limitParked.failure?.usageLimit !== undefined
+          ? String(limitParked.turnId)
+          : undefined;
       if (command.kind === "change-work-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,
@@ -1405,6 +1415,7 @@ export class WorkThreadService {
                                 nextProviderInstanceId: command.providerInstanceId,
                                 nextModelId: command.modelId,
                                 changedAt: updatedAt,
+                                ...(releasedStopId === undefined ? {} : { releasedStopId }),
                               },
                             }),
                         version: command.expectedVersion + 1,

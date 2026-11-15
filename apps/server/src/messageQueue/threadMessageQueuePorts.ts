@@ -15,7 +15,7 @@ import {
   type WorkTurnLookupResult,
   type WorkTurnState,
 } from "@octant/contracts";
-import { activeChatTurns } from "@octant/domain";
+import { activeChatTurns, parkedStopReleased } from "@octant/domain";
 import type { ChatService, ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeRouteService } from "../codeRoutes";
 import type { Journal } from "../persistence/journal";
@@ -93,6 +93,15 @@ function tailOf(id: string, status: string): ThreadMessageQueueTail {
 }
 
 /**
+ * A turn parked on its account's usage limit that the thread has since moved
+ * off: it no longer holds the thread, and reads as the provider's ordinary
+ * refusal it was, so the queue goes on as it does after one ordinary failure.
+ */
+function releasedTail(id: string): ThreadMessageQueueTail {
+  return { id, status: "failed", ordinaryFailure: true };
+}
+
+/**
  * The queue passes one ordinary failure by itself, so the boundary is the
  * mode's own word: only an outcome of exactly `failed` qualifies. `interrupted`
  * covers a person's stop and a turn a restart cut off, `ambiguous` an end the
@@ -164,7 +173,13 @@ function readFacts(
         workingDirectory: thread.workingDirectory,
         access: thread.access,
       },
-      ...(turn === undefined ? {} : { tail: tailOf(String(turn.turnId), workOutcome(turn)) }),
+      ...(turn === undefined
+        ? {}
+        : {
+            tail: parkedStopReleased(thread, String(turn.turnId))
+              ? releasedTail(String(turn.turnId))
+              : tailOf(String(turn.turnId), workOutcome(turn)),
+          }),
       markedDone: thread.completionConfirmed === true,
     };
   }
@@ -192,7 +207,13 @@ function readFacts(
       ownershipReceiptId:
         checkout?.kind === "managed-worktree" ? checkout.ownershipReceiptId : undefined,
     },
-    ...(latest === undefined ? {} : { tail: tailOf(String(latest.id), latest.state) }),
+    ...(latest === undefined
+      ? {}
+      : {
+          tail: parkedStopReleased(thread, String(latest.id))
+            ? releasedTail(String(latest.id))
+            : tailOf(String(latest.id), latest.state),
+        }),
     checkoutAvailable: checkout?.availability === "available",
   };
 }
@@ -277,16 +298,20 @@ export function createThreadMessageQueuePort(
     }
     if (scope.mode === "work") {
       const id = decodeWorkThreadId(scope.threadId);
-      if (deps.work.readThread(id) === undefined) return { status: "unknown" };
+      const workThread = deps.work.readThread(id);
+      if (workThread === undefined) return { status: "unknown" };
       const turn = deps.work
         .listTurns(id)
         .find((candidate) => String(candidate.requestId) === String(messageId));
       if (turn === undefined) return { status: "not-admitted" };
+      if (parkedStopReleased(workThread, String(turn.turnId)))
+        return { status: "failed", ordinaryFailure: true };
       return settledAs(workOutcome(turn));
     }
     const id = decodeCodeThreadId(scope.threadId);
     const operationId = codeOperationId ?? messageId;
-    if (deps.persistence.readCodeThread(id) === undefined) return { status: "unknown" };
+    const codeThread = deps.persistence.readCodeThread(id);
+    if (codeThread === undefined) return { status: "unknown" };
     const frames = deps.journal
       .replayAggregate({
         aggregateType: "code-operation",
@@ -316,6 +341,8 @@ export function createThreadMessageQueuePort(
     const work = deps.persistence
       .readCodeRuntimeWorks(id)
       .find(({ work }) => String(work.id) === String(operationId))?.work;
+    if (work !== undefined && parkedStopReleased(codeThread, String(work.id)))
+      return { status: "failed", ordinaryFailure: true };
     if (work !== undefined) return settledAs(work.state);
     if (result?.kind === "operation-result") {
       if (result.result.kind === "operation-failed") return { status: "failed" };

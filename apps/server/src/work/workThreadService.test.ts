@@ -3369,6 +3369,21 @@ describe("moving a Work thread to another account", () => {
     });
   });
 
+  it("releases a turn parked on the old account's usage limit when the person moves the thread", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()], turns: [limitedTurn()] }));
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "move-work-thread-account",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: personal,
+    });
+
+    expect(result).toMatchObject({
+      thread: { providerHandoff: { releasedStopId: "72000000-0000-4000-8000-0000000000e2" } },
+    });
+  });
+
   it("refuses a move from an agent, from a routine, and while a turn runs", async () => {
     const agent = {
       kind: "agent" as const,
@@ -3420,6 +3435,8 @@ describe("moving a Work thread to another account", () => {
       providerHandoff: {
         previousProviderInstanceId: ids.provider,
         nextProviderInstanceId: personal,
+        // The parked turn no longer holds the thread; its limit stays in history.
+        releasedStopId: "72000000-0000-4000-8000-0000000000e2",
       },
       usageLimitHandoff: {
         providerInstanceId: personal,
