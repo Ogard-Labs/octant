@@ -26,8 +26,11 @@ marks, and its journal as provider-native research. Not built: a generic ACP age
 switch off; each built-in
 search's count and price in the turn's usage and cost (the count is journaled
 as research events; neither stream reports a price); replaying a built-in
-search's result blocks in the turn's later requests; and a per-entry processing
-region (no kind takes one through its API; Linkup's EU-pinned host is the
+search's result blocks in the turn's later requests; a search status that
+tells a tainted thread with no eligible backend why it has no search (the tool
+is left out, with no status saying so); the web composer reading the data
+policy for the provider-native route (the host refuses the turn with the
+reason); and a per-entry processing region (no kind takes one through its API; Linkup's EU-pinned host is the
 entry's address). Not yet run: the acceptance's live search on each of the two
 origins, which needs a maintainer's keys.
 
@@ -256,7 +259,7 @@ first one, at the cost of one prompt cache miss in such a turn. A request
 that withholds it leaves the built-in tool out and offers `web-search` when an eligible backend exists, where the
 tool-call policy can refuse a query that looks like it carries data
 ([Search queries on a tainted thread](search-query-taint.md)). With no eligible
-backend, a tainted thread has no search, and the turn's search status says so.
+backend, a tainted thread has no search; a status saying so is not built yet.
 At Full access the provider's own search stays offered and the mark is only
 recorded, as the tainted-query rule does there. Rationale: Octant sees a
 built-in query only after the provider has sent it, so the refusal the
