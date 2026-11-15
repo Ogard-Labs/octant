@@ -13851,9 +13851,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     OpenCode's own file tools are held to the same narrowing: at Full access
     its read and list refusals, on 1.x and 2.x, name only the Provider
     sign-ins group ([detail](design/provider-runtimes.md#key-providers)).
-    Not built yet: a server Project's file tools, which match the list on the
-    server in a shell script, still refuse every protected path at Full
-    access. Below Full access it keeps every
+    A server Project's file tools follow it too: the list they match on the
+    server in a shell script, and again on this host, names only that group
+    at Full access ([detail](design/server-projects.md#threads)). Below Full
+    access it keeps every
     secret-path refusal, and a path outside the Project's folders asks
     through the gate (Reviewed's reviewer decides it) rather than being
     refused; Plan refuses it (maintainer decision, 2026-11-14;

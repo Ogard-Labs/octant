@@ -9,7 +9,7 @@
  * later launch, which is why it is held here once rather than threaded through
  * each launcher's options.
  */
-import type { BuiltInProtectedFilesId } from "@octant/contracts/protected-files";
+import { BuiltInProtectedFilesId } from "@octant/contracts/protected-files";
 import {
   NO_PROTECTED_FILES_CHANGES,
   isSameOrInside,
@@ -60,21 +60,41 @@ export function currentProtectedFilesChoice(): ProtectedFilesChoice {
   return state.choice;
 }
 
-let serverPattern:
-  | {
-      readonly choice: ProtectedFilesChoice;
-      readonly text: string;
-      readonly expression: RegExp;
-    }
-  | undefined;
+interface ServerPattern {
+  readonly choice: ProtectedFilesChoice;
+  readonly text: string;
+  readonly expression: RegExp;
+}
+
+let serverPattern: ServerPattern | undefined;
+let fullAccessServerPattern: ServerPattern | undefined;
+
+/**
+ * The person's list narrowed to what Octant's file tools still refuse at
+ * Full access: every group but {@link FULL_ACCESS_PROTECTED_RULES} counts as
+ * removed and no added path counts, as {@link protectedAtLevel} narrows the
+ * list locally. A group the person removed stays removed.
+ */
+function fullAccessChoice(choice: ProtectedFilesChoice): ProtectedFilesChoice {
+  return {
+    added: [],
+    removed: BuiltInProtectedFilesId.literals.filter(
+      (id) => choice.removed.includes(id) || !FULL_ACCESS_PROTECTED_RULES.has(id),
+    ),
+  };
+}
 
 /** One search reads thousands of paths, so the list is built once per change to it. */
-function serverPatternInForce() {
-  if (serverPattern?.choice !== state.choice) {
-    const text = serverProtectedPathPattern(state.choice);
-    serverPattern = { choice: state.choice, text, expression: new RegExp(text, "imu") };
-  }
-  return serverPattern;
+function serverPatternInForce(fullAccess: boolean): ServerPattern {
+  const cached = fullAccess ? fullAccessServerPattern : serverPattern;
+  if (cached?.choice === state.choice) return cached;
+  const text = serverProtectedPathPattern(
+    fullAccess ? fullAccessChoice(state.choice) : state.choice,
+  );
+  const built = { choice: state.choice, text, expression: new RegExp(text, "imu") };
+  if (fullAccess) fullAccessServerPattern = built;
+  else serverPattern = built;
+  return built;
 }
 
 /** Exact host setup passed only to its owned mediation preparation worker. */
@@ -82,18 +102,22 @@ export function secretGuardConfiguration(): Readonly<SecretGuardState> {
   return state;
 }
 
-/** The list in force, as the expression a person's server is asked to refuse by. */
-export function currentServerProtectedPattern(): string {
-  return serverPatternInForce().text;
+/**
+ * The list in force, as the expression a person's server is asked to refuse
+ * by. `fullAccess` is a Full access caller's own file tool, which refuses
+ * only the provider sign-ins there, as Octant's file tools do locally.
+ */
+export function currentServerProtectedPattern(fullAccess = false): string {
+  return serverPatternInForce(fullAccess).text;
 }
 
 /**
- * Whether a path on a person's server is one the list protects. It never
- * reads this host's disk or home, so a server path cannot be judged by what
- * happens to sit at that path here.
+ * Whether a path on a person's server is one the list protects, for a caller
+ * at Full access or below it. It never reads this host's disk or home, so a
+ * server path cannot be judged by what happens to sit at that path here.
  */
-export function isProtectedPathOnServer(path: string): boolean {
-  return serverPatternInForce().expression.test(path);
+export function isProtectedPathOnServer(path: string, fullAccess = false): boolean {
+  return serverPatternInForce(fullAccess).expression.test(path);
 }
 
 export function secretGuardPlatform(platform: NodeJS.Platform): SecretGuardPlatform {

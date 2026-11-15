@@ -48,16 +48,18 @@ const PROTECTED_ON_SERVER_MESSAGE =
   "This path is protected by the secret guard's list, here matched on the server, so Octant's file tools do not open it. Use the server's own credential setup instead. The list is in Settings › Permissions › Protected files.";
 
 /**
- * Refused at every level, by the secret guard's own list in force on this
- * host (the person's changes included), as its tools refuse a path locally.
+ * Refused by the secret guard's own list in force on this host (the person's
+ * changes included), as its tools refuse a path locally: below Full access
+ * the whole list, and for a Full access caller's file tool only the provider
+ * sign-ins.
  */
-export function serverCredentialPathRefusal(path: string): string | undefined {
-  return isProtectedPathOnServer(path) ? PROTECTED_ON_SERVER_MESSAGE : undefined;
+export function serverCredentialPathRefusal(path: string, fullAccess = false): string | undefined {
+  return isProtectedPathOnServer(path, fullAccess) ? PROTECTED_ON_SERVER_MESSAGE : undefined;
 }
 
-/** Puts the list in force in `$protected` for a script that reads it. */
-export function withProtectedPaths(script: string): string {
-  return `protected='${currentServerProtectedPattern().replaceAll("'", `'\\''`)}'\n${script}`;
+/** Puts the list in force at the caller's level in `$protected` for a script that reads it. */
+export function withProtectedPaths(script: string, fullAccess = false): string {
+  return `protected='${currentServerProtectedPattern(fullAccess).replaceAll("'", `'\\''`)}'\n${script}`;
 }
 
 /**
@@ -139,6 +141,12 @@ export interface ServerFileSystemOptions {
   readonly root: string;
   readonly maxFileBytes?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Whether the thread is at Full access now, read on every call: there the
+   * file tools refuse only provider sign-ins, as Octant's file tools do on
+   * this host. Without it every protected path is refused.
+   */
+  readonly fullAccess?: () => boolean;
 }
 
 type Resolved =
@@ -149,6 +157,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
   readonly #options: ServerFileSystemOptions;
   readonly #root: string;
   readonly #maxFileBytes: number;
+  readonly #fullAccess: () => boolean;
   readonly #readMarks = new Map<string, string>();
 
   constructor(options: ServerFileSystemOptions) {
@@ -156,6 +165,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     this.#options = options;
     this.#root = options.root.replace(/\/+$/, "");
     this.#maxFileBytes = options.maxFileBytes ?? 5 * 1024 * 1024;
+    this.#fullAccess = options.fullAccess ?? (() => false);
   }
 
   get root(): string {
@@ -177,7 +187,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly marksRead?: boolean;
   }): Promise<NativeHarnessReadResult> {
     const lexical = this.#lexical(input.path);
-    const guarded = guard(lexical);
+    const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
     const resolved = await this.#resolve(READ_SCRIPT, [
       lexical,
@@ -185,7 +195,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       String(this.#maxFileBytes),
     ]);
     if (resolved.kind === "refused") return resolved;
-    const guardedReal = guard(resolved.path);
+    const guardedReal = this.#guard(resolved.path);
     if (guardedReal !== undefined) return guardedReal;
     const kind = String.fromCharCode(resolved.rest[0] ?? 0);
     const payload = resolved.rest.subarray(1);
@@ -196,7 +206,8 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
         .split("\0")
         .filter(
           (entry) =>
-            entry.length > 1 && guard(posix.join(resolved.path, entry.slice(1))) === undefined,
+            entry.length > 1 &&
+            this.#guard(posix.join(resolved.path, entry.slice(1))) === undefined,
         )
         .map((entry) => ({
           name: entry.slice(1),
@@ -224,7 +235,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     readonly content: string;
   }): Promise<NativeHarnessWriteResult> {
     const lexical = this.#lexical(input.path);
-    const guarded = guard(lexical);
+    const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
     const target = await this.#call(RESOLVE_FOR_WRITE_SCRIPT, [lexical], undefined, 4_096);
     if (target.status !== "ran") return unreachable(target);
@@ -232,7 +243,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const kind = answer[0];
     const path = answer.slice(1);
     if (kind === "x" || !this.#inside(path)) return refusedWith("path-escapes-root");
-    const guardedReal = guard(path);
+    const guardedReal = this.#guard(path);
     if (guardedReal !== undefined) return guardedReal;
     if (kind === "o") return refusedWith("not-a-file");
     const put = await this.#call(PUT_SCRIPT, [path], Buffer.from(input.content, "utf8"), 1_024);
@@ -276,7 +287,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
 
   async #loadForEdit(path: string): Promise<NativeHarnessEditTarget | NativeHarnessFileRefused> {
     const lexical = this.#lexical(path);
-    const guarded = guard(lexical);
+    const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
     const resolved = await this.#resolve(READ_SCRIPT, [
       lexical,
@@ -284,7 +295,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       String(this.#maxFileBytes),
     ]);
     if (resolved.kind === "refused") return resolved;
-    const guardedReal = guard(resolved.path);
+    const guardedReal = this.#guard(resolved.path);
     if (guardedReal !== undefined) return guardedReal;
     const mark = this.#readMarks.get(resolved.path);
     if (mark === undefined) return refusedWith("not-read-first");
@@ -325,7 +336,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
     const paths: string[] = [];
     let truncated = resolved.truncated;
     for (const path of resolved.rest.toString("utf8").split("\0")) {
-      if (path === "" || !this.#inside(path) || guard(path) !== undefined) continue;
+      if (path === "" || !this.#inside(path) || this.#guard(path) !== undefined) continue;
       if (!matcher.test(posix.relative(base, path))) continue;
       if (paths.length >= MAX_GLOB_RESULTS) {
         truncated = true;
@@ -345,7 +356,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
   }): Promise<NativeHarnessGrepResult> {
     if (input.pattern.length > MAX_GREP_PATTERN_LENGTH) return refusedWith("pattern-invalid");
     const lexical = this.#lexical(input.path ?? ".");
-    const guarded = guard(lexical);
+    const guarded = this.#guard(lexical);
     if (guarded !== undefined) return guarded;
     const resolved = await this.#resolve(
       GREP_SCRIPT,
@@ -375,7 +386,7 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       if (colon === -1 || !Number.isInteger(line) || !this.#inside(path)) continue;
       // A search across a folder passes over a credential file without
       // returning it, as a local search does.
-      if (guard(path) !== undefined) continue;
+      if (this.#guard(path) !== undefined) continue;
       files.add(path);
       const found = rest.slice(colon + 1);
       const shown =
@@ -444,13 +455,20 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
       });
     }
     return this.#options.connection.run(server, {
-      script: withProtectedPaths(script),
+      script: withProtectedPaths(script, this.#fullAccess()),
       args,
       ...(stdin === undefined ? {} : { stdin }),
       timeoutMs: CALL_TIMEOUT_MS,
       maxOutputBytes,
       ...(this.#options.signal === undefined ? {} : { signal: this.#options.signal }),
     });
+  }
+
+  #guard(path: string): NativeHarnessFileRefused | undefined {
+    const message = serverCredentialPathRefusal(path, this.#fullAccess());
+    return message === undefined
+      ? undefined
+      : { kind: "refused", reason: "protected-file", message };
   }
 
   #lexical(candidate: string): string {
@@ -471,11 +489,6 @@ export class ServerFileSystem implements NativeHarnessFileSystemPort {
 
 function digest(content: string): string {
   return createHash("sha256").update(content).digest("hex");
-}
-
-function guard(path: string): NativeHarnessFileRefused | undefined {
-  const message = serverCredentialPathRefusal(path);
-  return message === undefined ? undefined : { kind: "refused", reason: "protected-file", message };
 }
 
 function refusedWith(reason: NativeHarnessFileRefused["reason"]): NativeHarnessFileRefused {
