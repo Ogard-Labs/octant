@@ -7,7 +7,16 @@ import {
   decodeSetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
-import { decideHostMemoryLimits, type PrincipalKind } from "@octant/domain";
+import {
+  decodeSetWebSearchSettingsOutcome,
+  decodeWebSearchSettingsView,
+  type SetWebSearchSettingsRequest,
+} from "@octant/contracts/web-search";
+import {
+  decideHostMemoryLimits,
+  decideWebSearchSettings,
+  type PrincipalKind,
+} from "@octant/domain";
 import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { desktopCredentialStore } from "./hostDataMap";
 import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
@@ -771,5 +780,132 @@ describe("host control from a paired device", () => {
     );
     expect(purge).toHaveBeenCalledWith(expect.anything(), "remote-device", actor);
     expect(setWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("web search settings route", () => {
+  const path = "/api/host-control/web-search";
+  const settings = {
+    policy: "zdr-only",
+    backends: [
+      {
+        id: "00000000-0000-4000-8000-0000000000b1",
+        kind: "searxng",
+        address: "https://search.example/",
+        enabled: true,
+        statesZdr: true,
+        statesEuProcessing: false,
+      },
+    ],
+  } as const;
+
+  function webSearchSetup() {
+    const view = vi.fn(() => ({
+      settings,
+      source: "saved" as const,
+      states: [{ id: settings.backends[0].id, state: { kind: "ready" as const } }],
+    }));
+    const set = vi.fn((request: SetWebSearchSettingsRequest, principalKind: PrincipalKind) => {
+      const decision = decideWebSearchSettings({ principalKind, settings: request.settings });
+      return decision.kind === "allow"
+        ? ({ kind: "saved", view: view() } as const)
+        : ({ kind: "refused", code: decision.code, message: decision.message } as const);
+    });
+    return { view, set, ...setup({ webSearch: { view, set } as never }) };
+  }
+
+  async function asDevice(request: Request, admittedBy: "host-person" | "hub-roster") {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { createRemoteDevicePrincipal } = await import("./clientPrincipal");
+    const deviceId = "00000000-0000-4000-8000-00000000c201";
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "00000000-0000-4000-8000-00000000c202" as never,
+        deviceId: deviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-00000000c203" as never,
+        admittedBy,
+      }),
+      scopeId: decodeWindowId(deviceId),
+    });
+    return request;
+  }
+
+  it("reads and saves the backend list for a local window", async () => {
+    const { handler, set } = webSearchSetup();
+    const read = await handler(makeRequest(path, { method: "GET", capability }));
+    expect(read?.status).toBe(200);
+    expect(decodeWebSearchSettingsView(await read?.json()).settings).toEqual(settings);
+
+    const saved = await handler(makeRequest(path, { capability, body: { settings } }));
+    expect(saved?.status).toBe(200);
+    expect(decodeSetWebSearchSettingsOutcome(await saved?.json())).toMatchObject({
+      kind: "saved",
+    });
+    expect(set).toHaveBeenCalledWith({ settings }, "local-window");
+  });
+
+  it("refuses a missing capability and a malformed body without saving anything", async () => {
+    const { handler, set, view } = webSearchSetup();
+    expect((await handler(makeRequest(path, { method: "GET" })))?.status).toBe(401);
+    expect((await handler(makeRequest(path, { body: { settings } })))?.status).toBe(401);
+    const malformed = await handler(
+      makeRequest(path, { capability, body: { settings: { ...settings, policy: "anything" } } }),
+    );
+    expect(malformed?.status).toBe(400);
+    const keyInSettings = await handler(
+      makeRequest(path, {
+        capability,
+        body: { settings: { ...settings, backends: [{ ...settings.backends[0], key: "k" }] } },
+      }),
+    );
+    expect(keyInSettings?.status).toBe(400);
+    expect(set).not.toHaveBeenCalled();
+    expect(view).not.toHaveBeenCalled();
+  });
+
+  it("lets a device the host's own person paired read and change where queries go", async () => {
+    const { handler, set } = webSearchSetup();
+    const read = await handler(
+      await asDevice(
+        makeRequest(path, { method: "GET", origin: "http://127.0.0.1" }),
+        "host-person",
+      ),
+    );
+    expect(read?.status).toBe(200);
+    const saved = await handler(
+      await asDevice(
+        makeRequest(path, { body: { settings }, origin: "http://127.0.0.1" }),
+        "host-person",
+      ),
+    );
+    expect(saved?.status).toBe(200);
+    expect(set).toHaveBeenCalledWith({ settings }, "person-paired-device", expect.anything());
+  });
+
+  it("refuses a device another person introduced both the list and any change to it", async () => {
+    const { handler, view } = webSearchSetup();
+    const read = await handler(
+      await asDevice(
+        makeRequest(path, { method: "GET", origin: "http://127.0.0.1" }),
+        "hub-roster",
+      ),
+    );
+    expect(read?.status).toBe(403);
+    expect(view).not.toHaveBeenCalled();
+    const change = await handler(
+      await asDevice(
+        makeRequest(path, { body: { settings }, origin: "http://127.0.0.1" }),
+        "hub-roster",
+      ),
+    );
+    expect(change?.status).toBe(403);
+    expect(decodeSetWebSearchSettingsOutcome(await change?.json())).toMatchObject({
+      kind: "refused",
+      code: "unauthorized",
+    });
   });
 });

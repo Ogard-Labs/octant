@@ -261,6 +261,8 @@ import {
   BrowserStep,
   HOST_MEMORY_LIMITS_EVENT_NAME,
   HostMemoryLimitsChanged,
+  WEB_SEARCH_SETTINGS_EVENT_NAME,
+  WebSearchSettingsChanged,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -408,6 +410,7 @@ import {
   AgentTurnSentV1,
 } from "@octant/contracts/agent-access";
 import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
+import { WebSearchSettingsProjection } from "./webSearchSettingsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { UsageResumeProjection } from "./usageResumeProjection";
@@ -852,6 +855,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
     .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
+    .register(WEB_SEARCH_SETTINGS_EVENT_NAME, 1, WebSearchSettingsChanged)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
@@ -959,6 +963,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new AgentAccessProjection())
       .register(new ThreadRetentionProjection())
       .register(new HostMemoryLimitsProjection())
+      .register(new WebSearchSettingsProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection())
