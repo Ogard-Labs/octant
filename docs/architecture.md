@@ -14074,13 +14074,13 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   top to bottom, are Guarded (Ask first, Accept edits), Reviewed
   (Auto), and Full access; Plan is a read-only overlay:
 
-  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                              |
-  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------ |
-  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `untrusted` + external sandbox, `approvalsReviewer: "auto_review"` |
-  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                    |
-  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted       |
-  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                              |
-  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                     |
+  | Mode         | Stored posture                   | Level              | Claude Code                                             | Codex                                                               |
+  | ------------ | -------------------------------- | ------------------ | ------------------------------------------------------- | ------------------------------------------------------------------- |
+  | Auto         | `approval-gated` + `autoApprove` | Reviewed           | `permissionMode: "auto"`, its sandbox                   | `on-request` + external sandbox, `approvalsReviewer: "auto_review"` |
+  | Ask first    | `approval-gated`                 | Guarded            | `default`, its sandbox; Octant's gate decides each call | `untrusted` + external sandbox, reviewer `user`                     |
+  | Accept edits | `auto-accept-edits`              | Guarded            | `default`, its sandbox; in-root edits waived            | `untrusted` + external sandbox, in-root patch edits accepted        |
+  | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
+  | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
@@ -14671,10 +14671,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
   resident and starts under the profile in 130 to 260 ms. macOS refuses a
   Seatbelt profile inside another (`sandbox_apply: Operation not permitted`),
   so Codex's own sandbox cannot run inside Octant's. Each turn tells Codex the
-  sandbox is external (`externalSandbox`, network `restricted`), and both
-  prompting postures run `untrusted`, because under an external sandbox
-  `on-request` runs every command without asking (Auto running `on-request`
-  with Codex's reviewer is decided and not built yet; see
+  sandbox is external (`externalSandbox`, network `restricted`). Under an
+  external sandbox `on-request` runs every command Codex does not flag as
+  dangerous without asking, so Auto runs `on-request` with Codex's reviewer,
+  as Codex's own Auto does, and its commands run unasked inside Octant's
+  wall; Ask first and Accept edits run `untrusted` and keep asking. Codex
+  cannot ask to leave Octant's wall under an external sandbox, so a command
+  that needs to fails there (not built yet: carrying that ask; see
   [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Approving a command no
   longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
