@@ -213,6 +213,17 @@ export interface WorkspaceViewProps {
   };
   /** Called once the Chat pane has shown `revealChatTurn`; the jump is spent. */
   readonly onChatTurnRevealed?: () => void;
+  /**
+   * A Work turn or Code provider turn (by its operation) to bring into view
+   * once, from a search hit, in the pane that shows its thread.
+   */
+  readonly revealThreadTurn?: {
+    readonly mode: "work" | "code";
+    readonly threadId: string;
+    readonly turnId: string;
+  };
+  /** Called once the Work or Code pane has shown `revealThreadTurn`; the jump is spent. */
+  readonly onThreadTurnRevealed?: () => void;
   readonly codeController: CodeController;
   /**
    * One controller per open Code thread. Every Code surface reads the one for
@@ -1446,6 +1457,15 @@ function renderCodeTab(
       }
     >
       <CodeWorkspaceTab
+        {...(props.revealThreadTurn?.mode === "code" &&
+        props.revealThreadTurn.threadId === String(tab.threadId)
+          ? {
+              revealOperationId: props.revealThreadTurn.turnId,
+              ...(props.onThreadTurnRevealed === undefined
+                ? {}
+                : { onTurnRevealed: props.onThreadTurnRevealed }),
+            }
+          : {})}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -2106,6 +2126,15 @@ function renderNonCodeTab(
             >
               <WorkThreadWorkspace
                 projects={props.projects}
+                {...(props.revealThreadTurn?.mode === "work" &&
+                props.revealThreadTurn.threadId === String(tab.threadId)
+                  ? {
+                      revealTurnId: props.revealThreadTurn.turnId,
+                      ...(props.onThreadTurnRevealed === undefined
+                        ? {}
+                        : { onTurnRevealed: props.onThreadTurnRevealed }),
+                    }
+                  : {})}
                 {...(props.browserAutomationClient === undefined
                   ? {}
                   : { browserAutomationClient: props.browserAutomationClient })}

@@ -2228,9 +2228,11 @@ tool output among the threads each mode's sidebar and Archived group list.
 Every word must appear, and a quoted phrase must appear as written. Titles the
 current mode listed match at once; the host's hits follow, each naming its
 mode when the filter is All, and `Tool output` when a tool's text matched. A
-message or tool hit names the turn that holds it; a Chat hit opens the thread
-scrolled to that turn, and a Work or Code hit opens its thread, because those
-transcripts do not yet jump to a turn
+message or tool hit names the turn that holds it and opens the thread
+scrolled to that turn in every mode: Chat reads the page that ends with the
+turn, and Work and Code read earlier pages, one at a time, until it arrives.
+The jump happens once; a turn the thread no longer holds (an edit or rewind
+removed it) leaves the thread at its newest turns
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view

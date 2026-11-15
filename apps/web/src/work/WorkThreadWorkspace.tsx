@@ -482,6 +482,10 @@ export interface WorkThreadWorkspaceProps {
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** A turn to bring into view once, from a search hit. */
+  readonly revealTurnId?: string;
+  /** Called once `revealTurnId` is on screen, or the thread turns out not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -1450,6 +1454,33 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
   }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  // A search hit names the turn; the list keys its rows by request, and the
+  // turn's header may open its first reply's row, so the first row of the
+  // turn is the one to bring into view.
+  const revealTurnId = props.revealTurnId;
+  const onTurnRevealed = props.onTurnRevealed;
+  const revealKey = useMemo(
+    () =>
+      revealTurnId === undefined
+        ? undefined
+        : transcriptRows.find(
+            (row) =>
+              (row.kind === "message" || row.kind === "head" || row.kind === "tasks") &&
+              String(row.turn.turnId) === revealTurnId,
+          )?.key,
+    [revealTurnId, transcriptRows],
+  );
+  // A turn older than the loaded pages: read earlier pages, one at a time,
+  // until it arrives. A thread that holds no such turn (a rewind removed it)
+  // spends the jump rather than reading every page again on the next render.
+  useEffect(() => {
+    if (revealTurnId === undefined || revealKey !== undefined || !firstPageSettled) return;
+    if (earlierRow === "idle") {
+      void loadEarlier();
+      return;
+    }
+    if (earlierRow !== "loading") onTurnRevealed?.();
+  }, [earlierRow, firstPageSettled, loadEarlier, onTurnRevealed, revealKey, revealTurnId]);
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
@@ -2409,6 +2440,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             itemAt={workRowHappenedAt}
             itemKey={(row) => row.key}
             items={transcriptRows}
+            {...(revealKey === undefined ? {} : { revealKey })}
+            {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
             lead={
               <>
                 <ImportedTerminalHistory

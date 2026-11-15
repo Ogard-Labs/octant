@@ -1187,14 +1187,22 @@ function LaunchedShell(
   // the newest messages, or Jump to latest followed by Load earlier) does not
   // jump the reader back to it.
   const spendRevealChatTurn = useCallback(() => setRevealChatTurn(undefined), []);
+  // The same one-time jump for a Work turn or a Code provider turn.
+  const [revealThreadTurn, setRevealThreadTurn] = useState<
+    | { readonly mode: "work" | "code"; readonly threadId: string; readonly turnId: string }
+    | undefined
+  >(undefined);
+  const spendRevealThreadTurn = useCallback(() => setRevealThreadTurn(undefined), []);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
     setRevealChatTurn(undefined);
+    setRevealThreadTurn(undefined);
     setSearchOpen(true);
   }, []);
   const searchEveryThread = useCallback((query: string) => {
     setSearchQuery(query);
     setRevealChatTurn(undefined);
+    setRevealThreadTurn(undefined);
     setSearchOpen(true);
   }, []);
   const closeThreadSearch = useCallback(() => {
@@ -5536,6 +5544,7 @@ function LaunchedShell(
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
+      spendRevealThreadTurn,
       splitPane: controller.splitPane,
       startNewThreadDraft,
       toggleBottomPanel,
@@ -8156,6 +8165,7 @@ function LaunchedShell(
                       providerController={providerController}
                       providerReady={providerReady}
                       {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                      {...(revealThreadTurn === undefined ? {} : { revealThreadTurn })}
                       serverUrl={props.launch.serverUrl}
                       settings={controller.settings}
                       threadStatsSummary={threadStatsSummary}
@@ -8340,6 +8350,11 @@ function LaunchedShell(
               void controller.openChatThread(threadId, hit.title, hitProjectId);
               return;
             }
+            setRevealThreadTurn(
+              hit.turnId === undefined
+                ? undefined
+                : { mode: hit.mode, threadId: hit.threadId, turnId: hit.turnId },
+            );
             if (hit.mode === "work") {
               void controller.openWorkThread(
                 decodeWorkThreadId(hit.threadId),

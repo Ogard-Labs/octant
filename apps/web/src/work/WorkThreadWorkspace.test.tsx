@@ -1989,6 +1989,30 @@ describe("WorkThreadWorkspace", () => {
       );
     });
 
+    it("reads the page before when a search hit names an older turn, then spends the jump once it is shown", async () => {
+      const client = pagedClient();
+      const onTurnRevealed = vi.fn();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          onTurnRevealed={onTurnRevealed}
+          revealTurnId="turn-5"
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Long brief"
+          turnClient={client as never}
+        />,
+      );
+
+      await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+      expect(client.transcriptWindow).toHaveBeenLastCalledWith(
+        threadId,
+        { limit: 30, before: "request-20" },
+        expect.any(AbortSignal),
+      );
+      expect(screen.getAllByText("Prompt 5").length).toBeGreaterThan(0);
+    });
+
     it("says a page failed and loads it when asked again", async () => {
       let fail = true;
       const client = pagedClient({

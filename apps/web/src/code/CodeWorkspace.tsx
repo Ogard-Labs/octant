@@ -133,6 +133,9 @@ export interface CodeWorkspaceApprovals {
 }
 
 export interface CodeWorkspaceProps {
+  /** A provider turn to bring into view once, from a search hit. */
+  readonly revealOperationId?: string;
+  readonly onTurnRevealed?: () => void;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
@@ -234,6 +237,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeThreadWorkspace
         {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
+        {...(props.revealOperationId === undefined
+          ? {}
+          : { revealOperationId: props.revealOperationId })}
+        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined
           ? {}

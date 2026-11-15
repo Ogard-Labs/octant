@@ -199,6 +199,10 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 export interface CodeThreadWorkspaceProps {
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
+  /** A provider turn, by its operation, to bring into view once, from a search hit. */
+  readonly revealOperationId?: string;
+  /** Called once `revealOperationId` is on screen, or the thread turns out not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   /**
    * Set where a paired device shows the thread: it has no window on the host
    * to take dropped files with, and is not offered provider cloud sessions.
@@ -728,6 +732,46 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return { status: "accepted" };
     },
   );
+  // A search hit names the provider turn by its operation; the turn's first
+  // message (the person's prompt) is the row to bring into view.
+  const revealOperationId = props.revealOperationId;
+  const onTurnRevealed = props.onTurnRevealed;
+  const revealKey =
+    revealOperationId === undefined
+      ? undefined
+      : props.controller.conversation.find(
+          (message) =>
+            message.sourceThreadId === undefined &&
+            message.operationId !== undefined &&
+            String(message.operationId) === revealOperationId,
+        )?.id;
+  const earlierConversation = props.controller.earlierConversation;
+  const loadEarlierConversation = props.controller.loadEarlierConversation;
+  // A turn older than the loaded conversation: read earlier pages, one at a
+  // time, until it arrives. A thread that holds no such turn (a rewind removed
+  // it) spends the jump rather than reading every page again.
+  const conversationHistory = props.controller.conversationHistory;
+  useEffect(() => {
+    if (
+      revealOperationId === undefined ||
+      revealKey !== undefined ||
+      conversationHistory !== "loaded"
+    ) {
+      return;
+    }
+    if (earlierConversation === "idle") {
+      loadEarlierConversation();
+      return;
+    }
+    if (earlierConversation !== "loading") onTurnRevealed?.();
+  }, [
+    conversationHistory,
+    earlierConversation,
+    loadEarlierConversation,
+    onTurnRevealed,
+    revealKey,
+    revealOperationId,
+  ]);
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
@@ -1720,6 +1764,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               itemAt={messageHappenedAt}
               itemKey={(message) => message.id}
               items={messages}
+              {...(revealKey === undefined ? {} : { revealKey })}
+              {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
               key={String(props.threadId)}
               listClassName="code-thread-workspace__transcript thread-column"
               {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}

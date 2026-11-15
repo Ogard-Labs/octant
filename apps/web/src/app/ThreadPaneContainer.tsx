@@ -159,6 +159,7 @@ export interface ThreadPaneContainerProps {
     | "setUsageOpen"
     | "setWorkComposerSelection"
     | "spendRevealChatTurn"
+    | "spendRevealThreadTurn"
     | "splitPane"
     | "touchMemoryRevision"
     | "viewAllChatProjectThreads"
@@ -239,6 +240,11 @@ export interface ThreadPaneContainerProps {
   readonly providerController: ProviderController;
   readonly providerReady: boolean;
   readonly revealChatTurn?: { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId };
+  readonly revealThreadTurn?: {
+    readonly mode: "work" | "code";
+    readonly threadId: string;
+    readonly turnId: string;
+  };
   readonly serverUrl: string;
   readonly settings: NonNullable<ShellController["settings"]>;
   readonly tabActivation: ShellController["tabActivation"];
@@ -334,6 +340,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     providerController,
     providerReady,
     revealChatTurn,
+    revealThreadTurn,
     serverUrl,
     settings,
     tabActivation,
@@ -435,6 +442,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setUsageOpen,
     setWorkComposerSelection,
     spendRevealChatTurn,
+    spendRevealThreadTurn,
     splitPane,
     touchMemoryRevision,
     viewAllChatProjectThreads,
@@ -623,6 +631,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   chatReadCursorStore={chatReadCursorStore}
                   {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
                   onChatTurnRevealed={spendRevealChatTurn}
+                  {...(revealThreadTurn === undefined ? {} : { revealThreadTurn })}
+                  onThreadTurnRevealed={spendRevealThreadTurn}
                   {...(zen.enabled
                     ? {
                         onPinTerminal: (request: Parameters<typeof zen.pinTerminal>[0]) =>

@@ -36,6 +36,9 @@ export default function CodeWorkspaceTab(props: {
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly tab: CodeWorkspaceTab;
+  /** A provider turn to bring into view once, from a search hit. */
+  readonly revealOperationId?: string;
+  readonly onTurnRevealed?: () => void;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
@@ -147,6 +150,10 @@ export default function CodeWorkspaceTab(props: {
           })}
     >
       <CodeWorkspace
+        {...(props.revealOperationId === undefined
+          ? {}
+          : { revealOperationId: props.revealOperationId })}
+        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
