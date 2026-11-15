@@ -122,6 +122,14 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("permissions")?.label).toBe("Permissions");
     expect(ids("permissions")).toEqual([
+      "sandbox-restrictions",
+      "sandbox-policy-summary",
+      "sandbox-policy-folders",
+      "sandbox-policy-add-folder",
+      "sandbox-policy-blocked-actions",
+      "sandbox-policy-network",
+      "sandbox-policy-services",
+      "sandbox-policy-credentials",
       "protected-files",
       "protected-files-add",
       "public-links",
