@@ -94,7 +94,10 @@ export function createOctantInstructionsRouteHandler(
         return json(refusedOctantInstructions("malformed"), 400, origin);
       }
       const result = decodeOctantInstructionsResult(
-        dependencies.store.change(command, eventActorForPrincipal(principal)),
+        dependencies.store.change(command, {
+          actor: eventActorForPrincipal(principal),
+          actsAsHostPerson: actsAsPerson,
+        }),
       );
       const status =
         result.kind === "octant-instructions"

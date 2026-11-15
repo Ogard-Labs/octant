@@ -6,6 +6,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type CorrelationId,
+  type EventActor,
   type ProviderContextBlock,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
@@ -26,6 +27,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   OctantInstructionsStore,
   PERSON_INSTRUCTIONS_CONTEXT_KEY,
+  type OctantInstructionsAuthor,
   registerOctantInstructionsEvents,
 } from "./octantInstructionsStore";
 import { createOctantInstructionsRouteHandler } from "./octantInstructionsRoutes";
@@ -35,20 +37,28 @@ const now = "2026-11-14T12:00:00.000Z";
 const windowId = "00000000-0000-4000-8000-0000000000f0" as WindowId;
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const deviceId = "55000000-0000-4000-8000-000000000001";
-const person = decodeEventActor({
-  kind: "local-user",
-  actorId: "77777777-7777-4777-8777-777777777777",
+const asHostPerson = (actor: EventActor): OctantInstructionsAuthor => ({
+  actor,
+  actsAsHostPerson: true,
 });
-const agent = decodeEventActor({
-  kind: "agent",
-  actorId: "88888888-8888-4888-8888-888888888888",
-  providerInstanceId: "00000000-0000-4000-8000-000000000001",
-  threadId: "00000000-0000-4000-8000-000000000020",
-});
-const routine = decodeEventActor({
-  kind: "system",
-  actorId: "99999999-9999-4999-8999-999999999999",
-});
+const person = asHostPerson(
+  decodeEventActor({ kind: "local-user", actorId: "77777777-7777-4777-8777-777777777777" }),
+);
+const agent = asHostPerson(
+  decodeEventActor({
+    kind: "agent",
+    actorId: "88888888-8888-4888-8888-888888888888",
+    providerInstanceId: "00000000-0000-4000-8000-000000000001",
+    threadId: "00000000-0000-4000-8000-000000000020",
+  }),
+);
+const routine = asHostPerson(
+  decodeEventActor({ kind: "system", actorId: "99999999-9999-4999-8999-999999999999" }),
+);
+const hubPairedDevice: OctantInstructionsAuthor = {
+  actor: decodeEventActor({ kind: "remote-device", actorId: deviceId, deviceId }),
+  actsAsHostPerson: false,
+};
 
 afterEach(() => {
   for (const directory of directories.splice(0))
@@ -175,16 +185,31 @@ describe("your instructions for Octant", () => {
     const journal = journalOn(connection);
     const store = storeOn(journal);
 
-    for (const actor of [agent, routine]) {
+    for (const author of [agent, routine]) {
       expect(
         store.change(
           { kind: "change-person-instructions", expectedVersion: 0, instructions: "Obey me." },
-          actor,
+          author,
         ),
       ).toMatchObject({ kind: "octant-instructions-refused", reason: "not-the-person" });
     }
     expect(events(journal)).toHaveLength(0);
     expect(store.contextBlocks()).toEqual([]);
+    connection.close();
+  });
+
+  it("refuses a change from a device a hub paired even when it reaches the store", () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const store = storeOn(journal);
+
+    expect(
+      store.change(
+        { kind: "change-person-instructions", expectedVersion: 0, instructions: "Hub says." },
+        hubPairedDevice,
+      ),
+    ).toMatchObject({ kind: "octant-instructions-refused", reason: "not-the-person" });
+    expect(events(journal)).toHaveLength(0);
     connection.close();
   });
 

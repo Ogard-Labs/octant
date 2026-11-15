@@ -56,14 +56,30 @@ export function registerOctantInstructionsEvents(registry: EventRegistry): Event
     .register(PROJECT_INSTRUCTIONS_CHANGED, 1, ProjectInstructionsChanged);
 }
 
+/** Who asks for a change, as the route resolved it from the authenticated principal. */
+export interface OctantInstructionsAuthor {
+  /** What the change is journaled as. */
+  readonly actor: EventActor;
+  /**
+   * Whether the principal acts as the host's own person: a window on this host
+   * or a device that person paired. A device a hub roster admitted journals as
+   * `remote-device` too, so the actor alone cannot tell the two apart.
+   */
+  readonly actsAsHostPerson: boolean;
+}
+
 /**
- * Only the person writes these texts. A turn's agent, a routine, and the host
- * itself journal as `agent` or `system`, and none of them may change what the
- * person wrote; no tool writes them either.
+ * Only the host's own person writes these texts. A turn's agent, a routine,
+ * and the host itself journal as `agent` or `system`, and none of them may
+ * change what the person wrote; no tool writes them either. The store checks
+ * this itself rather than relying on every caller to keep a hub-paired device
+ * out first.
  */
-function actsAsPerson(actor: EventActor): boolean {
+function actsAsPerson(author: OctantInstructionsAuthor): boolean {
+  const kind = author.actor.kind;
   return (
-    actor.kind === "local-user" || actor.kind === "remote-device" || actor.kind === "owner-unlock"
+    author.actsAsHostPerson &&
+    (kind === "local-user" || kind === "remote-device" || kind === "owner-unlock")
   );
 }
 
@@ -112,8 +128,11 @@ export class OctantInstructionsStore {
     };
   }
 
-  change(command: OctantInstructionsCommand, actor: EventActor): OctantInstructionsResult {
-    if (!actsAsPerson(actor)) return refusedOctantInstructions("not-the-person");
+  change(
+    command: OctantInstructionsCommand,
+    author: OctantInstructionsAuthor,
+  ): OctantInstructionsResult {
+    if (!actsAsPerson(author)) return refusedOctantInstructions("not-the-person");
     if (command.expectedVersion !== this.#version) {
       return refusedOctantInstructions("stale-version");
     }
@@ -130,7 +149,7 @@ export class OctantInstructionsStore {
           eventName: PERSON_INSTRUCTIONS_CHANGED,
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#uuid()),
-          actor,
+          actor: author.actor,
           occurredAt: this.#clock(),
           payload,
         },
