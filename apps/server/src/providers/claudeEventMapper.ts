@@ -23,6 +23,7 @@ import type {
 } from "./claudeAgentSdkPort";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
+import { proposedPlanText } from "./proposedPlan";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -42,6 +43,12 @@ const SUMMARY_MAX_CHARACTERS = 1_024;
 export const CLAUDE_CHECKLIST_TOOL = "TodoWrite";
 /** Claude Code's own subagent tool, offered only when the person turned subagents on. */
 export const CLAUDE_SUBAGENT_TOOL = "Agent";
+/**
+ * Claude Code's own tool that hands a finished plan to the person. Offered in
+ * Plan only: the gate captures the plan and refuses the call, so the session
+ * never leaves Plan (see `claudeDriver.ts`).
+ */
+export const CLAUDE_PLAN_EXIT_TOOL = "ExitPlanMode";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -510,8 +517,12 @@ function toolState(
   const state: ClaudeToolState = {
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
-    // The checklist shows as the thread's task panel, not as a tool row.
-    emitsActivity: toolName !== "AskUserQuestion" && toolName !== CLAUDE_CHECKLIST_TOOL,
+    // The checklist shows as the thread's task panel and a handed-over plan
+    // as the reply's text, not as tool rows.
+    emitsActivity:
+      toolName !== "AskUserQuestion" &&
+      toolName !== CLAUDE_CHECKLIST_TOOL &&
+      toolName !== CLAUDE_PLAN_EXIT_TOOL,
     ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
@@ -568,6 +579,17 @@ function mapToolUse(
     content.toolName === CLAUDE_CHECKLIST_TOOL
   ) {
     return checklistEvents(context, content.input);
+  }
+  if (
+    authoritativeInput &&
+    content.disabled !== true &&
+    content.toolName === CLAUDE_PLAN_EXIT_TOOL
+  ) {
+    const plan = proposedPlanText(jsonString(content.input, "plan") ?? "");
+    if (plan === undefined) return [{ kind: "ignored" }];
+    const results = agentText(context, plan);
+    endAgentMessage(context);
+    return results;
   }
   // A streamed call's start carried no input; its whole message does. Octant
   // records a tool it runs itself from the request, so only the runtime's own

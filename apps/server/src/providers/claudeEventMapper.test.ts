@@ -1059,6 +1059,41 @@ describe("mapClaudeMessage", () => {
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
+  it("shows a plan Claude hands over in Plan as marked reply text, not as a tool row", () => {
+    const ctx = context();
+    const handedOver = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-plan",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-plan-1",
+            toolName: "ExitPlanMode",
+            input: { plan: "1. Add the route.\n2. Test it." },
+          },
+        ],
+        usage,
+      }),
+    );
+    const refused = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-plan-1", isError: true }],
+      }),
+    );
+
+    const text = handedOver.flatMap((event) => (event.kind === "text-delta" ? [event.text] : []));
+    expect(text.join("")).toBe("**Proposed plan**\n\n1. Add the route.\n2. Test it.\n");
+    expect(
+      [...handedOver, ...refused].some(
+        (event) => event.kind === "tool-start" || event.kind === "tool-failure",
+      ),
+    ).toBe(false);
+  });
+
   it("keeps the task panel in Claude's latest order when an item is renamed or inserted", () => {
     const ctx = context();
     const write = (toolUseId: string, items: ReadonlyArray<string>) =>

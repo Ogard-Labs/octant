@@ -479,7 +479,7 @@ names a withheld tool:
 
 | Withheld                                              | Why                                                                                                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list                                                      |
+| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)              |
 | `EnterWorktree`, `ExitWorktree`                       | The thread is bound to one checkout                                                                                                                  |
 | `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup` | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
 | `REPL`                                                | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
@@ -508,9 +508,26 @@ decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are
 also listed in `allowedTools`; the `PreToolUse` hook still answers each call
 first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
-and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
+`ExitPlanMode`, and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
 list at every level and holds no part of the preset: its filesystem and shell
 stay withheld, so it gains nothing from tools Octant has not named.
+
+### Native plan capture
+
+A Plan session runs in Claude Code's own `plan` permission mode, which ends a
+plan by calling `ExitPlanMode` with the plan's text. Plan holds that tool and
+nothing that changes mode: `EnterPlanMode` stays withheld, and so does
+`ExitPlanMode` outside Plan (maintainer decision, 2026-11-14). When the call's
+transcript block arrives, its `plan` becomes the reply's own paragraph under a
+**Proposed plan** heading, with no tool row. The `PreToolUse` hook then
+refuses the call with "The plan was captured and shown to the person; wait
+for the person", and `canUseTool` refuses it too, since no grant was
+recorded. Claude Code's own answer to an approved `ExitPlanMode` switches the
+session to a mode that edits; refused, the session stays in `plan` and the
+turn ends. The person accepts the plan by moving the thread out of Plan, so
+Plan stays read-only throughout. Octant's thread plan (the person's
+structured proposal) has no path from a provider, so the plan stays reply
+text (not built yet: a provider-proposed thread plan).
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
@@ -551,6 +568,35 @@ profile allows and why. The wire mapping that follows from it:
   so the person is asked for commands and not for patches. Plan and Chat keep
   `never`, so a write fails at the profile rather than at a prompt.
 - Full access keeps `danger-full-access` and an unwrapped process.
+- A Plan session runs in Codex's own Plan mode: every `turn/start` carries the
+  experimental `collaborationMode` with `mode: "plan"` and settings naming the
+  model, `reasoning_effort`, and `developer_instructions: null` (the
+  connection opts into experimental fields at `initialize`; `null` asks for
+  Codex's built-in Plan instructions, and the mode restates the model and
+  effort because it takes precedence over both; read at `rust-v0.169.0`,
+  present since `rust-v0.155.1`). Codex then plans as it does on its own: it proposes its
+  plan in a `<proposed_plan>` block, reported as a plan item, and may ask
+  through its question form, which Codex offers only in Plan mode. The mode
+  only instructs the model, so Plan's read-only profile and its declined
+  approvals are unchanged (maintainer decision, 2026-11-14). Codex keeps a
+  mode for the thread's later turns, so a session outside Plan that resumes a
+  thread whose `thread/resume` reports `collaborationMode.mode: "plan"` sends
+  `mode: "default"`; any other session sends no mode and runs as before.
+- A plan item becomes the reply's own paragraph under a **Proposed plan**
+  heading when it completes; its deltas are not shown, so the plan reads once.
+  The person accepts it by moving the thread out of Plan. Octant's thread plan
+  (the person's structured proposal) has no path from a provider, so the plan
+  stays reply text (not built yet: a provider-proposed thread plan).
+- `item/tool/requestUserInput` reaches the person as the thread's
+  questionnaire, one request per question with its choices, in order; when
+  every question is answered Codex gets one reply mapping each question id to
+  `{ answers: [text] }`. Codex adds a free answer to each question itself,
+  so a typed answer passes through. A set with a question Codex marks
+  `isSecret`, or that asks for a password, passphrase, API key, access token,
+  or private key, is never shown: Codex is answered at once with a refusal
+  telling the model Octant does not collect secrets in chat. A subagent's set
+  (Codex offers the form to the root thread only) is answered empty. The
+  capability is reported `supported`.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
@@ -652,10 +698,26 @@ child run (starting, running, completed or failed), its permission and
 question requests are handled as the parent's own, so the person answers them
 at the same level and the reply goes to the child's session, and a web read it
 makes marks the thread. Nothing else a child says joins the parent's
-transcript. Questions are
-unsupported: 2.0.22 serves no question routes and asks through forms, which
-are not mapped, so the written posture denies `question` and a form that
-still arrives fails the turn. Resume,
+transcript. Questions reach the person through the same questionnaire 1.x
+questions use (maintainer decision, 2026-11-14: Octant adds capabilities to a
+provider and never takes its core features away). 2.0.22 serves no question
+routes; its `question` tool publishes a `form.created` form marked
+`metadata.kind: "question"` with one field per question, keyed `q0`, `q1`, ...
+(the question as the description, its header as the title, its choices as
+options), and takes the answer at
+`POST /api/session/{id}/form/{form}/reply` as `{ answer: { q0: ... } }`
+(read from the v2.0.22 and v2.0.27 source). A subagent's form is asked the
+same way and answered in the subagent's own session. From 2.0.22 the written posture
+allows `question` at every level, Plan included, since a question changes
+nothing, and the capability is reported `supported`. An earlier 2.x release
+keeps `question` denied, as before, so the model is told no and carries on
+instead of the turn failing on a form Octant cannot map. A question asking for
+several answers (a multiselect field) fails the turn as an unsupported
+format, as on 1.x. A form with a question that asks for a password,
+passphrase, API key, access token, or private key is never shown or
+journaled: each of its fields is answered at once with the refusal Codex
+gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
+still fails the turn rather than hang on an unanswerable form. Resume,
 interruption, and tool activity are reported. A Stop the person asked for
 (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay
 ordinary interruptions; a `shutdown` interruption, or the OpenCode process
