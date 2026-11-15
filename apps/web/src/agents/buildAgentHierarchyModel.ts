@@ -18,6 +18,8 @@ export interface AgentHierarchyInputEntry {
   readonly parentRunId?: string;
   /** The sibling runs this one waits for, as the host listed them. */
   readonly dependsOn?: ReadonlyArray<string>;
+  /** The parent agent's label for siblings a person may compare side by side. */
+  readonly compareGroup?: string;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
@@ -120,7 +122,10 @@ export type AgentRunGraphRow = Pick<
   | "waitingOn"
   | "createdAt"
   | "updatedAt"
->;
+> & {
+  /** Set for a subagent its provider started: the provider it names. Such a card has no links. */
+  readonly startedByProvider?: string;
+};
 
 export interface AgentHierarchyModel {
   readonly creationPosture: "off" | "ask" | "automatic";

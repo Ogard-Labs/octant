@@ -782,3 +782,65 @@
   border: 0;
   min-width: 0;
 }
+
+/* A compare group: siblings the thread's agent labelled alike, side by side.
+   Members wrap onto new lines in a narrow dock instead of shrinking past
+   their facts, and keep the host's order; nothing is ranked or highlighted. */
+.agent-hierarchy__compare {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+  padding-block: var(--oct-space-1);
+}
+
+.agent-hierarchy__compare-label {
+  margin: 0;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.agent-hierarchy__compare-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr));
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-hierarchy__compare-member {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+}
+
+/* One control per member; the recipe's fixed height would clip its facts. */
+.agent-hierarchy__compare-open {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  height: auto;
+  max-height: 240px;
+  min-width: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+  overflow: hidden;
+  padding: var(--oct-space-2);
+  text-align: start;
+  white-space: normal;
+}
+
+.agent-hierarchy__compare-provider,
+.agent-hierarchy__compare-state {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}

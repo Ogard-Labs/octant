@@ -74,9 +74,7 @@ describe("SubagentsTray", () => {
     expect(toggle).toHaveTextContent("1 failed · earlier ones not retained");
     expect(screen.getByText(/Earlier observed children/)).toBeVisible();
     await user.click(toggle);
-    await user.click(
-      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /^Inspect parser\. / }));
     expect(onOpenSubagent).toHaveBeenCalledWith("observation:provider-child");
     expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
   });
@@ -279,6 +277,64 @@ describe("SubagentsTray", () => {
       "Subagents could not be stopped. They are still running.",
     );
   });
+
+  it("lists both kinds of subagent as one list, naming the provider on every row and asking first", async () => {
+    const user = userEvent.setup();
+    const route = {
+      requestedProviderInstanceId: "55555555-5555-4555-8555-555555555555",
+      requestedModelId: "gpt-6-astra",
+      executionProviderInstanceId: "55555555-5555-4555-8555-555555555555",
+      executionModelId: "gpt-6-astra",
+      poolDerived: false,
+    };
+    renderTray([{ ...entry("a", "running"), route }], {
+      observations: [
+        observedChildFixture({
+          observationId: "done",
+          task: "Finished scan",
+          lifecycleStatus: "completed",
+        }),
+        observedChildFixture({
+          observationId: "stuck",
+          task: "Stuck scan",
+          lifecycleStatus: "failed",
+        }),
+      ],
+      providers: new Map([
+        ["55555555-5555-4555-8555-555555555555", { driverKind: "codex", displayName: "Codex" }],
+      ]),
+    });
+    // A finished provider-started subagent counts like a finished managed one.
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent(
+      "1 failed · 1 working · 1 done",
+    );
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Stuck scan"),
+      expect.stringContaining("Task a"),
+    ]);
+    expect(rows[0]).toHaveTextContent("Failed · Started by Codex · Model unknown");
+    expect(rows[1]).toHaveTextContent("Working · Codex · gpt-6-astra");
+    expect(rows[0]?.querySelector('[data-driver-kind="codex"]')).not.toBeNull();
+    // Only the run Octant started offers Stop.
+    expect(within(rows[0] as HTMLElement).queryByRole("button", { name: /Stop/ })).toBeNull();
+    await user.click(within(rows[1] as HTMLElement).getByRole("button", { name: /Stop subagent/ }));
+  });
+
+  it("shows a compare group as one line with its members counted by state", async () => {
+    const user = userEvent.setup();
+    const { onOpenSubagent } = renderTray([
+      { ...entry("a", "running"), compareGroup: "plans" },
+      { ...entry("b", "completed"), compareGroup: "plans" },
+      { ...entry("c", "running"), compareGroup: "plans" },
+    ]);
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    const group = within(rows[0] as HTMLElement).getByRole("button", { name: /^Compare plans\./ });
+    expect(group).toHaveTextContent("3 subagents · 2 working · 1 done");
+    await user.click(group);
+    expect(onOpenSubagent).toHaveBeenCalledWith();
+  });
 });
 
 describe("ThreadSubagentsTray", () => {
@@ -369,9 +425,7 @@ describe("ThreadSubagentsTray", () => {
       }),
     );
     expect(onOpenSubagent).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000002");
-    await userEvent.click(
-      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: /^Inspect parser\. / }));
     expect(onOpenSubagent).toHaveBeenLastCalledWith("observation:provider-child");
     expect(
       screen.queryByRole("button", {

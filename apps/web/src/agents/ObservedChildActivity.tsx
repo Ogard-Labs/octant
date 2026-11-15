@@ -1,5 +1,6 @@
 import type { AgentObservedChild } from "@octant/contracts";
 import { ArrowLeft } from "lucide-react";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
 import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 
@@ -8,30 +9,47 @@ export function observedChildSelectionId(child: AgentObservedChild): string {
   return `observation:${child.observationId}`;
 }
 
+/**
+ * A subagent a provider runtime started on its own. Octant lists it with the
+ * thread's other subagents and says who started it; it offers none of the
+ * controls a run Octant started has.
+ */
 export function ObservedChildRow(props: {
   readonly child: AgentObservedChild;
   readonly now: number;
+  /** The provider's display name, or its instance id when unknown. */
+  readonly providerName: string;
+  /** Present when the surface knows the instance, so its mark is drawn. */
+  readonly driverKind?: string;
   readonly onOpen?: (selectionId: string) => void;
 }) {
   const child = props.child;
   const task = child.task ?? "Task unavailable";
   const age = subagentElapsedLabel(child.firstObservedAt, props.now);
+  const meta = [
+    subagentStatusWord(child.lifecycleStatus),
+    `Started by ${props.providerName}`,
+    child.modelId ?? "Model unknown",
+    age === "" ? undefined : `First seen ${age} ago`,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
   return (
     <OctantButton
-      aria-label={`Inspect observed child: ${task}. ${subagentStatusWord(child.lifecycleStatus)}. Observation only.`}
+      aria-label={`${task}. ${meta}. Opens it in Agents.`}
       className="composer-subagents__open"
       onClick={() => props.onOpen?.(observedChildSelectionId(child))}
       size="xs"
+      title={task}
       variant="ghost"
     >
       <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
+      {props.driverKind === undefined ? null : (
+        <ProviderGlyph displayName={props.providerName} driverKind={props.driverKind} size={12} />
+      )}
       <span className="composer-subagents__content">
         <span className="composer-subagents__task">{task}</span>
-        <span className="composer-subagents__meta">
-          {subagentStatusWord(child.lifecycleStatus)} · Observation only
-          {age === "" ? "" : ` · First seen ${age} ago`}
-        </span>
-        <span className="composer-subagents__meta">{child.modelId ?? "Model unavailable"}</span>
+        <span className="composer-subagents__meta">{meta}</span>
         <span className="composer-subagents__reason">
           {child.latestSummary || "No activity reported."}
         </span>
@@ -59,10 +77,12 @@ export function ObservedChildDetail(props: {
           <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
           {subagentStatusWord(child.lifecycleStatus)}
         </p>
-        <p className="agent-run-detail__fact">Observation only. Controls are unavailable.</p>
+        <p className="agent-run-detail__fact">
+          Started by its provider. Octant observes it and has no controls for it.
+        </p>
         <p className="agent-run-detail__fact">Provider: {child.providerInstanceId}</p>
         <p className="agent-run-detail__fact">
-          {child.modelId === undefined ? "Model unavailable" : `Model: ${child.modelId}`}
+          {child.modelId === undefined ? "Model unknown" : `Model: ${child.modelId}`}
         </p>
         <p className="agent-run-detail__fact">Child: {child.childAgentId}</p>
         {child.parentChildAgentId === undefined ? null : (

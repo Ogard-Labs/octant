@@ -120,12 +120,12 @@ describe("AgentRunHierarchy", () => {
     );
     await screen.findByRole("region", { name: "Observed child" });
     await user.click(screen.getByRole("button", { name: "Subagents" }));
-    await user.click(
-      await screen.findByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-    );
-    expect(screen.getByText("Observation only. Controls are unavailable.")).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: /^Inspect parser\. / }));
+    expect(
+      screen.getByText(/Started by its provider\. Octant observes it and has no controls for it\./),
+    ).toBeVisible();
     expect(screen.getByText(/Conflicting observations/)).toBeVisible();
-    expect(screen.getByText("Model unavailable")).toBeVisible();
+    expect(screen.getByText("Model unknown")).toBeVisible();
     expect(screen.getByText("Reading the parser")).toBeVisible();
     expect(screen.queryByRole("group", { name: "Subagent actions" })).not.toBeInTheDocument();
     expect(client.conversation).not.toHaveBeenCalled();
@@ -153,14 +153,10 @@ describe("AgentRunHierarchy", () => {
       );
       await waitFor(() => expect(screen.getByText(/No subagents yet/)).toBeVisible());
       await act(async () => vi.advanceTimersByTimeAsync(30_000));
-      expect(
-        screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-      ).toBeVisible();
+      expect(screen.getByRole("button", { name: /^Inspect parser\. / })).toBeVisible();
       await act(async () => vi.advanceTimersByTimeAsync(2_000));
       expect(screen.getByText(/Reconnecting. Showing the last child activity/)).toBeVisible();
-      expect(
-        screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-      ).toBeVisible();
+      expect(screen.getByRole("button", { name: /^Inspect parser\. / })).toBeVisible();
     } finally {
       vi.useRealTimers();
     }
