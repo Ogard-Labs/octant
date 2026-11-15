@@ -1724,7 +1724,9 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
   2026-11-14).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
-  the posture's rules apply as in Code.
+  the posture's rules apply as in Code (`task` is to be allowed outside Plan
+  at every level; designed, not built,
+  [Security and authority](#security-and-authority)).
 - **Pi:** the Work session starts with its shell tool.
 - **ACP agents, Mistral Vibe included:** an `execute` request reaches the
   person at Guarded as in Code, and a Work launch gets the exec and fork a
@@ -14160,7 +14162,29 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
 
   The Claude Code and Codex columns are today's; their sandboxes change per
   [Providers run in their own sandbox](#security-and-authority) (designed,
-  not built).
+  not built). Today Claude Code's Accept edits runs Claude's `default` mode
+  and Octant waives in-root edits itself, and Octant's gate judges each call
+  before Claude's own rules see the ones it would ask about
+  ([Provider runtimes: Full built-in tool set](design/provider-runtimes.md#full-built-in-tool-set)).
+
+  **The provider's own permission system decides, as on its own**
+  (maintainer decision, 2026-11-15; designed, not built):
+  - **Claude Code's own permission modes.** Octant maps its levels onto
+    Claude Code's native modes: Ask first to `default`, Accept edits to
+    `acceptEdits`, Auto to `auto`, Full access to `bypassPermissions`, and
+    Plan to `plan`. Claude Code's own permission engine and the person's
+    Claude Code rules decide each tool call, and Octant no longer
+    second-guesses a call Claude's rules allow. When Claude Code asks, the
+    ask reaches the person as an Octant approval, decided and journaled on
+    the server as today. Plan stays read-only and Chat has no shell.
+  - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
+    Claude Code's full built-in tool preset with no Octant deny list.
+  - **OpenCode's `task` subagents** are always allowed outside Plan, instead
+    of following the level; Plan still denies them.
+
+  Rationale: each provider then behaves as its own documentation says, and
+  Octant's server still answers every ask the provider raises and journals
+  it, so no approval leaves the server's authority.
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
   `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
@@ -14710,11 +14734,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Octant approval at Guarded and Accept edits and Reviewed's reviewer at
     Reviewed. Approved runs that one command; denied or unanswered stays
     refused, and nothing is remembered for a later command.
-  - **Strict: Octant's sandbox as an opt-in.** A per-account setting, set the
-    way the [opt-in sandbox at Full access](#security-and-authority) is,
-    runs the provider inside Octant's profile instead of its own sandbox
-    (for Codex, the profile the table below shows). Strict keeps provider sign-ins, `~/.ssh` and cloud keys unreadable, and
-    turns native escalation off, so a command that needs to leave fails.
+  - **Strict: Octant's sandbox as an opt-in.** Strict is set in the same
+    places as the [opt-in sandbox at Full access](#security-and-authority):
+    per thread, as a Project's default, and as the default in Settings, a
+    thread's request taking its Project's choice, else Settings', else off.
+    It runs the provider inside Octant's profile instead of its own sandbox
+    (for Codex, the profile the table below shows). Strict keeps provider
+    sign-ins, `~/.ssh` and cloud keys unreadable, and turns native
+    escalation off, so a command that needs to leave fails.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -14726,8 +14753,13 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Octant passes it no sandbox settings at all: no writable roots, no
     network, no read or deny rules, and no change to when sandboxed commands
     run unasked. Claude's own request to run a command outside its sandbox
-    becomes the Octant approval above. Plan keeps its read-only confinement,
-    and Octant's sandbox applies to Claude Code only under Strict. Gemini CLI and Qwen Code use their
+    becomes the Octant approval above. Plan keeps its read-only confinement.
+    Under Strict, Octant cannot wrap Claude's sandbox in its own profile,
+    since macOS refuses nested Seatbelt, so Strict for Claude Code is
+    today's configuration of Claude's own sandbox: reads and writes held to
+    the Project's folders, network per Network limits, and
+    `autoAllowBashIfSandboxed: false`, with native escalation off as Strict
+    turns it off everywhere. Gemini CLI and Qwen Code use their
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
@@ -14840,7 +14872,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   [detail](design/provider-runtimes.md#full-built-in-tool-set)). Today Octant
   sets that sandbox's folders and network and keeps sandboxed commands
   asking; under [Providers run in their own sandbox](#security-and-authority)
-  (designed, not built) it passes Claude's sandbox no settings at all.
+  (designed, not built) it passes Claude's sandbox no settings at all, and
+  keeps today's configuration only under Strict.
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
@@ -15445,7 +15478,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     and `features.unified_exec` on and its own approval policy for the level;
     Reviewed uses its own approval review or Octant Shield.
   - **OpenCode** stops denying `bash` and `task` in Work; the person's own
-    OpenCode permission rules apply over the level. It has no reviewer of
+    OpenCode permission rules apply over the level. (`task` is to be allowed
+    outside Plan at every level, per
+    [the provider's own permission system decides](#security-and-authority);
+    designed, not built.) It has no reviewer of
     its own, so Reviewed uses [Octant Shield](#octant-shield).
   - **Pi** starts with its shell tool; Reviewed uses Octant Shield there too.
   - **ACP agents**, Mistral Vibe included, get their `execute` requests sent

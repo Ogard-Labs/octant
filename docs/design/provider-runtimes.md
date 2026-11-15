@@ -595,6 +595,19 @@ allow), so a launch that lacks a requested tool still runs.
 
 ### Full built-in tool set
 
+Decided under [the provider's own permission system decides](../architecture.md#security-and-authority)
+(maintainer decision, 2026-11-15; designed, not built): outside Plan and Chat
+Octant offers Claude Code's full built-in tool preset with no Octant deny
+list, and maps its levels onto Claude Code's own permission modes (Ask first
+`default`, Accept edits `acceptEdits`, Auto `auto`, Full access
+`bypassPermissions`, Plan `plan`). Claude Code's permission engine and the
+person's Claude Code rules then decide each call; Octant no longer
+second-guesses a call those rules allow, and an ask Claude Code raises
+reaches the person as an Octant approval, decided and journaled on the
+server. Plan stays read-only and Chat has no shell. The withheld list and the
+gate's own rules described in this section, and Octant's in-root edit waiver
+at Accept edits, are today's build.
+
 A Work or Code session outside Plan launches with Claude Code's own tool
 preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
 fixed list, so it holds what Claude Code holds in its own app (maintainer
@@ -734,8 +747,12 @@ Under [Providers run in their own sandbox](../architecture.md#security-and-autho
 (maintainer decision, 2026-11-15; designed, not built), Octant passes Claude's
 sandbox no settings: it runs as the person's own Claude Code settings
 configure it, Claude's own escape request reaches the person as an Octant
-approval, Plan keeps its read-only confinement, and Octant's sandbox applies
-only under Strict. The sandbox settings described next are today's build.
+approval, and Plan keeps its read-only confinement. Strict (set per thread,
+per Project and in Settings, as the opt-in sandbox at Full access is) keeps
+today's configuration of Claude's own sandbox, since Octant cannot nest its
+profile around it on macOS: reads and writes held to the Project's folders,
+network per Network limits, `autoAllowBashIfSandboxed: false`, and no escape
+request. The sandbox settings described next are today's build.
 
 Below Full access Claude's command sandbox lets a command out the way Claude
 Code does on its own (maintainer decision, 2026-11-14): the launch sets
@@ -1376,7 +1393,11 @@ tools follow the level instead of being denied outright; a server's environment 
 headers keep only a reference to a variable the host has (`{env:NAME}`), and a
 server whose command line or URL carries a credential is left out, so the
 secret stays where the person keeps it. Plan keeps them off, and Chat's confinement still applies to
-what they run. Sessions OpenCode's `task` tool delegates to are followed from
+what they run. Today `task` follows the level like any other call: it asks
+at Guarded, goes to the reviewer at Reviewed, runs at Full access and is
+denied in Plan. Decided (maintainer decision, 2026-11-15; designed, not built;
+[the provider's own permission system decides](../architecture.md#security-and-authority)):
+`task` is always allowed outside Plan, and Plan still denies it. Sessions OpenCode's `task` tool delegates to are followed from
 their `session.created` event, which names the parent: each is shown as a
 child run (starting, running, completed or failed), its permission and
 question requests are handled as the parent's own, so the person answers them
