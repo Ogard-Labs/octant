@@ -20,10 +20,18 @@ for every caller but the person. The To-dos destination is built on that host:
 the page, quick add, filters, editing in place, reordering, the sidebar row and
 its badge, and New to-do in the command palette and on a shortcut. Start is
 built for this host's Projects and Chat: the draft with its source, the link,
-Link again, the thread state on a row, and Tick off. Not built yet: the list
-host setting, reaching a list on another host, Start into another host's
-Project, live updates to other clients (a window reads the list again
-every 30 seconds while it is visible), and the phone screen.
+Link again, the thread state on a row, and Tick off. Every window on the list
+host follows changes as they happen: each change publishes the host's `todos`
+change topic, and a window reads the list again on it (and every 30 seconds
+while visible, for a feed that is reconnecting). Settings › To-dos › Keep the
+list on is built: this host, or a computer this window is paired with, saved
+on this host and refused once this host keeps a to-do. A window reaches a list
+on another computer through its own pairing with it, shows the last list
+read-only when that computer cannot be reached, and keeps quick adds as
+unsent drafts on the device. Not built yet: the hub as the default list host,
+Start into another host's Project, a list host's changes reaching windows on
+other computers as they happen (they read it every 30 seconds), and the phone
+screen.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
@@ -92,11 +100,28 @@ Every person has one **list host**.
 
 - **Default.** A host that belongs to a hub uses the hub as its list host; a
   phone or browser that joined a hub as a guest uses the hub. A host in no hub
-  uses itself, and a phone paired with it uses that host.
+  uses itself, and a phone paired with it uses that host. Built so far: every
+  host uses itself until the person chooses; the hub default is not built,
+  because applied to a host that already keeps to-dos it would show an empty
+  list in place of the person's own.
 - **Choosing.** Settings › To-dos › Keep the list on names the list host: this
   host, the hub, or a computer this host is paired with. In the first version
   the choice can change only while this host's own list is empty; moving a
-  list from one host to another is later work.
+  list from one host to another is later work. The choice is journaled on this
+  host (`todo.list-host-chosen@1`, aggregate `todo-list-host`) and served at
+  `/api/todos/list-host` to this host's own windows only: the private listener
+  does not forward it. The host refuses a move to another host as
+  `list-not-empty` while it holds any to-do, done and dropped included; coming
+  back to this host is always allowed. While another host keeps the list,
+  this host refuses every change to its own list as `kept-elsewhere`, so a
+  stale window or a phone paired here cannot add a to-do nobody is shown. A
+  window that cannot read the choice shows no list rather than this host's.
+  The choice names the other host by its
+  stable id and last-seen name and grants nothing there: a window reaches it
+  through its own pairing (the desktop's paired-computer channel admits
+  `GET /api/todos` and `POST /api/todos/commands`), where the to-do routes
+  accept only a device that host's own person paired. A thread or Project of
+  this host is linked by this host's id, wherever the list lives.
 - **Journal.** The list host journals aggregate type `todo` with
   `todo.created@1`, `todo.edited@1` (title or notes), `todo.state-changed@1`,
   `todo.projects-set@1`, `todo.tags-set@1`, `todo.order-changed@1`,
@@ -130,7 +155,9 @@ Every person has one **list host**.
   stale and read-only, as for any unreachable host. Quick add still accepts
   text but keeps it as an unsent draft on that device with a Send button; it
   is never sent on its own, because a mutation names one destination and
-  is never queued as offline work.
+  is never queued as offline work. A draft keeps the id it was made with, so
+  sending it twice adds it once. A window that is not paired with the list
+  host says so and shows no list.
 - **Hub down.** A standby hub holds no copy of the list. While the hub is
   unreachable the list is read-only and drafts wait for the person to send
   them.

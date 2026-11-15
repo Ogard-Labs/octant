@@ -314,4 +314,77 @@ describe("the person's to-do list", () => {
     });
     expect(policy.inspect(elsewhere).kind).not.toBe("allow");
   });
+
+  it("keeps the list on another computer only while this one holds no to-do, and remembers the choice", async () => {
+    const h = host();
+    const other = {
+      kind: "other-host",
+      hostId: "22222222-2222-4222-8222-222222222222",
+      name: "Studio Mac",
+    };
+    const before = await h.fromWindow("/api/todos/list-host");
+    expect(await before?.json()).toMatchObject({
+      kind: "todo-list-host",
+      thisHostId: HOST_ID,
+      choice: { kind: "this-host" },
+      ownListEmpty: true,
+    });
+
+    const chosen = await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: other,
+    });
+    expect(chosen?.status).toBe(200);
+    expect(h.start().listHost().choice).toEqual(other);
+    // While another computer keeps the list, a change sent here (a stale
+    // window, a phone paired with this computer) is refused, not hidden.
+    const strayAdd = await h.fromDevice("host-person", "/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_2,
+      title: "Lost here",
+    });
+    expect(strayAdd?.status).toBe(409);
+    expect(await strayAdd?.json()).toMatchObject({ reason: "kept-elsewhere" });
+    expect(h.store.listHost().ownListEmpty).toBe(true);
+
+    await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: { kind: "this-host" },
+    });
+    await h.fromWindow("/api/todos/commands", { kind: "add-todo", todoId: TODO_1, title: "Mine" });
+    const refused = await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: other,
+    });
+    expect(refused?.status).toBe(409);
+    expect(await refused?.json()).toMatchObject({ reason: "list-not-empty" });
+    expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
+  });
+
+  it("refuses to name this computer as another, and a device or an agent grant that would move the list", async () => {
+    const h = host();
+    const self = await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: { kind: "other-host", hostId: HOST_ID, name: "This Mac" },
+    });
+    expect(self?.status).toBe(409);
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      const response = await h.fromDevice(admittedBy, "/api/todos/list-host", {
+        kind: "choose-todo-list-host",
+        choice: { kind: "this-host" },
+      });
+      expect(response?.status).toBe(403);
+    }
+    const policy = createRemoteRoutePolicy({ origin: "https://octant.example:8443" });
+    const forwarded = new Request("https://octant.example:8443/api/todos/list-host", {
+      method: "POST",
+      headers: {
+        host: "octant.example:8443",
+        origin: "https://octant.example:8443",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+    });
+    expect(policy.inspect(forwarded).kind).not.toBe("allow");
+  });
 });

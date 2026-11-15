@@ -1615,6 +1615,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "todos",
+      label: "To-dos",
+      scope: "host",
+      keywords: "to-dos todo list keep host hub paired computer where sync",
+      settings: [
+        {
+          id: settingId("todo-list-host"),
+          label: "Keep the list on",
+          scope: "host",
+          keywords: "to-dos list host hub paired computer this computer where",
+        },
+      ],
+    },
+    {
       id: "sync",
       label: "Sync",
       scope: "host",

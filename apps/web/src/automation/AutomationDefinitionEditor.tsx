@@ -56,6 +56,8 @@ export interface AutomationDefinitionEditorProps {
 
 const FULL_ACCESS_NOTE =
   "Full access profiles are not eligible for automations. Choose an approval-gated profile.";
+const SERVER_FILE_TRIGGER_NOTE =
+  "A file routine watches a folder on this computer, so a Project on a server offers no file trigger.";
 
 export { localInputFromUtcInstant, utcInstantFromLocalInput } from "./RoutineScheduleFields";
 
@@ -232,6 +234,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
   );
 
   const selectedProject = projectOptions.find((project) => String(project.projectId) === projectId);
+  const onServer = selectedProject?.serverLocation !== undefined;
   const selectedExecution = executionOptions.find(
     (option) => String(option.receipt.profileId) === executionProfileId,
   );
@@ -400,12 +403,18 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           onValueChange={(value) => {
             setProjectId(value);
             setExecutionProfileId("");
+            const next = projectOptions.find((project) => String(project.projectId) === value);
+            if (next?.serverLocation !== undefined && trigger.kind === "file-arrival")
+              setTrigger((previous) => ({ ...previous, kind: "once" }));
           }}
           options={[
             { id: "", label: "Choose a Project" },
             ...projectOptions.map((project) => ({
               id: String(project.projectId),
-              label: project.name,
+              label:
+                project.serverLocation === undefined
+                  ? project.name
+                  : `${project.name} — ${project.serverLocation}`,
             })),
           ]}
           value={projectId}
@@ -473,12 +482,13 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         fileMode={mode === "code" ? "code" : "work"}
         allowIntegrationEvents={mode === "work" || mode === "code"}
         eventSources={catalog.eventSources ?? []}
-        allowFileArrivals={mode === "work" || mode === "code"}
+        allowFileArrivals={(mode === "work" || mode === "code") && !onServer}
         missedRunPolicy={missedRunPolicy}
         onMissedRunPolicyChange={setMissedRunPolicy}
         onTriggerChange={setTrigger}
         trigger={trigger}
       />
+      {onServer ? <p className="automation-editor__note">{SERVER_FILE_TRIGGER_NOTE}</p> : null}
 
       <div className="automation-editor__field">
         <label htmlFor={ids.target}>Delivery</label>

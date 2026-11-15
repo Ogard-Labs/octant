@@ -1,5 +1,10 @@
-import type { TodoClient } from "@octant/client-runtime/todo-client";
-import { decodeTodoListView, type TodoCommand, type TodoResult } from "@octant/contracts/todos";
+import type { TodoClient, TodoListHostClient } from "@octant/client-runtime/todo-client";
+import {
+  decodeTodoListHostView,
+  decodeTodoListView,
+  type TodoCommand,
+  type TodoResult,
+} from "@octant/contracts/todos";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -39,6 +44,20 @@ const list = decodeTodoListView({
   ],
 });
 
+/** This computer keeps the list, as an unchanged host answers. */
+const thisHostKeepsList: TodoListHostClient = {
+  readListHost: async () =>
+    decodeTodoListHostView({
+      kind: "todo-list-host",
+      thisHostId: HOST,
+      choice: { kind: "this-host" },
+      ownListEmpty: false,
+    }),
+  chooseListHost: async () => {
+    throw new Error("Not used here.");
+  },
+};
+
 function todoClient() {
   const change = vi.fn(async (_command: TodoCommand): Promise<TodoResult> => list);
   const todos: TodoClient = { read: vi.fn(async () => list), change };
@@ -71,6 +90,7 @@ describe("starting a thread from a to-do", () => {
         providerClient={providers()}
         shellClient={client(chatShellBootstrap())}
         todoClient={todos}
+        todoListHostClient={thisHostKeepsList}
       />,
     );
 
@@ -109,6 +129,7 @@ describe("starting a thread from a to-do", () => {
         providerClient={providers()}
         shellClient={client(chatShellBootstrap())}
         todoClient={todos}
+        todoListHostClient={thisHostKeepsList}
       />,
     );
     const startIntoChat = async () => {
@@ -152,6 +173,7 @@ describe("starting a thread from a to-do", () => {
         providerClient={providers()}
         shellClient={client(chatShellBootstrap())}
         todoClient={todos}
+        todoListHostClient={thisHostKeepsList}
       />,
     );
     await user.click(await newChatButton());
@@ -167,5 +189,73 @@ describe("starting a thread from a to-do", () => {
     await waitFor(() =>
       expect(change).toHaveBeenCalledWith(expect.objectContaining({ kind: "link-todo-thread" })),
     );
+  });
+});
+
+describe("a list kept on another computer", () => {
+  it("never shows this computer's list when the list lives on a computer this window cannot reach", async () => {
+    const user = userEvent.setup();
+    const { todos } = todoClient();
+    const listHost: TodoListHostClient = {
+      readListHost: vi.fn(async () =>
+        decodeTodoListHostView({
+          kind: "todo-list-host",
+          thisHostId: HOST,
+          choice: {
+            kind: "other-host",
+            hostId: "22222222-2222-4222-8222-222222222222",
+            name: "Studio Mac",
+          },
+          ownListEmpty: true,
+        }),
+      ),
+      chooseListHost: vi.fn(),
+    };
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+        todoClient={todos}
+        todoListHostClient={listHost}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+    expect(
+      await screen.findByText("Studio Mac keeps the list, and this window is not paired with it."),
+    ).toBeVisible();
+    expect(screen.queryByText("Draft the launch post")).toBeNull();
+    expect(todos.read).not.toHaveBeenCalled();
+  });
+
+  it("shows no list and sends nothing when where the list lives cannot be read", async () => {
+    const user = userEvent.setup();
+    const { todos } = todoClient();
+    const listHost: TodoListHostClient = {
+      readListHost: vi.fn(async () => {
+        throw new Error("The host did not answer.");
+      }),
+      chooseListHost: vi.fn(),
+    };
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+        todoClient={todos}
+        todoListHostClient={listHost}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
+    expect(await screen.findByText(/Where the to-do list is kept could not be read/)).toBeVisible();
+    expect(todos.read).not.toHaveBeenCalled();
   });
 });

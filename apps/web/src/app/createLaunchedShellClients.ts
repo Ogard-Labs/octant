@@ -28,7 +28,11 @@ import {
   createPersonMemoryClient,
   type PersonMemoryClient,
 } from "@octant/client-runtime/person-memory-client";
-import { createTodoClient, type TodoClient } from "@octant/client-runtime/todo-client";
+import {
+  createTodoClient,
+  type TodoClient,
+  type TodoListHostClient,
+} from "@octant/client-runtime/todo-client";
 import {
   createAgentMessageClient,
   type AgentMessageClient,
@@ -167,6 +171,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly planClient: PlanClient | undefined;
   readonly shipClient: ShipClient | undefined;
   readonly todoClient?: TodoClient | undefined;
+  readonly todoListHostClient?: TodoListHostClient | undefined;
   readonly workThreadClient: WorkThreadClient | undefined;
   readonly workTurnClient: WorkTurnClient | undefined;
 }
@@ -243,6 +248,7 @@ export interface LaunchedShellClients {
   readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly todoClient: TodoClient;
+  readonly todoListHostClient: TodoListHostClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
   readonly workRequestClient: ReturnType<typeof createWorkRequestClient>;
@@ -353,6 +359,7 @@ export function createLaunchedShellClients(
     replicaMembershipClient = undefined;
   }
 
+  const localTodos = createTodoClient(port);
   return {
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
@@ -416,7 +423,8 @@ export function createLaunchedShellClients(
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
-    todoClient: options.todoClient ?? createTodoClient(port),
+    todoClient: options.todoClient ?? localTodos,
+    todoListHostClient: options.todoListHostClient ?? localTodos,
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),
