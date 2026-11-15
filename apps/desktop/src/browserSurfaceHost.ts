@@ -3368,6 +3368,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         const sensitiveDocument = await hasSensitiveDocument(
           contentsView(owned),
           owned.policy.credentialFieldProtection,
+          (read) => queueSurfaceAction(owned, read),
         );
         const screenshotDataUrl = sensitiveDocument
           ? undefined
@@ -5445,6 +5446,12 @@ async function waitForPageSettled(view: BrowserSurfaceViewPort): Promise<void> {
 async function hasSensitiveDocument(
   view: BrowserSurfaceViewPort,
   protectCredentials: boolean,
+  /**
+   * Where the debugger's DOM read runs when a frame refuses the probe. A caller
+   * outside the surface's queue passes the queue, so no agent action can adopt
+   * the read's attachment and lose it when the read detaches.
+   */
+  domRead: (read: () => Promise<boolean>) => Promise<boolean> = (read) => read(),
 ): Promise<boolean> {
   if (!protectCredentials) return false;
   // No committed document means no credential fields and no frame whose
@@ -5477,22 +5484,60 @@ async function hasSensitiveDocument(
     // failing closed on them withheld every picture of those pages. The
     // debugger reads the DOM whatever a frame's script settings, so the page
     // is checked there, and any frame it cannot read still fails closed.
-    return await domHoldsCredentialField(view).catch(() => true);
+    return await domRead(() => domHoldsCredentialField(view)).catch(() => true);
   }
 }
 
 /** Frame sessions the DOM check follows before it gives up and fails closed. */
 const MAX_CREDENTIAL_CHECK_FRAME_SESSIONS = 64;
+/** How long one protocol answer of the DOM check may take; a busy frame fails closed. */
+const CREDENTIAL_CHECK_SEND_MS = 2_000;
+/** How long the whole DOM check may hold its attachment. */
+const CREDENTIAL_CHECK_MS = 5_000;
 
 /**
  * Whether any document of the page, read from the debugger's DOM, holds a
  * credential field. A frame on another site is its own target and is read
  * through its own session; a frame element whose document it cannot reach
  * counts as holding one.
+ *
+ * The read uses only an attachment it makes itself: reading through one an
+ * agent's recording, emulation, or popup watch holds would leave the DOM
+ * domain on for the rest of it. A debugger already attached fails closed, as
+ * every such page did before this read existed.
  */
 async function domHoldsCredentialField(view: BrowserSurfaceViewPort): Promise<boolean> {
-  const targets = frameTargetsOf(view.webContents.debugger);
-  return withDebugger(view, async (send) => {
+  checkExecutionView(view);
+  const client = view.webContents.debugger;
+  if (client.isAttached()) return true;
+  client.attach("1.3");
+  // Marked as Octant's own, so a popup watch or point selection that starts
+  // meanwhile shares it instead of taking it for someone else's.
+  agentDebuggers.add(client);
+  try {
+    const targets = frameTargetsOf(client);
+    const deadline = Date.now() + CREDENTIAL_CHECK_MS;
+    const send = (
+      method: string,
+      parameters?: Record<string, unknown>,
+      sessionId?: string,
+    ): Promise<unknown> => {
+      checkExecutionView(view);
+      const answer =
+        sessionId === undefined
+          ? client.sendCommand(method, parameters)
+          : client.sendCommand(method, parameters, sessionId);
+      // A busy frame can leave a command unanswered; the check fails closed
+      // at the bound instead of holding the peek and the surface's queue.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const bound = Math.max(0, Math.min(CREDENTIAL_CHECK_SEND_MS, deadline - Date.now()));
+      return Promise.race([
+        answer,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Browser frame did not answer.")), bound);
+        }),
+      ]).finally(() => clearTimeout(timer));
+    };
     const pending: Array<string | undefined> = [undefined];
     const read = new Set<string>();
     while (pending.length > 0) {
@@ -5512,7 +5557,10 @@ async function domHoldsCredentialField(view: BrowserSurfaceViewPort): Promise<bo
       }
     }
     return false;
-  });
+  } finally {
+    // A recording or emulation that adopted the attachment keeps it.
+    if (!attachmentHeld(client)) detachAgentDebugger(client);
+  }
 }
 
 /**
@@ -5557,11 +5605,9 @@ function credentialFieldScan(
       )
         return { status: "holds" };
     }
+    // Any element that owns a frame, whatever its tag, is followed into it.
     if (scriptRecord(node.contentDocument)) pending.push(node.contentDocument);
-    else if (
-      typeof node.frameId === "string" &&
-      ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(name)
-    )
+    else if (node.nodeType === 1 && typeof node.frameId === "string")
       remoteFrameIds.push(node.frameId);
     for (const field of ["children", "shadowRoots"]) {
       const children = node[field];
