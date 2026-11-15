@@ -1,12 +1,72 @@
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentObservedChild } from "@octant/contracts";
 import { ArrowLeft } from "lucide-react";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 
 /** Selection keys never enter the managed run identifier or command paths. */
 export function observedChildSelectionId(child: AgentObservedChild): string {
   return `observation:${child.observationId}`;
+}
+
+const STOP_REFUSALS = {
+  "not-found": "The subagent already finished.",
+  "not-live": "The turn that started this subagent is no longer running.",
+  unsupported: "This provider cannot stop one subagent on its own.",
+  unauthorized: "This window cannot stop subagents of this thread.",
+} as const;
+
+/**
+ * Stop for one subagent a provider started, offered only where the host said
+ * the running turn can stop it alone. A request is not a stop: the child
+ * keeps its reported status until the provider says it finished.
+ */
+function ObservedChildStop(props: {
+  readonly child: AgentObservedChild;
+  readonly client?: Pick<AgentRunClient, "stopObserved"> | undefined;
+}) {
+  const [state, setState] = useState<
+    | { readonly kind: "idle" | "requesting" | "requested" }
+    | { readonly kind: "refused"; readonly message: string }
+  >({ kind: "idle" });
+  const stopObserved = props.client?.stopObserved;
+  if (props.child.control !== "stop" || stopObserved === undefined) return null;
+  const stop = async () => {
+    setState({ kind: "requesting" });
+    try {
+      const result = await stopObserved({
+        parentThreadId: props.child.parentThreadId,
+        observationId: props.child.observationId,
+      });
+      setState(
+        result.status === "stop-requested"
+          ? { kind: "requested" }
+          : { kind: "refused", message: STOP_REFUSALS[result.reason] },
+      );
+    } catch {
+      setState({ kind: "refused", message: "The subagent could not be stopped. Try again." });
+    }
+  };
+  return (
+    <>
+      <OctantButton
+        aria-label={`Stop subagent: ${props.child.task ?? props.child.childAgentId}`}
+        disabled={state.kind === "requesting" || state.kind === "requested"}
+        onClick={() => void stop()}
+        size="xs"
+        variant="ghost"
+      >
+        {state.kind === "requested" ? "Stopping" : "Stop"}
+      </OctantButton>
+      {state.kind === "refused" ? (
+        <span className="composer-subagents__reason" role="status">
+          {state.message}
+        </span>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -22,6 +82,7 @@ export function ObservedChildRow(props: {
   /** Present when the surface knows the instance, so its mark is drawn. */
   readonly driverKind?: string;
   readonly onOpen?: (selectionId: string) => void;
+  readonly client?: Pick<AgentRunClient, "stopObserved">;
 }) {
   const child = props.child;
   const task = child.task ?? "Task unavailable";
@@ -35,32 +96,36 @@ export function ObservedChildRow(props: {
     .filter((part): part is string => part !== undefined)
     .join(" · ");
   return (
-    <OctantButton
-      aria-label={`${task}. ${meta}. Opens it in Agents.`}
-      className="composer-subagents__open"
-      onClick={() => props.onOpen?.(observedChildSelectionId(child))}
-      size="xs"
-      title={task}
-      variant="ghost"
-    >
-      <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
-      {props.driverKind === undefined ? null : (
-        <ProviderGlyph displayName={props.providerName} driverKind={props.driverKind} size={12} />
-      )}
-      <span className="composer-subagents__content">
-        <span className="composer-subagents__task">{task}</span>
-        <span className="composer-subagents__meta">{meta}</span>
-        <span className="composer-subagents__reason">
-          {child.latestSummary || "No activity reported."}
+    <>
+      <OctantButton
+        aria-label={`${task}. ${meta}. Opens it in Agents.`}
+        className="composer-subagents__open"
+        onClick={() => props.onOpen?.(observedChildSelectionId(child))}
+        size="xs"
+        title={task}
+        variant="ghost"
+      >
+        <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
+        {props.driverKind === undefined ? null : (
+          <ProviderGlyph displayName={props.providerName} driverKind={props.driverKind} size={12} />
+        )}
+        <span className="composer-subagents__content">
+          <span className="composer-subagents__task">{task}</span>
+          <span className="composer-subagents__meta">{meta}</span>
+          <span className="composer-subagents__reason">
+            {child.latestSummary || "No activity reported."}
+          </span>
         </span>
-      </span>
-    </OctantButton>
+      </OctantButton>
+      <ObservedChildStop child={child} client={props.client} />
+    </>
   );
 }
 
 export function ObservedChildDetail(props: {
   readonly child: AgentObservedChild;
   readonly onBack: () => void;
+  readonly client?: Pick<AgentRunClient, "stopObserved">;
 }) {
   const child = props.child;
   return (
@@ -77,9 +142,13 @@ export function ObservedChildDetail(props: {
           <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
           {subagentStatusWord(child.lifecycleStatus)}
         </p>
-        <p className="agent-run-detail__fact">
-          Started by its provider. Octant observes it and has no controls for it.
-        </p>
+        {child.control === "stop" ? (
+          <ObservedChildStop child={child} client={props.client} />
+        ) : (
+          <p className="agent-run-detail__fact">
+            Started by its provider. Octant observes it and has no controls for it.
+          </p>
+        )}
         <p className="agent-run-detail__fact">Provider: {child.providerInstanceId}</p>
         <p className="agent-run-detail__fact">
           {child.modelId === undefined ? "Model unknown" : `Model: ${child.modelId}`}

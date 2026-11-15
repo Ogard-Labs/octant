@@ -79,6 +79,35 @@ describe("SubagentsTray", () => {
     expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
   });
 
+  it("offers Stop for an observed child the running turn can stop, and keeps its status until the provider reports it", async () => {
+    const user = userEvent.setup();
+    const stopObserved = vi.fn(async () => ({ status: "stop-requested" as const }));
+    renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
+      stopClient: { stopObserved },
+    });
+    await user.click(screen.getByRole("button", { name: /Stop subagent: Inspect parser/ }));
+    expect(stopObserved).toHaveBeenCalledWith(
+      expect.objectContaining({ observationId: observedChildFixture().observationId }),
+    );
+    expect(screen.getByRole("button", { name: /Stop subagent/ })).toHaveTextContent("Stopping");
+    expect(screen.getByRole("button", { name: /Inspect observed child/ })).toHaveTextContent(
+      "Working",
+    );
+  });
+
+  it("says why a stop was refused", async () => {
+    const user = userEvent.setup();
+    renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
+      stopClient: {
+        stopObserved: async () => ({ status: "refused" as const, reason: "not-live" as const }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /Stop subagent/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("no longer running");
+  });
+
   it("previews the latest attributed result using that generation's model and reported evidence", () => {
     renderTray([
       {

@@ -93,6 +93,7 @@ export function ThreadSubagentsTray(props: {
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
         onStopAll={() => void subagents.stopAll()}
+        stopClient={props.client}
         reconnecting={subagents.reconnecting || connectionLost}
       />
     </>
@@ -110,6 +111,8 @@ export interface SubagentsTrayProps {
   readonly onStop: (runId: string) => void;
   /** Cancels every active subagent on the thread. Already confirmed when called. */
   readonly onStopAll: () => void;
+  /** Stops one provider-native subagent where the host offers it. */
+  readonly stopClient?: Pick<AgentRunClient, "stopObserved">;
   readonly busy?: boolean;
   /**
    * What is shown is the last status the host reported. The tray dims and stops
@@ -280,6 +283,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                   <li key={item.row.id} className="composer-subagents__row">
                     <ObservedChildRow
                       child={item.row.child}
+                      {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
                       now={now}
                       providerName={item.row.providerName}
                       {...(item.row.driverKind === undefined
