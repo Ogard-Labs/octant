@@ -7,6 +7,7 @@ import {
   filterTodos,
   parseQuickAdd,
   projectKey,
+  todoListIsReadOnly,
   todoStateSentence,
   withoutQuickAddWord,
 } from "./todoListModel";
@@ -134,5 +135,14 @@ describe("the list's filters", () => {
     expect(counts).toEqual({ open: 2, started: 1, waiting: 1 });
     expect(todoStateSentence(counts)).toBe("2 open, 1 started");
     expect(todoStateSentence(countTodos([]))).toBe("Nothing is open.");
+  });
+});
+
+describe("when the list takes no change", () => {
+  it("locks a list whose computer is unreachable, or whose remote read failed, until a read succeeds", () => {
+    expect(todoListIsReadOnly({ remote: true, unreachable: "Gone" }, "ready")).toBe(true);
+    expect(todoListIsReadOnly({ remote: true }, "failed")).toBe(true);
+    expect(todoListIsReadOnly({ remote: true }, "ready")).toBe(false);
+    expect(todoListIsReadOnly({ remote: false }, "failed")).toBe(false);
   });
 });

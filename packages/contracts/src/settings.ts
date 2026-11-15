@@ -32,6 +32,7 @@ export const SETTINGS_SECTION_IDS = [
   "memory",
   "secret-stores",
   "data",
+  "todos",
   "sync",
   "remote-access",
   "host",
