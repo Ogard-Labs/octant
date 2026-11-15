@@ -1133,13 +1133,22 @@ function openCodeGlobalAgentsInstructionFile(
   try {
     const configDirectory = absolute(environment.OPENCODE_CONFIG_DIR);
     const configHome = absolute(environment.XDG_CONFIG_HOME);
-    const folder =
+    const configured =
       configDirectory !== undefined
-        ? realpathSync(configDirectory)
+        ? join(configDirectory, "AGENTS.md")
         : configHome !== undefined
-          ? join(realpathSync(configHome), "opencode")
-          : join(realpathSync(home), ".config", "opencode");
-    const file = join(folder, "AGENTS.md");
+          ? join(configHome, "opencode", "AGENTS.md")
+          : join(home, ".config", "opencode", "AGENTS.md");
+    // Only the home folder itself is canonicalized (macOS homes and temporary
+    // folders sit behind /private links). Every folder below it, and a
+    // configured folder outside it, is kept as named, so a linked
+    // OPENCODE_CONFIG_DIR or a link inside XDG_CONFIG_HOME fails the check
+    // below instead of being resolved away first.
+    const homeDirectory = join(home);
+    const file =
+      configured === homeDirectory || configured.startsWith(`${homeDirectory}/`)
+        ? join(realpathSync(homeDirectory), configured.slice(homeDirectory.length))
+        : configured;
     if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
     if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
       return undefined;

@@ -1431,6 +1431,7 @@ describe("OpenCodeProcessPort", () => {
         readonly executionPolicy?: ProviderExecutionPolicy;
         readonly runsAsItself?: boolean;
         readonly mode?: string;
+        readonly environment?: NodeJS.ProcessEnv;
       },
     ): Promise<{
       readonly seen: string;
@@ -1462,6 +1463,7 @@ describe("OpenCodeProcessPort", () => {
               HOME: home,
               XDG_CONFIG_HOME: "",
               OPENCODE_CONFIG_DIR: "",
+              ...options.environment,
             },
           }).start({
             binaryPath,
@@ -1556,6 +1558,49 @@ describe("OpenCodeProcessPort", () => {
             (input?.privateHomeAllowPaths ?? []).some(
               (path) => path.endsWith("AGENTS.md") || path === elsewhere,
             ),
+          ).toBe(false);
+        }
+      }
+    });
+
+    it("is found where OPENCODE_CONFIG_DIR or XDG_CONFIG_HOME names the folder", async () => {
+      const { home } = agentsHome();
+      const real = realpathSync(home);
+      mkdirSync(join(real, "own-config"));
+      writeFileSync(join(real, "own-config", "AGENTS.md"), "From the config folder.\n");
+      mkdirSync(join(real, "xdg", "opencode"), { recursive: true });
+      writeFileSync(join(real, "xdg", "opencode", "AGENTS.md"), "From XDG.\n");
+      const fromConfigDirectory = await launch(home, {
+        platform: "linux",
+        environment: { OPENCODE_CONFIG_DIR: join(real, "own-config") },
+      });
+      expect(fromConfigDirectory.seen).toBe("From the config folder.\n");
+      const fromXdg = await launch(home, {
+        platform: "linux",
+        environment: { XDG_CONFIG_HOME: join(real, "xdg") },
+      });
+      expect(fromXdg.seen).toBe("From XDG.\n");
+    });
+
+    it("refuses an AGENTS.md behind a linked OPENCODE_CONFIG_DIR or a link inside XDG_CONFIG_HOME", async () => {
+      const { home } = agentsHome();
+      const real = realpathSync(home);
+      const elsewhere = mkdtempSync(join(tmpdir(), "octant-opencode-agents-elsewhere-"));
+      directories.push(elsewhere);
+      mkdirSync(join(elsewhere, "opencode"));
+      writeFileSync(join(elsewhere, "AGENTS.md"), "behind a linked config folder\n");
+      writeFileSync(join(elsewhere, "opencode", "AGENTS.md"), "behind a linked XDG folder\n");
+      symlinkSync(elsewhere, join(real, "linked-config"));
+      for (const environment of [
+        { OPENCODE_CONFIG_DIR: join(real, "linked-config") },
+        { XDG_CONFIG_HOME: join(real, "linked-config") },
+      ]) {
+        for (const platform of ["darwin", "linux"] as const) {
+          const { seen, input } = await launch(home, { platform, environment });
+          expect(seen).toBe("");
+          expect((input?.extraRules ?? []).some((rule) => rule.includes("AGENTS.md"))).toBe(false);
+          expect(
+            (input?.privateHomeAllowPaths ?? []).some((path) => path.startsWith(elsewhere)),
           ).toBe(false);
         }
       }
