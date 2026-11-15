@@ -1067,7 +1067,11 @@ session (its resume record) before the thread records the adoption, so an
 adoption the thread then refuses (it changed meanwhile, or could not be
 marked) gives the claim back through the driver's `release`, which removes
 the record only while it still names this adoption's Octant session; the
-session is offered and adoptable again. Its picker and details row
+session is offered and adoptable again. Just before it records, a Work
+adoption also reads the Project again and refuses (giving the claim back)
+when its binding, root or the thread's approved working folder changed while
+the provider was asked; a change to the thread itself is refused by its
+version. Its picker and details row
 are Code's, above the Work composer.
 
 #### Wake-ups the model schedules

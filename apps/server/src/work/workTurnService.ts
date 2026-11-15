@@ -384,6 +384,11 @@ export interface WorkTurnServiceDependencies {
     thread: WorkThread,
     adopted: WorkThreadAdoptedSession,
   ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
+  /**
+   * Stops the thread's session the host kept past its last turn, and every
+   * background task in it. Absent, no Work session is kept.
+   */
+  readonly stopKeptSession?: (threadId: WorkThreadId) => Promise<boolean>;
   readonly attachments?: WorkAttachmentStore;
   /**
    * Whether a provider can carry its native session on to another of its
@@ -653,6 +658,7 @@ export class WorkTurnService {
    */
   readonly #adoptingThreads = new Set<string>();
   readonly #recordAdoptedSession: WorkTurnServiceDependencies["recordAdoptedSession"];
+  readonly #stopKeptSession: WorkTurnServiceDependencies["stopKeptSession"];
   /**
    * The access each running turn holds, by thread. The native harness checks
    * edits against this rather than the thread's own access, so a goal-loop
@@ -747,6 +753,7 @@ export class WorkTurnService {
     this.#outsideContentMarks = dependencies.outsideContentMarks;
     this.#forgeChanges = dependencies.forgeChanges;
     this.#recordAdoptedSession = dependencies.recordAdoptedSession;
+    this.#stopKeptSession = dependencies.stopKeptSession;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#serverProjects = dependencies.serverProjects;
@@ -1057,6 +1064,19 @@ export class WorkTurnService {
   }
 
   /**
+   * Hands the thread's native session to a requested compaction, which
+   * resumes it on a connection of its own. A session the host kept past the
+   * last turn is stopped first, background tasks and all: two processes must
+   * never write the same native history, and the next turn must resume what
+   * the compaction left. Answers false while a turn is starting or running.
+   */
+  async releaseSessionForCompaction(threadId: WorkThreadId): Promise<boolean> {
+    if (this.isTurnActive(threadId) || this.isTurnStarting(threadId)) return false;
+    await this.#stopKeptSession?.(threadId);
+    return !(this.isTurnActive(threadId) || this.isTurnStarting(threadId));
+  }
+
+  /**
    * The provider's own sessions, begun outside Octant in the folder this
    * thread's turns run in, that the thread may start from; or the session it
    * was started from.
@@ -1165,6 +1185,21 @@ export class WorkTurnService {
         const occupied = this.#conversationRefusal(target.thread);
         if (occupied !== undefined)
           return { kind: "work-native-session-refused", message: occupied.message };
+        // The session was claimed for the folder the Project granted before
+        // the provider was asked. A relink, archive or a withdrawn working
+        // folder meanwhile would record a session its first turn could not
+        // take up; the thread's own changes are refused by its version below.
+        if (
+          adoptionFolderAuthority(
+            this.#persistence.readProject(target.thread.projectId),
+            target.thread,
+          ) !== target.folderAuthority
+        )
+          return {
+            kind: "work-native-session-refused",
+            message:
+              "This thread's Project folder changed while it took up the session. Try again.",
+          };
         const recorded = record(target.thread, {
           nativeSessionId,
           providerSessionId,
@@ -1227,6 +1262,8 @@ export class WorkTurnService {
         readonly status: "ready";
         readonly thread: WorkThread;
         readonly projectRoot: string;
+        /** What the Project granted the thread's folder when the target was read. */
+        readonly folderAuthority: string;
         readonly nativeSessions: NonNullable<ProviderDriver["nativeSessions"]>;
       }
     | {
@@ -1285,7 +1322,16 @@ export class WorkTurnService {
         status: "refused",
         message: "This thread's provider cannot continue a session started outside Octant.",
       };
-    return { status: "ready", thread, projectRoot, nativeSessions: driver.nativeSessions };
+    const folderAuthority = adoptionFolderAuthority(project, thread);
+    if (folderAuthority === undefined)
+      return { status: "refused", message: "This thread's folder is unavailable." };
+    return {
+      status: "ready",
+      thread,
+      projectRoot,
+      folderAuthority,
+      nativeSessions: driver.nativeSessions,
+    };
   }
 
   async #admitTurn(
@@ -2205,6 +2251,7 @@ export class WorkTurnService {
         ...(resumeCursor === undefined ? {} : { resumeCursor }),
         projectRoot,
         projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
+        ...(project === undefined ? {} : { project }),
         extraFolders,
         ...(server === undefined ? {} : { serverTools: server.tools }),
         driver,
@@ -2616,6 +2663,11 @@ export class WorkTurnService {
     readonly projectRoot: string;
     /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
     readonly projectCanonicalRoot: string;
+    /**
+     * The Project as admission read it, which `projectRoot` and
+     * `extraFolders` came from; a kept session's terms are taken from it.
+     */
+    readonly project?: Project;
     /** The Project's extra folders, granted what the bound root is granted. */
     readonly extraFolders: ReadonlyArray<string>;
     /**
@@ -2799,12 +2851,9 @@ export class WorkTurnService {
         command: input.command,
         providerSessionId: input.providerSessionId,
         ...(input.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
-        ...sessionTermsOption(
-          input.thread,
-          input.thread === undefined
-            ? undefined
-            : this.#persistence.readProject(input.thread.projectId),
-        ),
+        // The Project the turn took its root and extra folders from: a folder
+        // removed since is still in the session, so its terms must name it.
+        ...sessionTermsOption(input.thread, input.project),
         ...(this.#outsideContentMarks === undefined
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
@@ -4046,6 +4095,30 @@ function wakeupsOption(wakeups: ProviderWakeupSchedule | undefined): {
   readonly wakeups?: ProviderWakeupSchedule;
 } {
   return wakeups === undefined ? {} : { wakeups };
+}
+
+/**
+ * What a Work Project grants a thread's folder: its current binding and
+ * root and the thread's approved working folder. Undefined when the Project
+ * grants it nothing (gone, archived, or the folder withdrawn).
+ */
+function adoptionFolderAuthority(
+  project: Project | undefined,
+  thread: WorkThread,
+): string | undefined {
+  if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
+  return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+  ]);
 }
 
 /** The thread's terms a kept session is held to; see {@link workSessionTerms}. */

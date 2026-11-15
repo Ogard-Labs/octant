@@ -117,7 +117,7 @@ import {
   type WorkTurnServiceDependencies,
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
-import { WorkTurnRuntime, type WorkTurnRuntimePort } from "./workTurnRuntime";
+import { WorkTurnRuntime, workSessionTerms, type WorkTurnRuntimePort } from "./workTurnRuntime";
 import { prepareAutomationFileDefinition } from "../automation/automationFileSourceAuthority";
 import {
   automationDefinitionFixture,
@@ -2420,6 +2420,55 @@ describe("WorkTurnService", () => {
       });
     });
 
+    it("refuses an adoption whose Project was relinked while it ran, and gives the claim back", async () => {
+      let finish: (() => void) | undefined;
+      const adopt = vi.fn((_input: { readonly sessionId: unknown }) =>
+        Effect.async<typeof cursor>((resume) => {
+          finish = () => resume(Effect.succeed(cursor));
+        }),
+      );
+      const release = vi.fn((_input: { readonly sessionId: unknown }) => Effect.void);
+      const recordAdoptedSession = vi.fn(() => ({ status: "recorded" as const }));
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+        }),
+        recordAdoptedSession,
+      });
+
+      const adoption = fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      fixture.persistence.readProject.mockImplementation(() =>
+        workProject({
+          binding: { canonicalRoot: "/private/tmp/elsewhere" },
+          bindingHistory: [
+            ...workProject().bindingHistory,
+            {
+              revisionId: "72000000-0000-4000-8000-000000000077" as never,
+              revision: 2,
+              currentBinding: { canonicalRoot: "/private/tmp/elsewhere" },
+              actor: {
+                kind: "local-user",
+                actorId: "72000000-0000-4000-8000-000000000009" as never,
+              },
+              changedAt: now as never,
+            },
+          ],
+        }),
+      );
+      finish?.();
+
+      expect(await adoption).toEqual({
+        kind: "work-native-session-refused",
+        message: "This thread's Project folder changed while it took up the session. Try again.",
+      });
+      expect(recordAdoptedSession).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: adopt.mock.calls[0]?.[0].sessionId }),
+      );
+    });
+
     it("refuses the first turn once the thread moved to another model than the session it adopted", async () => {
       const fixture = serviceFixture({
         adoptedSession: () => ({
@@ -2437,6 +2486,73 @@ describe("WorkTurnService", () => {
       ).rejects.toMatchObject({ failure: { category: "stale" } });
       expect(fixture.acquireInputs).toHaveLength(0);
     });
+  });
+
+  it("holds a kept session to the folders the turn took, so a folder removed while it starts is never retained", async () => {
+    const taken = workProject({
+      extraFolders: [
+        {
+          canonicalRoot: "/private/tmp/assets",
+          addedBy: { kind: "local-user", actorId: "72000000-0000-4000-8000-000000000009" },
+          addedAt: now,
+        },
+      ] as never,
+    });
+    const narrowed = workProject({ extraFolders: [] });
+    let current = taken;
+    const seen: Array<{ readonly terms?: string; readonly extraFolders?: ReadonlyArray<string> }> =
+      [];
+    const fixture = serviceFixture({
+      project: taken,
+      // Watching the folder starts once the turn took its folders, before its
+      // session is acquired: the person removes the extra folder meanwhile.
+      turnFileObserver: {
+        observe: () => {
+          current = narrowed;
+          return { finish: () => [] };
+        },
+      } as never,
+      turnRuntime: {
+        run: async (input) => {
+          seen.push({
+            ...(input.sessionTerms === undefined ? {} : { terms: input.sessionTerms }),
+            ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+          });
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    fixture.persistence.readProject.mockImplementation(() => current);
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const thread = await fixture.threads.read();
+    expect(seen).toEqual([
+      { terms: workSessionTerms(thread, taken), extraFolders: ["/private/tmp/assets"] },
+    ]);
+    // The Project's terms now differ, so the session is not kept past its turn.
+    expect(seen[0]?.terms).not.toEqual(workSessionTerms(thread, narrowed));
+  });
+
+  it("stops the thread's kept session before a compaction resumes it, and refuses while a turn runs", async () => {
+    const stopKeptSession = vi.fn(async () => true);
+    let release: (() => void) | undefined;
+    const fixture = serviceFixture({
+      stopKeptSession,
+      turnRuntime: {
+        run: () =>
+          new Promise((resolve) => {
+            release = () => resolve({ kind: "completed", response: "Done" });
+          }),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(await fixture.service.releaseSessionForCompaction(ids.thread)).toBe(false);
+    expect(stopKeptSession).not.toHaveBeenCalled();
+    release?.();
+    await fixture.waitForIdle();
+    await vi.waitFor(() => expect(fixture.service.isTurnActive(ids.thread)).toBe(false));
+    expect(await fixture.service.releaseSessionForCompaction(ids.thread)).toBe(true);
+    expect(stopKeptSession).toHaveBeenCalledWith(ids.thread);
   });
 
   it("refuses to open the runtime's own turn on a thread with no session to open it in", async () => {
@@ -6194,6 +6310,7 @@ function serviceFixture(
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
     readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    readonly stopKeptSession?: WorkTurnServiceDependencies["stopKeptSession"];
     /** Read on every thread read, so a test can adopt a session between reads. */
     readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
   } = {},
@@ -6419,6 +6536,7 @@ function serviceFixture(
     ...(options.recordAdoptedSession === undefined
       ? {}
       : { recordAdoptedSession: options.recordAdoptedSession }),
+    ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),

@@ -575,6 +575,8 @@ export function wireWork(deps: WorkDependencies) {
       // is journaled on the thread, marked as carrying outside content first.
       recordAdoptedSession: (thread, adopted) =>
         workThreadService.recordAdoptedSession(thread, adopted),
+      // A compaction stops the session kept past the thread's last turn.
+      stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
         outlivingSessions: outlivingWorkSessions,
         stalledTurnLimitMs: () =>
