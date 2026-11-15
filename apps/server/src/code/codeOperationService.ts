@@ -131,7 +131,7 @@ import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoverySer
 import { ReviewFindingServiceError } from "./reviewFindingService";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
-import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 
 type Awaitable<T> = T | Promise<T>;
 
@@ -353,6 +353,17 @@ export interface CodeOperationEventPort {
    * reporting a truncated history as the whole one.
    */
   readonly historyForThread: (threadId: CodeThreadId) =>
+    | {
+        readonly status: "ok";
+        readonly frames: ReadonlyArray<CodeOperationEventFrame>;
+      }
+    | { readonly status: "rebuild-required" };
+  /**
+   * The thread's history reduced to the frames its latest facts come from
+   * (`summarizeThreadHistory`), refused exactly where `historyForThread` is.
+   * The newest repository test result is one of those facts.
+   */
+  readonly summaryForThread: (threadId: CodeThreadId) =>
     | {
         readonly status: "ok";
         readonly frames: ReadonlyArray<CodeOperationEventFrame>;
@@ -1219,7 +1230,9 @@ export interface CodeOperationServiceOptions {
    */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
   /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
-  readonly serverTerminalLogin?: (thread: CodeThread) => ServerTerminalLogin | undefined;
+  readonly serverTerminalLogin?: (
+    thread: CodeThread,
+  ) => ServerTerminalLogin | ServerTerminalRefusal | undefined;
   /**
    * Git on a server thread's server, for the Git panel, or undefined when the
    * thread has none now. Every command it runs is on the server.
@@ -2720,7 +2733,7 @@ export class CodeOperationService {
         threadId,
         checkoutId,
       });
-    const history = this.#options.events.historyForThread(threadId);
+    const history = this.#options.events.summaryForThread(threadId);
     if (history.status !== "ok")
       return decodeCodeRepositoryTestStatus({
         kind: "code-repository-test-status",
@@ -3707,7 +3720,11 @@ export class CodeOperationService {
         // other folder. Plan starts no terminal there either.
         let serverLogin: ServerTerminalLogin | undefined;
         if (checkout.kind === "remote-root") {
-          serverLogin = this.#options.serverTerminalLogin?.(thread);
+          const login = this.#options.serverTerminalLogin?.(thread);
+          // The server's own refusal (a suspended machine) is named as it is.
+          if (login !== undefined && "kind" in login)
+            return this.#failed(command.operationId, "unavailable", login.message);
+          serverLogin = login;
           if (
             serverLogin === undefined ||
             command.browserGrant === "on" ||

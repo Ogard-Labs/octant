@@ -175,6 +175,10 @@ export const BrowserActionKind = Schema.Literal(
   // asked to record; see the recording bounds below.
   "record-start",
   "record-stop",
+  // Only the agent tool reads and calls the tools a page declares; see
+  // `BrowserPageDeclaredTools`.
+  "page-tools",
+  "page-tool-call",
 );
 export type BrowserActionKind = typeof BrowserActionKind.Type;
 
@@ -577,6 +581,95 @@ export type BrowserPerformanceAudit = typeof BrowserPerformanceAudit.Type;
 export const BrowserPageAudit = Schema.Union(BrowserAccessibilityAudit, BrowserPerformanceAudit);
 export type BrowserPageAudit = typeof BrowserPageAudit.Type;
 
+/**
+ * The bounds on the tools one page may declare for agents. A declaration is
+ * outside content the page wrote, so every part of it is clipped before it
+ * reaches the server's answer: the counts and lengths below are the whole of
+ * what an agent ever reads of it.
+ */
+export const MAX_BROWSER_PAGE_TOOLS = 16;
+export const MAX_BROWSER_PAGE_TOOL_DESCRIPTION_CHARACTERS = 1024;
+export const MAX_BROWSER_PAGE_TOOL_PARAMETERS = 24;
+export const MAX_BROWSER_PAGE_TOOL_PARAMETER_DESCRIPTION_CHARACTERS = 256;
+export const MAX_BROWSER_PAGE_TOOL_CHOICES = 32;
+export const MAX_BROWSER_PAGE_TOOL_ARGUMENT_CHARACTERS = 4096;
+
+/** A declared tool's or parameter's name: what the page wrote, if it is a plain identifier. */
+export const BrowserPageToolName = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,64}$/));
+export type BrowserPageToolName = typeof BrowserPageToolName.Type;
+
+/** One parameter of a declared tool, read from one named control of its form. */
+export const BrowserPageToolParameter = Schema.Struct({
+  name: BrowserPageToolName,
+  type: Schema.Literal("text", "number", "boolean", "choice"),
+  required: Schema.Boolean,
+  description: Schema.optional(
+    Schema.String.pipe(
+      Schema.minLength(1),
+      Schema.maxLength(MAX_BROWSER_PAGE_TOOL_PARAMETER_DESCRIPTION_CHARACTERS),
+    ),
+  ),
+  /** For a `choice`: the values the page offers. */
+  choices: Schema.optional(
+    Schema.Array(Schema.String.pipe(Schema.maxLength(128))).pipe(
+      Schema.maxItems(MAX_BROWSER_PAGE_TOOL_CHOICES),
+    ),
+  ),
+}).annotations(strict);
+export type BrowserPageToolParameter = typeof BrowserPageToolParameter.Type;
+
+/**
+ * One tool a page declares for agents: a `<form>` carrying `toolname` and
+ * `tooldescription` (the declarative form of the WebMCP proposal). `autosubmit`
+ * is the form's `toolautosubmit`: without it the page asks the person to review
+ * and submit the filled form themselves.
+ */
+export const BrowserPageDeclaredTool = Schema.Struct({
+  name: BrowserPageToolName,
+  description: Schema.String.pipe(Schema.maxLength(MAX_BROWSER_PAGE_TOOL_DESCRIPTION_CHARACTERS)),
+  autosubmit: Schema.Boolean,
+  parameters: Schema.Array(BrowserPageToolParameter).pipe(
+    Schema.maxItems(MAX_BROWSER_PAGE_TOOL_PARAMETERS),
+  ),
+}).annotations(strict);
+export type BrowserPageDeclaredTool = typeof BrowserPageDeclaredTool.Type;
+
+/**
+ * What a `page-tools` read found. `truncated` says the page declared more than
+ * the bounds keep; `withheld` counts declared forms that hold a credential
+ * field, which are never listed or called.
+ */
+export const BrowserPageDeclaredTools = Schema.Struct({
+  tools: Schema.Array(BrowserPageDeclaredTool).pipe(Schema.maxItems(MAX_BROWSER_PAGE_TOOLS)),
+  truncated: Schema.Boolean,
+  withheld: Schema.Int.pipe(Schema.between(0, 1024)),
+}).annotations(strict);
+export type BrowserPageDeclaredTools = typeof BrowserPageDeclaredTools.Type;
+
+/** One call of a declared tool: its name and the value for each named parameter. */
+export const BrowserPageToolCall = Schema.Struct({
+  name: BrowserPageToolName,
+  arguments: Schema.Record({
+    key: BrowserPageToolName,
+    value: Schema.Union(
+      Schema.String.pipe(Schema.maxLength(MAX_BROWSER_PAGE_TOOL_ARGUMENT_CHARACTERS)),
+      Schema.Number,
+      Schema.Boolean,
+    ),
+  }),
+}).annotations(strict);
+export type BrowserPageToolCall = typeof BrowserPageToolCall.Type;
+
+/**
+ * How a declared tool's call ended in the page: its form was submitted, or
+ * filled and left for the person to submit because it does not auto-submit.
+ */
+export const BrowserPageToolCallOutcome = Schema.Struct({
+  name: BrowserPageToolName,
+  outcome: Schema.Literal("submitted", "filled-for-person"),
+}).annotations(strict);
+export type BrowserPageToolCallOutcome = typeof BrowserPageToolCallOutcome.Type;
+
 export const BrowserActionRequest = Schema.Struct({
   actionId: ToolActionId,
   contextId: BrowserContextId,
@@ -626,6 +719,8 @@ export const BrowserActionRequest = Schema.Struct({
   auditKind: Schema.optional(BrowserAuditKind),
   /** The answer for the first dialog this action raises; absent, the fixed rule. */
   dialog: Schema.optional(BrowserDialogAnswer),
+  /** The declared tool a `page-tool-call` calls, and its arguments. */
+  pageTool: Schema.optional(BrowserPageToolCall),
   value: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))),
   point: Schema.optional(BrowserViewportPoint),
   deltaX: Schema.optional(Schema.Number.pipe(Schema.between(-2000, 2000))),
@@ -796,6 +891,10 @@ export const BrowserObservation = Schema.Struct({
   diagnosticsCursor: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   /** Only an `audit` action fills this: what the audit found or measured. */
   audit: Schema.optional(BrowserPageAudit),
+  /** Only a `page-tools` read fills this: the tools the page declares, bounded. */
+  pageTools: Schema.optional(BrowserPageDeclaredTools),
+  /** Only a `page-tool-call` fills this: how the call ended in the page. */
+  pageToolCall: Schema.optional(BrowserPageToolCallOutcome),
   screenshotDataUrl: Schema.optional(
     Schema.String.pipe(
       Schema.maxLength(MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS),

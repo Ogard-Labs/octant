@@ -1224,10 +1224,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   list-style: none;
 }
 
-.settings-disclosure > summary::-webkit-details-marker {
-  display: none;
-}
-
 .settings-disclosure > summary:hover {
   color: var(--octant-text-primary);
 }
@@ -1235,11 +1231,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-disclosure > summary > svg {
   flex: 0 0 auto;
   color: var(--octant-text-muted);
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.settings-disclosure[open] > summary > svg {
-  transform: rotate(90deg);
 }
 
 .settings-disclosure--section > summary {
@@ -1784,14 +1775,9 @@ textarea.settings-view__text-input {
   border-top: 0;
 }
 
-.settings-theme-editor__disclosure-icon {
+.settings-theme-editor__disclosure > summary > svg {
   flex: 0 0 auto;
   color: var(--oct-muted);
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.settings-theme-editor__disclosure[open] .settings-theme-editor__disclosure-icon {
-  transform: rotate(180deg);
 }
 
 .settings-theme-editor__disclosure-body {

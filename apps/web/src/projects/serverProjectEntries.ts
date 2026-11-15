@@ -1,6 +1,8 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ShieldServersClient } from "@octant/client-runtime/shield-servers-client";
+import type { ServerProjectCodeBinding } from "@octant/contracts/server-projects";
 import type { BindingRevisionId, ProjectId, ProjectAction } from "@octant/contracts/projects";
 import type { ComposerProjectEntry } from "./ComposerProjectSelector";
 
@@ -20,6 +22,8 @@ export interface ServerCodeProject {
   readonly location: string;
   readonly folder?: string;
   readonly actions?: ReadonlyArray<ProjectAction>;
+  /** A Code Project's own folder checkout, as the host derives it; a routine there binds it. */
+  readonly codeBinding?: ServerProjectCodeBinding;
 }
 
 /** A Work Project on a server, with the binding its Work threads are created against. */
@@ -107,7 +111,14 @@ export function useServerCodeProjectsSource(
           };
         };
         // A Work Project on a server holds Work threads, never Code ones.
-        const next = view.projects.filter((project) => project.mode !== "work").map(entryOf);
+        const next = view.projects
+          .filter((project) => project.mode !== "work")
+          .map(
+            (project): ServerCodeProject => ({
+              ...entryOf(project),
+              ...(project.codeBinding === undefined ? {} : { codeBinding: project.codeBinding }),
+            }),
+          );
         const nextWork = view.projects.flatMap(
           (project): ReadonlyArray<ServerWorkProject> =>
             project.mode === "work" && project.workBindingRevisionId !== undefined
@@ -142,8 +153,8 @@ export function useServerCodeProjectsSource(
   }, [client, servers, revision]);
   useEffect(() => {
     if (client === undefined) return;
-    const timer = window.setInterval(refresh, SERVER_PROJECT_REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(refresh, SERVER_PROJECT_REFRESH_MS);
+    return () => stopRefresh();
   }, [client, refresh]);
   return useMemo(
     () => ({ catalog, projects, workProjects, refresh }),

@@ -113,6 +113,10 @@ import {
   type ChatTranscriptSearchRows,
   type ProjectedChatSettings,
 } from "./chatProjection";
+import {
+  searchCodeTranscript,
+  type CodeTranscriptSearchRows,
+} from "./codeTranscriptSearchProjection";
 import type { PendingChatPurge, ProjectedChatContent } from "./chatPersistenceSchema";
 import type { ProjectedCodeSettings } from "./codePersistenceSchema";
 import {
@@ -264,6 +268,10 @@ export interface PersistenceService {
   /** The modes whose journaled thread answers to this id; see `readThreadIdModes`. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly searchCodeTranscript: (
+    query: string,
+    visibleThreadIds: ReadonlySet<string>,
+  ) => CodeTranscriptSearchRows;
   /** The thread a Code Project designated as its planner, if any. */
   readonly readCodePlannerThreadId: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
@@ -508,9 +516,14 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       );
     } else if (fingerprint !== undefined && scannedHead !== verifiedThrough) {
       // Only a scan that found the journal compatible and left its rows
-      // untouched may move the watermark.
+      // untouched may move the watermark. The status check below clears it
+      // again if it refuses the start, so a refused tail is never skipped.
       recordJournalWatermark(connection, fingerprint, scannedHead, clock());
     }
+    // The status inspection trusts rows at or below the watermark only while
+    // they are the same rows the earlier start verified.
+    const statusVerifiedThrough =
+      compatibility.compatible && compaction.eventsRemoved === 0 ? verifiedThrough : 0;
     // Before any service can start a provider session, so no live session
     // can still be waiting to journal its record.
     const sessionSweep = sweepUnrecordedSessionData(connection);
@@ -528,7 +541,13 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       reconciledAt: clock(),
     });
 
-    let status = databaseStatus({ connection, journal, projections, compatibility });
+    let status = databaseStatus({
+      connection,
+      journal,
+      projections,
+      compatibility,
+      verifiedThrough: statusVerifiedThrough,
+    });
     // Lagging, inconsistent or quarantined projections over a journal that
     // decodes and passes the integrity check are rebuilt from it. A previously
     // quarantined event can also become readable after a compatible upcast
@@ -543,7 +562,13 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       damageIsProjectionOnly(verifyDatabase({ connection, journal, projections, compatibility }))
     ) {
       rebuildProjectionsOnce();
-      status = databaseStatus({ connection, journal, projections, compatibility });
+      status = databaseStatus({
+        connection,
+        journal,
+        projections,
+        compatibility,
+        verifiedThrough: statusVerifiedThrough,
+      });
     } else if (status.heldDerivedViews !== undefined && status.integrity === "ok") {
       // A held view that catch-up brought to the head (a fixed build applied
       // the event it failed on) still has its quarantine row, which would
@@ -561,7 +586,13 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         }
       }
       if (caughtUp.length > 0) {
-        status = databaseStatus({ connection, journal, projections, compatibility });
+        status = databaseStatus({
+          connection,
+          journal,
+          projections,
+          compatibility,
+          verifiedThrough: statusVerifiedThrough,
+        });
       }
     }
     if (status.heldDerivedViews !== undefined) {
@@ -570,6 +601,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       );
     }
     if (status.state !== "current" || status.integrity !== "ok") {
+      clearJournalWatermark(connection);
       throw new PersistenceStartupFailed({
         category: "recovery-required",
         message: "Octant storage requires recovery before startup.",
@@ -577,7 +609,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       });
     }
     // Readiness gates answer from the latest inspection and never start one.
-    // An inspection runs SQLite's integrity check and decodes every journal
+    // A fresh inspection runs SQLite's integrity check and walks every journal
     // row, and every service calls `status()` before every read: run each
     // time, a CPU profile put a third of all server time here, and even a
     // re-inspection every 10 s held the event loop for 0.9 to 1.7 s on a
@@ -655,6 +687,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
       readThreadIdModes: (threadId) => readThreadIdModes(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
+      searchCodeTranscript: (query, visibleThreadIds) =>
+        searchCodeTranscript(connection, query, visibleThreadIds),
       readCodePlannerThreadId: (projectId) => {
         const designation = readCodePlannerDesignation(connection, projectId);
         return designation?.kind === "designated" ? designation.plannerThreadId : undefined;

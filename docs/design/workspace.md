@@ -664,17 +664,32 @@ keeps the first four and says the rest stayed as tabs. With no selection,
 **Show side by side** puts the right-clicked tab beside the open one. The
 layout is made of ordinary split commands, so closing or resizing a pane
 afterwards works as for any split, and a placement the window's authority
-refuses (another Project, mode, or host) is refused with the usual message.
-Several same-authority threads can be pinned or dropped into
-that tree; pointer activity and keyboard input make exactly one pane active,
+refuses (another mode or host) is refused with the usual message.
+Threads of one mode and host can be pinned or dropped into
+that tree, from any of that mode's Projects; pointer activity and keyboard input make exactly one pane active,
 and the pane's drag handle (its title row) alone marks it visually, with no
 other border, fill, or badge. The pane region carries `aria-current` and its
 accessible name for assistive technology. Increased-contrast mode also fills
 the active pane, as a contrast fallback and the one exception to the handle
 alone. The older plan's separately "marked active pane" is superseded. Completed layout operations go through
-server-authoritative workspace commands. One visible tree belongs to one
-authority context (host, mode, Project, and bound root); a cross-Project,
-cross-mode, or cross-host placement is refused or offered in a new window.
+server-authoritative workspace commands. One visible tree belongs to one host
+and one mode; each pane keeps its own Project's authority (maintainer
+decision, 2026-11-14). The window's context names a lead Project, the one a
+layout is stowed under; a pane of another Project records that Project's
+context, which the host resolves from the pane's surface and never takes from
+the renderer. A turn in a pane reaches only its own Project, the window
+reaches the Projects its visible panes show and no more, and closing a pane
+ends its Project's reach. A cross-mode or cross-host placement is refused or
+offered in a new window, and so is a preview or Canvas of another Project.
+In a window showing several Projects every pane's title row names its Project
+at every width, and its accessible name reads "Project, title"; the dock,
+skills and plugins follow the active pane's Project. A single click on a
+thread the window does not show still moves the window to that thread's
+Project, stowing the current layout; a click on a thread of a stowed layout
+that held several Projects brings that whole layout back with the thread's
+pane active. Server Projects mix with local ones the same way, and their
+root-backed surfaces still fail closed. Design and rationale:
+[Threads from several Projects in one window](mixed-project-panes.md).
 
 Dragging a sidebar thread onto a Chat, Work, or Code composer attaches that
 thread as context. The drop uses the same mention path as typing `#` and
@@ -686,7 +701,10 @@ composer itself is the drop target, not the pane behind it. The row menu's
 or the only composer when one is open. Dropping the composer's own thread,
 a thread already attached, something that is not a thread, or a thread this
 window cannot Open leaves the draft unchanged and says so without reading
-the thread. Image and file drops, and dropping a thread on a pane rather
+the thread. Showing several Projects adds no reach here: a Code thread's
+composer attaches Code threads of its own Project only, and any other
+composer the Code threads of the window's lead Project, exactly as in a
+window that shows only that Project. Image and file drops, and dropping a thread on a pane rather
 than its composer, stay pane and attachment behaviour.
 
 ### Find in a thread, and a new thread from a selection
@@ -1200,7 +1218,7 @@ shows no button.
 Explicitly opening or selecting the tab in the current window session also
 requests a shell. The host still checks the thread's checkout and authority;
 Plan cannot start or stop terminals. Restored transcripts never replay commands.
-A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). **Minimised tools.** A thread's Browser and Terminal can be minimised into small
+A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility). A focused Browser page does not trap the window's shortcuts either: at their default chords the command palette (`Mod+K`), sidebar (`Mod+\`), dock (`Mod+Shift+J`) and focus composer (`Ctrl+Escape`) are held back from the page and handed to the window, and Settings (`Mod+,`) stays a menu accelerator; Zen's `Mod+Shift+Z` is Redo, which a page's text field keeps as the renderer's do. **Minimised tools.** A thread's Browser and Terminal can be minimised into small
 live cards on a shelf at the foot of the dock, so a page or a shell can be
 watched, and seen to answer, while another tool or only the dock's overview is
 in front. A floating preview of the Browser, drawn over the thread, covered the
@@ -2203,10 +2221,20 @@ threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
 hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The list's three
+the mode; the overlay also stays in the command palette. The overlay matches
+titles among the threads the host listed and, in every mode, message text
+through that mode's host read (`GET /api/chat/transcript-search`,
+`/api/work/transcript-search`, `/api/code/transcript-search`), which lists
+the same threads as the sidebar and its Archived group. A message hit shows its
+snippet after the title matches and names the turn that holds it; a Chat hit
+opens the thread scrolled to that turn, and a Work or Code hit opens its thread,
+because those transcripts do not yet jump to a turn
+([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
-picker uses, not an icon in the header. That row stands in the same place in
+picker uses, not an icon in the header. The phone's Work and Code tabs offer the
+same three as a segmented control above their thread list
+([Mobile maturity](mobile-maturity.md#exists-today)). That row stands in the same place in
 all three, with the Project tree's own Projects heading under it, so pressing
 the switch moves nothing but the list. Status headings carry their count in
 meta ink after the label ("Needs input 2"), the same face as the feed's folded
@@ -2567,6 +2595,22 @@ control (see [Minimised tools](#minimised-tools) and
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
+
+On the phone, a thread's header button (Views and panes) is the one way to
+reach anything beside the conversation. Its sheet lists the full-screen views
+the host would fill (Browser today) under Views; choosing one replaces the
+transcript, and a Conversation chip under the header leads back, so no thread
+carries a tab row it rarely uses. Below them it opens Environment, Review,
+Context & usage, and Agents with a segmented control, read-only and in this
+section's wording at phone scale: the header card's name, branch, and folder
+name; Uncommitted changes with its counts, opening Review's changed files and
+their unified diffs, with the checkout's recent commits under them; Running
+(Local servers, Subagents) and Delivery (the linked pull request). Environment
+and Review appear only on a Code thread. Commit, push, Stop, and steering a
+subagent stay at a window, and a subagent is shown by its counts rather than
+one row per run, because AgentRun reads authorize a local window only. The
+reads it uses and the gaps are in
+[Mobile maturity](mobile-maturity.md#exists-today).
 
 ### Browser toolbar
 

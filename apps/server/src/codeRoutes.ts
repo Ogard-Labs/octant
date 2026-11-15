@@ -162,6 +162,8 @@ import {
   type CodeThreadId,
   type CodeThreadView,
   type WindowId,
+  decodeCodeTranscriptSearch,
+  type CodeTranscriptSearch,
 } from "@octant/contracts";
 import {
   decodeCodeLanguageApprovalRequest,
@@ -299,6 +301,11 @@ export interface CodeRouteService {
     signal?: AbortSignal,
   ) => Promise<GitHistoryResult>;
   readonly bootstrap: (authenticatedWindowId: WindowId) => Promise<CodeBootstrap> | CodeBootstrap;
+  /** Message search over listed Code threads; absent, the route answers unavailable. */
+  readonly searchTranscript?: (
+    authenticatedWindowId: WindowId,
+    query: string,
+  ) => Promise<CodeTranscriptSearch> | CodeTranscriptSearch;
   readonly navigation: (
     authenticatedWindowId: WindowId,
   ) => Promise<CodeNavigation> | CodeNavigation;
@@ -736,6 +743,27 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireMethodAndEmptyQuery(request, url, "GET");
           return jsonResponse(
             await dependencies.service.bootstrap(authenticatedWindowId),
+            200,
+            origin,
+          );
+        case "transcript-search":
+          if (request.method !== "GET" || [...url.searchParams.keys()].some((key) => key !== "q")) {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          if (dependencies.service.searchTranscript === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code message search is unavailable." },
+              503,
+              origin,
+            );
+          }
+          return jsonResponse(
+            decodeCodeTranscriptSearch(
+              await dependencies.service.searchTranscript(
+                authenticatedWindowId,
+                url.searchParams.get("q") ?? "",
+              ),
+            ),
             200,
             origin,
           );
@@ -2416,6 +2444,7 @@ type MatchedRoute =
       kind:
         | "bootstrap"
         | "navigation"
+        | "transcript-search"
         | "commands"
         | "terminal-inspection"
         | "terminal-live"
@@ -2563,6 +2592,7 @@ function readAttachmentIdentity(url: URL): {
 function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/bootstrap") return { kind: "bootstrap" };
   if (pathname === "/api/code/navigation") return { kind: "navigation" };
+  if (pathname === "/api/code/transcript-search") return { kind: "transcript-search" };
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
   if (pathname === "/api/code/terminals/live") return { kind: "terminal-live" };

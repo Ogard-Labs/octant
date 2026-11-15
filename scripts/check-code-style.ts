@@ -5,7 +5,10 @@ import { resolve } from "node:path";
 /**
  * Enforces the code-style rules in AGENTS.md that no formatter or default lint
  * rule expresses: no `any`, no non-null `!`, no `as unknown as`, and no tracker
- * identifiers in shipped code.
+ * identifiers in shipped code. It also holds the server's reads of a window's
+ * lead Project (`contextByMode`) to the ones that exist: a window shows panes
+ * of several Projects, so a new authority check asks `windowAdmitsProject`
+ * rather than comparing against the lead.
  *
  * `any` and `!` are found by oxlint's own rules, run here rather than in
  * `.oxlintrc.json` because oxlint has no baseline: turning them on there would
@@ -17,7 +20,12 @@ import { resolve } from "node:path";
 
 export const BASELINE_PATH = "scripts/code-style-baseline.json";
 
-export type CodeStyleRule = "explicit-any" | "non-null-assertion" | "as-unknown-as" | "tracker-id";
+export type CodeStyleRule =
+  | "explicit-any"
+  | "non-null-assertion"
+  | "as-unknown-as"
+  | "tracker-id"
+  | "window-lead-read";
 
 export interface CodeStyleFinding {
   readonly rule: CodeStyleRule;
@@ -33,6 +41,7 @@ const RATCHETED_RULES: ReadonlyArray<CodeStyleRule> = [
   "explicit-any",
   "non-null-assertion",
   "as-unknown-as",
+  "window-lead-read",
 ];
 
 const OXLINT_RULES: Readonly<Record<string, CodeStyleRule>> = {
@@ -44,6 +53,8 @@ const OXLINT_RULES: Readonly<Record<string, CodeStyleRule>> = {
  * examples such as a Linear integration's `ENG-12` are other teams' keys. */
 const TRACKER_ID = /\b(?:OCT|BOOT)-\d+\b/g;
 const AS_UNKNOWN_AS = /\bas\s+unknown\s+as\b/g;
+const WINDOW_LEAD_READ = /\bcontextByMode\b/g;
+const SERVER_SOURCE = /^apps\/server\//;
 
 const SOURCE_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
 
@@ -73,7 +84,7 @@ function lineAt(source: string, index: number): number {
   return line;
 }
 
-/** The two rules a pattern can express exactly. */
+/** The rules a pattern can express exactly. */
 export function findTextFindings(
   files: Readonly<Record<string, string>>,
 ): ReadonlyArray<CodeStyleFinding> {
@@ -84,6 +95,10 @@ export function findTextFindings(
     }
     for (const match of source.matchAll(TRACKER_ID)) {
       findings.push({ rule: "tracker-id", file, line: lineAt(source, match.index) });
+    }
+    if (!SERVER_SOURCE.test(file)) continue;
+    for (const match of source.matchAll(WINDOW_LEAD_READ)) {
+      findings.push({ rule: "window-lead-read", file, line: lineAt(source, match.index) });
     }
   }
   return findings;
@@ -120,6 +135,7 @@ export function countFindings(
     "non-null-assertion": {},
     "as-unknown-as": {},
     "tracker-id": {},
+    "window-lead-read": {},
   };
   for (const finding of findings) {
     const byFile = counts[finding.rule];
@@ -192,6 +208,8 @@ const REMEDY: Readonly<Record<CodeStyleRule, string>> = {
     "decode or narrow the value instead of laundering it through `unknown` (AGENTS.md: `as` never invents a value)",
   "tracker-id":
     "remove the tracker identifier; say what the rule means instead (AGENTS.md: tracker ids stay in Linear)",
+  "window-lead-read":
+    "ask `windowAdmitsProject` (or `activePaneContext`) instead of reading the window's lead Project; a window shows panes of several Projects",
 };
 
 function shippedFiles(root: string): ReadonlyArray<string> {

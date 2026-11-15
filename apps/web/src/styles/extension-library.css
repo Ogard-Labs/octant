@@ -217,18 +217,9 @@
   list-style: none;
 }
 
-.library__fold > summary::-webkit-details-marker {
-  display: none;
-}
-
-.library__chevron {
+.library__fold > summary > svg {
   flex: 0 0 auto;
   color: var(--oct-meta);
-  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.library__fold[open] > summary > .library__chevron {
-  transform: rotate(90deg);
 }
 
 .library__row--skeleton {

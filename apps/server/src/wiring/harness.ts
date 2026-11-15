@@ -96,6 +96,8 @@ import {
   type ServerResourceRead,
 } from "../serverProjects/serverResources";
 import { createServerProjectRouteHandler } from "../serverProjects/serverProjectRoutes";
+import { CloudMachineService } from "../cloudMachines/cloudMachineService";
+import { createCloudMachineRouteHandler } from "../cloudMachines/cloudMachineRoutes";
 import { serverProjectOf } from "../serverProjects/serverProjectThreads";
 import { openServerSshAccessFor } from "../shield/serverSshAccess";
 import { makeServerSshKeysBrokerClient } from "../shield/sshKeyBrokerClient";
@@ -147,6 +149,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "cloudMachineServers"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -171,6 +174,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
     agentRunInteractions,
+    cloudMachineServers,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -274,15 +278,41 @@ export function wireHarness(deps: HarnessDependencies) {
     ownerCurrent: (owner) =>
       windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
     agentSocket: sshAgentSocket,
+    pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
+    refuses: (server) => serverConnection.refusal(server),
     record: (record) => serverProjectStore.recordPreview(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
     windows: windowAuthorityStore,
     tunnels: serverPreviewTunnels,
   });
+  // Machines in the person's own cloud account, each bound as a server
+  // Project. Targets arrive only from cloud machine target plugins the person
+  // installed, trusted and enabled; no such plugin ships and no stored package
+  // may run one yet, so the list is empty and nothing is created. Octant runs
+  // no machines of its own to fall back to.
+  const cloudMachines = new CloudMachineService({
+    journal: persistence.journal,
+    personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    now: Date.now,
+    targets: () => [],
+    credentialHandle: async () => undefined,
+    servers: shieldServerStore,
+    projects: serverProjectStore,
+  });
+  cloudMachines.load();
+  cloudMachineServers.pinnedHostKeys = (server) => cloudMachines.pinnedHostKeys(server);
+  cloudMachineServers.suspendedRefusal = (server) => cloudMachines.suspendedRefusal(server);
+  const cloudMachineRoutes = createCloudMachineRouteHandler({
+    windowAuthorityStore,
+    service: cloudMachines,
+  });
   const catalogRoutes = createServerProjectRouteHandler({
     windowAuthorityStore,
     store: serverProjectStore,
+    cloudMachineOf: (projectId) => cloudMachines.machineForProject(projectId),
   });
   const serverResourceReaders = new Map<string, () => Promise<ServerResourceRead>>();
   const resourceRoutes = createServerResourceRoutes({
@@ -318,6 +348,7 @@ export function wireHarness(deps: HarnessDependencies) {
     (await setupCheckRoutes(request)) ??
     (await previewRoutes(request)) ??
     (await resourceRoutes(request)) ??
+    (await cloudMachineRoutes(request)) ??
     catalogRoutes(request);
   const runtimeRemoteCommands = new RuntimeRemoteCommands((input) =>
     shieldServerStore.recordRemoteCommand(input),

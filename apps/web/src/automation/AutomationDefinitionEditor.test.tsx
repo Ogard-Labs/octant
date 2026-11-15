@@ -4,6 +4,8 @@ import {
   decodeProjectSummary,
   type AutomationDefinitionDraft,
 } from "@octant/contracts";
+import { decodeBindingRevisionId, decodeProjectId } from "@octant/contracts/projects";
+import type { ServerWorkProject } from "../projects/serverProjectEntries";
 import { buildAutomationEditorCatalog } from "./automationEditorCatalog";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -106,6 +108,60 @@ function ordinaryWorkCatalog(): AutomationEditorCatalog {
       code: [],
     },
   });
+}
+
+const SERVER_WORK_PROJECT: ServerWorkProject = {
+  projectId: decodeProjectId("5e7e0000-0000-4000-8000-0000000000a1"),
+  name: "Build box",
+  location: "devbox:/srv/app",
+  folder: "/srv/app",
+  bindingRevisionId: decodeBindingRevisionId("5e7e0000-0000-4000-8000-0000000000a2"),
+};
+
+/**
+ * The real catalog as a window builds it, with the server Projects it read:
+ * the host's own person reads the server catalog, and a restricted device's
+ * read is refused, so it passes empty lists.
+ */
+function catalogWithServerProjects(
+  work: ReadonlyArray<ServerWorkProject>,
+): AutomationEditorCatalog {
+  const ordinary = ordinaryWorkCatalog();
+  const built = buildAutomationEditorCatalog({
+    hostId: "local",
+    hostLabel: "This Mac",
+    actorId: AUTOMATION_UI_TEST_IDS.actor,
+    projects: [],
+    profiles: [
+      decodeAgentProfile({
+        id: AUTOMATION_UI_TEST_IDS.executionProfile,
+        displayName: "Work default",
+        approvedSkillIds: [],
+        toolConstraints: [],
+        modelConstraints: [],
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        compatibleModes: ["work", "code"],
+        version: 1,
+        createdAt: AUTOMATION_UI_TEST_NOW,
+        updatedAt: AUTOMATION_UI_TEST_NOW,
+      }),
+    ],
+    providerChoicesByMode: {
+      work: [
+        { providerInstanceId: "aa000000-0000-4000-8000-0000000000b1", modelId: "local-only-model" },
+      ],
+      code: [],
+    },
+    serverProjects: { code: [], work },
+    serverProviderChoicesByMode: {
+      work: [
+        { providerInstanceId: "aa000000-0000-4000-8000-0000000000b2", modelId: "harness-model" },
+      ],
+      code: [],
+    },
+  });
+  return { ...built, projects: [...ordinary.projects, ...built.projects] };
 }
 
 async function chooseLabeledOption(label: string, optionName: string): Promise<void> {
@@ -347,6 +403,54 @@ describe("AutomationDefinitionEditor creation", () => {
     await userEvent.click(screen.getByLabelText("Schedule"));
     expect(
       screen.queryByRole("option", { name: "When files arrive or change" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lists the person's server Projects, binds the one chosen, and offers no file trigger there", async () => {
+    const props = editorProps({ catalog: catalogWithServerProjects([SERVER_WORK_PROJECT]) });
+    render(<AutomationDefinitionEditor {...props} />);
+    await userEvent.type(screen.getByLabelText("Name"), "Nightly build check");
+    await userEvent.type(screen.getByLabelText("Task for each run"), "Check last night's build.");
+    await chooseLabeledOption("Project", "Build box — devbox:/srv/app");
+    await chooseLabeledOption("Execution profile", "Work default");
+    await chooseLabeledOption("Authority profile", "Work default");
+    expect(
+      screen.getByText(
+        "A file routine watches a folder on this computer, so a Project on a server offers no file trigger.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(screen.getByLabelText("Schedule"));
+    expect(
+      screen.queryByRole("option", { name: "When files arrive or change" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("option", { name: "Run once" }));
+    fireEvent.change(screen.getByLabelText("Run at"), { target: { value: "2026-09-01T09:00" } });
+    await userEvent.type(screen.getByLabelText("Delivery"), "The build is green or explained.");
+    await userEvent.click(
+      screen.getByLabelText("I confirm this delivery target for every scheduled run"),
+    );
+    const draft = await savedDraft(props);
+    expect(String(draft.projectId)).toBe(String(SERVER_WORK_PROJECT.projectId));
+    expect(draft.binding).toMatchObject({
+      kind: "work",
+      projectVersion: 1,
+      bindingRevisionId: SERVER_WORK_PROJECT.bindingRevisionId,
+    });
+    // A server Project's turn runs on the Octant Harness alone.
+    expect(draft.executionProfile).toMatchObject({
+      providerInstanceId: "aa000000-0000-4000-8000-0000000000b2",
+      modelId: "harness-model",
+    });
+  });
+
+  it("lists no server Project when the window could not read the server catalog", async () => {
+    render(
+      <AutomationDefinitionEditor {...editorProps({ catalog: catalogWithServerProjects([]) })} />,
+    );
+    await userEvent.click(screen.getByLabelText("Project"));
+    expect(await screen.findByRole("option", { name: "Docs Project" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Build box — devbox:/srv/app" }),
     ).not.toBeInTheDocument();
   });
 

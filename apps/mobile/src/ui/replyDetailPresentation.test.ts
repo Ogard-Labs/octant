@@ -5,26 +5,29 @@ import { mobileReplyDetailPresentation } from "./replyDetailPresentation";
 const reasoning = "**Compare** the fixtures.\nThe second is stale.";
 
 describe("a reply on the phone at each Reply detail level", () => {
-  it("keeps reasoning shut and finished tool cards folded at low, as the phone always has", () => {
+  it("keeps reasoning shut and a settled run of tool calls folded behind one line at low", () => {
     expect(mobileReplyDetailPresentation("low", reasoning)).toEqual({
       reasoningExpanded: false,
       reasoningPreview: "",
+      toolCallsOpen: false,
       toolDetailOpen: false,
     });
   });
 
-  it("keeps reasoning shut with its first line showing at medium", () => {
+  it("keeps reasoning shut with its first line showing and tool calls listed at medium", () => {
     expect(mobileReplyDetailPresentation("medium", reasoning)).toEqual({
       reasoningExpanded: false,
       reasoningPreview: "Compare the fixtures.",
+      toolCallsOpen: true,
       toolDetailOpen: false,
     });
   });
 
-  it("opens reasoning and every tool card at high", () => {
+  it("opens reasoning, the tool calls, and each call's detail at high", () => {
     expect(mobileReplyDetailPresentation("high", reasoning)).toEqual({
       reasoningExpanded: true,
       reasoningPreview: "",
+      toolCallsOpen: true,
       toolDetailOpen: true,
     });
   });

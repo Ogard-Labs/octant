@@ -878,9 +878,11 @@ Deep-link capture and live transport ownership do not mount in that branch.
 Leaving the demo discards its sample state and returns to the explicit connection
 choice. This is review preparation, not evidence of native or store acceptance.
 
-Its background shares the desktop's three Gradient pictures and Pixelate/Dither
-print effect (Appearance › Background), drawn once through a GL shader that
-uses the same ordered threshold.
+Its background shares the desktop's three Gradient pictures and
+Pixelate/Dither/ASCII print effect (Appearance › Background), drawn once
+through a GL shader that uses the same ordered threshold and the same glyph
+table. The phone keeps its own effect choice on the device; it never follows
+the desktop's.
 
 Internal TestFlight distributes this same client and grants the phone no new
 authority. The bundle is `app.octant.mobile` (installed name Octant) at source
@@ -3563,12 +3565,15 @@ until all three exist; a standing grant never substitutes for the per-act
 approval.
 
 **Machines in the person's own cloud account** (maintainer decision,
-2026-11-14; not built yet). A delivery target may also be a machine Octant
+2026-11-14; partly built). A delivery target may also be a machine Octant
 creates in the person's own cloud account, through a credential reference the
 credential broker holds. It appears as a
 [Server Project](design/server-projects.md#machines-in-the-persons-cloud-account)
-and can be suspended and resumed by the person. Octant operates no hosted
-machines of its own; an Octant-operated hosted service stays out of scope
+and can be suspended and resumed by the person. A cloud machine target plugin
+does the provider work; every act is the person's, server-enforced and
+journaled, and destroying asks once. Built: the seam and the host lifecycle;
+no target plugin ships. Octant operates no hosted machines of its own; an
+Octant-operated hosted service stays out of scope
 ([Current Release Boundary](#current-release-boundary)).
 
 **Coordinator threads start and direct worker threads.** A person may make a
@@ -5067,12 +5072,20 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Both adapters run the store in WAL mode with `synchronous = FULL`:
-  a Chat reply's and a Code turn's streamed deltas batch into one journal commit
-  per short burst (a Code burst also flushes before any other event of its turn
-  and when the turn ends), so the authoritative journal fsyncs a bounded number
-  of times per second instead of once per token, and a power loss loses at most
-  the burst that was still open — never a committed one. A burst is also
+  the port. Both adapters run the store in WAL mode with `synchronous = NORMAL`,
+  a 64 MiB `journal_size_limit` and a 256 MiB `mmap_size`: a Chat reply's and a
+  Code turn's streamed deltas batch into one journal commit per short burst (a
+  Code burst also flushes before any other event of its turn and when the turn
+  ends), so the journal commits a bounded number of times per second instead
+  of once per token. Every commit survives a crash of the server process; an OS
+  crash or power loss may lose the commits since the last WAL checkpoint, never
+  leaves a torn or half-applied one, and the journal stays consistent.
+  Rationale (maintainer decision, 2026-11-14): `FULL` fsynced the WAL on every
+  commit, a full barrier on macOS that held the single-threaded control plane
+  2–15 ms per append, dozens of times a second with concurrent turns; the
+  local-first store accepts losing the newest seconds on power loss for that.
+  The size limit truncates the WAL after a checkpoint instead of leaving it at
+  its largest size. A burst is also
   bounded in size (256 Ki characters of Code text, merged into one event; 64
   Chat deltas, each its own event), so no single commit, including the one
   that settles a Stop, grows with how fast the provider streams: an unbounded Chat burst under a flood held nearly 600 deltas and
@@ -5112,7 +5125,12 @@ flowchart LR
   has no identity: it neither reads nor writes a watermark and scans
   everything, and a start that migrated computes nothing. The first start of
   every new build therefore runs one full scan; hashing the bundle costs about
-  10 ms. The next start of the same build decodes only rows after the watermark. A different fingerprint, a
+  10 ms. The next start of the same build decodes only rows after the watermark,
+  and its status inspection walks only those rows for version gaps and stale
+  aggregate heads (every stored head must still name a journal row) and skips
+  SQLite's `integrity_check`, which runs on every full scan; a tail that looks
+  wrong falls back to the full inspection, and a refused start clears the
+  watermark. A different fingerprint, a
   migration in the same start, a missing, malformed or too-high watermark, or
   any rewrite or delete of a journal row (a trigger clears it in the same
   transaction, so purge, compaction and host-identity rewrites are covered)
@@ -6642,16 +6660,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   with no assigned directory also reads the one file `~/.claude.json`: refused
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
-  A thread stays on the instance it started with until the person moves it
-  (maintainer decision, 2026-11-14; not built yet): the person may move a
-  thread to another account or instance, and the move is carried out by the
-  disclosed text handoff in
+  A thread stays on its instance until the person moves it: the thread's
+  **Move to account…** action (or the model picker) moves it to another
+  account, and the next turn starts there with the disclosed handoff of
   [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
-  journaled like any provider change. A per-thread setting the person opts
-  into, "when this account hits its usage limit, hand off to" a named account,
-  is allowed later; it hands off by the same path and names the move in the
-  thread. Octant never rotates, fails over, or load-balances between accounts
-  silently or on its own choice. Discovery can find
+  whose marker names the new account. The host accepts the move only from the
+  person, at a window or on a device they paired, and only while no turn runs
+  and no model pool is on (the pool names the current account);
+  a move from the host itself or an agent is refused, so there is no silent or
+  automatic failover, rotation, or load-balancing between accounts (maintainer
+  decision, 2026-11-14). Built for Chat; Work and Code move through the model
+  picker. An opt-in "on a usage limit, hand off to this account" is not built.
+  Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
   is created disabled. Discovery never installs or updates runtimes, never
@@ -8072,8 +8092,7 @@ reference) and every later delta journals `chat.attempt-response-appended@1`
 carrying only the reference it appended and the attempt's `updatedAt`, so
 journal bytes per reply are linear in its length. Deltas inside a short burst
 share one journal commit, folded ahead of any full attempt update in the same
-transaction, so the store fsyncs per burst rather than per token and stays on
-`synchronous = FULL`. A tool event journals `chat.attempt-tool-step@1` the same way
+transaction, so the store commits per burst rather than per token. A tool event journals `chat.attempt-tool-step@1` the same way
 ([Tool calls in Chat and Work](#tool-calls-in-chat-and-work)). The appended frame goes only
 to a subscriber that asks with `appended=1`; every other subscriber still
 receives each delta as a full `attempt-updated` frame read back from the
@@ -12850,11 +12869,14 @@ effective, which already means installed, trusted, and enabled at the plugin
 and the component; installation, trust, and enablement stay separate steps,
 and discovery or a catalog listing offers nothing. The one runtime theme
 authority applies a listed theme as it applies a built-in preset, and token
-export draws it the same way. Switching the plugin off, or removing it, takes
-its themes out of the pickers at once; a stored choice that names one then
-draws the default theme and the picker shows the default. The stored choice
-is kept, as disabling a plugin preserves its selections, so turning the plugin
-back on restores the theme. _Rationale:_ rewriting the setting on disable
+export draws it the same way. The server checks the person's semantic colour
+overrides against the selected theme as the renderer resolves it, reading the
+effective plugin themes from that same snapshot, so an override that fails
+contrast on a selected plugin theme is refused before it is stored. Switching
+the plugin off, or removing it, takes its themes out of the pickers at once; a
+stored choice that names one then draws the default theme and the picker shows
+the default. The stored choice is kept, as disabling a plugin preserves its
+selections, so turning the plugin back on restores the theme. _Rationale:_ rewriting the setting on disable
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
 
@@ -13031,10 +13053,20 @@ mechanisms are:
   before anything executes. Tool results and external content are data with
   provenance, never instructions.
   Every Project check inside a Code turn's tool call is judged on the turn's
-  window as it stands when the call runs (its persisted Project binding, and
-  only while the window is still live), never on the admission of the
-  request that started the turn, whether that request has ended or is still
-  open. A closed window's turn keeps running but its tool calls reach no
+  window as it stands when the call runs (the Projects its persisted
+  workspace shows, and only while the window is still live), never on the
+  admission of the request that started the turn, whether that request has
+  ended or is still open. The call reaches only the turn's own Project: a
+  window that shows threads of several Projects side by side never lets one
+  pane's turn read or drive another pane's Project
+  ([Workspace: Panes and content navigation](design/workspace.md#panes-and-content-navigation)).
+  **A window reaches the Projects it shows.** A window's reach in a mode is
+  its lead Project plus the Project of every visible pane that holds another
+  one, and every host check that judges a named Project asks that set
+  (`windowAdmitsProject`). A pane's Project is resolved by the host from the
+  surface it shows, never taken from the renderer; a pane showing the
+  welcome, and every stowed layout, reaches nothing; closing a pane ends its
+  reach. Mode and host still never mix in one layout. A closed window's turn keeps running but its tool calls reach no
   Project until the same window registers again, as a reopened primary
   window does; a renderer reload keeps the window live. A paired device's
   scope holds no binding, so its wider in-request reach never carries into

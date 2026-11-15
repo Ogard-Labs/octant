@@ -96,10 +96,26 @@ export const ProductFeedbackBrowserDescription = Schema.Struct({
   context: Schema.optional(ProductFeedbackBrowserContext),
 }).annotations(strict);
 
+/**
+ * The element's own markup, as the fixed reader serialized it for the Browser
+ * element picker: form values, editable text and script or style bodies are
+ * left out, and a cut is marked so a reader never takes a fragment for the
+ * whole element.
+ */
+export const MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS = 4_096;
+
+export const BrowserElementMarkup = Schema.Struct({
+  html: Schema.String.pipe(Schema.maxLength(MAX_BROWSER_ELEMENT_MARKUP_CHARACTERS)),
+  truncated: Schema.Boolean,
+}).annotations(strict);
+export type BrowserElementMarkup = typeof BrowserElementMarkup.Type;
+
 export const ProductFeedbackPointObservation = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("described"),
     element: ProductFeedbackBrowserDescription,
+    /** Read for the picker only; a note never keeps it. */
+    markup: Schema.optional(BrowserElementMarkup),
     cropDataUrl: Schema.optional(
       Schema.String.pipe(
         Schema.maxLength(MAX_PRODUCT_FEEDBACK_CROP_CHARACTERS),
@@ -301,7 +317,62 @@ export const UpdateProductFeedbackCommand = Schema.Struct({
     Schema.filter((command) => command.comment !== undefined || command.included !== undefined),
   );
 
+/**
+ * Pick one element of a Work or Code thread's Browser for the composer. The
+ * host resolves it exactly as it resolves a pointed-at note, marks the thread
+ * as holding outside content, and answers with a snapshot; nothing is kept.
+ */
+export const PickBrowserElementCommand = Schema.Struct({
+  kind: Schema.Literal("pick-browser-element"),
+  threadId: Schema.UUID,
+  contextId: Schema.UUID,
+  selectionId: Schema.optional(Schema.UUID),
+  expectedObservationRevision: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  point: CaptureProductFeedbackCommand.fields.point,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.selectionId !== undefined || command.expectedObservationRevision !== undefined,
+    ),
+  );
+
+/** The computed styles a picked element reports: box size, colours, font, display and position. */
+export const BROWSER_ELEMENT_SNAPSHOT_STYLES = [
+  "display",
+  "position",
+  "width",
+  "height",
+  "color",
+  "background-color",
+  "font-family",
+  "font-size",
+  "font-weight",
+] as const;
+
+export const BrowserElementSnapshot = Schema.Struct({
+  threadId: Schema.UUID,
+  selector: boundedLabel(1_024),
+  tag: boundedLabel(64),
+  url: Schema.optional(boundedLabel(4_096)),
+  title: Schema.optional(boundedLabel(1_024)),
+  /** Absent when the reader returned no markup for the element. */
+  markup: Schema.optional(BrowserElementMarkup),
+  styles: Schema.Array(
+    Schema.Struct({
+      property: Schema.Literal(...BROWSER_ELEMENT_SNAPSHOT_STYLES),
+      value: Schema.String.pipe(Schema.maxLength(128)),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(BROWSER_ELEMENT_SNAPSHOT_STYLES.length)),
+  /** Always outside content: everything here came off the page. */
+  provenance: ContentProvenance,
+  capturedAt: UtcTimestamp,
+}).annotations(strict);
+export type BrowserElementSnapshot = typeof BrowserElementSnapshot.Type;
+
 export const ProductFeedbackCommand = Schema.Union(
+  PickBrowserElementCommand,
   CaptureProductFeedbackCommand,
   DiscardProductFeedbackCommand,
   PrepareProductFeedbackCommand,
@@ -349,6 +420,10 @@ export const ProductFeedbackCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("feedback-refused"),
     reason: ProductFeedbackRefusalReason,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("browser-element-picked"),
+    snapshot: BrowserElementSnapshot,
   }).annotations(strict),
 );
 export type ProductFeedbackCommandResult = typeof ProductFeedbackCommandResult.Type;
@@ -408,6 +483,7 @@ export const decodeProductFeedbackNote = Schema.decodeUnknownSync(ProductFeedbac
 export const decodeProductFeedbackPreview = Schema.decodeUnknownSync(ProductFeedbackPreview);
 export const decodeProductFeedbackCropAnswer = Schema.decodeUnknownSync(ProductFeedbackCropAnswer);
 export const decodeProductFeedbackCommand = Schema.decodeUnknownSync(ProductFeedbackCommand);
+export const decodeBrowserElementSnapshot = Schema.decodeUnknownSync(BrowserElementSnapshot);
 export const decodeProductFeedbackCommandResult = Schema.decodeUnknownSync(
   ProductFeedbackCommandResult,
 );

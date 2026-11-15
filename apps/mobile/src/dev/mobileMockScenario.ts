@@ -9,6 +9,7 @@ import {
 import {
   decodeChatBootstrap,
   decodeChatThread,
+  decodeCodeThread,
   decodeChatThreadView,
   decodeCodeBootstrap,
   decodeCodeBoardView,
@@ -27,6 +28,13 @@ import {
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileHostRegistration } from "../hosts/HostRegistry";
 
+import {
+  MOCK_WORKING_TREE_DIFF,
+  mockCodeEnvironment,
+  mockGitHistory,
+  mockLocalServers,
+  mockUsageQuery,
+} from "./mobileMockThreadPanes";
 import {
   resolveMobileMockScenario,
   type MobileMockScenario,
@@ -90,6 +98,52 @@ const capabilities = {
   citations: "supported",
 } as const;
 
+/**
+ * The mock host's answer to a row action (snooze, wake, put away, reopen, pin):
+ * it changes the thread as the real host's journal would and returns the
+ * updated thread, so the phone's shelves can be seen working in the preview.
+ */
+function applyMockRest<T extends { readonly id: unknown; readonly version: number }>(
+  threads: T[],
+  command: {
+    readonly kind?: string;
+    readonly threadId?: string;
+    readonly until?: string;
+    readonly pinned?: boolean;
+  },
+  decode: (value: unknown) => T,
+): T | undefined {
+  const verb = command.kind?.match(
+    /^(snooze|wake|complete|reopen|pin)-(chat|work|code)-thread$/,
+  )?.[1];
+  if (verb === undefined || command.threadId === undefined) return undefined;
+  const index = threads.findIndex((thread) => String(thread.id) === command.threadId);
+  const current = threads[index];
+  if (current === undefined) return undefined;
+  const {
+    snooze: _snooze,
+    completedAt: _completedAt,
+    ...rest
+  } = current as T & {
+    readonly snooze?: unknown;
+    readonly completedAt?: unknown;
+  };
+  const kept = current as T & { readonly snooze?: unknown; readonly completedAt?: unknown };
+  const next = decode({
+    ...(verb === "snooze" || verb === "complete" || verb === "pin" ? kept : rest),
+    ...(verb === "wake" && kept.completedAt !== undefined ? { completedAt: kept.completedAt } : {}),
+    ...(verb === "reopen" && kept.snooze !== undefined ? { snooze: kept.snooze } : {}),
+    ...(verb === "snooze" && command.until !== undefined
+      ? { snooze: { until: command.until, at: NOW } }
+      : {}),
+    ...(verb === "complete" ? { completedAt: NOW } : {}),
+    ...(verb === "pin" ? { pinned: command.pinned === true } : {}),
+    version: current.version + 1,
+  });
+  threads[index] = next;
+  return next;
+}
+
 function createChatThread(input: {
   readonly id: string;
   readonly title: string;
@@ -148,6 +202,8 @@ function createChatView(thread: ChatThread, rich: boolean): ChatThreadView {
             kind: "reasoning",
             text: "Checking authority, native configuration, and the review evidence before proposing changes.",
           },
+          { kind: "tool", name: "read_file", status: "done", summary: "app.config.ts" },
+          { kind: "tool", name: "search", status: "done", summary: "12 matches for expo-blur" },
           {
             kind: "tool",
             name: "mobile_quality_check",
@@ -373,11 +429,28 @@ function createCodeBoardView(threads: ReadonlyArray<CodeThread>) {
         insertions: 42,
         deletions: 12,
       },
-      linkedPullRequest: { kind: "none", freshness: "fresh" },
+      linkedPullRequest: {
+        kind: "linked",
+        freshness: "fresh",
+        number: 812,
+        url: "https://github.com/octocat/octant/pull/812",
+        baseRepository: "octocat/octant",
+        baseBranch: "development",
+        headBranch: "feature/issue-812-mobile-polish-mock",
+        state: "open",
+        matchesDeliveryBranch: true,
+      },
       pullRequestSummaries: { items: [], hiddenCount: 0 },
       checks: { freshness: "fresh", state: "passing" },
       reviewState: { freshness: "fresh", state: "approved" },
-      childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+      childAgents: {
+        active: 1,
+        completed: 2,
+        failed: 0,
+        unacknowledgedResults: 1,
+        latestSummary: "Checked the Review pane's diff colours against the dark theme.",
+        latestActivityAt: NOW,
+      },
       planProgress: { kind: "none" },
       recovery: { kind: "ok" },
       githubFreshness: "fresh",
@@ -532,6 +605,12 @@ function mockJsonResponse(value: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(value), { ...init, headers });
 }
 
+/** A bounded clip around the first match, as the host's message search returns. */
+function mockSnippet(body: string, needle: string): string {
+  const at = body.toLowerCase().indexOf(needle);
+  return body.slice(at < 40 ? 0 : at - 40, at + 100);
+}
+
 /** Sample feeds have no frames; keep only their owning view's abortable wait. */
 function waitForAbort(signal: AbortSignal | undefined): Promise<Response> {
   return new Promise((_resolve, reject) => {
@@ -616,6 +695,99 @@ function createMockTransport(input: {
     head: { kind: "branch", name: "feature/issue-812-mobile-polish-mock", oid: "a".repeat(40) },
     observedAt: NOW,
   } as const;
+  // The checklist thread has one finished turn, so message search finds Work
+  // text in the preview as it finds Chat and Code text.
+  if (workThreads.some((thread) => String(thread.id) === WORK_THREAD_ID)) {
+    const prompt = "List what the travel launch still needs.";
+    const response = "Visa letters, the venue deposit, and the press kit are still open.";
+    workTurns.set(WORK_THREAD_ID, [
+      {
+        requestId: "84000000-0000-4000-8000-000000000001",
+        threadId: WORK_THREAD_ID,
+        turnId: "84000000-0000-4000-8000-000000000002",
+        projectId: PROJECT_ID,
+        authority: {
+          hostId: input.hostId,
+          projectId: PROJECT_ID,
+          bindingRevisionId: BINDING_ID,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: PROVIDER_ID,
+          modelId: MODEL_ID,
+        },
+        status: "completed",
+        prompt,
+        response,
+        transcript: [
+          { role: "user", text: prompt },
+          { role: "assistant", text: response },
+        ],
+        capabilities: {
+          workspace: "project-backed",
+          confinement: "project-root-confined",
+          shell: "denied",
+          git: "denied",
+          worktree: "denied",
+          pullRequest: "denied",
+          code: "denied",
+        },
+        version: 2,
+        acceptedAt: EARLIER,
+        updatedAt: NOW,
+      },
+    ]);
+  }
+  // The review thread has one finished turn, so its Context & usage pane
+  // shows the window its provider reported.
+  if (codeThreads.some((thread) => String(thread.id) === CODE_THREAD_ID)) {
+    const prompt = "Bring the desktop's side panes to the phone, read-only.";
+    const reply = "Added Environment, Review, Context & usage and Agents as one sheet.";
+    const promptId = "83000000-0000-4000-8000-000000000001";
+    const replyId = "83000000-0000-4000-8000-000000000002";
+    const encoder = new TextEncoder();
+    codeEvidence.set(promptId, {
+      contentId: promptId,
+      digest: "6".repeat(64),
+      byteLength: encoder.encode(prompt).byteLength,
+      text: prompt,
+    });
+    codeEvidence.set(replyId, {
+      contentId: replyId,
+      digest: "7".repeat(64),
+      byteLength: encoder.encode(reply).byteLength,
+      text: reply,
+    });
+    codeTurns.set(CODE_THREAD_ID, [
+      {
+        operationId: "82000000-0000-4000-8000-000000000001",
+        providerInstanceId: PROVIDER_ID,
+        modelId: MODEL_ID,
+        sessionId: "82000000-0000-4000-8000-000000000002",
+        prompt: {
+          contentId: promptId,
+          digest: "6".repeat(64),
+          byteLength: encoder.encode(prompt).byteLength,
+        },
+        assistant: [
+          {
+            contentId: replyId,
+            digest: "7".repeat(64),
+            byteLength: encoder.encode(reply).byteLength,
+          },
+        ],
+        usage: {
+          inputTokens: 41_000,
+          outputTokens: 1_800,
+          cacheReadInputTokens: 37_000,
+          contextWindow: 200_000,
+          contextTokens: 42_800,
+        },
+        status: "completed",
+        startedAt: EARLIER,
+        updatedAt: NOW,
+      },
+    ]);
+  }
 
   return {
     hostId: input.hostId,
@@ -654,7 +826,15 @@ function createMockTransport(input: {
         );
       }
       if (request.method === "GET" && request.path === "/api/work/threads/bootstrap") {
-        return mockJsonResponse(decodeWorkThreadBootstrap({ threads: workThreads }));
+        // The seeded Work thread has a turn running, so Status shows a Working row.
+        return mockJsonResponse(
+          decodeWorkThreadBootstrap({
+            threads: workThreads,
+            runtime: workThreads
+              .filter((thread) => String(thread.id) === WORK_THREAD_ID)
+              .map((thread) => ({ threadId: thread.id, executing: true })),
+          }),
+        );
       }
       if (request.method === "GET" && request.path.startsWith("/api/work/turns/transcript/")) {
         const threadId = decodeURIComponent(
@@ -830,6 +1010,10 @@ function createMockTransport(input: {
             readonly deliveryTarget?: CodeThread["deliveryTarget"];
           };
         };
+        const restedCode = applyMockRest(codeThreads, command, decodeCodeThread);
+        if (restedCode !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedCode });
+        }
         if (command.kind === "prepare-code-project-checkout") {
           return mockJsonResponse({
             kind: "checkout-prepared",
@@ -949,6 +1133,30 @@ function createMockTransport(input: {
             state: "running",
           });
         }
+        if (command.kind === "observe-git" && command.operationId !== undefined) {
+          const diffId = globalThis.crypto.randomUUID();
+          const byteLength = new TextEncoder().encode(MOCK_WORKING_TREE_DIFF).byteLength;
+          codeEvidence.set(diffId, {
+            contentId: diffId,
+            digest: "8".repeat(64),
+            byteLength,
+            text: MOCK_WORKING_TREE_DIFF,
+          });
+          return mockJsonResponse({
+            kind: "git-observed",
+            operationId: command.operationId,
+            gitOperationId: (command as { readonly gitOperationId?: string }).gitOperationId,
+            head: codeCheckout.head,
+            stateToken: "9".repeat(64),
+            // One untracked file beside the diff's edits, so Review shows a "New file" row.
+            status: [{ path: "docs/notes/mobile-panes.md", index: "?", worktree: "?" }],
+            changedPaths: ["docs/notes/mobile-panes.md"],
+            diff: { contentId: diffId, digest: "8".repeat(64), byteLength, truncated: false },
+            remotes: [],
+            upstream: null,
+            worktrees: [],
+          });
+        }
         if (command.kind === "observe-pull-request" && command.operationId !== undefined) {
           return mockJsonResponse(pullRequestReview(command.operationId));
         }
@@ -971,6 +1179,94 @@ function createMockTransport(input: {
           byteLength,
         });
       }
+      if (request.method === "GET" && request.path === "/api/chat/transcript-search") {
+        // Matches message bodies the way the host does, naming the turn each one is in.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const hits = chatThreads.flatMap((thread) => {
+          const view = chatViews.get(String(thread.id));
+          if (view === undefined || needle.length === 0) return [];
+          return view.contents
+            .filter((content) => content.body.toLowerCase().includes(needle))
+            .flatMap((content) => {
+              const turn = view.turns.find(
+                (entry) =>
+                  String(entry.userMessageRef.contentId) === String(content.contentId) ||
+                  entry.attempts.some((attempt) =>
+                    attempt.responseRefs.some(
+                      (ref) => String(ref.contentId) === String(content.contentId),
+                    ),
+                  ),
+              );
+              // The seeded rich view keeps messages without turns; its hits name a
+              // placeholder turn, which the phone opens at the top of the thread.
+              const turnId = turn?.id ?? "88000000-0000-4000-8000-000000000001";
+              const at = content.body.toLowerCase().indexOf(needle);
+              return [
+                {
+                  threadId: thread.id,
+                  title: thread.title,
+                  lifecycle: thread.lifecycle,
+                  turnId,
+                  snippet: content.body.slice(at < 40 ? 0 : at - 40, at + 100),
+                },
+              ];
+            });
+        });
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
+      if (request.method === "GET" && request.path === "/api/work/transcript-search") {
+        // One hit per turn whose prompt or reply holds the text, as the host answers.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const hits = workThreads.flatMap((thread) =>
+          (workTurns.get(String(thread.id)) ?? []).flatMap((turn) => {
+            const body = [turn.prompt, turn.response]
+              .filter((text): text is string => typeof text === "string")
+              .find((text) => needle.length > 0 && text.toLowerCase().includes(needle));
+            return body === undefined
+              ? []
+              : [
+                  {
+                    threadId: thread.id,
+                    turnId: turn.turnId,
+                    title: thread.title,
+                    lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
+                    projectId: thread.projectId,
+                    snippet: mockSnippet(body, needle),
+                  },
+                ];
+          }),
+        );
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
+      if (request.method === "GET" && request.path === "/api/code/transcript-search") {
+        // One hit per provider turn, named by its operation, reading the evidence text.
+        const needle = new URLSearchParams(request.query ?? "").get("q")?.toLowerCase() ?? "";
+        const textOf = (reference: unknown) =>
+          typeof reference === "object" && reference !== null && "contentId" in reference
+            ? codeEvidence.get(String(reference.contentId))?.text
+            : undefined;
+        const hits = codeThreads.flatMap((thread) =>
+          (codeTurns.get(String(thread.id)) ?? []).flatMap((turn) => {
+            const reply = Array.isArray(turn.assistant) ? turn.assistant.map(textOf).join("") : "";
+            const body = [textOf(turn.prompt), reply]
+              .filter((text): text is string => typeof text === "string")
+              .find((text) => needle.length > 0 && text.toLowerCase().includes(needle));
+            return body === undefined
+              ? []
+              : [
+                  {
+                    threadId: thread.id,
+                    operationId: turn.operationId,
+                    title: thread.title,
+                    lifecycle: thread.lifecycle === "archived" ? "archived" : "active",
+                    projectId: thread.projectId,
+                    snippet: mockSnippet(body, needle),
+                  },
+                ];
+          }),
+        );
+        return mockJsonResponse({ query: needle, hits, truncated: false });
+      }
       if (request.method === "POST" && request.path === "/api/chat/commands") {
         const command = JSON.parse(String(request.body ?? "{}")) as {
           readonly kind?: string;
@@ -978,6 +1274,10 @@ function createMockTransport(input: {
           readonly threadId?: string;
           readonly prompt?: string;
         };
+        const restedChat = applyMockRest(chatThreads, command, decodeChatThread);
+        if (restedChat !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedChat });
+        }
         if (command.kind === "create-chat-thread") {
           const thread = createChatThread({
             id: command.threadId ?? mockUuid(0x84, ++mockChatMutationSequence),
@@ -1028,6 +1328,10 @@ function createMockTransport(input: {
           readonly providerInstanceId?: string;
           readonly modelId?: string;
         };
+        const restedWork = applyMockRest(workThreads, command, decodeWorkThread);
+        if (restedWork !== undefined) {
+          return mockJsonResponse({ kind: "thread-updated", thread: restedWork });
+        }
         if (command.kind !== "create-work-thread") {
           return new Response("Mock route not found", { status: 404 });
         }
@@ -1071,6 +1375,58 @@ function createMockTransport(input: {
               }
             : { ...fields, attachmentId: header("attachment-id") },
         );
+      }
+      if (
+        request.method === "GET" &&
+        request.path === `/api/projects/${CODE_PROJECT_ID}/environment`
+      ) {
+        const threadId = new URLSearchParams(request.query ?? "").get("threadId") ?? CODE_THREAD_ID;
+        return mockJsonResponse(
+          mockCodeEnvironment({ projectId: CODE_PROJECT_ID, threadId, checkoutId: CHECKOUT_ID }),
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/code/local-servers/commands") {
+        const body = JSON.parse(String(request.body ?? "{}")) as {
+          readonly requestId?: string;
+          readonly threadId?: string;
+        };
+        return mockJsonResponse(
+          mockLocalServers({
+            requestId: body.requestId ?? "",
+            projectId: CODE_PROJECT_ID,
+            threadId: body.threadId ?? CODE_THREAD_ID,
+          }),
+        );
+      }
+      if (request.method === "GET" && request.path === "/api/code/git/history") {
+        const query = JSON.parse(new URLSearchParams(request.query ?? "").get("query") ?? "{}") as {
+          readonly threadId?: string;
+          readonly checkoutId?: string;
+        };
+        return mockJsonResponse(
+          mockGitHistory({
+            threadId: query.threadId ?? CODE_THREAD_ID,
+            checkoutId: query.checkoutId ?? CHECKOUT_ID,
+          }),
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/usage/query") {
+        const body = JSON.parse(String(request.body ?? "{}")) as {
+          readonly filter?: { readonly subjectAggregateId?: string };
+        };
+        const threadId = body.filter?.subjectAggregateId ?? CODE_THREAD_ID;
+        return mockJsonResponse(
+          threadId === CODE_THREAD_ID
+            ? mockUsageQuery({ threadId, providerInstanceId: PROVIDER_ID, modelId: MODEL_ID })
+            : {
+                ...mockUsageQuery({ threadId, providerInstanceId: PROVIDER_ID, modelId: MODEL_ID }),
+                turnMetrics: undefined,
+              },
+        );
+      }
+      if (request.method === "POST" && request.path === "/api/context/inspect") {
+        const body = JSON.parse(String(request.body ?? "{}")) as { readonly subject?: unknown };
+        return mockJsonResponse({ kind: "not-planned", subject: body.subject });
       }
       if (request.method === "GET" && request.path === "/api/reply-detail") {
         return mockJsonResponse(mockReplyDetailReading());

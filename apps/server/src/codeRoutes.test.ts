@@ -115,6 +115,41 @@ describe("Code routes", () => {
     expect(bootstrap).not.toHaveBeenCalled();
   });
 
+  it("answers Code message search for the authenticated window and refuses any other query key, method, or a missing capability", async () => {
+    const payload = {
+      query: "parser",
+      hits: [
+        {
+          threadId,
+          operationId,
+          title: "Parser fix",
+          lifecycle: "archived",
+          projectId,
+          snippet: "fix the parser",
+          matchRanges: [{ start: 8, end: 14 }],
+        },
+      ],
+      truncated: true,
+    };
+    const searchTranscript = vi.fn(async () => payload);
+    const route = routeFixture({ searchTranscript });
+
+    const response = await route(request("/api/code/transcript-search?q=parser"));
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(payload);
+    expect(searchTranscript).toHaveBeenCalledWith(windowId, "parser");
+
+    expect((await route(request("/api/code/transcript-search?q=a&limit=5")))?.status).toBe(400);
+    expect(
+      (await route(request("/api/code/transcript-search?q=a", { method: "POST" })))?.status,
+    ).toBe(400);
+    expect(
+      (await route(new Request("http://127.0.0.1/api/code/transcript-search?q=a")))?.status,
+    ).toBe(401);
+    expect(searchTranscript).toHaveBeenCalledOnce();
+    expect((await routeFixture()(request("/api/code/transcript-search?q=a")))?.status).toBe(503);
+  });
+
   it("rejects malformed and oversized JSON commands within the one MiB envelope", async () => {
     const execute = vi.fn();
     const route = routeFixture({ execute }, 16);

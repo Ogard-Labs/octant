@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts/command-credentials";
 import { OctantButton } from "../ui/base/OctantButton";
 import "./credentialRequests.css";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export function CommandCredentialRequests(props: {
   readonly threadId: string;
@@ -126,8 +127,10 @@ export function CommandCredentialRequests(props: {
   useThreadInfoAttention("credential-commands", requests.length > 0);
   if (client === undefined || props.projectId === undefined) return null;
   return (
-    <details className="credential-requests">
-      <summary>Credential commands{requests.length > 0 ? " · Review required" : ""}</summary>
+    <OctantCollapsible
+      className="credential-requests"
+      summary={<>Credential commands{requests.length > 0 ? " · Review required" : ""}</>}
+    >
       <p>
         Saved commands for this Code Project. Each run follows the task’s ordinary command approvals
         and needs a separate human approval for credential use. Plan refuses runs.
@@ -233,6 +236,6 @@ export function CommandCredentialRequests(props: {
         </section>
       )}
       {message === undefined ? null : <OctantAlert tone="danger">{message}</OctantAlert>}
-    </details>
+    </OctantCollapsible>
   );
 }

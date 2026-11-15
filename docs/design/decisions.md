@@ -39,11 +39,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 10      | 6            | 0                   |
 | [Agents and delegation](#agents-and-delegation)                                       | 5         | 2       | 3            | 0                   |
-| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 3            | 1                   |
+| [Boards, pull requests and delivery](#boards-pull-requests-and-delivery)              | 6         | 2       | 4            | 0                   |
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 8         | 5       | 2            | 1                   |
+| [Providers](#providers)                                                               | 7         | 4       | 3            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -54,11 +54,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
 | [Updates and development](#updates-and-development)                                   | 4         | 4       | 0            | 0                   |
 | [Design system](#design-system)                                                       | 11        | 11      | 0            | 0                   |
-| [Workspace](#workspace)                                                               | 17        | 12      | 5            | 0                   |
+| [Workspace](#workspace)                                                               | 18        | 13      | 5            | 0                   |
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 8         | 3       | 3            | 2                   |
+| [Browser](#browser)                                                                   | 7         | 3       | 4            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **259**   | **155** | **97**       | **7**               |
+| **All areas**                                                                         | **258**   | **155** | **100**      | **3**               |
 
 ## Principles and hard lines
 
@@ -154,7 +154,7 @@ The server decides every authority question, the event journal is the record, an
 
 - Every authority check (mode, Project, thread, provider, approval, remote principal, spend ceiling) runs in the server before a side effect; renderers only show what the server allows.
 - Commands append versioned events; read models are idempotent projections rebuildable from the journal.
-- Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the first start of a new build, a source run, a migration, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
+- Startup verifies only journal rows after a disposable watermark (sequence plus a fingerprint of the exact server build, the registry's names and versions, and the schema head); the status inspection then checks only the rows after it and skips SQLite's integrity check; the first start of a new build, a source run, a migration, a suspicious tail, a refused start, or rewrite or delete of a journal row forces a full scan ([Architecture: Persistence](../architecture.md#persistence)).
 - Contracts are schema-only and domain code is pure; dependencies point inward and provider payloads stop at the adapter.
 - No thread offers an interactive raw provider terminal: typing into a provider's own terminal program bypasses approvals and the journal (maintainer decision, 2026-11-14; rationale in the owner).
 - The host refuses unknown fields in everything it decodes; a client drops unknown fields in a host answer, except inside asks a person decides on, which stay strict.
@@ -482,6 +482,7 @@ The phone app is a remote-control client under the host's authority. Threads are
 
 - The phone creates Chat, Work and Code threads and sends follow-up turns under each thread's own authority; approvals, folder binding, file edits and shell stay host-only.
 - Attached photos and files go through the mode's own attachment route, and the host strips image metadata from every paired upload.
+- The thread's side panes (Environment, Review, Context & usage, Agents) are read-only on the phone and use only reads the listener already forwards; per-run subagent detail stays with a local window, whose AgentRun routes authorize a window only (maintainer request, 2026-11-14).
 - Internal mobile beta distribution grants the phone no new authority; public store distribution, external tester groups and store listing stay closed until a separate maintainer action.
 - A build counts only after the device pass in the runbook, not when the build service finishes processing it.
 
@@ -668,6 +669,7 @@ Modes are server-enforced domain policy, not renderer flags. The shell shows two
 
 - Chat and Work can be switched off in Settings; Code is always available, and disabling a mode never deletes its data.
 - A new-thread composer chooses Chat (no folder) or In a folder (a Work thread bound to a Project root). The choice only selects the create command, and nothing converts a thread between Chat and Work.
+- The phone follows the same shape: its tab bar has Work and Code, Work lists Chat and Work threads together, and each tab offers the sidebar's Status, Projects, and Activity arrangements (maintainer request, 2026-11-14). Detail: [Mobile maturity](mobile-maturity.md#exists-today).
 - The mode switcher is the Work and Code icon pair at the top of the sidebar, not in the title band; each mode's name is its tooltip and accessible name (maintainer request, 2026-11-09). Detail: [Workspace: Sidebar](workspace.md#sidebar).
 - Chat binds a virtual, memory-scoped Project or none; Work binds exactly one OS-confined root; Code binds exactly one directory and selects a checkout inside it.
 - Project memory is scoped to one Project and keeps source, kind, timestamps and supersession; moving it across Projects or modes is explicit and keeps provenance. Person memory, beside it, crosses Projects ([Person memory across Projects](#person-memory-across-projects)). _Here only._
@@ -1011,9 +1013,10 @@ Octant operates no deployment infrastructure and offers no ship target of its ow
 - A ship integration never receives a secret; it names a credential reference and the host hands it a bounded, purpose-scoped handle at use. _Here only._
 - Delivery is dormant: the ship service exists, but the host wires no target source, build observer or per-act approval bound to target, revision and build.
 - Delivery stays absent from the interface until all three exist; a standing grant never replaces the per-act approval.
-- A target may also be a machine Octant creates in the person's own cloud account through a credential reference in the credential broker; it appears as a Server Project, and the person suspends and resumes it (maintainer decision, 2026-11-14; [Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)). An Octant-operated hosted service stays out of scope.
+- A target may also be a machine Octant creates in the person's own cloud account through a credential reference in the credential broker; it appears as a Server Project, and the person suspends and resumes it (maintainer decision, 2026-11-14). An Octant-operated hosted service stays out of scope.
+- A cloud machine target is a plugin contribution offered only once installed, trusted and enabled; every create, bind, refresh, suspend, resume and destroy is a person's act at a local window, journaled; destroy needs one host-issued confirmation for that machine, and a machine is recorded destroyed only when its provider reports it gone. The host pins the host keys the provider reported at creation for that server, a suspended machine's Project refuses turns and calls by name until the person resumes it, and the provider's own hourly cost is shown only when it reports one. Built: the seam (host keys and reported cost included), the host lifecycle and its journal, host-key pinning, the suspended refusal, and the Settings › Permissions › Servers screen; not built: a target plugin, a per-machine key and wake-on-open ([Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)).
 
-Status: Designed, not built. Since: —; cloud machines 2026-11-14. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
+Status: Partly built. Since: —; cloud machines 2026-11-14. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
 ### Project planner thread
 
@@ -1039,7 +1042,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
-- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools; file triggers are refused there. Not built yet: choosing a server Project in Automation Center's editor ([Server Projects: Routines](server-projects.md#routines)).
+- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools, and Automation Center's editor offers the person's server Projects (the host's own person only; a restricted device sees none) with Octant Harness models only, saving through the same create and edit route; file triggers are hidden there in the editor and refused at save and at every occurrence ([Server Projects: Routines](server-projects.md#routines)).
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
@@ -1118,7 +1121,7 @@ The event journal is the authoritative record, and projections are rebuildable a
 
 - A command targets one aggregate and carries the expected aggregate version; a stale version returns a typed concurrency conflict and writes nothing. _Here only._
 - Every event carries a versioned envelope. A projection checkpoint may trail the journal head but never lead it. _Here only._
-- The store runs in WAL mode with full sync, and streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst, so a power loss loses at most the open burst. Projecting a streamed Chat delta writes one row of its own, not the whole attempt and turn, so its cost does not grow with the reply; reads and the next whole attempt fold those rows in.
+- The store runs in WAL mode with normal sync: every commit survives a process crash, and an OS crash or power loss may lose the commits since the last checkpoint, never leaving a torn one (maintainer decision, 2026-11-14; full sync stalled the control plane on every append). Streamed deltas of a Chat reply and of a Code turn batch into one commit per short burst. Projecting a streamed Chat delta writes one row of its own, not the whole attempt and turn, so its cost does not grow with the reply; reads and the next whole attempt fold those rows in.
 - Purgeable bulk content such as terminal transcripts and test output lives outside the journal and is referenced from it. _Here only._
 - A projection whose state is only in memory replays from the start of the journal at every host start.
 - A turn's streamed text and reasoning are bounded at 32 MiB: past it the turn keeps what was journaled, ends with a truncation marker, and stops. A write that fails on a full disk commits nothing and tells the person the disk is full.
@@ -1303,25 +1306,16 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on the instance it started with until the person moves it ([Moving a thread to another account](#moving-a-thread-to-another-account)). Octant never rotates, fails over or load-balances between accounts on its own.
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
+- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
 
-Status: Built. Since: —. Detail: [Architecture: Providers](../architecture.md#providers).
-
-### Moving a thread to another account
-
-The person may move a thread to another provider account or instance; the move is carried out by the disclosed text handoff in [Handoffs between providers, forks and branches](#handoffs-between-providers-forks-and-branches) (maintainer decision, 2026-11-14).
-
-- Only the person moves a thread; the move is journaled like any provider change, with the handoff's counts, taint and omissions.
-- A per-thread setting the person opts into, "when this account hits its usage limit, hand off to" a named account, is allowed later; it hands off by the same path and names the move in the thread.
-- Silent or automatic rotation, failover and load-balancing between accounts stay refused.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 
@@ -1716,6 +1710,7 @@ A plugin may contribute a theme as data only, validated by `@octant/theme` befor
 
 - A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
 - The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+- The server checks colour overrides against the selected theme, including an effective plugin theme, and against the default when that plugin is off.
 - A contributed theme is listed only while its plugin is installed, trusted and enabled. Switching the plugin off removes its themes; a stored choice of one draws the default theme and is kept for when the plugin returns.
 
 Status: Built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
@@ -1801,7 +1796,7 @@ Status: Built. Since: —. Detail: [Architecture: Security and authority, Pendin
 A desktop authority confirmation is decided only in an isolated approval view owned by the main process, not by the ordinary renderer.
 
 - The approval view is sandboxed with a restrictive content policy, no external resources and no ordinary host bridge; only that live view can decide its challenge. _Here only._
-- The ordinary renderer may only report geometry, palette or cancel. Cancel is the default; expiry, teardown or a late decision fails closed. _Here only._
+- The ordinary renderer may only report geometry, palette, an overlay covering the window, or cancel. Cancel is the default; expiry, teardown or a late decision fails closed. While an overlay covers the window the view leaves it and refuses Allow; Escape cancels, and focus starts inside the view on Cancel. _Here only._
 - A window holds at most eight pending confirmations per composer owner, and navigation never extends the five-minute expiry. _Here only._
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
@@ -2429,9 +2424,11 @@ Status: Built. Since: —. Detail: [DESIGN.md: Accessibility](../../DESIGN.md#ac
 A new window, its background and its drafts behave predictably.
 
 - Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed, subject to the active pane having an eligible dock subject. The bottom panel starts closed. An explicit show or hide is restored per window later.
+- A picture ground prints as it is, pixelated, dithered, or in ASCII: one 5×5 bitmap glyph per cell from the ramp ` .:-=+*#%@` by luminance, in the cell's colour over that colour at half strength, never below 10-pixel cells (starting at 14) and always still. The desktop and the phone read one glyph table and each keeps its own choice (maintainer request, 2026-11-14).
 - A photo ground comes from the host's background image library (8 MiB, 4096x4096, PNG, JPEG or WebP). The host refuses to delete a photo while it is showing, and ground settings are kept across kinds. _Here only._
 - While an everywhere background covers the sidebar, the sidebar's own background is not drawn and its controls are disabled with a note; saved sidebar values are kept. _Here only._
 - A new-task composer keeps its identity while its Project changes. A refused binding keeps the prior authorized Project and the draft.
+- A new Chat's first-run composer stages attachments before the thread exists and sends them with the first message.
 - If first-turn startup fails after the task opens, the provisional prompt is withdrawn and its text returns to the composer with the refusal reason. _Here only._
 
 Status: Built. Since: —. Detail: [Workspace: Right dock and bottom panel](workspace.md#right-dock-and-bottom-panel), [Application ground](application-ground.md), [DESIGN.md: Depth and material](../../DESIGN.md#depth-and-material), [Composer row](../../DESIGN.md#composer-row) and [Draft continuity and composer notices](thread-view.md#draft-continuity-and-composer-notices).
@@ -2475,6 +2472,16 @@ for navigation. Closing Find releases the index; changed rows refresh in rotatin
 batches without starving later rows during streaming.
 
 Status: Built. Since: 2026-11-10. Detail: [Find in a thread](workspace.md#find-in-a-thread-and-a-new-thread-from-a-selection).
+
+### Message search in every mode
+
+Thread Search matches message text in Chat, Work, and Code, on the desktop and the phone, through one host read per mode (maintainer request, 2026-11-14).
+
+- Each mode's read lists exactly the threads its sidebar and Archived group list, applies that listing authority on the host before the hit cap, and never searches a deleted thread or a turn a rewind removed.
+- A hit names the turn that holds the match: the Chat or Work turn, or the operation of a Code provider turn. Queries, hit counts, and snippets share one set of bounds, and a query's LIKE wildcards are text.
+- The reads are GETs a paired device reaches under the overview read grant. Code text is searched through a rebuildable projection of the operation journal that joins a reply's streamed parts; Work text is searched in the rebuildable turn projection.
+
+Status: Built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands](host-reads-and-commands.md).
 
 ### Mode-first navigation and Projects
 
@@ -2529,7 +2536,8 @@ Status: Built. Since: —. Detail: [Workspace: Thread visibility and completion]
 
 The central workspace is one recursive split tree with one surface per leaf, and all layout operations are server-authoritative.
 
-- One visible tree belongs to one authority context. A cross-Project, cross-mode or cross-host placement is refused or offered in a new window.
+- One visible tree belongs to one host and one mode; each pane keeps its own Project's authority, resolved by the host from its surface (maintainer decision, 2026-11-14). A turn reaches only its own Project, a window reaches only the Projects its visible panes show, and a cross-mode or cross-host placement, or a preview or Canvas of another Project, is refused or offered in a new window.
+- In a window showing several Projects every pane names its Project at every width, a `#` mention or dropped thread reaches nothing a single-Project window would not, and a click on a thread of a stowed mixed layout brings that layout back. Detail: [Threads from several Projects in one window](mixed-project-panes.md).
 - Kept content references and order persist locally per endpoint/window/pane and exact authority context; temporary thread previews are omitted. Restoration reuses the authoritative selected surface and performs no open or side effect; every later activation is authorized by the host. Tabs add no persisted layout or authority. Dropping a sidebar thread on a composer attaches it as bounded context; nothing is sent and the source is not moved.
 - Layout persists per client window, mode and Project context and restores after restart. A mode preset applies only when no saved layout exists or the person restores it. _Here only._
 - File and artifact previews are host-authorized and read-only. The renderer never receives a host path, every open is re-authorized, scripts, remote resources, macros and formulas are disabled, and a missing source restores as a placeholder, never another file. _Here only._
@@ -2890,9 +2898,10 @@ Only an explicit screenshot is kept, and it stays with the thread.
 - At most 8 of those captures are recordings: keeping a ninth drops the thread's oldest recording, never a screenshot. It is the same journal-derived rule as the capture limit (no drop event; listing, reads, export and recovery all apply it, and purge erases everything as before), and it bounds a thread's recordings at about 16 MiB instead of about 64 MiB.
 - A thread also keeps the agent's last 50 Browser steps (operation, element role and name, page origin and path, the one-line result or failure category; never typed text, a field value, or a secret query value) on the same journal rules as captures. Beside its captures they are the thread's "Browser proof".
 - The person can draw on a kept capture and add it to the thread's message: "Draw on page" keeps a capture through the Screenshot route and draws on that picture only, then "Add to chat" hands a PNG to the thread's composer as an ordinary image attachment. It sends nothing, stores nothing beside the capture, and is offered only in a Work or Code thread's Browser.
+- "Pick element" in a Work or Code thread's Browser adds one element's selector, tag, page address, a few computed styles and its outer HTML (form values, editable text, script bodies, inline styles, event handlers and addresses left out, cut at 4,096 characters with the cut marked; a note's read never carries markup) to the thread's draft (maintainer decision, 2026-11-14). The host reads it as it reads a pointed-at note's element, refuses where that read refuses, marks the thread as holding outside content before answering, and keeps nothing.
 - Proof reaches a pull request only when the person chooses "Include Browser proof" in the Code pull-request form: a "Browser check" section of numbered steps. Screenshots are saved to a folder the person picks on a local window, never uploaded. A paired device reads, attaches, and saves none of it.
 
-Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof) and [Recordings](browser-captures.md#recordings), and [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar).
+Status: Partly built. Since: —. Detail: [Browser captures: What is kept](browser-captures.md#what-is-kept), [Retention](browser-captures.md#retention), [Marking up a capture](browser-captures.md#marking-up-a-capture), [Proof](browser-captures.md#proof), [Recordings](browser-captures.md#recordings), [Draw on page toolbar](browser-captures.md#draw-on-page-toolbar), and [Picking an element](browser-captures.md#picking-an-element).
 
 ### Browser for agents
 
@@ -2942,7 +2951,7 @@ Browser pages may keep sign-in in a Project or Personal profile. Private is the 
 - On a profile page the agent needs a site approval for each origin and profile, for reading too, at every level, Full access included; the person can remember it or widen it to "Allow all sites in this profile" (maintainer request, 2026-11-12). Built. Credential fields stay protected.
 - One persistent grant, "this routine or child may use profile X on sites Y", survives a host restart and an app update and replaces the review that lapsed on every restart; upload and download manifests and owner control get no new scope (maintainer request, 2026-11-12). Built: a clean host close journals that each surviving grant was still live, and a restart restores only a grant with that record, its reviewed expiry not passed and its caller, model, authority, definition and profile unchanged; a host that crashed, a revocation whose record could not be saved, and a record that cannot be read restore nothing. Not built yet: a restored grant takes no lease on the background native owner and runs only while a local window that holds its Project is open. A local person may review a bounded session permission for one same-Project managed child, execution host, current run/model/workspace authority, stored profile and exact HTTPS sites. It expires, is revocable, and authorizes no transfers, sign-in, credential use or scripts. The child owns its context and uses an available native owner window; no parent page or authority is lent. Queued/waiting review does not execute or resume the child. Work keeps ambient network access off; its explicit site-limited Browser permission does not change other tools or process authority. Named enabled local Work/Code routines may receive a seven-day permission (explicit maximum 30 days), bound to the definition, model, authority and Project binding. Each dispatcher-proven run owns a separate context and proves its own Code checkout against the target policy, reviewed origin thread where applicable, current thread and repository; changing or ending that run withholds observations. Replaying a grant's audit record alone never revives authority. A running terminal may receive a separate profile/site permission bound to its exact transport grant and current Code task/model/authority. It owns its context and ends with the terminal; stale reads never fall back to Private. Paired devices retain their refusal. See [Delegated sessions](browser-profiles.md#delegated-sessions).
 - An extension is installed and enabled only by a person at a local window. Install never enables, and no agent, plugin or skill can install or enable.
-- Background native ownership is a default-off local host preference. Only newly reviewed managed-child or dispatcher-proven local routine permissions bind that owner's exact generation; each execution has its own native lease with current grant/task/model/authority/profile/sites/expiry checks. Last-window close may retain those opted-in pages in the same native process/store. Switch-off, cancellation, expiry, revocation, generation change and accepted Quit end their authority; restart or reconnect restores none. Window provenance never becomes an execution principal, and no headless fallback, renderer attach, human/script/credential or transfer authority is lent. Production broker/runtime fixtures are covered; packaged acceptance in the approved native test Space remains pending. See [Background native ownership](browser-profiles.md#background-native-ownership).
+- Background native ownership is a default-off local host preference. Only newly reviewed managed-child or dispatcher-proven local routine permissions bind that owner's exact generation; each execution has its own native lease with current grant/task/model/authority/profile/sites/expiry checks. Last-window close may retain those opted-in pages in the same native process/store. Switch-off, cancellation, expiry, revocation, generation change and accepted Quit end their authority; restart or reconnect restores none. Window provenance never becomes an execution principal, and no headless fallback, renderer attach, human/script/credential or transfer authority is lent. An execution page idle for five minutes with nothing in flight, or past four live execution contexts, hibernates: its views close while its context, lease, partition and tab addresses remain, and the next action reopens them (maintainer request, 2026-11-14). Production broker/runtime fixtures are covered; packaged acceptance in the approved native test Space remains pending. See [Background native ownership](browser-profiles.md#background-native-ownership).
 - Profiles, their stores, site approvals, refusals, sign out, extension install, per-profile enablement, and popups are built. A popup, an options page, and an extension's background worker get `chrome.tabs` (query, get, create, update, sendMessage) for the profile's own pages in the window only, and an extension with no popup page gets `chrome.action.onClicked`. An extension opens a page only to an origin the page already admits, and sees tab addresses only with the `tabs` permission.
 
 Browser selected-item permission records an explicitly reviewed account/vault/
@@ -2993,24 +3002,17 @@ Browser pages can keep sign-ins in named profiles, and a person may import cooki
 
 Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cookie import](browser-profiles.md#cookie-import).
 
-### Browser element picker
-
-In a Work or Code thread's Browser the person may click an element to attach a structured snapshot of it to the composer: a selector, its outer HTML trimmed to a fixed bound, and a subset of its computed styles (maintainer decision, 2026-11-14).
-
-- The snapshot is read by the same host-owned top-frame reader and checks as a pointed-at feedback note and stays on this computer until the person sends the message it is attached to.
-- It is outside content and marks the thread as other page content does; picking sends, queues and approves nothing.
-
-Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Attaching a picked element to the composer](browser-agent-tool.md#attaching-a-picked-element-to-the-composer).
-
 ### Page-declared tools
 
-Tools a page declares for agents (WebMCP) are read as outside content and are never added to a thread's tools by themselves (maintainer decision, 2026-11-14).
+The Browser agent tool reads the tools a page declares for agents and calls them on that page (maintainer decision, 2026-11-14).
 
-- Their names, descriptions and schemas mark the thread and are framed as evidence, never instructions.
-- Each call goes through the Browser tool on the declaring page and is approval-gated for that one call; at Full access it follows [The Full access rule](#the-full-access-rule). Its result is outside content.
-- A declared tool never reaches another page, the host or the person's credentials; site approvals and navigation guards still apply.
+- Octant reads the declarative WebMCP form, a `<form>` carrying `toolname` and `tooldescription`; the imperative registry is not read, because neither Browser enables it.
+- A declaration is outside content: listing one marks the thread under the `browser-page` source, it is bounded and framed as evidence, never instructions, and it adds nothing to the thread's tools by itself.
+- A call fills that page's form and submits it only when the page declared `toolautosubmit`, through the same Browser runtime, site approval and credential-field rule as other Browser actions; a form with a credential field is never listed or called.
+- Below Full access each call asks the person, naming the site, the tool and its arguments, and the answer is never remembered. At Full access a call runs without asking unless [The Full access rule](#the-full-access-rule)'s existing pay, buy or send-as-the-person entry covers it; no exception is added.
+- Built on the server and the headless Browser, with a real-Chromium test; the desktop Browser's path is wired but not yet run in the app.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
+Status: Partly built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
 
 ## Provider runtimes
 

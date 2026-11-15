@@ -889,7 +889,11 @@ function validateLayout(
   if ("mode" in surface && surface.mode !== mode) {
     reject("invalid-layout", `${surface.kind} surface mode must match the ${mode} layout`);
   }
-  validateTabContext(surface, mode, context);
+  const paneContext = layout.context ?? context;
+  if (paneContext.host !== context.host) {
+    reject("invalid-layout", "a pane's context must name its layout's host");
+  }
+  validateTabContext(surface, mode, paneContext);
   if (seenTabIds.has(surface.id)) reject("duplicate-id", "workspace surface IDs must be unique");
   seenTabIds.add(surface.id);
   return { panes: 1, paneIds: new Set([layout.paneId]) };
@@ -1083,12 +1087,21 @@ function restoreDestinationLayout(
   workspace: WindowWorkspace,
   mode: OctantMode,
   candidate: WorkspaceContextKey,
+  surface: WorkspaceTab,
 ): WindowWorkspace {
-  const entry = workspace.stowedLayouts.find((stowed) =>
-    sameWorkspaceContext(stowed.context, candidate),
-  );
+  // A thread that sat in a mixed layout brings that whole layout back, so a
+  // click on any of its threads returns the person to the view they left.
+  // Stowed layouts are most recent first, so a thread stowed in two places
+  // returns to the one the person saw last.
+  const entry =
+    workspace.stowedLayouts.find(
+      (stowed) => findSurfacePane(stowed.layout, surface) !== undefined,
+    ) ?? workspace.stowedLayouts.find((stowed) => sameWorkspaceContext(stowed.context, candidate));
   const stowedLayouts = workspace.stowedLayouts.filter((stowed) => stowed !== entry);
-  const layout = entry === undefined ? defaultLayout(mode) : entry.layout;
+  const layout =
+    entry === undefined
+      ? defaultLayout(mode)
+      : rebaseLayout(entry.layout, entry.context, candidate);
   const activePaneId = entry === undefined ? firstPane(layout).paneId : entry.activePaneId;
   const next: WindowWorkspace = {
     ...workspace,
@@ -1105,6 +1118,183 @@ function restoreDestinationLayout(
     return unfocused;
   }
   return next;
+}
+
+/**
+ * Moves a layout from one lead to another without changing any pane's
+ * authority: a pane that held the old lead implicitly now names it, and a pane
+ * of the new lead's Project drops its own, since the lead speaks for it.
+ */
+function rebaseLayout(
+  layout: WorkspaceLayoutNode,
+  from: WorkspaceContextKey,
+  to: WorkspaceContextKey,
+): WorkspaceLayoutNode {
+  if (layout.kind === "split") {
+    return {
+      ...layout,
+      first: rebaseLayout(layout.first, from, to),
+      second: rebaseLayout(layout.second, from, to),
+    };
+  }
+  // A surface with no Project of its own did not hold the old lead's; giving
+  // it that context would keep the old lead in reach through a Settings pane.
+  const own = surfaceNamesNoProject(layout.surface) ? undefined : (layout.context ?? from);
+  return withPaneContext(layout, own, to);
+}
+
+/**
+ * The pane's own authority context, if it holds one. A pane showing the
+ * welcome holds none: reconciliation turns a pane whose surface lost its
+ * authority into the welcome, and such a pane must not keep its Project in reach.
+ */
+function paneOwnContext(pane: WorkspacePane): WorkspaceContextKey | undefined {
+  return surfaceNamesNoProject(pane.surface) ? undefined : pane.context;
+}
+
+/**
+ * Surfaces that hold no Project of their own: the welcome, Settings, a Side
+ * Chat, and Files, which follow the lead. A pane showing one carries no
+ * context and reaches nothing.
+ */
+function surfaceNamesNoProject(surface: WorkspaceTab): boolean {
+  return (
+    surface.kind === "welcome" ||
+    surface.kind === "settings" ||
+    surface.kind === "side-chat" ||
+    surface.kind === "files"
+  );
+}
+
+function withPaneContext(
+  pane: WorkspacePane,
+  context: WorkspaceContextKey | undefined,
+  lead: WorkspaceContextKey,
+): WorkspacePane {
+  const { context: _previous, ...bare } = pane;
+  if (context === undefined || sameProject(context.projectId, lead.projectId)) return bare;
+  return { ...bare, context };
+}
+
+function findPaneHoldingSurface(
+  layout: WorkspaceLayoutNode,
+  surface: WorkspaceTab,
+): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return String(layout.surface.id) === String(surface.id) ||
+      sameWorkspaceSurface(layout.surface, surface)
+      ? layout
+      : undefined;
+  }
+  return (
+    findPaneHoldingSurface(layout.first, surface) ?? findPaneHoldingSurface(layout.second, surface)
+  );
+}
+
+/**
+ * Writes the authority context of the pane an operation just placed a surface
+ * in, from what the host resolves for that surface and never from the
+ * operation's own fields. A pane of the lead's Project, a context-free
+ * surface, and a surface with no Project of its own (Files) carry none.
+ * Previews and Canvases of another Project never reach here: the resolver
+ * refuses them, because the pure policy does not know their bound root.
+ */
+export function recordPaneContext(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  resolves: WorkspaceContextResolves,
+): WindowWorkspace {
+  return validateWorkspace(stampPaneContext(workspace, operation, resolves));
+}
+
+function stampPaneContext(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  resolves: WorkspaceContextResolves,
+): WindowWorkspace {
+  if (
+    operation.kind !== "open-surface" &&
+    operation.kind !== "replace-pane-surface" &&
+    operation.kind !== "split-pane" &&
+    operation.kind !== "switch-project-surface"
+  ) {
+    return workspace;
+  }
+  const mode = operation.mode;
+  const lead = workspace.contextByMode[mode];
+  const layout = workspace.layouts[mode];
+  const pane = findPaneHoldingSurface(layout, operation.surface);
+  if (pane === undefined) return workspace;
+  const surface = pane.surface;
+  const resolved =
+    surface.kind === "preview" || surface.kind === "canvas" || surface.kind === "files"
+      ? undefined
+      : resolves.tabContext(surface);
+  if (resolved !== undefined && (resolved.mode !== mode || resolved.host !== lead.host)) {
+    throw new WorkspaceContextRejected(
+      "This surface belongs to a different mode or host. Open it in a new window.",
+    );
+  }
+  const next = withPaneContext(pane, resolved, lead);
+  if (next.context === pane.context) return workspace;
+  const mapped = mapPane(layout, pane.paneId, () => next);
+  return replaceLayout(workspace, mode, mapped.layout);
+}
+
+/**
+ * The Projects one mode of a window reaches: its lead and every visible pane's
+ * own. A stowed layout reaches nothing until it is shown again.
+ */
+export function admissionSet(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+): ReadonlyArray<ProjectId> {
+  const projects: Array<ProjectId> = [];
+  const lead = workspace.contextByMode[mode].projectId;
+  if (lead !== null) projects.push(lead);
+  const visit = (layout: WorkspaceLayoutNode): void => {
+    if (layout.kind === "split") {
+      visit(layout.first);
+      visit(layout.second);
+      return;
+    }
+    const own = paneOwnContext(layout)?.projectId;
+    if (own != null && !projects.some((id) => String(id) === String(own))) projects.push(own);
+  };
+  visit(workspace.layouts[mode]);
+  return projects;
+}
+
+/** The context of a mode's active pane: its own when it holds another Project, else the lead's. */
+export function activePaneContext(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+): WorkspaceContextKey {
+  const lead = workspace.contextByMode[mode];
+  const pane = findPane(workspace.layouts[mode], workspace.activePaneIds[mode]);
+  return (pane === undefined ? undefined : paneOwnContext(pane)) ?? lead;
+}
+
+/**
+ * Whether one mode of a window reaches a Project: its lead or a visible pane's.
+ * `null` asks about Chat threads outside every Project, which a window reaches
+ * when its lead or one of its panes names no Project.
+ */
+export function windowAdmitsProject(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+  projectId: ProjectId | null,
+): boolean {
+  const lead = workspace.contextByMode[mode].projectId;
+  if (sameProject(lead, projectId)) return true;
+  const visit = (layout: WorkspaceLayoutNode): boolean =>
+    layout.kind === "split"
+      ? visit(layout.first) || visit(layout.second)
+      : (() => {
+          const own = paneOwnContext(layout);
+          return own !== undefined && sameProject(own.projectId, projectId);
+        })();
+  return visit(workspace.layouts[mode]);
 }
 
 /**
@@ -1148,7 +1338,7 @@ export function resolveWorkspaceContext(
       );
     }
     const stowed = stowOutgoingLayout(workspace, operation.mode);
-    const restored = restoreDestinationLayout(stowed, operation.mode, candidate);
+    const restored = restoreDestinationLayout(stowed, operation.mode, candidate, operation.surface);
     return {
       ...restored,
       contextByMode: {
@@ -1308,9 +1498,10 @@ export function resolveWorkspaceContext(
     }
     return workspace;
   }
-  throw new WorkspaceContextRejected(
-    "This surface belongs to a different Project. Open it in a new window to keep its authority.",
-  );
+  // Another Project of this mode and host joins as its own pane: the pane
+  // keeps that Project's authority (recordPaneContext writes it once the
+  // operation has placed the surface) and the lead stays as it is.
+  return workspace;
 }
 
 export function resolveSurfaceDescriptors(
@@ -1495,7 +1686,7 @@ function nextVersion(workspace: WindowWorkspace): WindowWorkspace["version"] {
   return (workspace.version + 1) as WindowWorkspace["version"];
 }
 
-function finishOperation(workspace: WindowWorkspace): WindowWorkspace {
+function finishLayout(workspace: WindowWorkspace, validate: boolean): WindowWorkspace {
   const focusedPaneId = workspace.focusedPaneId;
   const focusReachable =
     focusedPaneId === undefined ||
@@ -1506,12 +1697,13 @@ function finishOperation(workspace: WindowWorkspace): WindowWorkspace {
       activePaneIds[mode] = firstPane(workspace.layouts[mode]).paneId;
     }
   }
-  return validateWorkspace({
+  const next: WindowWorkspace = {
     ...workspace,
     activePaneIds,
     ...(focusReachable ? {} : { focusedPaneId: undefined }),
     version: nextVersion(workspace),
-  });
+  };
+  return validate ? validateWorkspace(next) : next;
 }
 
 function requirePane(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane {
@@ -1604,6 +1796,32 @@ export function applyWorkspaceOperation(
   workspace: WindowWorkspace,
   operation: WorkspaceOperation,
 ): WindowWorkspace {
+  return applyOperation(workspace, operation, true);
+}
+
+/**
+ * Applies an operation the host has resolved, writing the placed pane's own
+ * Project context before the layout is validated. A pane is judged against its
+ * own Project: validating first would hold a local Browser pane split into a
+ * window led by a server Project (no bound root) to the lead's missing root
+ * and refuse it before its own root was known.
+ */
+export function applyResolvedWorkspaceOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  resolves: WorkspaceContextResolves,
+): WindowWorkspace {
+  return validateWorkspace(
+    stampPaneContext(applyOperation(workspace, operation, false), operation, resolves),
+  );
+}
+
+function applyOperation(
+  workspace: WindowWorkspace,
+  operation: WorkspaceOperation,
+  validate: boolean,
+): WindowWorkspace {
+  const finishOperation = (next: WindowWorkspace) => finishLayout(next, validate);
   validateWorkspace(workspace);
   const mode = operation.mode;
   const layout = workspace.layouts[mode];

@@ -39,6 +39,38 @@ describe("createWorkThreadClient", () => {
     );
   });
 
+  it("searches Work message text through the authenticated route and refuses an answer it cannot read", async () => {
+    const answer = {
+      query: "brief",
+      truncated: false,
+      hits: [
+        {
+          threadId,
+          turnId: "21000000-0000-4000-8000-000000000009",
+          title: "Draft brief",
+          lifecycle: "active",
+          projectId,
+          snippet: "the brief",
+        },
+      ],
+    };
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(answer))
+      .mockResolvedValueOnce(Response.json({ query: "brief", hits: "none" }));
+    const client = createWorkThreadClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.searchTranscript("brief & notes")).resolves.toEqual(answer);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/work/transcript-search?q=brief+%26+notes`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+    await expect(client.searchTranscript("brief")).rejects.toBeInstanceOf(WorkThreadClientFailure);
+  });
+
   it("loads projection-only Work navigation from the authenticated route", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ threads: [thread()], runtime: [] }), {

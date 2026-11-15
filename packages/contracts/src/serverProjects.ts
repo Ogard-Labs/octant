@@ -9,6 +9,7 @@
  */
 
 import { Schema } from "effect";
+import { CodeCheckoutId, CodeRepositoryId } from "./code";
 import { AggregateId, AggregateVersion, UtcTimestamp } from "./events";
 import {
   BindingRevisionId,
@@ -107,13 +108,54 @@ export const decodeServerWorkDeveloperToolsChangedPayload = Schema.decodeUnknown
 );
 
 /**
+ * A machine's state as its cloud provider last reported it, normalized by the
+ * target plugin. Octant shows this and never infers a state it did not read.
+ * Canonical: docs/design/server-projects.md § Machines in the person's cloud account.
+ */
+export const CloudMachineState = Schema.Literal(
+  "provisioning",
+  "running",
+  "suspending",
+  "suspended",
+  "resuming",
+  "destroying",
+  "destroyed",
+  "unknown",
+);
+export type CloudMachineState = typeof CloudMachineState.Type;
+
+/** The cloud machine behind a server Project, as the catalog shows it. */
+export const ServerProjectCloudMachine = Schema.Struct({
+  machineId: AggregateId,
+  targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+  state: CloudMachineState,
+  stateObservedAt: UtcTimestamp,
+}).annotations(strict);
+export type ServerProjectCloudMachine = typeof ServerProjectCloudMachine.Type;
+
+/**
+ * The binding a Code Project on a server derives from its id, server, and
+ * folder: the Project's own folder checkout, which a routine there binds.
+ */
+export const ServerProjectCodeBinding = Schema.Struct({
+  bindingRevisionId: BindingRevisionId,
+  repositoryId: CodeRepositoryId,
+  checkoutId: CodeCheckoutId,
+}).annotations(strict);
+export type ServerProjectCodeBinding = typeof ServerProjectCodeBinding.Type;
+
+/**
  * A server Project as the catalog shows it. A Work Project also names the
- * binding its threads are created against, which the host derives from the
- * Project; nothing about it is journaled.
+ * binding its threads are created against, and a Code Project its own folder
+ * checkout, both of which the host derives from the Project; a Project on a
+ * machine Octant created in the person's cloud account names that machine and
+ * its last reported state. Nothing about any of them is journaled on the Project.
  */
 export const ServerProjectEntry = Schema.Struct({
   ...ServerProject.fields,
   workBindingRevisionId: Schema.optional(BindingRevisionId),
+  codeBinding: Schema.optional(ServerProjectCodeBinding),
+  cloudMachine: Schema.optional(ServerProjectCloudMachine),
 }).annotations(strict);
 export type ServerProjectEntry = typeof ServerProjectEntry.Type;
 

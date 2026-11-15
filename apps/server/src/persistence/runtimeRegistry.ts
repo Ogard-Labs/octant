@@ -309,6 +309,15 @@ import {
   ServerWorkDeveloperToolsChangedPayload,
 } from "@octant/contracts/server-projects";
 import {
+  CLOUD_MACHINES_EVENT_NAMES,
+  CloudMachineCreatedPayload,
+  CloudMachineCreationEndedPayload,
+  CloudMachineCreationRequestedPayload,
+  CloudMachineDestroyedPayload,
+  CloudMachineProjectBoundPayload,
+  CloudMachineStateChangedPayload,
+} from "@octant/contracts/cloud-machines";
+import {
   RUNTIME_NETWORK_EVENT_NAMES,
   RuntimeNetworkDecisionsRecordedPayload,
   RuntimeNetworkLaunchStartedPayload,
@@ -350,6 +359,7 @@ import { AggregateHeadsProjection } from "./aggregateHeadsProjection";
 import { AgentProfileProjection } from "./agentProfileProjection";
 import { ChatProjection } from "./chatProjection";
 import { CodeProjection } from "./codeProjection";
+import { CodeTranscriptSearchProjection } from "./codeTranscriptSearchProjection";
 import { ContextProjection } from "./contextProjection";
 import { EventRegistry } from "./eventRegistry";
 import { ProjectionRegistry } from "./projection";
@@ -685,6 +695,12 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       1,
       ServerWorkDeveloperToolsChangedPayload,
     )
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationRequested, 1, CloudMachineCreationRequestedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.created, 1, CloudMachineCreatedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.creationEnded, 1, CloudMachineCreationEndedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.projectBound, 1, CloudMachineProjectBoundPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.stateChanged, 1, CloudMachineStateChangedPayload)
+    .register(CLOUD_MACHINES_EVENT_NAMES.destroyed, 1, CloudMachineDestroyedPayload)
     .register(SHIELD_TAG_EVENT_NAMES.recorded, 1, ShieldTagRecordedPayload)
     .register(SHIELD_FORGE_CHANGE_EVENT_NAMES.observed, 1, ShieldForgeChangeObservedPayload)
     .register(SAFE_NETWORKS_EVENT_NAMES.limitsSet, 1, SafeNetworksLimitsSetPayload)
@@ -916,6 +932,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ShellProjection())
       .register(new ChatProjection())
       .register(new CodeProjection())
+      .register(new CodeTranscriptSearchProjection())
       .register(agentRunProjection)
       .register(canvasProjection)
       .register(automationProjection)

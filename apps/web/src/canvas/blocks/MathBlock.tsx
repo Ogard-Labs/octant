@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import { useLayoutEffect, useRef, useState } from "react";
 import katex from "katex";
 // KaTeX's stylesheet and fonts are bundled with the renderer: the page's font
@@ -42,12 +43,11 @@ function DisplayMath({ block }: { readonly block: CanvasMathDisplayBlock }) {
       {block.caption === undefined ? null : (
         <figcaption className="canvas-block__math-caption">{block.caption}</figcaption>
       )}
-      <details className="canvas-block__math-source">
-        <summary>View source</summary>
+      <OctantCollapsible className="canvas-block__math-source" summary="View source">
         <pre>
           <code>{block.source}</code>
         </pre>
-      </details>
+      </OctantCollapsible>
     </figure>
   );
 }
@@ -64,8 +64,7 @@ function InlineMath({ block }: { readonly block: CanvasMathInlineBlock }) {
           ),
         )}
       </p>
-      <details className="canvas-block__math-source">
-        <summary>View source</summary>
+      <OctantCollapsible className="canvas-block__math-source" summary="View source">
         <p>
           {block.runs.map((run, index) =>
             "math" in run ? (
@@ -75,7 +74,7 @@ function InlineMath({ block }: { readonly block: CanvasMathInlineBlock }) {
             ),
           )}
         </p>
-      </details>
+      </OctantCollapsible>
     </div>
   );
 }

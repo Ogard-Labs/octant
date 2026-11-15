@@ -27,6 +27,7 @@ import type { DesignAssetRuntime } from "./designDocument";
 import { DesignFrameView, FullscreenButton, useFullscreen, useSize } from "./DesignBlock";
 import type { DiagramBoardLayoutRuntime } from "./DiagramBoard";
 import { MockupFrame, type MockupHotspots } from "./MockupBlock";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 /**
  * A flow block as a board: the screens it names, drawn at board scale and
@@ -466,8 +467,7 @@ export function FlowBoard(props: FlowBoardProps) {
           ))}
         </ol>
       )}
-      <details className="canvas-flow-board__outline">
-        <summary>Outline</summary>
+      <OctantCollapsible className="canvas-flow-board__outline" summary="Outline">
         <ul>
           {layout.screens.map((screen) => (
             <li key={screen.screenId}>{screen.label}</li>
@@ -480,7 +480,7 @@ export function FlowBoard(props: FlowBoardProps) {
             </li>
           ))}
         </ul>
-      </details>
+      </OctantCollapsible>
       {message === undefined ? null : (
         <OctantAlert className="canvas-board__message" tone="warning">
           {message}

@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { useEffect, useMemo, useState } from "react";
 import {
   createTerminalSessionClient,
@@ -50,19 +51,24 @@ export function ImportedTerminalHistory(props: {
   if (imported === undefined) return null;
   const tool = TERMINAL_SESSION_TOOL_NAMES[imported.provider];
   return (
-    <details className="imported-history thread-column">
-      <summary className="imported-history__summary">
-        <span className="imported-history__title">
-          Started from a {tool} session: {imported.title}
-        </span>
-        <span className="imported-history__meta">
-          {imported.entries.length === 1 ? "1 message" : `${imported.entries.length} messages`} ·
-          last active{" "}
-          <time dateTime={imported.updatedAt}>
-            {absoluteTimeFormatter.format(new Date(imported.updatedAt))}
-          </time>
-        </span>
-      </summary>
+    <OctantCollapsible
+      className="imported-history thread-column"
+      summary={
+        <>
+          <span className="imported-history__title">
+            Started from a {tool} session: {imported.title}
+          </span>
+          <span className="imported-history__meta">
+            {imported.entries.length === 1 ? "1 message" : `${imported.entries.length} messages`} ·
+            last active{" "}
+            <time dateTime={imported.updatedAt}>
+              {absoluteTimeFormatter.format(new Date(imported.updatedAt))}
+            </time>
+          </span>
+        </>
+      }
+      summaryClassName="imported-history__summary"
+    >
       <p className="imported-history__note">
         Outside content, read from this Mac. The assistant read it once at the start of this thread;
         it is not a message anyone sent here.
@@ -86,6 +92,6 @@ export function ImportedTerminalHistory(props: {
           </li>
         ))}
       </ol>
-    </details>
+    </OctantCollapsible>
   );
 }

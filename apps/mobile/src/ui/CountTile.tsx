@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { mix, radii, space, typography, useTheme, withAlpha } from "../../design-system";
+import { mix, radii, typography, useTheme, withAlpha } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
 export interface CountTileProps {
@@ -23,32 +23,36 @@ export interface CountTileProps {
  */
 export function CountTile(props: CountTileProps) {
   const { colors, scheme } = useTheme();
-  const solid = scheme === "light";
-  const ink = solid ? colors.primaryForeground : props.hue;
+  // A place with nothing in it steps back to a plain glass tile in the muted
+  // ink, so the tiles that do hold something are what the eye lands on.
+  const quiet = props.count === 0;
+  const solid = scheme === "light" && !quiet;
+  const ink = quiet ? colors.textTertiary : solid ? colors.primaryForeground : props.hue;
   const styles = useMemo(
     () =>
       StyleSheet.create({
         pressable: { flex: 1, borderRadius: radii.md },
         face: {
-          minHeight: 76,
+          minHeight: 64,
           justifyContent: "space-between",
-          padding: 12,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
           borderRadius: radii.md,
           borderWidth: StyleSheet.hairlineWidth,
           overflow: "hidden",
         },
         top: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
         count: {
-          fontSize: 26,
+          fontSize: 24,
           fontWeight: "600",
           letterSpacing: -0.6,
           fontVariant: ["tabular-nums"],
-          lineHeight: 30,
+          lineHeight: 28,
         },
         label: {
           fontSize: typography.detail.fontSize,
           fontWeight: "500",
-          marginTop: space.xs,
+          marginTop: 2,
         },
       }),
     [],
@@ -90,7 +94,12 @@ export function CountTile(props: CountTileProps) {
         <View
           style={[
             styles.face,
-            { backgroundColor: withAlpha(props.hue, 0.18), borderColor: withAlpha(props.hue, 0.3) },
+            quiet
+              ? { backgroundColor: colors.glassFillThin, borderColor: colors.glassStroke }
+              : {
+                  backgroundColor: withAlpha(props.hue, 0.18),
+                  borderColor: withAlpha(props.hue, 0.3),
+                },
           ]}
         >
           {content}

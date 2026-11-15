@@ -118,8 +118,13 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
   };
 
   // The thread's own agent asks the person to sign in through the same list;
-  // that question, like an exact-source script permission, is never remembered.
-  if (pending.signIn !== undefined || pending.script !== undefined) {
+  // that question, like an exact-source script permission or one call of a
+  // tool the page declares, is never remembered.
+  if (
+    pending.signIn !== undefined ||
+    pending.script !== undefined ||
+    pending.pageTool !== undefined
+  ) {
     return (
       <OctantApprovalCard
         actions={
@@ -130,7 +135,11 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
               size="sm"
               type="button"
             >
-              {pending.script === undefined ? "Continue" : "Run once"}
+              {pending.pageTool !== undefined
+                ? "Call once"
+                : pending.script === undefined
+                  ? "Continue"
+                  : "Run once"}
             </OctantButton>
             <OctantButton
               disabled={busy}
@@ -155,7 +164,13 @@ export function TerminalBrowserApprovalPrompt(props: TerminalBrowserApprovalProm
           )
         }
         error={message}
-        label={pending.script === undefined ? "Browser sign-in" : "Browser script permission"}
+        label={
+          pending.pageTool !== undefined
+            ? "Browser page tool"
+            : pending.script === undefined
+              ? "Browser sign-in"
+              : "Browser script permission"
+        }
         summary={browserApprovalSummary(pending)}
       />
     );

@@ -183,6 +183,9 @@ export function installNightlyCodeApprovals<TWindow extends ApprovalHostWindow>(
   options.register(DESKTOP_IPC_CHANNELS.cancelCodeOperationApproval, (event) => {
     controller.cancel(windowOf(event).windowId);
   });
+  options.register(DESKTOP_IPC_CHANNELS.setRendererOverlayOpen, (event, open) => {
+    controller.setObscured(windowOf(event).windowId, open === true);
+  });
   options.register(DESKTOP_IPC_CHANNELS.approvalSurfacePalette, (event, palette) => {
     const { windowId } = windowOf(event);
     const decoded = decodeCodeOperationApprovalPalette(palette);

@@ -100,6 +100,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { ThreadStandingAnswerStore } from "../context/threadStandingAnswerStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
@@ -187,7 +188,7 @@ function authorizeAgentRunCancellation(input: {
     return false;
   }
 
-  let threadProjectId: string | null | undefined;
+  let threadProjectId: ProjectId | null | undefined;
   try {
     if (mode === "chat") {
       const thread = input.persistence.readChatThread(
@@ -209,7 +210,7 @@ function authorizeAgentRunCancellation(input: {
   } catch {
     return false;
   }
-  if (String(context.projectId) !== String(threadProjectId ?? null)) return false;
+  if (!windowAdmitsProject(workspace, mode, threadProjectId ?? null)) return false;
   if (
     input.run.routingReceipt.projectId !== undefined &&
     String(input.run.routingReceipt.projectId) !== String(threadProjectId)
@@ -265,7 +266,7 @@ export function authorizeAgentRunParentThread(input: {
   if (
     chatThread !== undefined &&
     chatContext.mode === "chat" &&
-    String(chatContext.projectId) === String(chatThread.projectId ?? null) &&
+    windowAdmitsProject(workspace, "chat", chatThread.projectId ?? null) &&
     layoutContainsAgentRunThread(workspace.layouts.chat, threadId, String(chatContext.host))
   ) {
     return true;
@@ -281,7 +282,7 @@ export function authorizeAgentRunParentThread(input: {
   if (
     workThread !== undefined &&
     workContext.mode === "work" &&
-    String(workContext.projectId) === String(workThread.projectId) &&
+    windowAdmitsProject(workspace, "work", workThread.projectId) &&
     layoutContainsAgentRunThread(workspace.layouts.work, threadId, String(workContext.host))
   ) {
     return true;
@@ -297,7 +298,7 @@ export function authorizeAgentRunParentThread(input: {
   return (
     codeThread !== undefined &&
     codeContext.mode === "code" &&
-    String(codeContext.projectId) === String(codeThread.projectId) &&
+    windowAdmitsProject(workspace, "code", codeThread.projectId) &&
     layoutContainsAgentRunThread(workspace.layouts.code, threadId, String(codeContext.host))
   );
 }
@@ -1367,7 +1368,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           truncated: turns.length > 64,
         });
       }
-      const history = codeBoardEventStore.historyForThread(
+      const history = codeBoardEventStore.summaryForThread(
         decodeCodeThreadId(String(parentThreadId)),
       );
       return observedChildren({

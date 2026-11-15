@@ -15,6 +15,7 @@ import type {
   WorkThreadCommand,
 } from "@octant/contracts";
 import type { ChatThreadId } from "@octant/contracts/chat";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
@@ -90,6 +91,8 @@ export type ShellActions = {
     prompt?: string,
     modelOptionValues?: ProviderModelOptionValues,
     paneId?: PaneId,
+    extensionSelections?: ReadonlyArray<ExtensionSelection>,
+    attachments?: ReadonlyArray<File>,
   ) => void;
   readonly createProject: ProjectController["create"];
   readonly dismissCrossContextOffer: ShellController["dismissCrossContextOffer"];
