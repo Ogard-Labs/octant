@@ -85,9 +85,15 @@ server reads the Project's instruction files only without
 it reads the global file alone. Its global configuration folder is the
 launch's private one, so the person's own global `AGENTS.md` is not found
 there and `~/.claude/CLAUDE.md` is (not built yet: linking that `AGENTS.md`
-in, which OpenCode on its own would prefer). The text grants nothing: Plan
-stays read-only, and the protected-file rules and the account's sign-in file
-exemptions apply to reads as before.
+in, which OpenCode on its own would prefer). Below Full access the 1.x
+launch's wall opens that one file for reading and nothing else in
+`~/.claude`: a literal Seatbelt rule on macOS, under the `~/.claude` denial
+that stays whole, and a read-only bind on Linux. The file is found at
+`~/.claude/CLAUDE.md` in the launch's home, as OpenCode looks for it
+(`CLAUDE_CONFIG_DIR` is not consulted); a protected file, a link, or a file
+reached through a linked `.claude` is not opened. A 2.x launch opens nothing
+there. The text grants nothing: Plan stays read-only, and the protected-file
+rules and the account's sign-in file exemptions apply to reads as before.
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,

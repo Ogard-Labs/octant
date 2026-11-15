@@ -5,6 +5,7 @@ import {
   constants,
   accessSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -31,12 +32,15 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
+  seatbeltAllowLiteralMetadataRule,
+  seatbeltAllowLiteralReadRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
@@ -1063,6 +1067,37 @@ function openCodeDiscoveryRules(home: string | undefined): ReadonlyArray<string>
   ];
 }
 
+/**
+ * The person's global `CLAUDE.md` when a confined OpenCode 1.x launch may read
+ * it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts`), 1.x reads `os.homedir()/.claude/CLAUDE.md`
+ * where it finds no global `AGENTS.md`, and its global configuration folder is
+ * the launch's private one, so this is the file it reads; it ignores
+ * `CLAUDE_CONFIG_DIR`. 2.x reads only `AGENTS.md`, so nothing is opened there.
+ *
+ * The rest of `~/.claude` (the sign-in in `.credentials.json`, settings,
+ * transcripts) stays denied: the grant names this one file. A protected file
+ * stays denied, and a link, or a file reached through a linked `.claude`, is
+ * refused rather than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalClaudeInstructionFile(
+  runtime: OpenCodeRuntime,
+  home: string | undefined,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  try {
+    const file = join(realpathSync(home), ".claude", "CLAUDE.md");
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
 interface OpenCodeLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -1179,6 +1214,11 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
+      const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
+        runtime,
+        profile.environment.HOME,
+        platform,
+      );
       const privateHomeAllowPaths = existingAbsolutePaths([
         root,
         binaryPath,
@@ -1190,6 +1230,11 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
+        // denied as a whole and reopens the file by literal rule below: as an
+        // allowed path here it would deny `.claude` entry by entry instead, so
+        // a sign-in written after launch would be readable.
+        ...(platform === "darwin" ? [] : [globalClaudeInstructions]),
       ]);
       const writeRoots = existingAbsolutePaths([
         configDirectory,
@@ -1286,6 +1331,15 @@ function prepareOpenCodeLaunch(
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),
+                // OpenCode 1.x reads the person's global CLAUDE.md as it does
+                // on its own; the person's protected files still follow these
+                // rules, and nothing else under `.claude` opens.
+                ...(globalClaudeInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalClaudeInstructions)),
+                      seatbeltAllowLiteralReadRule(globalClaudeInstructions),
+                    ]),
                 // The git stand-in's only exec: the always-failing binary the
                 // PATH shim resolves `git` to. No other exec becomes possible.
                 ...(betaGitStandin
