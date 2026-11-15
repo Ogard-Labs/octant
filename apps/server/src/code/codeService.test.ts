@@ -1175,6 +1175,25 @@ describe("CodeService commands", () => {
     expect(updated).not.toHaveProperty("settings.allowDefaultFolderThreads");
   });
 
+  it("refuses a new thread that carries a host move's continued-on-fallback reason", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const spoofed = thread({
+      executionPolicy: "approval-gated",
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider,
+        previousModelId: "model-a",
+        nextProviderInstanceId: ids.provider,
+        nextModelId: "model-b",
+        changedAt: "2026-11-15T12:00:00.000Z",
+        continuedOnFallback: "Words a client wrote",
+      } as never,
+    });
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: spoofed }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("journals an authorized new thread at expected aggregate version zero", async () => {
     const created = thread({ executionPolicy: "approval-gated" });
     const fixture = serviceFixture({ threads: [] });

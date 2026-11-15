@@ -953,7 +953,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
-  const continuedOnFallback = continuedOnFallbackPlacement(messages, view?.thread.providerHandoff);
+  // Only a coordinator's worker carries a host move's reason.
+  const continuedOnFallback =
+    view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
+      ? undefined
+      : continuedOnFallbackPlacement(messages, view.thread.providerHandoff);
   const loadedOperationIds = new Set(
     messages.flatMap((message) =>
       message.role === "assistant" && message.operationId !== undefined
@@ -3392,15 +3396,33 @@ function messageHappenedAt(message: CodeConversationMessage): string | undefined
  * thread's latest move carries its reason.
  */
 function continuedOnFallbackPlacement(
-  messages: ReadonlyArray<{ readonly id: string; readonly at?: string }>,
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly at?: string;
+    readonly operationId?: unknown;
+  }>,
   handoff: CodeThread["providerHandoff"],
 ): { readonly afterId: string; readonly reason: string } | undefined {
   const reason = handoff?.continuedOnFallback;
   if (handoff === undefined || reason === undefined) return undefined;
   const movedAt = Date.parse(String(handoff.changedAt));
-  const before = messages.filter(
-    (message) => message.at !== undefined && Date.parse(message.at) <= movedAt,
+  // A prompt's time is its turn's start, which never moves; a reply's is its
+  // turn's last update, which may come after the move. So the stopped turn
+  // is found by its prompt, and the marker goes after that turn's reply.
+  const promptIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "user" && message.at !== undefined && Date.parse(message.at) <= movedAt,
   );
-  const last = before.at(-1);
-  return last === undefined ? undefined : { afterId: last.id, reason };
+  const prompt = messages[promptIndex];
+  if (prompt === undefined) return undefined;
+  const reply = messages
+    .slice(promptIndex + 1)
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        prompt.operationId !== undefined &&
+        String(message.operationId) === String(prompt.operationId),
+    );
+  return { afterId: (reply ?? prompt).id, reason };
 }

@@ -1141,19 +1141,29 @@ describe("CodeThreadWorkspace", () => {
           {
             ...base,
             conversation: [
-              { id: "ask", role: "user", text: "Fix the test", at: "2026-11-15T12:00:00.000Z" },
+              {
+                id: "ask",
+                role: "user",
+                text: "Fix the test",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                at: "2026-11-15T12:00:00.000Z",
+              },
               {
                 id: "stopped",
                 role: "assistant",
                 text: "Looking at it",
                 status: "waiting",
-                at: "2026-11-15T12:01:00.000Z",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                // Its turn settled after the move; the marker still follows it.
+                at: "2026-11-15T12:03:00.000Z",
               },
             ],
             activeView: {
               ...base.activeView!,
               thread: {
                 ...base.activeView!.thread,
+                coordinatorThreadId: "20000000-0000-4000-8000-0000000000c1",
+                coordinatorChoice: { role: "default", rank: { fallback: 1 }, reason },
                 providerHandoff: {
                   previousProviderInstanceId: providerId,
                   previousModelId: modelId,
@@ -1169,9 +1179,13 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    expect(screen.getByLabelText("Continued on the fallback")).toHaveTextContent(
-      `Octant moved this thread: ${reason}`,
-    );
+    const marker = screen.getByLabelText("Continued on the fallback");
+    expect(marker).toHaveTextContent(`Octant moved this thread: ${reason}`);
+    // After the stopped turn's reply, not between its prompt and reply.
+    expect(
+      screen.getByText("Looking at it").compareDocumentPosition(marker) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {

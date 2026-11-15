@@ -2139,7 +2139,9 @@ export class CodeService {
           command.thread.coordinatorBounds !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
-          command.thread.coordinatorWakeOff !== undefined
+          command.thread.coordinatorWakeOff !== undefined ||
+          // Only the host's own move writes this reason, which the transcript shows as Octant's.
+          command.thread.providerHandoff?.continuedOnFallback !== undefined
         ) {
           throw this.#failure(
             "unauthorized",

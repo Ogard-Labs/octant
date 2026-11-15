@@ -1150,7 +1150,7 @@ export class CoordinatorService {
     const nextChoice: CoordinatorWorkerChoice = {
       role: next.role,
       rank: next.rank,
-      reason: reason.slice(0, 400),
+      reason: reason.slice(0, 400).trim(),
       ...(choice.why === undefined ? {} : { why: choice.why }),
       ...(choice.needsImages === true ? { needsImages: true as const } : {}),
       ...(choice.reviewedProviderKind === undefined
