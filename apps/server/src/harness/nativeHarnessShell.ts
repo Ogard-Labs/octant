@@ -39,6 +39,11 @@ export interface NativeHarnessShellOptions {
    */
   readonly scriptFileName?: () => string | undefined;
   /**
+   * What the script file holds for a command; the command alone when absent.
+   * A Windows shell wraps it so its exit status reaches the result.
+   */
+  readonly scriptText?: (command: string) => string;
+  /**
    * Present for a shell whose commands reach the network only through the
    * host's egress proxy (`proxied`). Every run starts its own launch, and a
    * launch that cannot start never runs its command.
@@ -156,7 +161,9 @@ async function runScript(
     if (google?.status === "refused")
       return { status: "unavailable", output: google.message, truncated: false };
     const credentials = google;
-    await writeFile(script, `${input.command}\n`, { mode: 0o600 });
+    await writeFile(script, options.scriptText?.(input.command) ?? `${input.command}\n`, {
+      mode: 0o600,
+    });
     const result = await options.process.executeShellScript(
       {
         script,

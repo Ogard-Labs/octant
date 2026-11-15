@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessShell } from "./nativeHarnessShell";
-import { createWindowsFullAccessShellPort, windowsScriptFileName } from "./windowsFullAccessShell";
+import {
+  createWindowsFullAccessShellPort,
+  windowsScriptFileName,
+  windowsScriptText,
+} from "./windowsFullAccessShell";
 
 const directories: string[] = [];
 
@@ -13,20 +17,21 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(windowsShell: "powershell" | "cmd" = "powershell") {
   const root = mkdtempSync(join(tmpdir(), "octant-windows-harness-"));
   directories.push(root);
   const scriptDirectory = join(root, "scripts");
   const checkout = join(root, "checkout");
   mkdirSync(scriptDirectory);
   mkdirSync(checkout);
-  const shell = () => terminalShellFor({ platform: "win32", windowsShell: undefined });
+  const shell = () => terminalShellFor({ platform: "win32", windowsShell });
   return {
     checkout,
     harness: createNativeHarnessShell({
       process: createWindowsFullAccessShellPort({ shell, scriptDirectory }),
       scriptDirectory,
       scriptFileName: () => windowsScriptFileName(shell()),
+      scriptText: (command) => windowsScriptText(shell(), command),
     }),
   };
 }
@@ -40,6 +45,45 @@ describe("the harness shell at Full access on a Windows host", () => {
     expect(windowsScriptFileName("C:\\Windows\\System32\\cmd.exe")).toBe("command.cmd");
     expect(windowsScriptFileName("C:\\Program Files\\Git\\bin\\bash.exe")).toBeUndefined();
   });
+
+  it("ends a PowerShell script with the command's own failure and a Command Prompt script with its error level", () => {
+    const powershell = windowsScriptText(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      "npm test",
+    );
+    expect(powershell.startsWith("\uFEFF")).toBe(true);
+    expect(powershell).toContain("npm test");
+    expect(powershell).toContain("exit $global:LASTEXITCODE");
+    expect(powershell).toContain("$ErrorActionPreference = 'Stop'");
+    expect(windowsScriptText("C:\\Windows\\System32\\cmd.exe", "npm test")).toBe(
+      "@echo off\r\nnpm test\r\nexit /b %errorlevel%\r\n",
+    );
+  });
+
+  it.runIf(process.platform === "win32")(
+    "reports a failed native program, a failed cmdlet and a failed Command Prompt command as failures",
+    async () => {
+      const { checkout, harness } = fixture();
+      const run = (command: string) => harness.run({ command, cwd: checkout, timeoutMs: 60_000 });
+      const git = await run("git.exe status");
+      expect(git.status).toBe("ran");
+      expect(git.status === "ran" ? git.exitCode : undefined).not.toBe(0);
+      expect(await run("cmd.exe /c exit 3")).toMatchObject({ status: "ran", exitCode: 3 });
+      expect(await run("Get-Item -LiteralPath does-not-exist")).toMatchObject({
+        status: "ran",
+        exitCode: 1,
+      });
+      expect(await run("cmd.exe /c exit 3; Write-Output after")).toMatchObject({
+        status: "ran",
+        exitCode: 3,
+      });
+      const cmd = fixture("cmd");
+      expect(
+        await cmd.harness.run({ command: "exit /b 4", cwd: cmd.checkout, timeoutMs: 60_000 }),
+      ).toMatchObject({ status: "ran", exitCode: 4 });
+    },
+    120_000,
+  );
 
   it.runIf(process.platform === "win32")(
     "runs a turn's command in Windows PowerShell that writes a file in the checkout and returns its output",

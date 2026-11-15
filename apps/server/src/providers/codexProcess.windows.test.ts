@@ -1,10 +1,12 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ProviderFailure } from "@octant/contracts";
+import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
 import { Effect, Either } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeCodexDriver } from "./codexDriver";
 import { makeCodexProcessLive, type CodexLaunchAuthority } from "./codexProcess";
+import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
  * The fake Codex app-server compiled to a Windows program (`bun build
@@ -87,6 +89,28 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
         expect(Either.isLeft(refused)).toBe(true);
         if (Either.isLeft(refused)) expect(refused.left.message).toMatch(/sandbox|confine/i);
       }
+    }, 60_000);
+
+    it("reads the catalog through the production driver with each process's ownership receipt, and removes the receipt once it ends", async () => {
+      const receiptDirectory = mkdtempSync(join(tmpdir(), "octant-codex-receipts-"));
+      directories.push(receiptDirectory);
+      const registry = new ProviderRuntimeRegistry({ receiptDirectory, shutdownTimeoutMs: 10_000 });
+      const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
+      const driver = makeCodexDriver({
+        instanceId,
+        binaryPath: fakeCodex ?? "",
+        process: port(true),
+        runtimeRegistry: registry,
+        idleLeaseMs: 0,
+      });
+      const probed = await Effect.runPromise(
+        Effect.scoped(Effect.either(driver.probe({ instanceId }))),
+      );
+      if (Either.isLeft(probed)) throw new Error(probed.left.message);
+      expect(probed.right.models.length).toBeGreaterThan(0);
+      await vi.waitFor(() => expect(readdirSync(receiptDirectory)).toEqual([]), {
+        timeout: 20_000,
+      });
     }, 60_000);
 
     it("reads the catalog only for a host that starts threads at open Full access", async () => {

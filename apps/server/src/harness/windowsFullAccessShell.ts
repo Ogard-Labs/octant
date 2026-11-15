@@ -35,6 +35,41 @@ export function windowsScriptFileName(shell: string): string | undefined {
   }
 }
 
+/**
+ * The script a Windows shell runs for one command, written so the command's
+ * failure reaches the result. PowerShell running a `-File` script reports
+ * exit 0 when a native program inside it failed, so a failed build or test
+ * read as passing. The PowerShell script therefore ends with the last native
+ * program's exit code when one set it, 1 when the last command failed, and 0
+ * otherwise; with `$ErrorActionPreference = 'Stop'` a cmdlet's error stops
+ * the command and exits 1 too. One cost: in Windows PowerShell 5.1 a native
+ * program's error output that the command itself redirects (`2>&1`) counts
+ * as an error, so such a command exits 1 at its first error line, a failure
+ * where the program may have succeeded, never the reverse. Command Prompt
+ * passes the last error level on with `exit /b`.
+ */
+export function windowsScriptText(shell: string, command: string): string {
+  if (windowsScriptFileName(shell) === "command.cmd")
+    return `@echo off\r\n${command}\r\nexit /b %errorlevel%\r\n`;
+  // A byte-order mark, so Windows PowerShell 5.1 reads the script as UTF-8
+  // rather than the ANSI code page, which garbles any non-ASCII command.
+  return `\uFEFF${[
+    "$global:LASTEXITCODE = $null",
+    "$ErrorActionPreference = 'Stop'",
+    "try {",
+    command,
+    "} catch {",
+    "  [Console]::Error.WriteLine($_.ToString())",
+    "  exit 1",
+    "}",
+    "$succeeded = $?",
+    "if ($null -ne $global:LASTEXITCODE -and $global:LASTEXITCODE -ne 0) { exit $global:LASTEXITCODE }",
+    "if (-not $succeeded) { exit 1 }",
+    "exit 0",
+    "",
+  ].join("\r\n")}`;
+}
+
 function scriptArguments(shell: string, script: string): ReadonlyArray<string> | undefined {
   switch (windowsScriptFileName(shell)) {
     case "command.ps1":

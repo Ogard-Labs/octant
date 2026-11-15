@@ -56,6 +56,7 @@ import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import {
   createWindowsFullAccessShellPort,
   windowsScriptFileName,
+  windowsScriptText,
 } from "../harness/windowsFullAccessShell";
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
@@ -1065,6 +1066,7 @@ export function wireHarness(deps: HarnessDependencies) {
             }),
             scriptDirectory: harnessScriptDirectory,
             scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
+            scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
           })
         : createNativeHarnessShell({
             process: harnessFullAccessProcessPort,

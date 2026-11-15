@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { stopWindowsProcessTree } from "./windowsProcessTree";
+import { stopWindowsProcessTree, windowsSystemProgram } from "./windowsProcessTree";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -464,8 +464,54 @@ export async function readProcessIdentity(pid: number): Promise<string | undefin
     }
     return hashIdentity(["darwin", match[1], match[2], match[3]]);
   }
+  if (process.platform === "win32") return await readWindowsProcessIdentity(pid);
   if (!processLeaderExists(pid)) return undefined;
   throw new Error("Owned process identity is unavailable on this platform.");
+}
+
+/** Runs one program with an exact argument list and no shell; answers its stdout. */
+export type WindowsIdentityRead = (program: string, args: ReadonlyArray<string>) => Promise<string>;
+
+/**
+ * A Windows process's identity: its pid and its creation time, which a
+ * reused pid never repeats. Windows has no `/proc` and no `ps`, so the time
+ * is read through Windows PowerShell from System32, started with an exact
+ * argument list and no shell, the pid being a checked integer. Measured on
+ * windows-2025: without a Windows identity every owned-process receipt
+ * failed ("Owned process identity is unavailable on this platform"), and a
+ * provider launch that waits for its receipt never started.
+ */
+export async function readWindowsProcessIdentity(
+  pid: number,
+  read: WindowsIdentityRead = async (program, args) =>
+    (
+      await execFileAsync(program, [...args], {
+        timeout: 10_000,
+        maxBuffer: 4_096,
+        windowsHide: true,
+      })
+    ).stdout,
+): Promise<string | undefined> {
+  if (!Number.isSafeInteger(pid) || pid < 1) return undefined;
+  let stdout: string;
+  try {
+    stdout = await read(windowsSystemProgram("WindowsPowerShell\\v1.0\\powershell.exe"), [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()`,
+    ]);
+  } catch (error) {
+    if (!processLeaderExists(pid)) return undefined;
+    throw error;
+  }
+  const started = stdout.trim();
+  if (!/^\d{1,20}$/.test(started)) {
+    if (!processLeaderExists(pid)) return undefined;
+    throw new Error("Owned process identity could not be observed.");
+  }
+  return hashIdentity(["win32", String(pid), started]);
 }
 
 function processLeaderExists(pid: number): boolean {

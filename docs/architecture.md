@@ -18306,13 +18306,17 @@ deliverable and keeps every gate above:
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action is written for a POSIX shell and is refused
-     on Windows. A Windows terminal keeps no owned-process receipt, because
-     the receipt's process identity has no Windows form yet (measured on
-     `windows-2025`, every terminal's receipt failed and its fail-closed stop
-     reached nothing); closing it ends its tree, and a host restart does not
-     find a terminal it left behind. Close confirms the stop by the shell's
-     pid, because ConPTY reports a shell's exit about 25 seconds after the
-     process ends (measured on `windows-2025`).
+     on Windows. Close confirms the stop by the shell's pid, because ConPTY
+     reports a shell's exit about 25 seconds after the process ends
+     (measured on `windows-2025`).
+   - **Ownership receipts.** An owned process's identity on Windows is its
+     pid and creation time, read through System32's Windows PowerShell with
+     an exact argument list and no shell
+     (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
+     never matches. Provider runtimes and terminals keep their receipts there
+     as elsewhere, and a host restart finds and stops what it left behind.
+     Without it every receipt failed on Windows, and a provider launch, which
+     waits for its receipt, never started.
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
@@ -18350,8 +18354,16 @@ deliverable and keeps every gate above:
      (Windows PowerShell by default) from a `.ps1` (`-NoProfile
 -NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
      own script folder, with the Windows names a shell needs in its
-     environment, and ends the command's tree on timeout or cancellation. The
-     tool keeps its name, and a Work or Code lead on a Windows host is told
+     environment, and ends the command's tree on timeout or cancellation. A
+     command's failure reaches the result: PowerShell running a `-File`
+     script reports exit 0 when a native program inside it failed, so the
+     script ends with the last native program's exit code when one set it, 1
+     when the last command failed, and 0 otherwise, and a cmdlet's error stops
+     it with exit 1 (`$ErrorActionPreference = 'Stop'`). In Windows
+     PowerShell 5.1 a native program's error output the command redirects
+     itself (`2>&1`) counts as such an error, which can read a success as a
+     failure, never the reverse. A Command Prompt script ends with
+     `exit /b %errorlevel%`. The tool keeps its name, and a Work or Code lead on a Windows host is told
      the shell is PowerShell. The levels below Full access refuse on Windows
      before a command is planned.
    - **Not yet on Windows.** These run at Full access on macOS and Linux and
@@ -18368,7 +18380,10 @@ deliverable and keeps every gate above:
      rules are tested on Linux CI with the host's platform set to Windows.
      The `server-windows` CI job runs against real processes on
      `windows-2025`: the tree stop (a PowerShell root and the program it
-     started both end), a Full access PowerShell terminal that writes a file
+     started both end), a running process's identity read twice alike and
+     its receipt kept and removed, the production Codex driver reading its
+     catalog through a runtime registry that keeps receipts, a failed native
+     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
      and a live one that close ends, the harness shell running a turn's
      PowerShell command that writes a file in the checkout and returns its
      output and ending a timed-out command's tree, and a fake Codex app-server
