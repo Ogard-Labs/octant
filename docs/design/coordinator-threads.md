@@ -524,9 +524,10 @@ jobs, each a list with a main model and fallbacks, and two choices per role,
 **Ask before using** and **Continue on the fallback if the model stops**.
 Choosing by task and size, falling back at the start, borrowing the next
 tier, and asking before a role are built
-([Choosing the worker's model](#choosing-the-workers-model)). Continuing a
-running worker on the fallback, and describing images for a model that cannot
-see, are designed, not built.
+([Choosing the worker's model](#choosing-the-workers-model)), and Sees images
+describes an image for a worker whose model cannot read one
+([Architecture: Sees images](../architecture.md#sees-images)). Continuing a
+running worker on the fallback is designed, not built.
 
 ## Not in this design
 
