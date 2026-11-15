@@ -18326,23 +18326,57 @@ deliverable and keeps every gate above:
    - **Paths.** Provider launches at Full access take the thread's folder and
      the OS temporary directory (`os.tmpdir()`), never `/tmp`; terminal paths
      are judged by the host's own path rules.
+   - **Providers.** A Codex launch at Full access with the sandbox off reads
+     its `--version` and starts its app-server unconfined on Windows
+     (maintainer request, 2026-11-15): the runtime the read precedes has the
+     same reach, and the confined read has no Windows form. The decision is
+     made per launch, from that launch's own level, so no earlier read or
+     cached result admits another launch; every other level keeps the
+     confined read and launch, which refuse there, and the server gate above
+     refuses those turns first. Codex's model catalog is read by a lease of
+     its own with no thread; on Windows it runs unconfined only while the host
+     starts new threads at open Full access (Settings › Code's default mode or
+     Settings › Work's default access is Full access with the sandbox off,
+     each chosen through the one-time warning; `hostStartsThreadsAtOpenFullAccess`
+     in the domain), and is refused otherwise, so Codex reports itself
+     unavailable on a Windows host whose defaults are guarded. Codex's
+     environment keeps a Windows host's `Path`, `SystemRoot` and profile
+     names whatever their case. A Codex installed only as an npm `.cmd` shim
+     does not start (Windows starts a `.cmd` only through a shell, which
+     Octant does not use for a provider); its binary path names the
+     `codex.exe` the package carries.
+   - **Harness shell.** The Octant Harness's shell tool at Full access on
+     Windows runs each command in the terminal shell Settings › Code names
+     (Windows PowerShell by default) from a `.ps1` (`-NoProfile
+-NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
+     own script folder, with the Windows names a shell needs in its
+     environment, and ends the command's tree on timeout or cancellation. The
+     tool keeps its name, and a Work or Code lead on a Windows host is told
+     the shell is PowerShell. The levels below Full access refuse on Windows
+     before a command is planned.
    - **Not yet on Windows.** These run at Full access on macOS and Linux and
-     are unavailable on Windows: every CLI provider family (Codex, Claude,
-     OpenCode, Pi, ACP agents), because the `--version` read and catalog lease
-     each runs before a launch are confined launches with no Windows form
-     until the launcher ships, so such a provider reports itself unavailable
-     there; the Octant Harness's own shell tool, whose Full access form runs
-     `/bin/sh`; the [agent debug tool](design/language-services.md#agent-debug-tool-rules);
+     are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
+     families, whose version read, catalog and launch preparation have not
+     been given the Windows form Codex has (their confined reads refuse there,
+     so each reports itself unavailable); the
+     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
      a Project's [own toolchain copy](design/language-services.md#user-added-servers);
      and Project actions. A provider that starts no local process before its
-     turn (an Octant Harness model over an endpoint) is not refused there and
-     works with Octant's own file tools.
-   - **Evidence.** The level gate, the picker and the setting are tested on
-     Linux CI with the host's platform set to Windows. The `server-windows`
-     CI job runs the tree stop (a PowerShell root and the program it started
-     both end) and a Full access PowerShell terminal that writes a file in its
-     folder against real processes on `windows-2025`. A Work or Code turn on
-     a person's Windows machine has not run.
+     turn (an Octant Harness model over an endpoint) runs Full access turns
+     there with Octant's own file tools and the harness shell.
+   - **Evidence.** The level gate, the picker, the settings and the launch
+     rules are tested on Linux CI with the host's platform set to Windows.
+     The `server-windows` CI job runs against real processes on
+     `windows-2025`: the tree stop (a PowerShell root and the program it
+     started both end), a Full access PowerShell terminal that writes a file
+     and a live one that close ends, the harness shell running a turn's
+     PowerShell command that writes a file in the checkout and returns its
+     output and ending a timed-out command's tree, and a fake Codex app-server
+     compiled to a Windows program (`bun build --compile`) started at Full
+     access with an unconfined version read, refused at a guarded or
+     sandboxed level, and its catalog read only for a host at open Full
+     access. A whole Work or Code turn through a real provider on a person's
+     Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a
