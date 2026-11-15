@@ -9075,18 +9075,19 @@ describe("provider switch handoff", () => {
     }
   });
 
-  it("refuses a provider's own slash command in Plan before it reaches the runtime", async () => {
+  it("refuses a provider's own slash command in Plan before it reaches the runtime, listed or not", async () => {
     const drivers = twoHarnesses();
     const fixture = runtimeFixture({
       resolveProviderDriver: drivers.resolveProviderDriver,
+      // The list another Project's session last wrote, without this command.
       providerCommands: () => [{ name: "review" }],
     });
     fixture.setThread(
       decodeCodeThread({ ...onProvider(providerInstance, "model-a"), executionPolicy: "plan" }),
     );
     try {
-      const prompt = storedEvidence(86, "/review src");
-      fixture.evidenceValues.set(prompt.contentId, "/review src");
+      const prompt = storedEvidence(86, "/deploy src");
+      fixture.evidenceValues.set(prompt.contentId, "/deploy src");
       const started = await fixture.runtime.execute(windowId, {
         kind: "start-provider-turn",
         operationId: operationId(84),

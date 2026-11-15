@@ -4280,12 +4280,17 @@ runtime's message, which holds whenever the turn carries no other context
 or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
 its own command route rather than as text, with the turn's context admitted
 first as input that starts no run (detail in
-[Provider runtimes](design/provider-runtimes.md)). The host refuses a turn whose prompt
-opens with a listed command in Plan, which stays read-only, and in Chat,
-which keeps no folder and no shell, with the existing turn refusal; those
-composers still list the commands and say why they cannot run. An ACP agent
-with a reviewed command inventory (Kimi Code) keeps its probe check and runs
-only a listed command on that inventory. Codex lists none: its app-server
+[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
+reaches any driver, a turn whose prompt opens with a command-shaped `/name`
+in Plan, which stays read-only, and in Chat, which keeps no folder and no
+shell, whenever the provider lists commands at all, whether or not the list
+the host holds names it: that list is the one a session last wrote for the
+provider, which may be another Project's. The refusal is the existing turn
+refusal, so a remote client meets it too; those composers still list the
+commands and say why they cannot run. An ACP agent with a reviewed command
+inventory (Kimi Code) keeps its probe check, refuses every leading slash in
+Plan and Chat, and elsewhere runs only a reviewed command its session
+listed. Codex lists none: its app-server
 (rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
 and its slash commands are its terminal client's own. OpenCode 1.x lists
 none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
