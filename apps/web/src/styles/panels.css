@@ -1,0 +1,222 @@
+/* Panel layout: the rules that keep a dock tool's blocks from overlapping at
+   any width from 320px up. A pane is a column of blocks; each block either
+   keeps its own height or scrolls inside itself, so no block can be squeezed
+   below its content and draw over the next one (a flex child with a set
+   min-height shrinks below its content when the column is short, which is how
+   "Select Git hunks" ended up under the layout control). Rows are flex with
+   min-width: 0, so a title ellipsises, and their controls wrap onto a line of
+   their own when there is no room. One left edge: the panel's 12px inset.
+   Loaded after dock.css so it wins ties with the dock's per-tool rules. */
+
+/* ─── blocks keep their height ───────────────────────────────────────── */
+.code-diff-pane > :where(.code-diff-pane__toolbar, .code-diff-pane__warning, nav, p, .callout),
+.code-delivery-pane
+  > :where(header, p, label, button, .callout, .code-review-pane__form, .code-git-pane__actions) {
+  flex: none;
+}
+
+.code-diff-pane__toolbar,
+.code-delivery-pane__toolbar {
+  text-align: start;
+}
+
+/* ─── header rows: title, count, controls ────────────────────────────── */
+.code-diff-pane__toolbar {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.code-diff-pane__toolbar > div {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.code-diff-pane__toolbar > p {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.code-diff-pane__toolbar > [data-slot="toggle-group"] {
+  flex: 0 1 auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.code-diff-pane__toolbar > .check {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A delivery head is the label and title on the first line, and its status
+   sentence under them in the meta ink, full width, wrapping. */
+.code-delivery-pane .code-delivery-pane__toolbar {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.code-delivery-pane .code-delivery-pane__toolbar > div {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.code-delivery-pane .code-delivery-pane__toolbar h1 {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-delivery-pane .code-delivery-pane__toolbar > p {
+  flex: 1 1 100%;
+  max-width: 100%;
+  color: var(--oct-meta);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* One left edge: every block in a delivery pane starts at the panel's inset. */
+.code-delivery-pane
+  :is(
+    .code-test-pane__definition,
+    .code-git-pane__actions,
+    .code-pr-pane__form,
+    .code-pr-pane__result,
+    .code-review-pane__form,
+    .code-delivery-pane__notice
+  ),
+.code-delivery-pane > :is([role="status"], [role="alert"]) {
+  padding-inline: var(--oct-space-3);
+}
+
+/* ─── the hunk selector ──────────────────────────────────────────────── */
+/* It can be taller than the pane once a comparison is open: it scrolls inside
+   itself instead of pushing the diff out of the pane or drawing over it. */
+.code-diff-pane > .code-diff-pane__hunk-selection {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 60%;
+  overflow: auto;
+  padding: var(--oct-space-3);
+}
+
+.code-diff-pane__hunk-selection > summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-diff-pane__hunk-selection > :not(summary) {
+  margin-block: var(--oct-space-2) 0;
+}
+
+.code-diff-pane__hunk-selection > p {
+  margin-block-end: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+/* Its buttons are a left-aligned wrapping row, not a boxed centred grid. */
+.code-diff-pane__hunk-selection .code-git-pane__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0;
+  border: 0;
+}
+
+.code-diff-pane__hunk-selection > h2 {
+  margin-block-end: 0;
+}
+
+/* ─── a tool's empty state: one quiet line at the panel's inset ───────── */
+.right-utility-dock__tool:not([data-dock-inset="true"]) .shell-state:not(.shell-state--page) {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: var(--oct-space-3);
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  justify-self: start;
+  align-self: start;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  text-align: start;
+}
+
+.right-utility-dock__tool:not([data-dock-inset="true"])
+  .shell-state:not(.shell-state--page)
+  [data-slot="empty-media"] {
+  width: 16px;
+  height: 16px;
+}
+
+.right-utility-dock__tool:not([data-dock-inset="true"])
+  .shell-state:not(.shell-state--page)
+  [data-slot="empty-title"] {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-regular);
+  overflow-wrap: anywhere;
+}
+
+.right-utility-dock__tool:not([data-dock-inset="true"])
+  .shell-state:not(.shell-state--page)
+  [data-slot="empty-description"] {
+  max-width: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* ─── header rows with a title and controls wrap instead of overlapping ─── */
+.right-utility-dock__tool
+  :is(
+    .agent-hierarchy__header,
+    .coordinator-workers-panel__header,
+    .code-pr-review__files > li,
+    .code-pr-review__checks > li,
+    .code-pr-review__switch,
+    .canvas-workspace-tab__drawer-header,
+    .device-card__head,
+    .device-facts > div
+  ) {
+  flex-wrap: wrap;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.right-utility-dock__tool
+  :is(
+    .agent-hierarchy__header,
+    .coordinator-workers-panel__header,
+    .code-pr-review__files > li,
+    .code-pr-review__checks > li,
+    .canvas-workspace-tab__drawer-header,
+    .device-card__head,
+    .device-facts > div
+  )
+  > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A device line (the approval question and its two buttons) wraps its buttons
+   under the question at a narrow width instead of squeezing the words to 0. */
+.device-line {
+  flex-wrap: wrap;
+  row-gap: var(--oct-space-1);
+}
+
+/* ─── the Browser's empty and error states are left-aligned lines ─────── */
+.browser-workspace__empty,
+.browser-workspace__remote-empty,
+.browser-workspace__native-error {
+  place-content: start;
+  justify-items: start;
+  padding: var(--oct-space-3);
+  text-align: start;
+}

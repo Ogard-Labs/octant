@@ -110,12 +110,6 @@
   margin: 0;
 }
 
-.code-delivery-pane__warning {
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
-  border-bottom: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
-}
-
 /* The label wraps a system-styled control; only the label text is ours. */
 .code-delivery-pane__field {
   display: grid;
@@ -792,23 +786,20 @@ html:not([data-octant-reduced-transparency="true"])
   white-space: normal;
 }
 
-.code-editor-pane__warning,
-.code-diff-pane__warning {
+.code-editor-pane__warning {
   padding: var(--oct-space-3) var(--oct-space-4);
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border-bottom: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
 }
 
-.code-editor-pane__warning p,
-.code-diff-pane__warning p {
+.code-editor-pane__warning p {
   margin: var(--oct-space-1) 0 0;
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
 }
 
-.code-editor-pane__warning button,
-.code-diff-pane__warning button {
+.code-editor-pane__warning button {
   margin-top: var(--oct-space-2);
 }
 
@@ -1111,8 +1102,7 @@ html:not([data-octant-reduced-transparency="true"])
   }
 }
 
-html[data-octant-increased-contrast="true"] .code-editor-pane__warning,
-html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
+html[data-octant-increased-contrast="true"] .code-editor-pane__warning {
   box-shadow: inset 0 0 0 1px currentColor;
 }
 

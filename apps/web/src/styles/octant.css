@@ -1143,6 +1143,29 @@ html {
 .callout[data-tone="danger"] {
   --callout-tone: var(--oct-danger-fg);
 }
+/* The row layout is a notice inside a panel: one quiet line at the panel's own
+   inset. The icon is the tone's ink with no dot, the sentence is the secondary
+   ink, and the action sits after the words, wrapping under them when there is
+   no room, so nothing in it can overlap at any panel width. */
+.callout--row {
+  gap: var(--oct-space-1) var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  outline: 0;
+  color: var(--oct-fg-2);
+  align-items: flex-start;
+}
+.callout--row > svg {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+.callout--row .callout__actions {
+  margin-inline-start: 0;
+}
 .callout .callout__second {
   color: var(--oct-fg-2);
 }

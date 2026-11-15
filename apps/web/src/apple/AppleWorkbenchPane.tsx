@@ -161,7 +161,7 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         />
       )}
       {props.actionFailure === undefined ? null : (
-        <OctantAlert className="apple-workbench__action-message" tone="warning">
+        <OctantAlert layout="row" className="apple-workbench__action-message" tone="warning">
           {deviceFailureSentence(props.actionFailure, "ios")}
         </OctantAlert>
       )}

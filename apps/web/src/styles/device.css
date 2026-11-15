@@ -233,10 +233,6 @@
   font-weight: var(--oct-weight-medium);
 }
 
-.device-line--approval {
-  background: color-mix(in oklab, var(--oct-warn-soft) 60%, var(--oct-bg));
-}
-
 .device-line--approval .device-line__mark {
   color: var(--oct-warn-fg);
 }

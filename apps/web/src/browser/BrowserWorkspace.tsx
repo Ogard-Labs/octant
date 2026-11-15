@@ -645,7 +645,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             localFailureRevision.current = undefined;
           }
           setStatus(next.status);
-          setMessage(next.failure?.message);
+          setMessage(snapshotFailureNotice(next.failure));
         }
       } catch (error) {
         if (!active || controller.signal.aborted) return;
@@ -1044,7 +1044,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     unchangedPolls.current = 0;
     setSnapshot(next);
     setStatus(next.status);
-    setMessage(next.failure?.message);
+    setMessage(snapshotFailureNotice(next.failure));
   }
 
   function queueRemoteAction(
@@ -1780,7 +1780,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         </span>
       </header>
       {taskProfileSupported && !props.startFresh && taskProfileRead === "error" ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The task’s default could not be loaded. Its saved choice has not changed.
           <OctantButton
             type="button"
@@ -1808,11 +1808,21 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ) : null}
       {notice === undefined ? null : (
         <OctantAlert
-          className={
-            message === undefined && captureNoticeTone !== "warning"
-              ? "browser-workspace__notice"
-              : "browser-workspace__message"
+          action={
+            message !== undefined && isExpiredPageNotice(message) ? (
+              <OctantButton
+                disabled={starting || url.trim() === ""}
+                onClick={() => void (activeContext ? navigate() : startFromAddress())}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Open again
+              </OctantButton>
+            ) : undefined
           }
+          className="browser-workspace__message"
+          layout="row"
           tone={message === undefined ? captureNoticeTone : "warning"}
         >
           {notice}
@@ -2210,6 +2220,38 @@ function captureNotKeptNotice(
   return `This screenshot could not be kept: ${why[reason]}.`;
 }
 
+/**
+ * The host words an expired page for the agent that must call navigate again.
+ * The person gets one short sentence and an Open again action instead.
+ */
+function failureNotice(category: string, hostMessage: string): string {
+  if (category === "stale") {
+    return "That page has closed, for example when Octant restarted. Open it again from Recent or the address bar.";
+  }
+  if (category === "context-expired") return expiredPageNotice(hostMessage);
+  return hostMessage;
+}
+
+function snapshotFailureNotice(
+  failure: { readonly category: string; readonly message: string } | undefined,
+): string | undefined {
+  if (failure === undefined) return undefined;
+  return failure.category === "context-expired"
+    ? expiredPageNotice(failure.message)
+    : failure.message;
+}
+
+function expiredPageNotice(hostMessage: string): string {
+  if (/\bPrivate profile\b/.test(hostMessage)) return "This Private page expired.";
+  if (/\bProject profile\b/.test(hostMessage)) return "This Project page expired.";
+  if (/\bPersonal profile\b/.test(hostMessage)) return "This Personal page expired.";
+  return "This page expired.";
+}
+
+function isExpiredPageNotice(message: string): boolean {
+  return /^This (?:Private |Project |Personal )?page expired\.$/.test(message);
+}
+
 function applyFailure(
   error: unknown,
   setStatus: (status: BrowserWorkspaceStatus) => void,
@@ -2225,11 +2267,7 @@ function applyFailure(
             ? "stale"
             : "failed",
     );
-    setMessage(
-      error.category === "stale"
-        ? "That page has closed, for example when Octant restarted. Open it again from Recent or the address bar."
-        : error.message,
-    );
+    setMessage(failureNotice(error.category, error.message));
     return;
   }
   setStatus("failed");
