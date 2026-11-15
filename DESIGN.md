@@ -474,12 +474,12 @@ at 20px, bold for a tick inside a filled mark, fill for a selected state. A few
 glyphs have no exact match (a folder's git badge, a plus on a branch or an
 image) and draw the plain glyph.
 
-| Size | Token           | Where                                                          |
-| ---- | --------------- | -------------------------------------------------------------- |
-| 12   | `--oct-icon-xs` | Disclosure chevrons, marks inside a chip, 20px buttons         |
-| 14   | `--oct-icon-sm` | Inside a 24px control, inline in 13px text, tile bar actions   |
-| 16   | `--oct-icon-md` | The default: buttons, menu rows, navigation rows, tool buttons |
-| 20   | `--oct-icon-lg` | An empty state, a dialog header, a page's empty mark           |
+| Size | Token           | Where                                                            |
+| ---- | --------------- | ---------------------------------------------------------------- |
+| 12   | `--oct-icon-xs` | Disclosure chevrons, marks inside a chip, 20px buttons           |
+| 14   | `--oct-icon-sm` | Inside a 24px control, inline in 13px text, a tab's leading icon |
+| 16   | `--oct-icon-md` | The default: buttons, menu rows, navigation rows, tool buttons   |
+| 20   | `--oct-icon-lg` | An empty state, a dialog header, a page's empty mark             |
 
 A tick of 16px or less inside a filled mark asks for `MARK_TICK_STROKE_WIDTH`
 (2.5), which the module draws as the bold weight. In a button pass the glyph with `data-icon` and let the recipe size it.
@@ -1329,13 +1329,22 @@ in [Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-
 
 A tiled tool has one 32px bar: its name, its controls, then Arrange and Close,
 on insets of 12px leading and 8px trailing, 4px between controls. Controls are
-24px with 14px glyphs; a view choice is a 28px word tray of 24px segments; an
+24px with 16px glyphs; a view choice is a 28px word tray of 24px segments; an
 action everyone knows is an icon button with a tooltip. The bar's hairline is
 drawn inside its 32px. At most one 32px secondary row holds content (a filter,
 a path) on the bar's insets. When the controls do not fit, word switches fold
 to a named control, then actions into one More menu; status text and must-read
 cues never fold. A tool alone in the dock keeps no bar. The folding order is in
 [Workspace: Tool tiles](docs/design/workspace.md#tool-tiles).
+
+The tool strip and the Browser's page row draw one tab recipe (`.content-tab`):
+a 26px pill in the control radius, a 14px leading icon (the tool's, a page's
+favicon when it has one) and a 12px label that ellipsises at 10rem. The open
+tab (`aria-selected`) has the subtle ink wash; the others are muted text with a
+hover fill. Its × always has its 22px slot and is revealed by opacity on the
+open tab, on hover and on focus, so a label never shifts; a New page "+" icon
+button follows the last Browser page. A Files preview tab is italic. A tab
+strip is never drawn a second way in a panel: reuse `.content-tab`.
 
 ### Composer row
 

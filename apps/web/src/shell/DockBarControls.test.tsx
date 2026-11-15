@@ -317,10 +317,10 @@ describe("the bar's sizes", () => {
     expect(rule(".dock-tile__tool-actions")).toMatch(/gap:\s*var\(--oct-space-1\)/);
   });
 
-  it("draws every bar control at 24px with a 14px glyph and the word switch as a 28px tray of 24px segments", () => {
+  it("draws every bar control at 24px with a 16px glyph and the word switch as a 28px tray of 24px segments", () => {
     expect(rule(".dock-tile__control")).toMatch(/width:\s*24px/);
     expect(rule(".dock-tile__control")).toMatch(/height:\s*24px/);
-    expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-sm\)/);
+    expect(rule(".dock-tile__control > svg")).toMatch(/width:\s*var\(--oct-icon-md\)/);
     expect(rule(".dock-bar-switch")).toMatch(/height:\s*28px/);
     // The ruler that decides the fold is plain spans with these classes, so the
     // sizes must be here as well as on the shared toggle group.

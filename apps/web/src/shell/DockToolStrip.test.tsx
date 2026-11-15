@@ -292,4 +292,42 @@ describe("the dock tool strip", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "Canvas" }), { key: "F10", shiftKey: true });
     expect(await screen.findByRole("menuitem", { name: "Show beside" })).toBeVisible();
   });
+
+  it("gives every tab one shared pill: selected by aria-selected, a close control kept in its own slot, shared by Browser and Terminal", () => {
+    render(
+      <DockToolStrip
+        active="terminal"
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+        tabs={[browser, terminal]}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveAttribute("aria-selected", "false");
+    for (const name of ["Browser", "Terminal"]) {
+      const tab = screen.getByRole("tab", { name: name });
+      expect(tab.className).toContain("content-tab__select");
+      expect(tab.closest(".content-tab")).not.toBeNull();
+      // The close control is always in the tab, so the label never shifts when
+      // it appears; only its opacity changes.
+      expect(screen.getByRole("button", { name: `Hide ${name}` })).toBeInTheDocument();
+    }
+  });
+
+  it("reserves the close control's slot and reveals it by opacity alone", () => {
+    const styles = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
+    const from = styles.indexOf(".content-tab > .content-tab__close {");
+    const idle = styles.slice(from, styles.indexOf("}", from));
+    expect(idle).toMatch(/width:\s*22px/);
+    expect(idle).toMatch(/opacity:\s*0/);
+    expect(idle).not.toMatch(/display:\s*none|visibility:\s*hidden/);
+    const shown = styles.slice(styles.indexOf(".content-tab:hover > .content-tab__close,"));
+    expect(shown.slice(0, shown.indexOf("}"))).toMatch(/\[aria-selected="true"\]/);
+  });
+
+  it("draws a tile bar's actions as 16px icons", () => {
+    const dock = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
+    const from = dock.indexOf(".dock-tile__control > svg {");
+    expect(dock.slice(from, dock.indexOf("}", from))).toMatch(/var\(--oct-icon-md\)/);
+  });
 });

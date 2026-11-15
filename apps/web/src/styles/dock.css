@@ -1381,10 +1381,10 @@
   padding: 0;
 }
 
-/* One glyph size in a 24px control (14), for Arrange and Close alike. */
+/* One glyph size in a 24px control (16), for Arrange and Close alike. */
 .dock-tile__control > svg {
-  width: var(--oct-icon-sm);
-  height: var(--oct-icon-sm);
+  width: var(--oct-icon-md);
+  height: var(--oct-icon-md);
 }
 
 /* The hit area is 8px wide, centred on the edge between two tiles; the line
