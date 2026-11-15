@@ -960,7 +960,8 @@ under rules.
   Refresh is a quiet icon button with a tooltip at the trailing edge.
 - **Columns.** The content keeps a measure of 980px, left-aligned under the
   title's inset, and opens to 1240px in a window 1200px wide or more; a wide
-  window leaves ground, it does not stretch the cards.
+  window leaves ground, it does not stretch the cards. The To-dos page keeps the
+  same measure, so both pages end on one right edge.
 - **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
   **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
   (a container query, not the window's) is 900px or more, and every card is one
@@ -977,6 +978,8 @@ under rules.
   it, when the window resets. It reads the host observation the composer and the
   rail already hold, adds no request, and is absent while no account reports a
   window.
+- **Inset.** A card's label, its rows' glyphs and text and its notes stand on one
+  16px inset, and a row's trailing items end 16px in, on the filters' right edge.
 - **Rows** in every card carry no rule between them; the row under the pointer
   takes the quiet hover fill with the row radius. Screen readers meet the title,
   the state sentence, Needs you, GitHub, Linear, then Plan usage.

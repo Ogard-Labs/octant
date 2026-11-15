@@ -6,6 +6,13 @@
   --oct-surface-measure: 980px;
 }
 
+/* The Inbox's column opens at the same width, so both pages end on one edge. */
+@media (min-width: 1200px) {
+  .todos-page {
+    --oct-surface-measure: 1240px;
+  }
+}
+
 .todos-page > .surface__inner {
   margin-inline: var(--oct-surface-gutter) auto;
 }
