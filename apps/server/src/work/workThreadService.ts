@@ -43,8 +43,15 @@ import {
   type UsageResumeRecord,
   type WindowId,
   type EventActor,
+  MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
+  MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
+  type WorkTranscriptSearch,
 } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
+import {
+  clipTranscriptSearchSnippet,
+  normalizeSearchText,
+} from "../persistence/transcriptSearchText";
 import { Schema } from "effect";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
@@ -500,6 +507,68 @@ export class WorkThreadService {
         });
       }
       return decodeWorkThreadNavigation({ threads, runtime });
+    } catch (error) {
+      throw this.#mapFailure(error);
+    }
+  }
+
+  /**
+   * Message search over the prompt and reply of each kept turn, newest thread
+   * first. It lists exactly what the sidebar and its Archived group list: a
+   * thread being deleted, or one in a Project that is gone or not a Work
+   * Project, is never searched. Turns live in the rebuildable in-memory turn
+   * projection, so the search reads them there rather than from a store; a
+   * rewound turn has left the thread's order and is not matched.
+   */
+  async searchTranscript(
+    _authenticatedWindowId: WindowId,
+    query: string,
+  ): Promise<WorkTranscriptSearch> {
+    this.#assertReady();
+    const trimmed = query.trim();
+    if (trimmed.length === 0) return { query: "", hits: [], truncated: false };
+    if (trimmed.length > MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH) {
+      throw this.#failure("invalid", "Work transcript search query is too long.");
+    }
+    const needle = normalizeSearchText(trimmed);
+    try {
+      const threads = this.#projection
+        .list()
+        .filter((thread) => {
+          if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") return false;
+          if (this.#serverProjects?.holdsThread(thread) === true) return true;
+          const project = this.#persistence.readProject(thread.projectId);
+          return project?.type === "work" && project.lifecycle === "active";
+        })
+        .sort(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            String(left.id).localeCompare(String(right.id)),
+        );
+      const hits: WorkTranscriptSearch["hits"][number][] = [];
+      for (const thread of threads) {
+        const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";
+        for (const turn of this.#turnProjection.listForThread(thread.id)) {
+          const body = [turn.prompt, turn.response ?? ""].find((text) =>
+            text.toLowerCase().includes(needle),
+          );
+          if (body === undefined) continue;
+          if (hits.length === MAX_CHAT_TRANSCRIPT_SEARCH_HITS) {
+            return { query: trimmed, hits, truncated: true };
+          }
+          const clipped = clipTranscriptSearchSnippet(body, needle);
+          hits.push({
+            threadId: thread.id,
+            turnId: turn.turnId,
+            title: thread.title,
+            lifecycle,
+            projectId: thread.projectId,
+            snippet: clipped.snippet,
+            ...(clipped.matchRanges.length === 0 ? {} : { matchRanges: clipped.matchRanges }),
+          });
+        }
+      }
+      return { query: trimmed, hits, truncated: false };
     } catch (error) {
       throw this.#mapFailure(error);
     }

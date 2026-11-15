@@ -8,6 +8,7 @@ import {
   type HistoryMetric,
   type HistoryCostBasis,
 } from "./usageHistoryPresentation";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 /** The day table carries the same readings for people who cannot use the chart. */
 export function ProviderUsageHistoryChart(props: {
@@ -116,8 +117,7 @@ export function ProviderUsageHistoryChart(props: {
         </svg>
       )}
       {props.data === undefined || props.data.days.length === 0 ? null : (
-        <details className="provider-history__chart-data">
-          <summary>View chart data</summary>
+        <OctantCollapsible className="provider-history__chart-data" summary="View chart data">
           <div
             className="provider-history__chart-table"
             tabIndex={0}
@@ -154,7 +154,7 @@ export function ProviderUsageHistoryChart(props: {
               </tbody>
             </table>
           </div>
-        </details>
+        </OctantCollapsible>
       )}
     </figure>
   );

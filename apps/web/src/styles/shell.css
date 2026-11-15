@@ -742,7 +742,7 @@ html[data-octant-native-host="true"]
 }
 
 .window-chrome__button[aria-disabled="true"] {
-  opacity: 0.45;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .dock-tool-buttons {
@@ -1627,6 +1627,13 @@ html[data-octant-native-host="true"]
   min-height: 18px;
   padding: 0;
   transform: translateY(-50%);
+}
+
+/* The 18px mark keeps its size; its press target reaches the 24px minimum. */
+.sidebar-navigation__thread-lineage::after {
+  position: absolute;
+  inset: -3px;
+  content: "";
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
@@ -3481,7 +3488,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .browser-profile-control:disabled {
-  opacity: 0.5;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .browser-extensions-button {
@@ -3829,6 +3836,11 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 .browser-workspace__remote--focused {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-accent) 42%, transparent);
+}
+
+/* A headless preview is a still: picking can show where a click lands, not the element under it. */
+.browser-workspace__remote--picking .browser-workspace__preview {
+  cursor: crosshair;
 }
 
 .browser-workspace__preview {

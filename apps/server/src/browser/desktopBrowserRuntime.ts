@@ -383,11 +383,16 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
     point: { readonly x: number; readonly y: number },
     signal: AbortSignal,
     selectionId?: string,
+    withMarkup?: boolean,
   ) {
     if (selectionId === undefined)
       return { status: "unavailable" as const, reason: "page-changed" as const };
     return decodeProductFeedbackPointObservation(
-      await this.#request("/v1/contexts/describe-point", { contextId, point, selectionId }, signal),
+      await this.#request(
+        "/v1/contexts/describe-point",
+        { contextId, point, selectionId, ...(withMarkup === true ? { markup: true } : {}) },
+        signal,
+      ),
     );
   }
 
@@ -436,6 +441,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.auditKind === undefined ? {} : { auditKind: request.auditKind }),
           ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
           ...(request.dialog === undefined ? {} : { dialog: request.dialog }),
+          ...(request.pageTool === undefined ? {} : { pageTool: request.pageTool }),
         },
       },
       signal,

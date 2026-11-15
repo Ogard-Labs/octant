@@ -1,3 +1,5 @@
+import { ASCII_GLYPH_SIZE, printAsciiCells } from "@octant/domain/ascii-print";
+
 /**
  * A person's photo behind the welcome screen is either printed through an
  * ordered dither — one cell per two CSS pixels, four levels per channel,
@@ -93,9 +95,9 @@ export function drawDitheredPhoto(
   return drawPhoto(target, image, imageSize, viewport, cell, true);
 }
 
-/** How a picture ground is printed: plain, in square cells, or dithered cells. */
+/** How a picture ground is printed: plain, in square cells, dithered cells, or characters. */
 export interface PrintEffect {
-  readonly kind: "none" | "pixelate" | "dither";
+  readonly kind: "none" | "pixelate" | "dither" | "ascii";
   /** CSS pixels per cell. */
   readonly cell: number;
   /** Colour steps per channel, for dither. */
@@ -115,6 +117,7 @@ export function drawPrinted(
   effect: PrintEffect,
 ): boolean {
   if (effect.kind === "none") return drawPhoto(target, image, imageSize, viewport);
+  if (effect.kind === "ascii") return drawAscii(target, image, imageSize, viewport, effect.cell);
   return drawPhoto(
     target,
     image,
@@ -174,6 +177,46 @@ export function drawPhoto(
     ditherPixels(frame.data, width, height, levels);
     context.putImageData(frame, 0, 0);
   }
+  return true;
+}
+
+/**
+ * Draws the photo as characters: one sampled colour per cell, printed as a
+ * 5×5 glyph from the shared ramp, so the canvas holds five pixels per cell
+ * edge and `image-rendering: pixelated` keeps the strokes crisp.
+ */
+export function drawAscii(
+  target: HTMLCanvasElement,
+  image: CanvasImageSource,
+  imageSize: PhotoSize,
+  viewport: PhotoSize,
+  cell: number,
+): boolean {
+  const columns = Math.max(1, Math.ceil(viewport.width / cell));
+  const rows = Math.max(1, Math.ceil(viewport.height / cell));
+  const width = columns * ASCII_GLYPH_SIZE;
+  const height = rows * ASCII_GLYPH_SIZE;
+  if (target.width !== width || target.height !== height) {
+    target.width = width;
+    target.height = height;
+  }
+  const context = target.getContext("2d", { willReadFrequently: true });
+  if (context === null) return false;
+  const scale = Math.max(columns / imageSize.width, rows / imageSize.height);
+  const drawnWidth = imageSize.width * scale;
+  const drawnHeight = imageSize.height * scale;
+  context.clearRect(0, 0, width, height);
+  context.drawImage(
+    image,
+    (columns - drawnWidth) / 2,
+    (rows - drawnHeight) / 2,
+    drawnWidth,
+    drawnHeight,
+  );
+  const cells = context.getImageData(0, 0, columns, rows);
+  const frame = context.createImageData(width, height);
+  frame.data.set(printAsciiCells(cells.data, columns, rows));
+  context.putImageData(frame, 0, 0);
   return true;
 }
 

@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
@@ -50,10 +51,8 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
   const refreshing = goal?.status === "active" && !pending;
   useEffect(() => {
     if (!refreshing) return;
-    const timer = setInterval(() => {
-      if (document.visibilityState !== "hidden") reload();
-    }, GOAL_REFRESH_INTERVAL_MS);
-    return () => clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(reload, GOAL_REFRESH_INTERVAL_MS);
+    return () => stopRefresh();
   }, [refreshing, reload]);
 
   if (controller.status !== "ready") {

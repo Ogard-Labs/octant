@@ -69,6 +69,7 @@ import {
   authorizeToolAction,
   browserCaptureTaker,
   browserPageAuditResult,
+  boundBrowserPageTools,
   canRequestToolCancellation,
   browserProfileKey,
   browserContextExpiresAt,
@@ -369,6 +370,8 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
   "select",
   "drag",
   "upload",
+  // A declared tool's call fills the page's fields and may submit them.
+  "page-tool-call",
 ]);
 /**
  * The actions that start and end an agent's recording. They read the page as
@@ -379,6 +382,15 @@ const PERSON_GUARDED_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Se
 const RECORDING_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
   "record-start",
   "record-stop",
+]);
+/**
+ * The actions on the tools a page declares. Only the agent tool sends them:
+ * it asks the person before a call wherever a call is asked, and a route that
+ * names no caller would skip that ask.
+ */
+const PAGE_TOOL_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
+  "page-tools",
+  "page-tool-call",
 ]);
 /** The person's pane actions that change what the page shows or holds. */
 const PERSON_PAGE_ACTIONS: ReadonlySet<BrowserActionRequest["kind"]> = new Set([
@@ -1477,6 +1489,16 @@ export class BrowserAutomationService {
         "failed",
       );
     }
+    if (PAGE_TOOL_ACTIONS.has(input.request.kind) && input.capturedBy !== "agent") {
+      return this.#failure(
+        owned,
+        {
+          category: "policy-denied",
+          message: "Only the agent's own call reads or calls the tools a page declares.",
+        },
+        "failed",
+      );
+    }
     const decision = evaluateBrowserAction(resolved.request, owned.record, granted);
     if (decision.kind === "denied") {
       return this.#failure(
@@ -1627,6 +1649,48 @@ export class BrowserAutomationService {
           owned.status,
         );
       }
+      // The declaration is the page's word: it is bounded here, whichever
+      // Browser read it, and a reading of the wrong shape reads as none.
+      const pageTools =
+        input.request.kind === "page-tools" ? boundBrowserPageTools(observed.pageTools) : undefined;
+      if (input.request.kind === "page-tools" && pageTools === undefined) {
+        return this.#failure(
+          owned,
+          {
+            category: "unavailable",
+            message: "This Browser cannot read the tools a page declares.",
+          },
+          owned.status,
+        );
+      }
+      const pageToolCall = observed.pageToolCall;
+      if (input.request.kind === "page-tool-call") {
+        if (pageToolCall?.mode !== "call" || input.request.pageTool === undefined) {
+          return this.#failure(
+            owned,
+            {
+              category: "unavailable",
+              message: "This Browser cannot call the tools a page declares.",
+            },
+            owned.status,
+          );
+        }
+        if (pageToolCall.status === "refused") {
+          return this.#failure(
+            owned,
+            pageToolCall.reason === "credential-field"
+              ? {
+                  category: "credential-protected",
+                  message: "Octant will not call a page tool whose form holds a credential field.",
+                }
+              : {
+                  category: "failed",
+                  message: `The page tool call did not run: ${pageToolCall.reason}.`,
+                },
+            "failed",
+          );
+        }
+      }
       const change = describeChange(
         input.request.kind,
         {
@@ -1689,9 +1753,20 @@ export class BrowserAutomationService {
                 ),
               ),
             }),
-        revision: RECORDING_ACTIONS.has(input.request.kind)
-          ? owned.observationRevision
-          : ++owned.observationRevision,
+        ...(pageTools === undefined ? {} : { pageTools }),
+        ...(input.request.kind === "page-tool-call" &&
+        input.request.pageTool !== undefined &&
+        pageToolCall?.mode === "call" &&
+        pageToolCall.status !== "refused"
+          ? { pageToolCall: { name: input.request.pageTool.name, outcome: pageToolCall.status } }
+          : {}),
+        // Reading what a page declares changes nothing on it, so a call can
+        // read the declaration before it acts without making the agent's
+        // revision stale.
+        revision:
+          RECORDING_ACTIONS.has(input.request.kind) || input.request.kind === "page-tools"
+            ? owned.observationRevision
+            : ++owned.observationRevision,
         observedAt: this.#clock() as BrowserObservation["observedAt"],
         stale: false,
       };
@@ -1711,7 +1786,19 @@ export class BrowserAutomationService {
         correlationId: owned.action.correlationId,
         authorized: true,
       });
-      if (ingested?.kind === "refused") {
+      // The tools a page declares are its own words for an agent, so they mark
+      // the thread under the page's source as well as the observation's.
+      const declared =
+        pageTools === undefined
+          ? undefined
+          : this.#recordExternalContentIngestion?.({
+              threadId: owned.threadId,
+              provenance: { origin: "tool-result", sourceLabel: "browser-page" },
+              contentReference: `browser-page-tools-${this.#uuid()}`,
+              correlationId: owned.action.correlationId,
+              authorized: true,
+            });
+      if (ingested?.kind === "refused" || declared?.kind === "refused") {
         return this.#failure(
           owned,
           { category: "failed", message: "The browser action failed." },
@@ -2536,6 +2623,8 @@ export class BrowserAutomationService {
     readonly point: { readonly x: number; readonly y: number };
     readonly selectionId?: string;
     readonly expectedObservationRevision?: number;
+    /** The element picker's read; a note's read never carries markup. */
+    readonly withMarkup?: boolean;
     /** Original host principal/request identity, never provider-supplied. */
     readonly current?: () => boolean;
     readonly signal?: AbortSignal;
@@ -2591,7 +2680,14 @@ export class BrowserAutomationService {
       const queued = this.#queueAction(owned, async (): Promise<BrowserPointObservation> => {
         if (!current()) return { status: "unavailable" };
         const observed = await waitForBrowserRuntime(
-          describe.call(this.#runtime, input.contextId, input.point, signal, input.selectionId),
+          describe.call(
+            this.#runtime,
+            input.contextId,
+            input.point,
+            signal,
+            input.selectionId,
+            input.withMarkup === true,
+          ),
           signal,
         );
         if (observed.kind === "interrupted" || !current()) return { status: "unavailable" };
@@ -3776,6 +3872,7 @@ function describeChange(
     kind === "screenshot" ||
     kind === "observe-diagnostics" ||
     kind === "audit" ||
+    kind === "page-tools" ||
     RECORDING_ACTIONS.has(kind)
   ) {
     return undefined;

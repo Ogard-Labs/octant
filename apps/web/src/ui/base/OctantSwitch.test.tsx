@@ -54,7 +54,8 @@ describe("OctantSwitch", () => {
     expect(onCheckedChange).not.toHaveBeenCalled();
   });
 
-  it("explains a disabled switch through its accessible description", () => {
+  it("explains a disabled switch through its accessible description and on hover", async () => {
+    const user = userEvent.setup();
     const reason = "The latest scan did not find its binary on this Mac.";
     render(
       <OctantSwitch
@@ -68,6 +69,11 @@ describe("OctantSwitch", () => {
 
     const control = screen.getByRole("switch", { name: "Enable Existing CLI" });
     expect(control).toHaveAccessibleDescription(reason);
-    expect(control).toHaveAttribute("title", reason);
+    // The disabled switch takes no pointer events; the layer over it shows the reason.
+    const layer = control.parentElement?.querySelector(".octant-switch__disabled-reason");
+    if (layer === null || layer === undefined)
+      throw new Error("expected the disabled reason layer");
+    await user.hover(layer);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(reason);
   });
 });

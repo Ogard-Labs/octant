@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { ProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { useEffect, useState } from "react";
@@ -35,10 +36,10 @@ export function useProviderUsageSnapshot(client: ProviderUsageLimitsClient | und
         () => undefined,
       );
     void read();
-    const timer = setInterval(() => void read(), REREAD_MS);
+    const stopRefresh = scheduleVisibleInterval(() => void read(), REREAD_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [client]);
   return { snapshot, now };

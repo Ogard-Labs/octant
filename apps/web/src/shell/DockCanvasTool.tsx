@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { CanvasId } from "@octant/contracts/canvas";
@@ -8,7 +9,6 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { OctantButton } from "../ui/base/OctantButton";
 import { isAuthorizedCanvasDocument } from "./dockToolAvailability";
-import { ShellState } from "./ShellState";
 
 const CanvasWorkspaceTab = lazy(() =>
   import("../canvas/CanvasWorkspaceTab").then((module) => ({
@@ -90,11 +90,11 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
   ]);
 
   if (status === "loading") {
-    return <ShellState state="loading" title="Loading canvas" />;
+    return <OctantEmpty state="loading" title="Loading canvas" />;
   }
   if (status === "unavailable" || cards.length === 0) {
     return (
-      <ShellState
+      <OctantEmpty
         message="This thread has no authorized Canvas document to open."
         state="neutral"
         title="Canvas is unavailable"
@@ -110,7 +110,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
     const projectId = canvasProjectId(openCard, props.projectId);
     if (projectId === undefined) {
       return (
-        <ShellState
+        <OctantEmpty
           message="This Canvas has no Project this window can address."
           state="neutral"
           title="Canvas is unavailable"
@@ -129,7 +129,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
       });
     } catch {
       return (
-        <ShellState
+        <OctantEmpty
           message="This Canvas could not be opened in the dock."
           state="neutral"
           title="Canvas is unavailable"
@@ -138,7 +138,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
     }
     if (tab.kind !== "canvas") {
       return (
-        <ShellState
+        <OctantEmpty
           message="This Canvas could not be opened in the dock."
           state="neutral"
           title="Canvas is unavailable"
@@ -152,7 +152,7 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
             All canvases
           </OctantButton>
         )}
-        <Suspense fallback={<ShellState state="loading" title="Loading canvas" />}>
+        <Suspense fallback={<OctantEmpty state="loading" title="Loading canvas" />}>
           <CanvasWorkspaceTab
             key={String(openCard.versionId)}
             client={props.client}

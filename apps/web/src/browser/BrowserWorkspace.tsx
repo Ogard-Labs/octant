@@ -1,5 +1,6 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useBrowserAccountProfiles } from "./useBrowserAccountProfiles";
-import { browserProfileFromChoice } from "@octant/domain";
+import { browserProfileFromChoice, formatBrowserElementSnapshot } from "@octant/domain";
 import { browserProfileLabel } from "./browserProfileCopy";
 import type { BrowserAgentAvailability } from "@octant/contracts";
 import { agentAvailabilityNote } from "./BrowserAgentStatus";
@@ -52,6 +53,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  MousePointerClick,
   PanelRight,
   PenLine,
   RotateCw,
@@ -66,9 +68,10 @@ import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
-import { ShellState } from "../shell/ShellState";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
-import { useProductFeedback } from "./useProductFeedback";
+import { useProductFeedback, type ProductFeedback } from "./useProductFeedback";
+import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
+import type { BrowserElementSnapshot } from "@octant/contracts/product-feedback";
 import { useBrowserFeedbackPointing } from "./useBrowserFeedbackPointing";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
@@ -110,6 +113,8 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".code-board-layer",
   // A divider being dragged across a tile, or a tab being dragged onto the dock.
   ".dock-tiles__drag-shield",
+  // A shell or split divider mid-drag: the native page would swallow the pointer.
+  ".shell-resize-shield",
   ".rail-placeholder",
   ".workspace-drag-preview",
   ".workspace-drop-overlay",
@@ -122,6 +127,20 @@ export const RENDERER_OVERLAY_SELECTOR = [
   ".octant-sheet__backdrop",
   ".octant-sheet__viewport",
   ".octant-sheet__popup",
+  // Floating chrome a click opens over the page area: notices, menus,
+  // popovers and disclosures. Tooltips stay out on purpose: they open on
+  // hover, and the page leaving the window whenever any tooltip in the window
+  // opened would flash it away. The Browser toolbar uses native titles, which
+  // the system draws above the native view.
+  ".toast-stack",
+  '[data-slot="popover-content"]',
+  '[data-slot="combobox-content"]',
+  '[data-slot="select-content"]',
+  '[data-slot="dropdown-menu-content"]',
+  '[data-slot="context-menu-content"]',
+  ".thread-info__panel:not([hidden])",
+  ".window-chrome__disclosure",
+  ".zen-panel",
 ].join(", ");
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
@@ -413,6 +432,55 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ? {}
       : { unavailableReason: feedbackSelectionUnavailable }),
   });
+  // Pick element shares the pointing gesture and its host checks; the picked
+  // element goes to this thread's composer instead of becoming a note.
+  const pickElement = feedback.pick;
+  const addPickedElement = useRef(addElementToMessage);
+  addPickedElement.current = addElementToMessage;
+  const elementPicker = useMemo<
+    Pick<ProductFeedback, "prepare" | "cancelPrepare" | "pauseRefresh">
+  >(
+    () => ({
+      prepare: async (point) => {
+        const picked = await pickElement(point);
+        if (picked.status === "refused") {
+          setCaptureNoticeTone("warning");
+          setCaptureNotice(picked.message);
+          return false;
+        }
+        return addPickedElement.current(picked.snapshot);
+      },
+      cancelPrepare: feedback.cancelPrepare,
+      pauseRefresh: feedback.pauseRefresh,
+    }),
+    [pickElement, feedback.cancelPrepare, feedback.pauseRefresh],
+  );
+  const elementPicking = useBrowserFeedbackPointing({
+    contextId:
+      snapshot?.context?.contextId === undefined ? undefined : String(snapshot.context.contextId),
+    threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
+    native: nativeContext,
+    feedback: elementPicker,
+    ...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge }),
+    ...(feedbackSelectionUnavailable === undefined
+      ? {}
+      : { unavailableReason: feedbackSelectionUnavailable }),
+  });
+  const pickingCancel = elementPicking.cancel;
+  // Escape ends picking wherever focus is in this window; on a native page the
+  // host ends it from the page's own key.
+  useEffect(() => {
+    if (!elementPicking.pointing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      pickingCancel();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [elementPicking.pointing, pickingCancel]);
+  const pointingAny = feedbackPointing.pointing || elementPicking.pointing;
   const codeThreadId = useMemo(
     () =>
       props.tab.mode === "code" && props.tab.threadId !== undefined
@@ -627,7 +695,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         aria-label="Browser automation"
         className="browser-workspace browser-workspace--state"
       >
-        <ShellState
+        <OctantEmpty
           eyebrow="Browser unavailable"
           message="The host requires one exact owning thread before it can create an isolated context."
           state="neutral"
@@ -896,6 +964,32 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     );
   }
 
+  /**
+   * Add a picked element to this thread's draft, after any text already there.
+   * The host marked the thread as holding outside content before answering;
+   * the draft text says the snapshot is page content.
+   */
+  function addElementToMessage(picked: BrowserElementSnapshot): boolean {
+    const threadId = props.tab.threadId === undefined ? undefined : String(props.tab.threadId);
+    if (threadId === undefined || String(picked.threadId) !== threadId) return false;
+    const text = formatBrowserElementSnapshot(picked);
+    const current = composerThreadDrafts.read(props.tab.mode, threadId);
+    const next =
+      current !== undefined && current.text.length > 0 ? `${current.text}\n\n${text}` : text;
+    const saved = composerThreadDrafts.write(props.tab.mode, threadId, {
+      ...(current ?? { stagedDropped: false }),
+      text: next,
+      caretIndex: next.length,
+    });
+    setCaptureNoticeTone(saved.status === "ok" ? "success" : "warning");
+    setCaptureNotice(
+      saved.status === "ok"
+        ? "Element added to the message"
+        : "Element added to the message in this window, but the draft could not be saved",
+    );
+    return true;
+  }
+
   async function stop(cancel: boolean): Promise<void> {
     if (snapshot?.context === undefined) return;
     localFailure.current = false;
@@ -1161,7 +1255,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     }
   }
 
-  const notice = message ?? captureNotice;
+  const notice = message ?? elementPicking.message ?? captureNotice;
   const showFeedback =
     feedback.available &&
     (snapshot?.context !== undefined ||
@@ -1265,15 +1359,36 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     props.client.readCapture !== undefined
       ? [
           {
-            description: feedbackPointing.pointing
+            description: pointingAny
               ? "Finish or cancel pointing at an element before drawing on the page"
               : markupPicture !== undefined
                 ? "A drawing is already open"
                 : "Keeps a screenshot with this thread",
-            disabled: capturing || markupPicture !== undefined || feedbackPointing.pointing,
+            disabled: capturing || markupPicture !== undefined || pointingAny,
             icon: <PenLine aria-hidden="true" size={16} />,
             label: "Draw on page",
             value: "draw",
+          },
+        ]
+      : []),
+    ...(activeContext &&
+    props.canDrawOnPage === true &&
+    props.tab.threadId !== undefined &&
+    feedback.available
+      ? [
+          {
+            description: elementPicking.pointing
+              ? "Click an element on the page, or press Escape to stop"
+              : (feedbackSelectionUnavailable ??
+                (feedbackPointing.pointing
+                  ? "Finish or cancel pointing at an element first"
+                  : "Adds the element's selector, markup and style to the message")),
+            disabled:
+              !elementPicking.pointing &&
+              (feedbackSelectionUnavailable !== undefined || feedbackPointing.pointing),
+            icon: <MousePointerClick aria-hidden="true" size={16} />,
+            label: elementPicking.pointing ? "Stop picking" : "Pick element",
+            value: "pick-element",
           },
         ]
       : []),
@@ -1436,6 +1551,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         return;
       case "draw":
         void startMarkup();
+        return;
+      case "pick-element":
+        setCaptureNotice(undefined);
+        elementPicking.toggle();
         return;
       case "external": {
         const target = validTargetUrl(committedAddress ?? url);
@@ -1849,7 +1968,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       ) : (
         <article
           aria-label="Interactive headless Browser preview"
-          className={`browser-workspace__remote${remoteFocused ? " browser-workspace__remote--focused" : ""}`}
+          className={`browser-workspace__remote${remoteFocused ? " browser-workspace__remote--focused" : ""}${elementPicking.pointing ? " browser-workspace__remote--picking" : ""}`}
           onBlur={() => setRemoteFocused(false)}
           onFocus={() => setRemoteFocused(true)}
           onKeyDown={(event) => {
@@ -1893,6 +2012,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               onClick={(event) => {
                 const point = previewPoint(event.currentTarget, event.clientX, event.clientY);
                 if (point === undefined) return;
+                if (elementPicking.pointing) {
+                  elementPicking.headlessPoint(point, snapshot.observation?.revision);
+                  return;
+                }
                 if (feedbackPointing.pointing) {
                   feedbackPointing.headlessPoint(point, snapshot.observation?.revision);
                   return;
@@ -1918,6 +2041,9 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             ? {}
             : { selectionUnavailable: feedbackSelectionUnavailable })}
           pointing={feedbackPointing.pointing}
+          {...(elementPicking.pointing
+            ? { selectionUnavailable: "Finish or stop picking an element first." }
+            : {})}
           onTogglePointing={feedbackPointing.toggle}
           onCancel={() => {
             feedbackPointing.cancel();

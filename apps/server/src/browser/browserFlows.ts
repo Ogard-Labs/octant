@@ -343,6 +343,7 @@ const UNSTORED_OPERATIONS: ReadonlySet<string> = new Set([
   "read-page",
   "diagnostics",
   "audit",
+  "page-tools",
   "tab-list",
   "help",
   // A recording belongs to the call that asked for it, never to a replay.
@@ -728,6 +729,7 @@ export async function replayBrowserFlow(
       parsed.operation === "sign-in" ||
       parsed.operation === "run-script" ||
       parsed.operation === "download-save" ||
+      parsed.operation === "page-tool-call" ||
       isBrowserToolRecordingInput(parsed) ||
       isBrowserToolFlowInput(parsed)
     ) {

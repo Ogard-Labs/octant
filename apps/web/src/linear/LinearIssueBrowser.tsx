@@ -13,11 +13,11 @@ import { CircleDot, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { failureMessage } from "../lib/failureMessage";
-import { ShellState } from "../shell/ShellState";
 import { SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
+  OctantEmpty,
   OctantEmptyContent,
   OctantEmptyHeader,
   OctantEmptyRoot,
@@ -243,7 +243,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       </div>
 
       {list.status === "loading" ? (
-        <ShellState
+        <OctantEmpty
           eyebrow="Linear"
           message="Reading issues from the connected workspace."
           state="loading"
@@ -252,7 +252,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
       ) : null}
 
       {list.status === "error" && page === undefined ? (
-        <ShellState
+        <OctantEmpty
           action={{
             label: "Retry",
             onClick: () => {
@@ -360,7 +360,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               <p className="linear-issues__status">Select an issue to read its description.</p>
             ) : null}
             {detail.status === "loading" ? (
-              <ShellState
+              <OctantEmpty
                 eyebrow="Linear"
                 message="Reading the selected issue."
                 state="loading"
@@ -368,7 +368,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
               />
             ) : null}
             {detail.status === "error" ? (
-              <ShellState
+              <OctantEmpty
                 eyebrow="Linear"
                 message={detail.message}
                 state="warning"

@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import { PAPER_LOCAL_SETUP } from "@octant/domain";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
@@ -5,7 +6,7 @@ import type {
   ExtensionCommandFailure,
   ExtensionPackagePreview,
 } from "@octant/contracts/extension-rpc";
-import { BookOpen, Check, ChevronRight, Puzzle, Search, Server, X } from "lucide-react";
+import { BookOpen, Check, Puzzle, Search, Server, X } from "lucide-react";
 import {
   useId,
   useMemo,
@@ -419,18 +420,22 @@ export function LibraryView(props: LibraryViewProps) {
           <>
             {lead.length === 0 ? null : (
               <section aria-label="Featured" className="library__group library__group--lead">
-                <details className="library__fold" open={filtering}>
-                  <summary className="library__group-summary">
-                    <ChevronRight aria-hidden="true" className="library__chevron" size={12} />
+                <OctantCollapsible
+                  chevronSize={12}
+                  className="library__fold"
+                  open={filtering}
+                  summary={
                     <h3 className="library__group-title">
                       Featured <span className="library__count">{lead.length}</span>{" "}
                       <span className="library__group-note">
                         Picked for everyday agent work; the list ships with Octant
                       </span>
                     </h3>
-                  </summary>
+                  }
+                  summaryClassName="library__group-summary"
+                >
                   {renderList("featured", lead, "Featured")}
-                </details>
+                </OctantCollapsible>
               </section>
             )}
             {groups.map((group) => (
@@ -439,15 +444,19 @@ export function LibraryView(props: LibraryViewProps) {
                     this computer) stay closed until asked for; what a person has
                     installed, and any search or filter, is open. The count stays
                     on the closed line. */}
-                <details className="library__fold" open={libraryGroupOpen(group.key, filtering)}>
-                  <summary className="library__group-summary">
-                    <ChevronRight aria-hidden="true" className="library__chevron" size={12} />
+                <OctantCollapsible
+                  chevronSize={12}
+                  className="library__fold"
+                  open={libraryGroupOpen(group.key, filtering)}
+                  summary={
                     <h3 className="library__group-title">
                       {group.title} <span className="library__count">{group.items.length}</span>
                     </h3>
-                  </summary>
+                  }
+                  summaryClassName="library__group-summary"
+                >
                   {renderList(group.key, group.items, group.title)}
-                </details>
+                </OctantCollapsible>
               </section>
             ))}
           </>

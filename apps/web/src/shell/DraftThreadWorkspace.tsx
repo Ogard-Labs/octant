@@ -1,3 +1,4 @@
+import { moveWithinTabList } from "../ui/base/radioGroupKeys";
 import {
   decodeThreadWorkingDirectory,
   type CoordinatorBounds,
@@ -1514,12 +1515,13 @@ function CreateFromIssueControl(props: {
               : "terminal";
   const panel = (
     <div className="create-from-issue-control__panel">
-      <div role="tablist" aria-label="Create from">
+      <div role="tablist" aria-label="Create from" onKeyDown={moveWithinTabList}>
         {showGithub ? (
           <OctantButton
             aria-selected={activeTab === "github"}
             onClick={() => props.onTabChange("github")}
             role="tab"
+            tabIndex={activeTab === "github" ? 0 : -1}
             size="sm"
             type="button"
             variant="ghost"
@@ -1532,6 +1534,7 @@ function CreateFromIssueControl(props: {
             aria-selected={activeTab === "linear"}
             onClick={() => props.onTabChange("linear")}
             role="tab"
+            tabIndex={activeTab === "linear" ? 0 : -1}
             size="sm"
             type="button"
             variant="ghost"
@@ -1544,6 +1547,7 @@ function CreateFromIssueControl(props: {
             aria-selected={activeTab === "terminal"}
             onClick={() => props.onTabChange("terminal")}
             role="tab"
+            tabIndex={activeTab === "terminal" ? 0 : -1}
             size="sm"
             type="button"
             variant="ghost"

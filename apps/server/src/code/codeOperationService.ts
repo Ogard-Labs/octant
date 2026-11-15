@@ -358,6 +358,17 @@ export interface CodeOperationEventPort {
         readonly frames: ReadonlyArray<CodeOperationEventFrame>;
       }
     | { readonly status: "rebuild-required" };
+  /**
+   * The thread's history reduced to the frames its latest facts come from
+   * (`summarizeThreadHistory`), refused exactly where `historyForThread` is.
+   * The newest repository test result is one of those facts.
+   */
+  readonly summaryForThread: (threadId: CodeThreadId) =>
+    | {
+        readonly status: "ok";
+        readonly frames: ReadonlyArray<CodeOperationEventFrame>;
+      }
+    | { readonly status: "rebuild-required" };
 }
 
 export class CodeOperationSnapshotRequiredError extends Error {
@@ -2720,7 +2731,7 @@ export class CodeOperationService {
         threadId,
         checkoutId,
       });
-    const history = this.#options.events.historyForThread(threadId);
+    const history = this.#options.events.summaryForThread(threadId);
     if (history.status !== "ok")
       return decodeCodeRepositoryTestStatus({
         kind: "code-repository-test-status",

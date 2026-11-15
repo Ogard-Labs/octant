@@ -209,11 +209,12 @@ export type AppBackgroundPercent = typeof AppBackgroundPercent.Type;
 
 /**
  * How a picture ground is printed: as it is, in square cells (`pixelate`),
- * or in cells quantized through an ordered threshold (`dither`). Absent on
+ * in cells quantized through an ordered threshold (`dither`), or as one
+ * character per cell picked by the cell's brightness (`ascii`). Absent on
  * rows written before it existed; the resolver then reads the older
  * `photoDithered` switch, so a dithered photo stays dithered.
  */
-export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither");
+export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither", "ascii");
 export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 
 /**

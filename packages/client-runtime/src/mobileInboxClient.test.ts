@@ -184,6 +184,33 @@ describe("mobileInboxClient", () => {
     });
   });
 
+  it("says a thread is working or needs input only when the host's runtime report says so", () => {
+    const rows = normalizeMobileInbox({
+      hostId,
+      chatThreads: [],
+      workThreads: [workThread],
+      codeThreads: [],
+      workRuntime: [{ threadId: workThread.id, executing: false, awaitingInput: true }],
+    });
+    expect(rows[0]).toMatchObject({ live: "needs-input", projectId: String(workThread.projectId) });
+    const idle = normalizeMobileInbox({
+      hostId,
+      chatThreads: [],
+      workThreads: [workThread],
+      codeThreads: [],
+      workRuntime: [{ threadId: workThread.id, executing: false }],
+    });
+    expect(idle[0]?.live).toBeUndefined();
+    const running = normalizeMobileInbox({
+      hostId,
+      chatThreads: [],
+      workThreads: [workThread],
+      codeThreads: [],
+      workRuntime: [{ threadId: workThread.id, executing: true }],
+    });
+    expect(running[0]?.live).toBe("working");
+  });
+
   it("attaches authoritative Code Board review state to inbox rows", () => {
     const decodedCodeThread = decodeCodeBootstrap({
       settings: codeSettings,

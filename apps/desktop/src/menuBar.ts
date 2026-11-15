@@ -295,7 +295,7 @@ export function buildMenuBarItems(
     }
     shutdownItems.push({
       id: "prepare-to-shut-down",
-      label: "Prepare to Shut Down…",
+      label: "Prepare to shut down…",
       enabled: snapshot.state !== "stopped",
     });
   }

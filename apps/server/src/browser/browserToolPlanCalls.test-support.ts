@@ -37,6 +37,8 @@ export const BROWSER_CALL_OF_EACH_OPERATION = {
   "tab-switch": { operation: "tab-switch", tabId: "t1" },
   "sign-in": { operation: "sign-in", reason: "The page needs a sign-in." },
   "run-script": { operation: "run-script", source: "1", expectedObservationRevision: 0 },
+  "page-tools": { operation: "page-tools" },
+  "page-tool-call": { operation: "page-tool-call", name: "search", arguments: { q: "shoes" } },
   "flow-save": { operation: "flow-save", name: "Order check" },
   "flow-run": { operation: "flow-run", name: "Order check" },
   "record-start": { operation: "steps", record: true, steps: [{ operation: "snapshot" }] },

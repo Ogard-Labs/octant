@@ -210,22 +210,27 @@ describe("buildThreadSearchResults", () => {
     });
   });
 
-  it("ignores content hits outside Chat mode", () => {
-    const results = buildThreadSearchResults({
-      mode: "work",
-      query: "migration",
-      threads: [],
-      projects,
-      contentHits: [
-        {
-          threadId: "t9",
-          title: "Quiet title",
-          lifecycle: "active",
-          turnId: "turn-1",
-          snippet: "migration",
-        },
-      ],
-    });
-    expect(results.hitCount).toBe(0);
-  });
+  it.each(["work", "code"] as const)(
+    "lists %s message-body hits as rows of that mode that open at their turn",
+    (mode) => {
+      const results = buildThreadSearchResults({
+        mode,
+        query: "migration",
+        threads: [],
+        projects,
+        contentHits: [
+          {
+            threadId: "t9",
+            title: "Quiet title",
+            lifecycle: "active",
+            turnId: "turn-1",
+            snippet: "migration",
+          },
+        ],
+      });
+      expect(flattenThreadSearchHits(results)).toEqual([
+        expect.objectContaining({ mode, threadId: "t9", turnId: "turn-1", snippet: "migration" }),
+      ]);
+    },
+  );
 });

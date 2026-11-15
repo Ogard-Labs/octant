@@ -1,8 +1,32 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Markdown, MarkdownLinkActionsContext } from "./Markdown";
+import { Markdown, MarkdownLinkActionsContext, settledMarkdownBlocks } from "./Markdown";
 
 describe("Markdown", () => {
+  // A link definition renders nothing and makes the renderer parse the whole
+  // document, so it is the reference for what split rendering must match.
+  const WHOLE = "\n\n[unused-reference]: https://example.test";
+  const streamedDocuments = [
+    "# Title\n\nFirst paragraph with **bold**.\n\nSecond paragraph.",
+    "- one\n- two\n\n- three, loose\n\nAfter the list.",
+    "1. first\n\n   continued item\n2. second\n\nText",
+    "```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nAfter code.",
+    "> quote\n\n> another\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nEnd",
+    "Para\n\n---\n\n    indented code\n\nTail",
+    "Streaming ```unterminated\n\n```js\nopen fence\n\nstill code\n```",
+  ];
+
+  it.each(streamedDocuments)("renders a streamed document the same as a whole parse: %#", (doc) => {
+    const split = render(<Markdown body={doc} />).container.innerHTML;
+    const whole = render(<Markdown body={doc + WHOLE} />).container.innerHTML;
+    expect(settledMarkdownBlocks(doc + WHOLE)).toHaveLength(1);
+    expect(split).toBe(whole);
+  });
+
+  it("splits settled paragraphs so only the trailing block parses again", () => {
+    expect(settledMarkdownBlocks("One.\n\nTwo.\n\nThr")).toEqual(["One.\n", "Two.\n", "Thr"]);
+  });
+
   it("renders the syntax the two parsers it replaced each only half supported", () => {
     render(
       <Markdown

@@ -3167,3 +3167,111 @@ describe("forking a Work thread from one of its turns", () => {
     expect(fixture.projection.read(forkId)).toBeUndefined();
   });
 });
+
+describe("searching Work message text", () => {
+  const searchTurn = (input: {
+    readonly threadId: string;
+    readonly index: number;
+    readonly prompt: string;
+    readonly response?: string;
+  }) =>
+    decodeWorkTurnState({
+      requestId: `72000000-0000-4000-8000-0000000002${String(input.index).padStart(2, "0")}`,
+      threadId: input.threadId,
+      turnId: `72000000-0000-4000-8000-0000000003${String(input.index).padStart(2, "0")}`,
+      projectId: ids.project,
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+      }),
+      status: "completed",
+      prompt: input.prompt,
+      ...(input.response === undefined ? {} : { response: input.response }),
+      transcript: [],
+      capabilities: {
+        workspace: "project-backed",
+        confinement: "project-root-confined",
+        shell: "denied",
+        git: "denied",
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      },
+      version: 1,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+  const archivedId = "72000000-0000-4000-8000-000000000031";
+  const deletingId = "72000000-0000-4000-8000-000000000032";
+
+  it("finds a prompt or a reply in active and archived threads, never in one being deleted", async () => {
+    const fixture = serviceFixture({
+      threads: [
+        thread(),
+        thread({ id: archivedId as never, title: "Old brief", lifecycle: "archived" }),
+        thread({ id: deletingId as never, title: "Going", lifecycle: "deleting" }),
+      ],
+      turns: [
+        searchTurn({ threadId: ids.thread, index: 1, prompt: "Draft the Release notes" }),
+        searchTurn({
+          threadId: archivedId,
+          index: 2,
+          prompt: "Summarize",
+          response: "The release moved to Friday.",
+        }),
+        searchTurn({ threadId: deletingId, index: 3, prompt: "release plan" }),
+        searchTurn({ threadId: ids.thread, index: 4, prompt: "Nothing to see" }),
+      ],
+    });
+
+    const result = await fixture.service.searchTranscript(ids.window, "  release ");
+    expect(result.query).toBe("release");
+    expect(result.truncated).toBe(false);
+    expect(
+      result.hits.map((hit) => [String(hit.threadId), hit.lifecycle, hit.snippet, hit.matchRanges]),
+    ).toEqual([
+      [String(ids.thread), "active", "Draft the Release notes", [{ start: 10, end: 17 }]],
+      [String(archivedId), "archived", "The release moved to Friday.", [{ start: 4, end: 11 }]],
+    ]);
+    expect(String(result.hits[0]?.turnId)).toBe("72000000-0000-4000-8000-000000000301");
+  });
+
+  it("searches no thread whose Project is not an active Work Project", async () => {
+    const fixture = serviceFixture({
+      project: { ...workProject(), lifecycle: "archived" } as Project,
+      turns: [searchTurn({ threadId: ids.thread, index: 1, prompt: "release" })],
+    });
+    await expect(fixture.service.searchTranscript(ids.window, "release")).resolves.toEqual({
+      query: "release",
+      hits: [],
+      truncated: false,
+    });
+  });
+
+  it("treats LIKE wildcards as text, caps the hits, and refuses an overlong query", async () => {
+    const turns = Array.from({ length: 51 }, (_, index) =>
+      searchTurn({ threadId: ids.thread, index, prompt: `item ${index} at 50% done` }),
+    );
+    const fixture = serviceFixture({
+      turns: [...turns, searchTurn({ threadId: ids.thread, index: 60, prompt: "plain words" })],
+    });
+
+    const capped = await fixture.service.searchTranscript(ids.window, "50%");
+    expect(capped.hits).toHaveLength(50);
+    expect(capped.truncated).toBe(true);
+    expect((await fixture.service.searchTranscript(ids.window, "_")).hits).toHaveLength(0);
+    await expect(fixture.service.searchTranscript(ids.window, "x".repeat(201))).rejects.toThrow(
+      "Work transcript search query is too long.",
+    );
+    await expect(fixture.service.searchTranscript(ids.window, "   ")).resolves.toEqual({
+      query: "",
+      hits: [],
+      truncated: false,
+    });
+  });
+});

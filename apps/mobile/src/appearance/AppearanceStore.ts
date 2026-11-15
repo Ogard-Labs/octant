@@ -26,7 +26,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   picture: "soft-glow",
   effect: DEFAULT_EFFECT,
   colorSchemePreference: "system",
-  surfaceStyle: "flat",
+  surfaceStyle: "glass",
 };
 
 const PICTURES: ReadonlyArray<GroundPicture> = [
@@ -45,7 +45,7 @@ function parseColorSchemePreference(value: unknown): ColorSchemePreference {
 
 function parseSurfaceStyle(value: unknown): SurfaceStylePreference {
   if (value === "flat" || value === "glass") return value;
-  return "flat";
+  return "glass";
 }
 
 function isPicture(value: unknown): value is GroundPicture {
@@ -67,7 +67,10 @@ function parseEffect(value: unknown): GroundEffect {
   if (typeof value !== "object" || value === null) return DEFAULT_EFFECT;
   const record = value as Record<string, unknown>;
   const kind =
-    record.kind === "pixelate" || record.kind === "dither" || record.kind === "none"
+    record.kind === "pixelate" ||
+    record.kind === "dither" ||
+    record.kind === "ascii" ||
+    record.kind === "none"
       ? record.kind
       : "none";
   return clampEffect({

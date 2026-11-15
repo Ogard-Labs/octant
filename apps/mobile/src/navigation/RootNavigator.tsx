@@ -8,6 +8,7 @@ import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRoute
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
+import type { MobileThreadArrangement } from "../inbox/threadArrangement";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
@@ -398,8 +399,14 @@ const shellStyles = StyleSheet.create({
 
 export function RootNavigator(props: RootNavigatorProps) {
   const [selectedThread, setSelectedThread] = useState<MobileInboxRow | undefined>();
+  const [focusTurnId, setFocusTurnId] = useState<string | undefined>();
   const [threadReturnRoute, setThreadReturnRoute] = useState<"home" | "agents">("home");
   const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
+  // Each tab keeps its own arrangement while the app runs, as each desktop
+  // mode does; Status is the default.
+  const [arrangements, setArrangements] = useState<
+    Readonly<Record<"work" | "code", MobileThreadArrangement>>
+  >({ work: "status", code: "status" });
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
@@ -497,7 +504,12 @@ export function RootNavigator(props: RootNavigatorProps) {
     <View style={shellStyles.shell} testID="octant-mobile-shell">
       {props.activeRoute === "home" ? (
         <InboxHomeScreen
+          arrangement={homeMode === "inbox" ? "status" : arrangements[homeMode]}
           homeMode={homeMode}
+          onSelectArrangement={(arrangement) => {
+            if (homeMode === "inbox") return;
+            setArrangements((current) => ({ ...current, [homeMode]: arrangement }));
+          }}
           onOpenAgents={(view) => {
             setAgentListView(view);
             props.onSelectRoute("agents");
@@ -517,6 +529,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           }}
           onOpenThread={(row) => {
             setSelectedThread(row);
+            setFocusTurnId(undefined);
             setThreadReturnRoute("home");
             props.onSelectRoute("thread");
           }}
@@ -525,8 +538,9 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "agents" ? (
         <AgentsListScreen
           onBack={() => props.onSelectRoute("home")}
-          onOpenThread={(row) => {
+          onOpenThread={(row, turnId) => {
             setSelectedThread(row);
+            setFocusTurnId(turnId);
             setThreadReturnRoute("agents");
             props.onSelectRoute("thread");
           }}
@@ -537,7 +551,11 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "thread" ? (
         <ThreadScreen
           onBack={() => props.onSelectRoute(threadReturnRoute)}
-          onOpenThread={setSelectedThread}
+          focusTurnId={focusTurnId}
+          onOpenThread={(row) => {
+            setSelectedThread(row);
+            setFocusTurnId(undefined);
+          }}
           selected={selectedThread}
         />
       ) : null}

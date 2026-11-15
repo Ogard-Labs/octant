@@ -218,6 +218,34 @@ describe("code client", () => {
     );
   });
 
+  it("searches Code message text through the authenticated route", async () => {
+    const answer = {
+      query: "parser",
+      truncated: true,
+      hits: [
+        {
+          threadId: ids.thread,
+          operationId: "70000000-0000-4000-8000-000000000002",
+          title: "Parser fix",
+          lifecycle: "archived",
+          projectId: thread.projectId,
+          snippet: "fix the parser",
+        },
+      ],
+    };
+    const fetch = vi.fn().mockResolvedValue(Response.json(answer));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.searchTranscript("parser")).resolves.toEqual(answer);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/transcript-search?q=parser`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+  });
+
   it("sends strict opaque Code operations through the authenticated command endpoint", async () => {
     const result = {
       kind: "operation-accepted",

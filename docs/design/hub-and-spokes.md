@@ -1813,8 +1813,8 @@ Prepare to shut down moves many threads at once, for the moment the person is
 leaving. It asks before anything moves, and its defaults are chosen so that
 the usual case is one press and one unlock.
 
-- **Where it opens.** From **Prepare to Shut Down…** in the application menu
-  and the menu bar, and from the existing quit confirmation: when Quit would
+- **Where it opens.** From **Prepare to shut down…** in the application menu
+  (File on Windows and Linux) and the menu bar, and from the existing quit confirmation: when Quit would
   ask about open sessions and this host is in a hub with a member that can take
   at least one of its threads, the confirmation gains **Move threads first…**,
   which opens Prepare to shut down instead of quitting. Cancel stays the
@@ -1879,7 +1879,7 @@ the usual case is one press and one unlock.
 - **Progress in the menu bar.** While the batch runs, the menu bar shows how
   many of its threads have ended out of how many (`3/9` beside the glyph,
   after only the host's own `!`) and a **Moving threads** line in its menu,
-  so hiding the dialog leaves the progress in sight. **Prepare to Shut Down…**
+  so hiding the dialog leaves the progress in sight. **Prepare to shut down…**
   sits in the menu bar while the window last saw this host in a hub with
   another member, or a batch runs, and brings the dialog back in the window
   that runs the batch. Only that window's dialog changes the menu bar's
@@ -3207,8 +3207,8 @@ a numbered slice. Built, with these narrower readings:
     a row that ended without moving (Don't move pressed, or its failure
     notice already put away) counts as staying rather than waiting forever.
     Hiding the dialog leaves its batch moving, and opening it again shows
-    that batch. **Prepare to Shut Down…** sits in the application menu above
-    Quit. The quit confirmation gains **Move threads
+    that batch. **Prepare to shut down…** sits in the application menu (File on
+    Windows and Linux) above Quit. The quit confirmation gains **Move threads
     first…** while the window last saw this host in a hub with another
     member, and the dialog then ends with Quit Octant through the guarded
     quit.

@@ -177,7 +177,7 @@ describe("ShellService", () => {
     ).toMatchObject({ kind: "workspace-replaced" });
   });
 
-  it("rejects opening a Project surface bound to a different context with a cross-context failure", () => {
+  it("opens another Project's surface in its own pane under that Project's context", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
     if (code.kind !== "pane") throw new Error("expected pane");
@@ -223,23 +223,18 @@ describe("ShellService", () => {
         title: "Project",
       },
     };
-    expect(() =>
-      service.execute({
-        kind: "apply-workspace-operation",
-        windowId: ids.window,
-        expectedVersion: 1,
-        operation,
-      }),
-    ).toThrowError(
-      expect.objectContaining({
-        failure: expect.objectContaining({
-          category: "cross-context",
-          message: expect.any(String),
-          offerNewWindow: true,
-        }),
-      }),
-    );
-    expect(fixture.append).not.toHaveBeenCalled();
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 1,
+      operation,
+    });
+    if (result.kind !== "workspace-replaced") throw new Error("expected a replaced workspace");
+    const pane = result.workspace.layouts.code;
+    if (pane.kind !== "pane") throw new Error("expected pane");
+    expect(pane.context?.projectId).toBe(projectId);
+    expect(result.workspace.contextByMode.code.projectId).toBe(otherProject);
+    expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
   it("atomically switches an existing window to another active Project", () => {
@@ -2593,7 +2588,70 @@ describe("ShellService", () => {
     expect(fixture.append).toHaveBeenCalledOnce();
   });
 
-  it("refuses to split a thread from another Project into this window", () => {
+  it("keeps another Project's Browser pane when the window's lead Project is archived", () => {
+    const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const lead = base.layouts.code;
+    if (lead.kind !== "pane") throw new Error("expected pane");
+    const otherContext = {
+      host: base.contextByMode.code.host,
+      mode: "code" as const,
+      projectId: otherProject,
+      boundRoot: "/home/other",
+    };
+    const workspace: WindowWorkspace = {
+      ...base,
+      layouts: {
+        ...base.layouts,
+        code: {
+          kind: "split",
+          nodeId: "00000000-0000-4000-8000-000000000231" as never,
+          orientation: "horizontal",
+          ratio: 0.5 as never,
+          first: lead,
+          second: {
+            kind: "pane",
+            nodeId: "00000000-0000-4000-8000-000000000232" as never,
+            paneId: "00000000-0000-4000-8000-000000000233" as never,
+            surface: {
+              kind: "browser",
+              id: "00000000-0000-4000-8000-000000000234" as never,
+              mode: "code",
+              title: "Browser",
+            },
+            context: otherContext,
+          },
+        },
+      },
+      contextByMode: {
+        ...base.contextByMode,
+        code: { ...otherContext, projectId, boundRoot: "/home/repo" },
+      },
+    };
+    const fixture = persistenceStub({
+      workspace: { workspace, aggregateVersion: 1 as never },
+      projectFor: (id) =>
+        String(id) === String(otherProject)
+          ? ({
+              ...projectFixture("code"),
+              id: otherProject,
+              binding: { canonicalRoot: "/home/other" },
+            } as never)
+          : ({ ...projectFixture("code"), lifecycle: "archived" } as never),
+    });
+    const restored = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    }).bootstrap(ids.window).workspace.layouts.code;
+    if (restored.kind !== "split" || restored.second.kind !== "pane") {
+      throw new Error("expected split");
+    }
+    expect(restored.second.surface.kind).toBe("browser");
+    expect(restored.second.context?.projectId).toBe(otherProject);
+  });
+
+  it("splits a thread from another Project into its own pane and clears that pane once the Project is archived", () => {
     const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };
     const anchored: WindowWorkspace = {
@@ -2640,39 +2698,55 @@ describe("ShellService", () => {
     });
     service.bootstrap(ids.window);
 
-    expect(() =>
-      service.execute({
-        kind: "apply-workspace-operation",
-        windowId: ids.window,
-        expectedVersion: 1,
-        operation: {
-          kind: "split-pane",
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: 1,
+      operation: {
+        kind: "split-pane",
+        mode: "chat",
+        targetPaneId: chat.paneId,
+        surface: {
+          kind: "chat-thread",
+          id: "00000000-0000-4000-8000-000000000227" as never,
+          threadId,
           mode: "chat",
-          targetPaneId: chat.paneId,
-          surface: {
-            kind: "chat-thread",
-            id: "00000000-0000-4000-8000-000000000227" as never,
-            threadId,
-            mode: "chat",
-            title: thread.title,
-          },
-          splitNodeId: "00000000-0000-4000-8000-000000000228",
-          newPaneNodeId: "00000000-0000-4000-8000-000000000229",
-          newPaneId: "00000000-0000-4000-8000-000000000230",
-          orientation: "horizontal",
-          placement: "after",
-          ratio: 0.5,
+          title: thread.title,
         },
-      }),
-    ).toThrowError(
-      expect.objectContaining({
-        failure: expect.objectContaining({
-          category: "cross-context",
-          offerNewWindow: true,
-        }),
-      }),
-    );
-    expect(fixture.append).not.toHaveBeenCalled();
+        splitNodeId: "00000000-0000-4000-8000-000000000228",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000229",
+        newPaneId: "00000000-0000-4000-8000-000000000230",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      },
+    });
+    if (result.kind !== "workspace-replaced") throw new Error("expected a replaced workspace");
+    const split = result.workspace.layouts.chat;
+    if (split.kind !== "split" || split.second.kind !== "pane") throw new Error("expected split");
+    expect(split.second.context?.projectId).toBe(otherProject);
+    expect(result.workspace.contextByMode.chat.projectId).toBe(projectId);
+
+    // Restart after the other Project was archived: its pane reaches nothing.
+    const archived = persistenceStub({
+      workspace: { workspace: result.workspace, aggregateVersion: 2 as never },
+      projectFor: (id) =>
+        String(id) === String(otherProject)
+          ? ({ ...projectFixture("chat"), id: otherProject, lifecycle: "archived" } as never)
+          : (projectFixture("chat") as never),
+      chatThread: thread,
+    });
+    const restarted = new ShellService({
+      persistence: archived.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    }).bootstrap(ids.window);
+    const restored = restarted.workspace.layouts.chat;
+    if (restored.kind !== "split" || restored.second.kind !== "pane") {
+      throw new Error("expected split");
+    }
+    expect(restored.second.context).toBeUndefined();
+    expect(restored.second.surface.kind).toBe("welcome");
   });
 
   it("refuses a split-pane command from an unregistered window", () => {

@@ -1,3 +1,4 @@
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 import {
   SHUTDOWN_BATCH_MAX,
   type HubMemberId,
@@ -700,16 +701,18 @@ export function PrepareToShutDownDialog(props: PrepareToShutDownDialogProps) {
           <>
             {listed.map(rowView)}
             {older.length === 0 ? null : (
-              <details
+              <OctantCollapsible
                 className="shutdown-dialog__older"
                 onToggle={(event) => setOlderOpen(event.currentTarget.open)}
                 open={olderOpen}
+                summary={
+                  <>
+                    Older threads <span className="shutdown-dialog__count">{older.length}</span>
+                  </>
+                }
               >
-                <summary>
-                  Older threads <span className="shutdown-dialog__count">{older.length}</span>
-                </summary>
                 {older.map(rowView)}
-              </details>
+              </OctantCollapsible>
             )}
           </>
         )}

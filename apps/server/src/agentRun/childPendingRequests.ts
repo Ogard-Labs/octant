@@ -15,7 +15,7 @@ import {
 import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
 import { sanitizeRequestText } from "../work/workRequestRuntime";
-import { windowCanAccessCodeProject } from "../windowCodeProjectAccess";
+import { windowCanAccessCodeProject, windowCanAccessWorkProject } from "../windowCodeProjectAccess";
 
 export interface ChildPendingRequestSources {
   readonly approvals: Pick<NativeHarnessApprovalStore, "waiting">;
@@ -77,8 +77,7 @@ export function windowMayListChildParent(input: {
       hasActiveCodeProject: () => true,
     });
   }
-  const bound = input.workspace?.contextByMode.work.projectId;
-  return bound != null && String(bound) === String(parent.projectId);
+  return windowCanAccessWorkProject({ workspace: input.workspace, projectId: parent.projectId });
 }
 
 /** What the host reads to decide whether a window may list a waiting child. */
