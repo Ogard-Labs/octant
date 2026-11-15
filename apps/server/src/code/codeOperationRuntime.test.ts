@@ -9011,6 +9011,17 @@ describe("provider switch handoff", () => {
     };
   }
 
+  async function previewRollback(fixture: ReturnType<typeof runtimeFixture>, from: number) {
+    const preview = await fixture.runtime.execute(windowId, {
+      kind: "preview-code-rewind",
+      operationId: operationId(89),
+      threadId,
+      checkoutId,
+      fromOperationId: operationId(from),
+    });
+    return preview.kind === "rewind-preview" ? preview.rollback : preview.kind;
+  }
+
   async function sendAfterRewind(fixture: ReturnType<typeof runtimeFixture>) {
     const prompt = storedEvidence(88, "Try it another way.");
     fixture.evidenceValues.set(prompt.contentId, "Try it another way.");
@@ -9117,11 +9128,14 @@ describe("provider switch handoff", () => {
         ...(await drivers.resolveProviderDriver(current)),
         forkSession,
       }),
+      supportsSessionRollback: () => true,
     });
     fixture.setThread(onProvider(providerInstance, "model-a"));
     try {
       await finishFirstTurn(fixture, drivers, providerInstance, "assistant-message-1");
       await finishSecondTurn(fixture, drivers, providerInstance);
+      // The kept turn journaled where it ends, so the preview promises a copy.
+      expect(await previewRollback(fixture, 85)).toBe("native");
       await fixture.runtime.execute(windowId, rewindFrom(85));
 
       await sendAfterRewind(fixture);
@@ -9164,11 +9178,15 @@ describe("provider switch handoff", () => {
         ...(await drivers.resolveProviderDriver(current)),
         forkSession,
       }),
+      supportsSessionRollback: () => true,
     });
     fixture.setThread(onProvider(providerInstance, "model-a"));
     try {
       await finishFirstTurn(fixture, drivers, providerInstance);
       await finishSecondTurn(fixture, drivers, providerInstance);
+      // The provider can copy its session, but not this one: the preview
+      // promises the text handoff the rewind will send.
+      expect(await previewRollback(fixture, 85)).toBe("handoff");
       await fixture.runtime.execute(windowId, rewindFrom(85));
 
       await sendAfterRewind(fixture);
@@ -9197,11 +9215,14 @@ describe("provider switch handoff", () => {
     const fixture = runtimeFixture({
       resolveProviderDriver: drivers.resolveProviderDriver,
       forkProviderSession,
+      supportsSessionRollback: () => true,
     });
     fixture.setThread(onProvider(harnessInstance, "harness-model"));
     try {
       await finishFirstTurn(fixture, drivers, harnessInstance);
       await finishSecondTurn(fixture, drivers, harnessInstance);
+      // The harness copies its own transcript, which needs no anchor.
+      expect(await previewRollback(fixture, 85)).toBe("native");
       await fixture.runtime.execute(windowId, rewindFrom(85));
 
       await sendAfterRewind(fixture);
@@ -10876,6 +10897,9 @@ function runtimeFixture(options: {
   >[0]["recordExternalContentIngestion"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
   providerCommands?: Parameters<typeof createCodeOperationRuntime>[0]["providerCommands"];
+  supportsSessionRollback?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["supportsSessionRollback"];
 }) {
   const directory =
     options.restartOf?.directory ?? mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
@@ -11219,6 +11243,9 @@ function runtimeFixture(options: {
     ...(options.providerCommands === undefined
       ? {}
       : { providerCommands: options.providerCommands }),
+    ...(options.supportsSessionRollback === undefined
+      ? {}
+      : { supportsSessionRollback: options.supportsSessionRollback }),
     nativeTurnAnchor: (anchorThreadId, anchorOperationId) =>
       conversationReader.nativeTurnAnchor(anchorThreadId, decodeCodeOperationId(anchorOperationId)),
     credentialResolver: options.credentialResolver ?? { resolve: async () => options.credential },

@@ -1567,7 +1567,25 @@ export function createCodeOperationRuntime(
       codeThreadTurns((page) => events.conversation(page), threadId, read),
     ...(options.supportsSessionRollback === undefined
       ? {}
-      : { supportsSessionRollback: options.supportsSessionRollback }),
+      : {
+          supportsSessionRollback: async (thread, lastKeptTurn) => {
+            if (options.supportsSessionRollback?.(thread) !== true) return false;
+            if (lastKeptTurn === undefined) return true;
+            // A runtime that copies its own session cuts only at the anchor
+            // the last kept turn journaled; without one the rewind sends the
+            // text handoff, so the preview must not promise a copy. The
+            // harness's transcript copy needs no anchor.
+            const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
+              () => undefined,
+            );
+            if (driver?.forkSession === undefined) return true;
+            const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
+            return (
+              anchor !== undefined &&
+              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
+            );
+          },
+        }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}

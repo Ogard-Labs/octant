@@ -2543,9 +2543,12 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Rewind to here** on a person's message removes that turn and every later
   one; on a reply it removes the turns after it. The person chooses
   conversation, files, or both, and is asked once, in a dialog that reads
-  `preview-code-rewind` first and shows how many turns leave and which files
-  differ from the checkpoint the files would come back from. Nothing changes
-  until they answer.
+  `preview-code-rewind` first and shows how many turns leave, which files
+  differ from the checkpoint the files would come back from, and whether the
+  provider continues a copy of its own session or a text handoff. A runtime
+  that copies its session at an anchor is promised a copy only when the last
+  kept turn journaled one ([native session anchors](#native-session-anchors)).
+  Nothing changes until they answer.
 - **Files** come back from Octant's own checkpoints: the checkpoint the first
   removed turn captured before it ran, or, past Plan turns that wrote nothing,
   the next one a writing turn captured. A writing turn without a capture
