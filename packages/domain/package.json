@@ -22,6 +22,8 @@
     "./guardrail-policy": "./src/guardrailPolicy.ts",
     "./person-memory-policy": "./src/personMemoryPolicy.ts",
     "./todo-policy": "./src/todoPolicy.ts",
+    "./octant-instructions-policy": "./src/octantInstructionsPolicy.ts",
+    "./secret-shaped-text-policy": "./src/secretShapedTextPolicy.ts",
     "./secret-guard-policy": "./src/secretGuardPolicy.ts",
     "./shield-judge-policy": "./src/shieldJudgePolicy.ts",
     "./shield-server-policy": "./src/shieldServerPolicy.ts",

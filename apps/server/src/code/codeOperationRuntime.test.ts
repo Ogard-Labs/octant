@@ -10448,6 +10448,10 @@ function runtimeFixture(options: {
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
+  octantInstructionBlocks?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["octantInstructionBlocks"];
+  personMemoryBlock?: Parameters<typeof createCodeOperationRuntime>[0]["personMemoryBlock"];
   designSystemContext?: Parameters<typeof createCodeOperationRuntime>[0]["designSystemContext"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
@@ -10872,6 +10876,12 @@ function runtimeFixture(options: {
     ...(options.projectMemoryEntries === undefined
       ? {}
       : { projectMemoryEntries: options.projectMemoryEntries }),
+    ...(options.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -12580,6 +12590,70 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
       }),
     );
     expect(projectMemoryEntries).toHaveBeenCalledWith(expect.objectContaining({ id: threadId }));
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("gives a Code session your instructions after Octant's own, once, and an edit once as a revision", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  let instructions = "Plan in Work before coding.";
+  const fixture = runtimeFixture({
+    provider: { ...providerDriver(connection), conversationOwnership: "provider" },
+    octantInstructionBlocks: () => [
+      { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+    ],
+    personMemoryBlock: () => "Remembered: prefers short replies.",
+    projectMemoryEntries: () => ["Releases ship from main only."],
+  });
+  const kept = providerEvent({
+    kind: "usage",
+    inputTokens: 10,
+    outputTokens: 2,
+    contextTokens: 9_000,
+    promptRetention: "kept",
+  });
+  const turn = async (operation: number, prompt: string) => {
+    const reference = storedEvidence(operation + 100, prompt);
+    fixture.evidenceValues.set(reference.contentId, prompt);
+    const sends = vi.mocked(connection.send).mock.calls.length;
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(operation),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: reference,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(sends + 1));
+    await Effect.runPromise(Queue.offer(queue, kept));
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledTimes(sends + 1));
+    return vi.mocked(connection.send).mock.calls[sends]?.[0].context ?? [];
+  };
+  try {
+    const first = (await turn(140, "first")).map((block) => block.kind);
+    const own = first.lastIndexOf("instructions");
+    const yours = first.indexOf("person-instructions");
+    expect(yours).toBeGreaterThan(own);
+    expect(first.indexOf("person-memory")).toBe(yours + 1);
+    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 1);
+
+    expect((await turn(141, "second")).map((block) => block.kind)).not.toContain(
+      "person-instructions",
+    );
+
+    instructions = "Plan in Code instead.";
+    const edited = await turn(142, "third");
+    expect(edited.filter((block) => block.kind === "person-instructions")).toEqual([
+      { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+    ]);
+    expect(edited.map((block) => block.kind)).not.toContain("person-memory");
+    expect((await turn(143, "fourth")).map((block) => block.kind)).not.toContain(
+      "person-instructions",
+    );
   } finally {
     await fixture.runtime.close();
     fixture.close();
