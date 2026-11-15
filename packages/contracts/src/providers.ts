@@ -975,12 +975,6 @@ const ProviderInstanceFields = {
   updatedAt: UtcTimestamp,
   /** Optional so existing provider rows remain valid and default to untagged. */
   dataTags: Schema.optional(ProviderDataTags),
-  /**
-   * The person's statement that their agreement with this endpoint's provider
-   * covers its own web search with no record kept (ZDR). Accepted only where
-   * the provider offers that for its search; absent is not stated.
-   */
-  providerSearchZdr: Schema.optional(Schema.Literal(true)),
 } as const;
 
 /**
@@ -2403,15 +2397,6 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("set-provider-data-tags"),
     ...ProviderInstanceCommandFields,
     dataTags: ProviderDataTags,
-  }).annotations(strict),
-  /**
-   * The person's ZDR statement for the endpoint's own web search. Refused for
-   * an endpoint whose provider does not offer ZDR for its search.
-   */
-  Schema.Struct({
-    kind: Schema.Literal("set-provider-search-zdr"),
-    ...ProviderInstanceCommandFields,
-    stated: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("set-provider-model-data-tags"),

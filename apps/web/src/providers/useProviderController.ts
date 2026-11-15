@@ -2229,21 +2229,6 @@ export function useProviderController(options: ProviderControllerOptions) {
       }),
     [execute],
   );
-  const setProviderSearchZdr = useCallback(
-    (instanceId: ProviderInstanceId, stated: boolean) =>
-      execute((current) => {
-        const instance = findProvider(current, instanceId);
-        return instance === undefined
-          ? undefined
-          : {
-              kind: "set-provider-search-zdr",
-              instanceId,
-              expectedVersion: instance.version,
-              stated,
-            };
-      }),
-    [execute],
-  );
   const setModelDataTags = useCallback(
     (instanceId: ProviderInstanceId, modelId: ProviderModelId, dataTags: ProviderDataTags) =>
       execute((current) => {
@@ -2668,7 +2653,6 @@ export function useProviderController(options: ProviderControllerOptions) {
     setProviderOwnMemory,
     threadNativeSetup,
     setDataTags,
-    setProviderSearchZdr,
     setModelDataTags,
     setModelContextWindow,
     remove,

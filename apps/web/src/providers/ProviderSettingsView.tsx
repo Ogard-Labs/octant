@@ -264,11 +264,6 @@ export interface ProviderSettingsViewProps {
     instanceId: ProviderInstanceId,
     dataTags: ProviderDataTags,
   ) => Promise<boolean>;
-  /** The person's ZDR statement for the endpoint's own web search, where its provider offers it. */
-  readonly onProviderSearchZdrChange?: (
-    instanceId: ProviderInstanceId,
-    stated: boolean,
-  ) => Promise<boolean>;
   readonly onModelDataTagsChange: (
     instanceId: ProviderInstanceId,
     modelId: ProviderModelId,

@@ -494,6 +494,3 @@ field empties. Settings › Chat no longer shows the SearXNG address: a link to
 its old row opens this page, and a Chat save carries the stored address
 unchanged. The page says the policy covers only its backends: a provider's
 own search and a key provider's own web search and fetch are not locked by it.
-A model endpoint's "Where your data
-goes" gains "Its own web search keeps no record of my queries" only where its
-provider offers ZDR for its search (Anthropic's and OpenAI's own APIs).

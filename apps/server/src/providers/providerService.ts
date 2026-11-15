@@ -90,7 +90,6 @@ import {
   isKeyProviderDriverKind,
   setProviderEnabled,
   setProviderDataTags,
-  setProviderSearchZdr,
   setProviderModelDataTags,
   updateProviderDefaults,
   orderProviderInstances,
@@ -1167,11 +1166,6 @@ export class ProviderService implements ProviderServiceApi {
           let keepsRuntime = false;
           if (command.kind === "set-provider-data-tags") {
             instance = setProviderDataTags(current, command.dataTags, updatedAt);
-            eventName = "provider.instance-data-tags-changed@1";
-          } else if (command.kind === "set-provider-search-zdr") {
-            // A statement about the provider's data terms, journaled as the
-            // data handling labels are; the running process is unaffected.
-            instance = setProviderSearchZdr(current, command.stated, updatedAt);
             eventName = "provider.instance-data-tags-changed@1";
           } else if (command.kind === "set-claude-artifact-delivery") {
             if (current.driverKind !== "claude") {

@@ -147,7 +147,6 @@ export * from "./projectCodeTrustPolicy";
 export * from "./providerCatalogPolicy";
 export * from "./researchPolicy";
 export * from "./webSearchPolicy";
-export * from "./providerWebSearchPolicy";
 export * from "./replyDetailPolicy";
 export * from "./shellPolicy";
 export * from "./sidebarThreadStatusPolicy";

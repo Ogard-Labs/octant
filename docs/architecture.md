@@ -5004,10 +5004,8 @@ unless the call asks for 1 to 10. It opens no page.
   at most 15 seconds each; an empty result stops it. Each call journals where
   the query went (`web-search.call-routed@1`). The policy covers only these
   backends: a vendor runtime's own web tools follow its native setup under
-  every policy. A model endpoint carries the person's ZDR
-  statement for its provider's own search (`providerSearchZdr`), accepted only
-  on Anthropic's and OpenAI's own APIs. A provider's own search in the native
-  harness under the policy is designed, not built
+  every policy, and a provider's own search is not governed by it. A
+  provider's own search in the native harness is designed, not built
   ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research
