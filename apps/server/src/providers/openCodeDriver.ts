@@ -6,7 +6,6 @@ import {
   type OpenCodeOwnSetup,
 } from "./openCodeOwnSetup";
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
-import { secretGuardEntries } from "../process/secretGuard";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import {
@@ -132,6 +131,13 @@ export interface OpenCodeDriverOptions {
   readonly permissionPersistence?: () => PermissionPersistence;
   /** The person's own OpenCode rules and MCP servers; read from their configuration by default. */
   readonly readOwnSetup?: () => OpenCodeOwnSetup;
+  /**
+   * The host's protected files and folders in force, as absolute paths, which
+   * every session refuses to read or list. The host resolves them, so the
+   * driver never reads its protected-file configuration itself. Absent
+   * refuses none beyond OpenCode's own `.env` rule.
+   */
+  readonly protectedPaths?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -153,6 +159,8 @@ interface SessionState {
   readonly nativeSetup: ProviderNativeSetup | undefined;
   /** The person's own permission rules this session applies, empty when none. */
   readonly own: OwnPermissions;
+  /** The host's protected paths when the session started, refused last in its rules. */
+  readonly protectedPaths: ReadonlyArray<string>;
   readonly approvals: Set<string>;
   /**
    * The delegated session each pending approval or question came from, when it
@@ -1380,7 +1388,15 @@ function acquireRuntime(
   probeMode: "chat" | "work" | "code" = "chat",
   probePolicy: ProviderExecutionPolicy = "plan",
 ) {
-  const betaPermissions = betaSessionPermissionRules(probePolicy, probeMode);
+  const betaPermissions = betaSessionPermissionRules(
+    probePolicy,
+    probeMode,
+    undefined,
+    [],
+    false,
+    NO_OWN_PERMISSIONS,
+    options.protectedPaths?.() ?? [],
+  );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
     start: async () => {
@@ -1768,6 +1784,7 @@ function makeConnection(
                     extraFolders,
                     ownSkills,
                     ownPermissions(ownSetup),
+                    options.protectedPaths?.() ?? [],
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
@@ -2134,6 +2151,7 @@ function makeConnection(
             input.nativeSetup,
             rememberedEdits,
             ownPermissions(ownSetup),
+            options.protectedPaths?.() ?? [],
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -2185,6 +2203,7 @@ function makeConnection(
                         extraFolders,
                         state.nativeSetup?.skills === true,
                         state.own,
+                        state.protectedPaths,
                       ),
                       model: splitModelId(input.modelId),
                     }),
@@ -2294,6 +2313,7 @@ function makeConnection(
                 input.nativeSetup,
                 rememberedEdits,
                 ownPermissions(ownSetup),
+                options.protectedPaths?.() ?? [],
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -2464,6 +2484,7 @@ function makeConnection(
                             extraFolders,
                             state.nativeSetup?.skills === true,
                             state.own,
+                            state.protectedPaths,
                           ),
                         }),
                       );
@@ -2738,6 +2759,7 @@ function newSessionState(
   nativeSetup: ProviderNativeSetup | undefined,
   rememberedEdits: Set<string>,
   own: OwnPermissions,
+  protectedPaths: ReadonlyArray<string>,
 ): SessionState {
   return {
     sessionId,
@@ -2753,6 +2775,7 @@ function newSessionState(
     executionPolicy,
     nativeSetup,
     own,
+    protectedPaths,
     approvals: new Set(),
     requestSources: new Map(),
     approvalCalls: new Map(),
@@ -2918,6 +2941,7 @@ function mapAndOffer(
               // which name resources Octant does not see, ended in `ask`; the
               // level decides what Octant does with it.
               { rules: [], toolServers: state.own.toolServers },
+              state.protectedPaths,
             ),
             action,
           );
@@ -3148,31 +3172,34 @@ const PLAN_READ_TOOLS = [
 const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 
 /**
+ * OpenCode's own default agent refuses `.env` files but not their examples;
+ * its rules come before Octant's, so the read allow above would otherwise
+ * take that protection away. These come after everything else.
+ */
+const OPENCODE_ENV_READ_RULES: ReadonlyArray<PermissionV2Rule> = [
+  { action: "read", resource: "*.env", effect: "deny" },
+  { action: "read", resource: "*.env.*", effect: "deny" },
+  { action: "read", resource: "*.env.example", effect: "allow" },
+];
+
+/**
  * The read refusals that come after everything else, so no allow reopens
- * them. OpenCode's own default agent refuses `.env` files but not their
- * examples; its rules come before Octant's, so the read allow above would
- * otherwise take that protection away. Octant's protected-file list in force
- * on this host is refused too, as the Claude Code gate refuses it. A name
- * pattern in that list is refused as its whole folder (`~/.ssh/*`), since
+ * them: the host's protected files in force, which the host resolves and
+ * passes in, refused as the Claude Code gate refuses them. A name pattern in
+ * that list arrives as its whole folder and is refused as `folder/*`, since
  * OpenCode's wildcards cannot say a regular expression: stricter, never wider.
  */
-export function openCodeReadRefusals(
-  platform: NodeJS.Platform = process.platform,
+export function openCodeProtectedReadRefusals(
+  protectedPaths: ReadonlyArray<string>,
 ): ReadonlyArray<PermissionV2Rule> {
-  const protectedPatterns = new Set<string>();
-  for (const entry of secretGuardEntries({ platform })) {
-    const base = entry.kind === "path" ? entry.path : entry.directory;
-    protectedPatterns.add(base);
-    protectedPatterns.add(`${base}/*`);
+  const patterns = new Set<string>();
+  for (const path of protectedPaths) {
+    patterns.add(path);
+    patterns.add(`${path}/*`);
   }
-  return [
-    { action: "read", resource: "*.env", effect: "deny" },
-    { action: "read", resource: "*.env.*", effect: "deny" },
-    { action: "read", resource: "*.env.example", effect: "allow" },
-    ...[...protectedPatterns].flatMap((resource) =>
-      (["read", "list"] as const).map((action) => ({ action, resource, effect: "deny" as const })),
-    ),
-  ];
+  return [...patterns].flatMap((resource) =>
+    (["read", "list"] as const).map((action) => ({ action, resource, effect: "deny" as const })),
+  );
 }
 
 export function permissionRules(
@@ -3182,6 +3209,7 @@ export function permissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
+  protectedPaths: ReadonlyArray<string> = [],
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
@@ -3250,7 +3278,10 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
-  for (const rule of openCodeReadRefusals()) {
+  for (const rule of [
+    ...OPENCODE_ENV_READ_RULES,
+    ...openCodeProtectedReadRefusals(protectedPaths),
+  ]) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
   if (managedToolServerName === undefined) return rules;
@@ -3290,6 +3321,7 @@ export function betaAgentPermissionRules(
   _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
+  protectedPaths: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const denyExternal: PermissionV2Ruleset = [
     { action: "external_directory", resource: "*", effect: "deny" },
@@ -3325,7 +3357,7 @@ export function betaAgentPermissionRules(
   for (const resource of extraFolderPatterns(extraFolders)) {
     rules.push({ action: "external_directory", resource, effect: "allow" });
   }
-  return [...rules, ...openCodeReadRefusals()];
+  return [...rules, ...OPENCODE_ENV_READ_RULES, ...openCodeProtectedReadRefusals(protectedPaths)];
 }
 
 /**
@@ -3360,9 +3392,10 @@ export function betaSessionPermissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
+  protectedPaths: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
-    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules),
+    ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
     ...(own.toolServers ? [] : [{ action: "*_*", resource: "*", effect: "deny" } as const]),
     ...(ownSkills ? [] : [{ action: "skill", resource: "*", effect: "deny" } as const]),
     // 2.0.22's question tool asks for this permission and then publishes a

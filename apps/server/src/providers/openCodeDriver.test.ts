@@ -2789,13 +2789,23 @@ describe("OpenCode driver", () => {
     const projectFile = "/work/project/src/index.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
     const credentials = join(homedir(), ".aws", "credentials");
+    const protectedPaths = [join(homedir(), ".ssh"), credentials];
     for (const policy of ["approval-gated", "plan"] as const) {
-      const legacy = permissionRules(policy, "code").map((rule) => ({
+      const legacy = permissionRules(
+        policy,
+        "code",
+        undefined,
+        [],
+        false,
+        undefined,
+        protectedPaths,
+      ).map((rule) => ({
         action: rule.permission,
         resource: rule.pattern,
         effect: rule.action,
       }));
-      for (const rules of [legacy, betaAgentPermissionRules(policy, "code")]) {
+      const beta = betaAgentPermissionRules(policy, "code", [], [], protectedPaths);
+      for (const rules of [legacy, beta]) {
         expect(lastMatch(rules, "read", projectFile), policy).toBe("allow");
         expect(lastMatch(rules, "grep", "TODO"), policy).toBe("allow");
         expect(lastMatch(rules, "read", key), policy).toBe("deny");
