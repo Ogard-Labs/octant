@@ -3316,7 +3316,11 @@ describe("ProviderSettingsView", () => {
 
   it("adds a ready model to the agent-eligible default pool without activating providers", async () => {
     const user = userEvent.setup();
-    const props = fixture({ observed: observation() });
+    // Only a model that carries Octant's tools can take delegated work.
+    const ready = observation();
+    const props = fixture({
+      observed: { ...ready, capabilities: { ...ready.capabilities, appManagedTools: "supported" } },
+    });
     render(<ProviderSettingsView {...props} />);
 
     const disclosure = screen.getByRole("button", { name: "Agent-eligible models" });
