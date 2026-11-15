@@ -44,7 +44,9 @@ describe("ThreadSearchOverlay", () => {
     await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
     expect(screen.getByRole("dialog", { name: "Search Chat threads" })).toBeVisible();
     expect(
-      screen.getByText("Searches Chat thread titles, messages, and archived history."),
+      screen.getByText(
+        "Searches Chat titles, messages, attachment names, Canvas, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.",
+      ),
     ).toBeVisible();
     expect(screen.getByRole("group", { name: "Threads" })).toBeVisible();
     expect(screen.getByText("Release checklist")).toBeVisible();
@@ -54,6 +56,50 @@ describe("ThreadSearchOverlay", () => {
       /\.thread-search\s*\{[^}]*--octant-dialog-width:\s*520px;[^}]*max-height:/s,
     );
     expect(componentStyles).not.toMatch(/\.thread-search\s*\{[^}]*\bwidth:\s*min\(/s);
+  });
+
+  it("searches every mode by default, names each hit's mode, marks tool output, and filters to one mode", async () => {
+    const user = userEvent.setup();
+    const onScopeChange = vi.fn();
+    const { onOpenThread } = renderOverlay({
+      scope: "all",
+      onScopeChange,
+      initialQuery: "release",
+      contentHits: [
+        // The host also matched this listed thread's title; it shows once.
+        {
+          mode: "chat",
+          threadId: "t1",
+          title: "Release checklist",
+          lifecycle: "active",
+          field: "title",
+          snippet: "Release checklist",
+        },
+        {
+          mode: "code",
+          threadId: "c9",
+          title: "CI",
+          lifecycle: "active",
+          turnId: "op1",
+          field: "tool",
+          snippet: "release.yml failed",
+        },
+      ],
+    });
+
+    expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();
+    expect(screen.getAllByRole("option", { name: /Release checklist/ })).toHaveLength(1);
+    const tool = screen.getByRole("option", { name: /CI/ });
+    expect(tool).toHaveTextContent("Tool output");
+    expect(tool).toHaveTextContent("Code");
+
+    await user.click(tool);
+    expect(onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "code", threadId: "c9", turnId: "op1", field: "tool" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Work" }));
+    expect(onScopeChange).toHaveBeenCalledWith("work");
   });
 
   it("finds a coordinator's worker and marks it as that coordinator's worker", async () => {

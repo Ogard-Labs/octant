@@ -147,6 +147,9 @@ export function classifyProductAction(request: Request): string | undefined {
   // projects. A paired device that does not already have that authority is
   // refused by the route, which returns no figures.
   if (path === "/api/host/resources" && method === "GET") return "project.overview.read";
+  // Search across modes reads what each mode's own GETs already read under
+  // the overview grant, and only among the threads each mode lists.
+  if (path === "/api/search" && method === "GET") return "project.overview.read";
   // Sync status is a read of this host with nothing to act on; setting up,
   // joining, and revoking stay on the host's own membership routes.
   if (path === "/api/replica-sync/status" && method === "GET") return "project.overview.read";

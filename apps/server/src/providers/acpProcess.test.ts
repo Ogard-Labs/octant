@@ -2207,6 +2207,7 @@ describe("Mistral Vibe running as itself", () => {
       "VIBE_ENABLE_EXPERIMENTAL_HOOKS",
       "VIBE_TOOL_PATHS",
       "VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS",
+      "VIBE_DISABLED_TOOLS",
     ]) {
       expect(own, name).not.toHaveProperty(name);
     }
@@ -2225,6 +2226,26 @@ describe("Mistral Vibe running as itself", () => {
     expect(readOnly.VIBE_MCP_SERVERS).toBe("[]");
     expect(readOnly.VIBE_ENABLE_EXPERIMENTAL_HOOKS).toBe("false");
     expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
+  });
+
+  it("keeps Vibe's own web search and fetch off unless the setup has web tools on", () => {
+    const off = '["web_search","web_fetch"]';
+    expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_DISABLED_TOOLS).toBe(off);
+    expect(
+      sanitizeAcpEnvironment(
+        vibe,
+        {},
+        {
+          managedHome: "/x",
+          executionPolicy: "full-access",
+          mode: "code",
+          nativeSetup: { ...everything, webTools: false },
+        },
+      ).VIBE_DISABLED_TOOLS,
+    ).toBe(off);
+    expect(
+      sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything }),
+    ).not.toHaveProperty("VIBE_DISABLED_TOOLS");
   });
 
   it("lets Vibe start its own subagents, as the person's own agents, in Work or Code at every level outside Plan", () => {

@@ -37,6 +37,31 @@ function router(now: () => number) {
 }
 
 describe("native harness router", () => {
+  it("skips a model outside the harness, journals why, and never routes to it", () => {
+    const settings: NativeHarnessRoutingSettings = {
+      configuration: {
+        slots: [{ id: "default" as never, candidates: [big, spare] }],
+        jobSlots: [],
+      },
+      version: 1 as never,
+      updatedAt: "2026-09-05T12:00:00.000Z" as never,
+    };
+    const subject = new NativeHarnessRouter({
+      store: { host: () => settings, projectOverride: () => undefined },
+      isReady: () => true,
+      canRunInHarness: (candidate) => candidate.modelId === spare.modelId,
+    });
+    const decision = subject.resolve({ job: "implementer" });
+    expect(decision).toMatchObject({ kind: "failure-fallback", candidate: spare });
+    expect(decision.rejected).toEqual([{ candidate: big, reasons: ["not-harness-runnable"] }]);
+    const none = new NativeHarnessRouter({
+      store: { host: () => settings, projectOverride: () => undefined },
+      isReady: () => true,
+      canRunInHarness: () => false,
+    });
+    expect(none.resolve({ job: "implementer" })).toMatchObject({ kind: "unroutable" });
+  });
+
   it("only inherits an offered parent while its cooldown and the empty slot's breaker allow it", () => {
     let clock = 1_000_000;
     const subject = new NativeHarnessRouter({

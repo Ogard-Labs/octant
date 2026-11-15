@@ -56,6 +56,7 @@ import {
   type CodexEventContext,
   type CodexMappedMessage,
   type CodexPendingApproval,
+  type CodexPendingQuestion,
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -149,6 +150,8 @@ export interface CodexThreadConfig {
    */
   readonly model_auto_compact_token_limit?: number;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  /** Codex's own web search, switched off unless the session's native setup has it on. */
+  readonly web_search?: "disabled";
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
   };
@@ -231,6 +234,20 @@ const CODEX_CHAT_CONFIG = {
 const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
   ...CODEX_SHELL_OFF_CONFIG,
   "features.view_image": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * Codex's built-in web search runs only where the session's native setup has
+ * `webTools` on: left unset, Codex searches by default, so a session whose
+ * person or account turned web tools off would still search. Read from the codex-cli 0.169.0 source: the `web_search` config key
+ * (disabled, cached, indexed, or live) wins over the legacy feature flags,
+ * defaults to cached when unset, and `disabled` leaves out both the hosted
+ * search tool and the standalone `web.run` tool; a managed requirement always
+ * accepts `disabled`. Like the other overrides it is forgotten on a plain
+ * resume, so it is sent on every start and resume.
+ */
+const CODEX_WEB_SEARCH_OFF_CONFIG = {
+  web_search: "disabled",
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -394,6 +411,50 @@ export interface CodexTurnStartInput {
    */
   readonly model?: string;
   readonly effort?: string;
+  /** Codex's own collaboration mode (see {@link codexCollaborationMode}). */
+  readonly collaborationMode?: CodexCollaborationMode;
+}
+
+/**
+ * `turn/start.collaborationMode`, an experimental field the connection opts
+ * into at `initialize`. It takes precedence over `model` and `effort`, so it
+ * restates both; `developer_instructions: null` asks for the mode's built-in
+ * instructions (`TurnStartParams` in codex-rs `app-server-protocol` at
+ * `rust-v0.169.0`, present since `rust-v0.155.1`).
+ */
+export interface CodexCollaborationMode {
+  readonly mode: "plan" | "default";
+  readonly settings: {
+    readonly model: string;
+    readonly reasoning_effort: string | null;
+    readonly developer_instructions: null;
+  };
+}
+
+/**
+ * The collaboration mode a session's turns carry. A Plan session runs in
+ * Codex's own Plan mode: Codex plans as it does on its own, proposes its plan
+ * as a plan item, and may ask the person through its question form. Plan's
+ * read-only sandbox and declined approvals are unchanged by it, since Codex's
+ * mode only instructs the model. Codex keeps a mode for the thread's later
+ * turns, so a session outside Plan on a thread that recorded Plan names the
+ * default mode; any other session sends none and runs as it did before.
+ */
+export function codexCollaborationMode(
+  policy: ProviderExecutionPolicy,
+  thread: Pick<CodexThreadResult, "reasoningEffort" | "collaborationMode">,
+  model: string,
+  turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
+): CodexCollaborationMode | undefined {
+  if (policy !== "plan" && thread.collaborationMode?.mode !== "plan") return undefined;
+  return {
+    mode: policy === "plan" ? "plan" : "default",
+    settings: {
+      model: turnOverrides?.model ?? model,
+      reasoning_effort: turnOverrides?.effort ?? thread.reasoningEffort ?? null,
+      developer_instructions: null,
+    },
+  };
 }
 
 export interface CodexApprovalResponse {
@@ -470,6 +531,7 @@ interface SessionState {
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
+  readonly collaborationMode?: CodexCollaborationMode;
   /**
    * The app tools the thread started with, which Codex keeps for good: a
    * resume that offers others is accepted and ignored (measured on 0.164.0).
@@ -494,6 +556,13 @@ interface SessionState {
   >;
   /** The compaction `compact` asked for, until the run that carries it ends. */
   compaction?: CodexPendingCompaction | undefined;
+  /**
+   * Codex's question set waiting on the person, and the answers given so far
+   * by question position. Codex blocks its turn on one set at a time.
+   */
+  pendingQuestion?:
+    | { readonly question: CodexPendingQuestion; readonly answers: Map<number, string> }
+    | undefined;
 }
 
 interface CodexPendingCompaction {
@@ -518,7 +587,7 @@ const capabilities = {
   resume: "supported",
   interruption: "supported",
   approvals: "supported",
-  userQuestions: "unsupported",
+  userQuestions: "supported",
   reasoning: "supported",
   usage: "supported",
   toolActivity: "supported",
@@ -538,7 +607,8 @@ const capabilities = {
   nativeSetup: {
     // A subagent's requests reach the parent's approval path at every level.
     subagents: "supported",
-    // Codex's own web search was never switched off; each search marks.
+    // Codex's own web search runs only where the setup has it on; each
+    // search marks the thread.
     webTools: "supported",
     skills: "supported",
     toolServers: "supported",
@@ -1610,7 +1680,11 @@ function makeConnection(
             : mode === "work"
               ? CODEX_WORK_CONFIG
               : {};
-        return skills === undefined ? modeConfig : { ...modeConfig, skills };
+        const webConfig =
+          nativeSetup?.webTools === true
+            ? modeConfig
+            : { ...modeConfig, ...CODEX_WEB_SEARCH_OFF_CONFIG };
+        return skills === undefined ? webConfig : { ...webConfig, skills };
       });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
@@ -1667,6 +1741,9 @@ function makeConnection(
         }
       }
       state.pendingApprovals.clear();
+      // A question set waits on the person like an approval and goes with
+      // the turn the same way; Codex drops its request at the turn's end.
+      state.pendingQuestion = undefined;
     };
     const clearPendingTools = (state: SessionState) => {
       for (const pending of state.pendingTools.values()) {
@@ -1868,6 +1945,12 @@ function makeConnection(
     ) => {
       const owner = subagentOwner(message.params.threadId);
       if (owner === undefined) return;
+      // Codex offers its question form to the root thread only; a subagent's
+      // set is answered empty, as Codex reads a client that could not ask.
+      if (message.method === "item/tool/requestUserInput") {
+        refuseSubagentRequest(message.id, { kind: "approval", result: { answers: {} } });
+        return;
+      }
       if (owner.terminal || owner.context === undefined) {
         refuseSubagentRequest(
           message.id,
@@ -1931,6 +2014,26 @@ function makeConnection(
         if (item.kind === "approval" || item.kind === "tool") {
           state.outputAccepted = true;
           if (admitRequest(state, item, message) === "stopped") return;
+          continue;
+        }
+        // A question asks the person and changes nothing, so every posture
+        // shows it, Plan and Full access included, as Codex itself does.
+        if (item.kind === "question-refused") {
+          state.outputAccepted = true;
+          respondInBackground(state, item.providerRequestId, () => item.result);
+          continue;
+        }
+        if (item.kind === "question") {
+          state.outputAccepted = true;
+          if (state.pendingQuestion !== undefined) {
+            terminalEvent(state, {
+              kind: "failed",
+              failure: failure("protocol", "Codex asked a second question set while one waited."),
+            });
+            return;
+          }
+          state.pendingQuestion = { question: item.question, answers: new Map() };
+          for (const asked of item.question.events) offer(asked);
           continue;
         }
         if (!isTerminal(item.event)) state.outputAccepted = true;
@@ -2089,6 +2192,12 @@ function makeConnection(
         deactivate(previous);
         sessionsByThread.delete(previous.threadId);
       }
+      const collaborationMode = codexCollaborationMode(
+        input.executionPolicy,
+        thread,
+        modelId,
+        turnOverrides,
+      );
       const state: SessionState = {
         sessionId: input.sessionId,
         projectRoot,
@@ -2098,6 +2207,7 @@ function makeConnection(
         fullAccessSandbox: input.fullAccessSandbox,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
+        ...(collaborationMode === undefined ? {} : { collaborationMode }),
         carriedTools,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
@@ -2373,6 +2483,9 @@ function makeConnection(
                         state.fullAccessSandbox,
                       ),
                       ...state.turnOverrides,
+                      ...(state.collaborationMode === undefined
+                        ? {}
+                        : { collaborationMode: state.collaborationMode }),
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {
@@ -2576,8 +2689,50 @@ function makeConnection(
             );
           }),
         ),
-      answerUserInput: () =>
-        Effect.fail(failure("unsupported", "Codex stable user questions are unsupported.")),
+      answerUserInput: (input) =>
+        stateFor(input.sessionId).pipe(
+          Effect.flatMap((state) => {
+            const pending = state.pendingQuestion;
+            const index = pending?.question.requestIds.indexOf(input.requestId) ?? -1;
+            if (
+              state.terminal ||
+              pending === undefined ||
+              index === -1 ||
+              pending.question.turnId !== state.activeTurnId ||
+              pending.answers.has(index)
+            ) {
+              return Effect.fail(
+                failure("protocol", "Codex question request is not pending for this turn."),
+              );
+            }
+            pending.answers.set(index, input.answer);
+            if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
+            state.pendingQuestion = undefined;
+            const answers = Object.fromEntries(
+              pending.question.questionIds.map((questionId, position) => [
+                questionId,
+                { answers: [pending.answers.get(position) ?? ""] },
+              ]),
+            );
+            // The JSON-RPC reply to Codex's question request, sent the way
+            // an approval's reply is.
+            return request(() =>
+              client.respondApproval({
+                providerRequestId: pending.question.providerRequestId,
+                result: { answers },
+              }),
+            ).pipe(
+              Effect.catchAll((providerFailure) =>
+                Effect.sync(() =>
+                  terminalEvent(state, {
+                    kind: "waiting",
+                    message: "Codex question response failed; resume must be verified.",
+                  }),
+                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+              ),
+            );
+          }),
+        ),
       answerTool: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {

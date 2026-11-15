@@ -18,10 +18,12 @@ import type { ResearchExecuteInput, ResearchExecutionResult } from "./researchRo
  */
 export function createWebSearchTools(
   search: (input: ResearchExecuteInput) => Promise<ResearchExecutionResult>,
+  /** The thread searching, so where each query went is journaled with its tool call. */
+  threadId?: string,
 ): AppManagedToolSet {
   return {
     definitions: [WEB_SEARCH_TOOL_DEFINITION],
-    execute: async ({ name, inputJson, signal }) => {
+    execute: async ({ name, inputJson, signal, toolCallId }) => {
       if (name !== WEB_SEARCH_TOOL_DEFINITION.name) {
         return { result: { error: "tool-unavailable" }, isError: true };
       }
@@ -40,6 +42,8 @@ export function createWebSearchTools(
           query: input.query,
           limit: input.limit ?? DEFAULT_WEB_SEARCH_RESULTS,
           ...(signal === undefined ? {} : { signal }),
+          ...(threadId === undefined ? {} : { threadId }),
+          ...(toolCallId === undefined ? {} : { toolCallId }),
         });
         return { result: { query: input.query, results: found.results } };
       } catch {

@@ -735,6 +735,85 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("keeps a web search backend's key in its own namespace and refuses callers without the broker token", async () => {
+    const credentialRef = randomUUID();
+    const searchKeys = memoryStore();
+    const providerKeys = memoryStore();
+    const broker = await startCredentialBroker(
+      providerKeys,
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      memoryStore(),
+      undefined,
+      memoryStore(),
+      undefined,
+      searchKeys,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>, token = broker.token) =>
+        broker.fetchForTest(brokerRequest(broker.url, token, path, { body: JSON.stringify(body) }));
+      expect(
+        (await call("/v1/web-search-credentials/set", { credentialRef, credential: "search-key" }))
+          .status,
+      ).toBe(200);
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: credentialRef })).status,
+      ).toBe(404);
+      for (const route of [
+        "/v1/desktop-provider-credentials/resolve",
+        "/v1/push-platform-credentials/resolve",
+      ]) {
+        expect((await call(route, { credentialRef })).status).toBe(404);
+      }
+      expect(
+        (await call("/v1/web-search-credentials/resolve", { credentialRef }, "wrong-token")).status,
+      ).toBe(401);
+      expect(
+        (
+          await broker.fetchForTest(
+            brokerRequest(broker.url, broker.token, "/v1/web-search-credentials/resolve", {
+              body: JSON.stringify({ credentialRef }),
+            }),
+            "192.0.2.10",
+          )
+        ).status,
+      ).toBe(401);
+      expect(
+        (await call("/v1/web-search-credentials/resolve", { providerInstanceId: credentialRef }))
+          .status,
+      ).toBe(400);
+      expect(
+        await (await call("/v1/web-search-credentials/resolve", { credentialRef })).json(),
+      ).toEqual({ credential: "search-key" });
+      expect(
+        await (await call("/v1/web-search-credentials/delete", { credentialRef })).json(),
+      ).toEqual({ deleted: true });
+      expect(await searchKeys.has(credentialRef)).toBe(false);
+      expect(await providerKeys.has(credentialRef)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
+  it("answers the web search key routes as unknown when the host has no store for them", async () => {
+    const broker = await startCredentialBroker(memoryStore());
+    try {
+      const response = await broker.fetchForTest(
+        brokerRequest(broker.url, broker.token, "/v1/web-search-credentials/has", {
+          body: JSON.stringify({ credentialRef: randomUUID() }),
+        }),
+      );
+      expect(response.status).toBe(404);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("gives out an SSH key's public line and signs only its logins, never the key", async () => {
     const serverId = randomUUID();
     const sshKeys = memoryStore();

@@ -1,8 +1,12 @@
 import {
   KEY_PROVIDER_DRIVER_KINDS,
+  type KeyProviderDriverKinds,
+  type ProjectId,
+  type ProjectSummary,
   type ProviderInstanceId,
   type ProviderInstance,
   type ThreadNativeSetupChoice,
+  type ThreadProjectCode,
 } from "@octant/contracts";
 import { ChevronDown } from "../ui/icons";
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
@@ -26,6 +30,25 @@ export interface ThreadNativeSetupServices {
     providerInstanceId: ProviderInstanceId,
     choice: ThreadNativeSetupChoice,
   ) => Promise<ThreadNativeSetupChoice>;
+  /** Whether a Work or Code thread's Project holds its provider's own Project code, and its trust. */
+  readonly readProjectCode?: (
+    threadId: string,
+    mode: "work" | "code",
+  ) => Promise<ThreadProjectCode>;
+  /** The Projects as this window last read them, for their live trust. */
+  readonly projects?: ReadonlyArray<ProjectSummary>;
+  /**
+   * Sends the Project's whole trusted-provider list, as Project settings does.
+   * Absent where this window holds no Project controller.
+   */
+  readonly setProjectNativeProviders?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ) => Promise<boolean>;
+}
+
+export function useThreadNativeSetupServices(): ThreadNativeSetupServices | undefined {
+  return useContext(ThreadNativeSetupContext);
 }
 
 const ThreadNativeSetupContext = createContext<ThreadNativeSetupServices | undefined>(undefined);

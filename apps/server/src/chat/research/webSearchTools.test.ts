@@ -11,6 +11,20 @@ function searchReturning() {
 }
 
 describe("Chat web search", () => {
+  it("passes the thread and the provider's call id with the query, so where it went is journaled with the call", async () => {
+    const search = searchReturning();
+    await createWebSearchTools(search, "00000000-0000-4000-8000-0000000000c7").execute({
+      name: "web-search",
+      inputJson: JSON.stringify({ query: "octant" }),
+      toolCallId: "toolu_search_1",
+    });
+    expect(search.mock.calls[0]?.[0]).toMatchObject({
+      query: "octant",
+      threadId: "00000000-0000-4000-8000-0000000000c7",
+      toolCallId: "toolu_search_1",
+    });
+  });
+
   it("offers the same web-search definition the harness offers", () => {
     expect(createWebSearchTools(searchReturning()).definitions).toEqual([
       WEB_SEARCH_TOOL_DEFINITION,

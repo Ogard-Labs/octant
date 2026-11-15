@@ -653,12 +653,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "research backend web search octant searxng",
         },
         {
-          id: settingId("chat-searxng-url"),
-          label: "SearXNG base URL",
-          scope: "app",
-          keywords: "searxng url address search engine research",
-        },
-        {
           id: settingId("chat-restart-continuation"),
           label: "Continue after restart",
           scope: "mode",
@@ -938,6 +932,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer telemetry usage anthropic privacy",
         },
         {
+          id: settingId("provider-web-tools"),
+          label: "A runtime's own web search and fetch",
+          scope: "host",
+          keywords: "web tools search fetch locked web search data policy zdr eu",
+        },
+        {
           id: settingId("provider-native-setup"),
           label: "Run as itself",
           scope: "host",
@@ -1145,6 +1145,33 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Added skill folders",
           scope: "host",
           keywords: "skill folders add folder path custom directory",
+        },
+      ],
+    },
+    {
+      id: "web-search",
+      label: "Web search",
+      scope: "host",
+      keywords:
+        "web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
+      settings: [
+        {
+          id: settingId("web-search-policy"),
+          label: "Data policy",
+          scope: "host",
+          keywords: "policy zdr eu processing region any",
+        },
+        {
+          id: settingId("web-search-provider-search"),
+          label: "A provider's own search",
+          scope: "host",
+          keywords: "provider native search anthropic openai web tools locked",
+        },
+        {
+          id: settingId("web-search-add"),
+          label: "Add backend",
+          scope: "host",
+          keywords: "add backend searxng staan mojeek linkup brave exa key",
         },
       ],
     },

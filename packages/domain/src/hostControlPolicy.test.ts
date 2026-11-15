@@ -72,6 +72,25 @@ describe("deriveHostLifecycleControls", () => {
     }
   });
 
+  it("offers neither restart nor a startup change on a host its Windows logon entry starts", () => {
+    for (const serviceMode of ["desktop", "service"] as const) {
+      const controls = deriveHostLifecycleControls({
+        serviceMode,
+        policy: knownPolicy,
+        supervisor: "logon-entry",
+      });
+      expect(controls.stop).toEqual({ kind: "available" });
+      for (const [control, command] of [
+        [controls.restart, "octant server restart"],
+        [controls.enable, "octant server enable"],
+        [controls.disable, "octant server disable"],
+      ] as const) {
+        expect(control.kind).toBe("unavailable");
+        if (control.kind === "unavailable") expect(control.reason).toContain(command);
+      }
+    }
+  });
+
   it("withholds policy mutations when the service policy is unavailable", () => {
     const controls = deriveHostLifecycleControls({
       serviceMode: "service",

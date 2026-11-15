@@ -3,7 +3,7 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   nativeHarnessSlotCandidateKey,
   type AgentRunRole,
-  type MultiModelCandidateRejectionReason,
+  type NativeHarnessCandidateRejectionReason,
   type NativeHarnessJob,
   type NativeHarnessRejectedCandidate,
   type NativeHarnessRouteDecision,
@@ -18,6 +18,12 @@ import {
 /** What the resolver may know about one candidate before it is chosen. */
 export interface NativeHarnessCandidateFacts {
   readonly ready: boolean;
+  /**
+   * Whether the harness can run this candidate itself. A role may list any
+   * connected provider's model; absent means runnable, and a candidate that
+   * is not is skipped like an ineligible one, never run in the harness.
+   */
+  readonly harnessRunnable?: boolean;
   /** A recent failure that keeps this candidate out of the chain until then. */
   readonly coolingDown?: {
     readonly reason: NativeHarnessRouteFailureReason;
@@ -101,7 +107,8 @@ export function resolveNativeHarnessRoute(
   let primaryFailure: NativeHarnessCandidateFacts["coolingDown"] | undefined;
   for (const [index, candidate] of slot.candidates.entries()) {
     const facts = input.facts(candidate);
-    const reasons: MultiModelCandidateRejectionReason[] = [];
+    const reasons: NativeHarnessCandidateRejectionReason[] = [];
+    if (facts.harnessRunnable === false) reasons.push("not-harness-runnable");
     if (!facts.ready) reasons.push("provider-not-ready");
     if (facts.coolingDown !== undefined && facts.coolingDown.until > input.now) {
       reasons.push("provider-not-ready");

@@ -25,7 +25,7 @@ import { useTheme, type ThemeColors } from "../../design-system";
 import { ListRow, ListSection, NavBar, SegmentedControl, ToolbarButton } from "../ui/NativeChrome";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { HomeComposerSheet } from "./HomeComposerSheet";
-import { sectionForAgentRow } from "./agentsListPresentation";
+import { searchHitsBesideList, sectionForAgentRow } from "./agentsListPresentation";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
 
@@ -223,6 +223,15 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       .map((section) => ({ title: section.title, rows: searchedRows(section.rows) }))
       .filter((section) => section.rows.length > 0);
   }, [grouped, hostLabel, query, view]);
+  // The filtered list already shows its own title matches; the hits add the rest.
+  const threadHits = useMemo(
+    () =>
+      searchHitsBesideList(
+        messageHits,
+        sections.flatMap((section) => section.rows),
+      ),
+    [messageHits, sections],
+  );
 
   const viewOptions: ReadonlyArray<{ readonly id: AgentListView; readonly label: string }> = [
     { id: "all", label: MOBILE_COPY.statusAllShort },
@@ -421,20 +430,26 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
       <ScrollView contentContainerStyle={styles.list} contentInsetAdjustmentBehavior="automatic">
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
-        {!loading && sections.length === 0 && messageHits.length === 0 ? (
+        {!loading && sections.length === 0 && threadHits.length === 0 ? (
           <Text style={styles.help}>
             {transports.length === 0 ? MOBILE_COPY.inboxEmpty : "No threads here yet"}
           </Text>
         ) : null}
-        {messageHits.length > 0 ? (
+        {threadHits.length > 0 ? (
           <ListSection testID="mobile-agents-message-hits" title={MOBILE_COPY.searchMessages}>
-            {messageHits.map((hit, index) => (
+            {threadHits.map((hit, index) => (
               <ListRow
-                detail={formatScreenshotSafeLabel(hit.snippet)}
+                detail={formatScreenshotSafeLabel(
+                  hit.field === "tool"
+                    ? `${MOBILE_COPY.searchToolOutput} · ${hit.snippet}`
+                    : hit.field === "canvas"
+                      ? `${MOBILE_COPY.searchCanvas} · ${hit.snippet}`
+                      : hit.snippet,
+                )}
                 icon={modeIcon(hit.mode)}
-                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId}`}
+                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
                 label={formatScreenshotSafeLabel(hit.title)}
-                last={index === messageHits.length - 1}
+                last={index === threadHits.length - 1}
                 onPress={() =>
                   props.onOpenThread(
                     rows.find(

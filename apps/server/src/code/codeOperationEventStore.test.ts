@@ -118,6 +118,36 @@ describe("CodeOperationEventStore", () => {
     reopened.connection.close();
   });
 
+  it("replays a turn the runtime started inside the person's turn after a restart", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const firstStore = createStore(first.journal);
+    firstStore.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { kind: "runtime-turn-started", trigger: "background-task" },
+    });
+    firstStore.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const store = createStore(reopened.journal);
+    expect(store.replay({ threadId, operationId, afterCursor: 0, limit: 10 })).toMatchObject({
+      status: "ok",
+      frames: [
+        { cursor: 1, event: { kind: "operation-state", state: "running" } },
+        { cursor: 2, event: { kind: "runtime-turn-started", trigger: "background-task" } },
+        { cursor: 3, event: { kind: "operation-state", state: "completed" } },
+      ],
+    });
+    expect(() =>
+      decodeCodeOperationEvent({ kind: "runtime-turn-started", trigger: "person" }),
+    ).toThrow();
+    reopened.connection.close();
+  });
+
   it("retains the normalized child identity in Code journal replay without granting a run", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

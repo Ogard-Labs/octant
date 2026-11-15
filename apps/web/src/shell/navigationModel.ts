@@ -1,4 +1,8 @@
-import type { ThreadBoardPullRequestSummaries, ThreadLiveStep } from "@octant/contracts";
+import type {
+  CoordinatorWorkerChoice,
+  ThreadBoardPullRequestSummaries,
+  ThreadLiveStep,
+} from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
 import type {
@@ -247,8 +251,10 @@ export interface ChatThreadNavigationItem {
    * the row still says "N working · N needs you" and no request is hidden.
    */
   readonly hiddenWorkers?: { readonly working: number; readonly attention: number };
-  /** Code only: the model the thread runs, by id, for a worker's row in the Workers panel. */
+  /** Code only: the model the thread runs, by id; a worker's row shows it. */
   readonly modelId?: string;
+  /** Code only: how the host chose a worker's model from the roles. */
+  readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /** When the thread was created; places a worker's card in its coordinator's transcript. */
   readonly createdAt?: string;
   /** Code and Work: the Wake when a message arrives switch is on. */

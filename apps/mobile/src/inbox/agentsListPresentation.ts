@@ -29,3 +29,26 @@ export function sectionForAgentRow(row: MobileInboxRow): AgentSection {
   }
   return "read";
 }
+
+/**
+ * The host's search hits to list beside the in-place title filter. A title
+ * match for a thread the filtered list already shows is that same row; any
+ * other title match stays, since the host matches words in any order and the
+ * list only the whole query.
+ */
+export function searchHitsBesideList<
+  Hit extends {
+    readonly hostId: string;
+    readonly mode: string;
+    readonly threadId: string;
+    readonly field?: string;
+  },
+>(
+  hits: ReadonlyArray<Hit>,
+  shownRows: ReadonlyArray<Pick<MobileInboxRow, "hostId" | "mode" | "threadId">>,
+): ReadonlyArray<Hit> {
+  const shown = new Set(shownRows.map((row) => `${row.hostId}:${row.mode}:${row.threadId}`));
+  return hits.filter(
+    (hit) => hit.field !== "title" || !shown.has(`${hit.hostId}:${hit.mode}:${hit.threadId}`),
+  );
+}

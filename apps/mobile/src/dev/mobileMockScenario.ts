@@ -58,6 +58,17 @@ const CHAT_THREAD_ID = "40000000-0000-4000-8000-000000000001";
 const CHAT_WAITING_ID = "40000000-0000-4000-8000-000000000002";
 const WORK_THREAD_ID = "50000000-0000-4000-8000-000000000001";
 const CODE_THREAD_ID = "60000000-0000-4000-8000-000000000001";
+const CODE_RESUME_THREAD_ID = "60000000-0000-4000-8000-000000000002";
+const CHAT_EARLIER_ID = "40000000-0000-4000-8000-000000000003";
+const WORK_WEEK_ID = "50000000-0000-4000-8000-000000000002";
+/**
+ * How many earlier turns the review Code thread holds before its newest one:
+ * more than the phone's first page, so a message search hit in an old turn
+ * opens an earlier page with Jump to latest.
+ */
+const CODE_EARLIER_TURNS = 24;
+/** The old Code turn the preview's search finds ("keychain"). */
+const CODE_SEARCHABLE_TURN = 3;
 const CHECKOUT_ID = "70000000-0000-4000-8000-000000000001";
 const REPOSITORY_ID = `repo_${"a".repeat(64)}`;
 
@@ -159,7 +170,7 @@ function createChatThread(input: {
     researchRouting: "automatic",
     personalityInstructions: "Be direct and practical.",
     version: 3,
-    createdAt: EARLIER,
+    createdAt: input.updatedAt < EARLIER ? input.updatedAt : EARLIER,
     updatedAt: input.updatedAt,
   });
 }
@@ -276,8 +287,10 @@ function createWorkThread(
     readonly title?: string | undefined;
     readonly providerInstanceId?: string | undefined;
     readonly modelId?: string | undefined;
+    readonly updatedAt?: string | undefined;
   } = {},
 ): WorkThread {
+  const updatedAt = input.updatedAt ?? NOW;
   return decodeWorkThread({
     id: input.id ?? WORK_THREAD_ID,
     projectId: input.projectId ?? PROJECT_ID,
@@ -287,19 +300,27 @@ function createWorkThread(
     modelId: input.modelId ?? MODEL_ID,
     bindingRevisionId: BINDING_ID,
     version: 2,
-    createdAt: EARLIER,
-    updatedAt: NOW,
+    createdAt: updatedAt < EARLIER ? updatedAt : EARLIER,
+    updatedAt,
   });
 }
 
-function createCodeThread(lifecycle: "active" | "waiting" = "active"): CodeThread {
+function createCodeThread(
+  lifecycle: "active" | "waiting" = "active",
+  input: {
+    readonly id?: string;
+    readonly title?: string;
+    readonly updatedAt?: string;
+  } = {},
+): CodeThread {
+  const updatedAt = input.updatedAt ?? NOW;
   return {
-    id: CODE_THREAD_ID,
+    id: input.id ?? CODE_THREAD_ID,
     projectId: CODE_PROJECT_ID,
     bindingRevisionId: BINDING_ID,
     repositoryId: REPOSITORY_ID,
     checkoutId: CHECKOUT_ID,
-    title: "Mobile mock-data foundation",
+    title: input.title ?? "Mobile mock-data foundation",
     lifecycle,
     providerInstanceId: PROVIDER_ID,
     modelId: MODEL_ID,
@@ -314,8 +335,8 @@ function createCodeThread(lifecycle: "active" | "waiting" = "active"): CodeThrea
       confirmedAt: NOW,
     },
     version: 4,
-    createdAt: EARLIER,
-    updatedAt: NOW,
+    createdAt: updatedAt < EARLIER ? updatedAt : EARLIER,
+    updatedAt,
   } as CodeThread;
 }
 
@@ -629,6 +650,8 @@ function createMockTransport(input: {
   readonly chatViews: ReadonlyArray<ChatThreadView>;
   readonly workThreads: ReadonlyArray<WorkThread>;
   readonly codeThreads: ReadonlyArray<CodeThread>;
+  /** When the usage limit the waiting Code thread stopped at resets. */
+  readonly usageResetsAt?: string;
 }): MobileRemoteTransport {
   const chatThreads = [...input.chatThreads];
   // A sample to-do list, decided by the list host's own rules, so the phone's
@@ -737,8 +760,10 @@ function createMockTransport(input: {
       },
     ]);
   }
-  // The review thread has one finished turn, so its Context & usage pane
-  // shows the window its provider reported.
+  // The review thread's newest turn reports its context window, so the Context
+  // & usage pane has a figure. Earlier turns come before it, more than the
+  // phone's first page, and one of them holds the word the preview's message
+  // search finds, so that hit opens an earlier page with Jump to latest.
   if (codeThreads.some((thread) => String(thread.id) === CODE_THREAD_ID)) {
     const prompt = "Bring the desktop's side panes to the phone, read-only.";
     const reply = "Added Environment, Review, Context & usage and Agents as one sheet.";
@@ -757,7 +782,53 @@ function createMockTransport(input: {
       byteLength: encoder.encode(reply).byteLength,
       text: reply,
     });
+    const earlierTurns = Array.from({ length: CODE_EARLIER_TURNS }, (_, index) => {
+      const step = index + 1;
+      const earlierPrompt =
+        step === CODE_SEARCHABLE_TURN
+          ? "Move the session keys behind the keychain migration before the device pass."
+          : `Step ${String(step)}: tighten the mock host so the phone's screens have data.`;
+      const earlierReply =
+        step === CODE_SEARCHABLE_TURN
+          ? "Session keys now read through the keychain migration; nothing stays in plain storage."
+          : `Done with step ${String(step)}.`;
+      const earlierPromptId = mockUuid(0x85, step * 2);
+      const earlierReplyId = mockUuid(0x85, step * 2 + 1);
+      for (const [contentId, text, sequence] of [
+        [earlierPromptId, earlierPrompt, step * 2],
+        [earlierReplyId, earlierReply, step * 2 + 1],
+      ] as const) {
+        codeEvidence.set(contentId, {
+          contentId,
+          digest: mockDigest(sequence),
+          byteLength: encoder.encode(text).byteLength,
+          text,
+        });
+      }
+      return {
+        operationId: mockUuid(0x86, step),
+        providerInstanceId: PROVIDER_ID,
+        modelId: MODEL_ID,
+        sessionId: "82000000-0000-4000-8000-000000000002",
+        prompt: {
+          contentId: earlierPromptId,
+          digest: mockDigest(step * 2),
+          byteLength: encoder.encode(earlierPrompt).byteLength,
+        },
+        assistant: [
+          {
+            contentId: earlierReplyId,
+            digest: mockDigest(step * 2 + 1),
+            byteLength: encoder.encode(earlierReply).byteLength,
+          },
+        ],
+        status: "completed",
+        startedAt: EARLIER,
+        updatedAt: EARLIER,
+      };
+    });
     codeTurns.set(CODE_THREAD_ID, [
+      ...earlierTurns,
       {
         operationId: "82000000-0000-4000-8000-000000000001",
         providerInstanceId: PROVIDER_ID,
@@ -785,6 +856,54 @@ function createMockTransport(input: {
         status: "completed",
         startedAt: EARLIER,
         updatedAt: NOW,
+      },
+    ]);
+  }
+  // The sync thread's provider stopped at a usage limit and is waiting, so the
+  // thread offers Resume when it resets above its composer.
+  if (codeThreads.some((thread) => String(thread.id) === CODE_RESUME_THREAD_ID)) {
+    const prompt = "Profile the sync worker and cut its cold start in half.";
+    const reply = "The first pass found two blocking reads; I stopped at the usage limit.";
+    const promptId = "87000000-0000-4000-8000-000000000001";
+    const replyId = "87000000-0000-4000-8000-000000000002";
+    const encoder = new TextEncoder();
+    for (const [contentId, text, sequence] of [
+      [promptId, prompt, 900],
+      [replyId, reply, 901],
+    ] as const) {
+      codeEvidence.set(contentId, {
+        contentId,
+        digest: mockDigest(sequence),
+        byteLength: encoder.encode(text).byteLength,
+        text,
+      });
+    }
+    codeTurns.set(CODE_RESUME_THREAD_ID, [
+      {
+        operationId: "87000000-0000-4000-8000-000000000003",
+        providerInstanceId: PROVIDER_ID,
+        modelId: MODEL_ID,
+        sessionId: "87000000-0000-4000-8000-000000000004",
+        prompt: {
+          contentId: promptId,
+          digest: mockDigest(900),
+          byteLength: encoder.encode(prompt).byteLength,
+        },
+        assistant: [
+          {
+            contentId: replyId,
+            digest: mockDigest(901),
+            byteLength: encoder.encode(reply).byteLength,
+          },
+        ],
+        status: "waiting",
+        failure: {
+          category: "unavailable",
+          message: "The provider's usage limit was reached.",
+          usageLimit: { kind: "temporary", resetsAt: input.usageResetsAt ?? NOW },
+        },
+        startedAt: EARLIER,
+        updatedAt: EARLIER,
       },
     ]);
   }
@@ -902,14 +1021,28 @@ function createMockTransport(input: {
         const threadId = decodeURIComponent(
           request.path.slice("/api/code/threads/".length, -"/conversation/window".length),
         );
-        const limit = Number(new URLSearchParams(request.query ?? "").get("limit") ?? "20");
+        // Answers one page as the host does: the newest, the page before a
+        // turn, or the page ending with one; a turn the thread lacks is stale.
+        const params = new URLSearchParams(request.query ?? "");
+        const limit = Number(params.get("limit") ?? "20");
         const turns = codeTurns.get(threadId) ?? [];
+        const anchor = params.get("through") ?? params.get("before");
+        const at =
+          anchor === null ? -1 : turns.findIndex((turn) => String(turn.operationId) === anchor);
+        if (anchor !== null && at < 0) {
+          return mockJsonResponse(
+            { category: "stale", message: "That Code turn is no longer in this thread." },
+            { status: 409 },
+          );
+        }
+        const end = anchor === null ? turns.length : params.has("through") ? at + 1 : at;
+        const start = Math.max(0, end - limit);
         return mockJsonResponse({
           version: 1,
           threadId,
-          turns: turns.slice(-limit),
-          hasEarlier: turns.length > limit,
-          hasLater: false,
+          turns: turns.slice(start, end),
+          hasEarlier: start > 0,
+          hasLater: end < turns.length,
         });
       }
       if (
@@ -1013,6 +1146,41 @@ function createMockTransport(input: {
         const restedCode = applyMockRest(codeThreads, command, decodeCodeThread);
         if (restedCode !== undefined) {
           return mockJsonResponse({ kind: "thread-updated", thread: restedCode });
+        }
+        if (
+          command.kind === "schedule-code-usage-resume" ||
+          command.kind === "cancel-code-usage-resume"
+        ) {
+          // Binds the opt-in to the waiting turn's limit the way the host does.
+          const index = codeThreads.findIndex((thread) => String(thread.id) === command.threadId);
+          const current = codeThreads[index];
+          const stopped = (codeTurns.get(String(command.threadId)) ?? []).at(-1);
+          const failure = stopped?.failure as
+            | { readonly usageLimit?: { readonly resetsAt?: string } }
+            | undefined;
+          if (current === undefined) return new Response("missing", { status: 404 });
+          const { usageResume: _withdrawn, ...withoutResume } = current;
+          const next = decodeCodeThread(
+            command.kind === "cancel-code-usage-resume"
+              ? { ...withoutResume, version: current.version + 1 }
+              : {
+                  ...current,
+                  usageResume: {
+                    status: "scheduled",
+                    record: {
+                      threadId: String(current.id),
+                      turnId: command.operationId,
+                      providerInstanceId: PROVIDER_ID,
+                      usageLimit: failure?.usageLimit,
+                      resetsAt: failure?.usageLimit?.resetsAt,
+                      scheduledAt: NOW,
+                    },
+                  },
+                  version: current.version + 1,
+                },
+          );
+          codeThreads[index] = next;
+          return mockJsonResponse({ kind: "thread-updated", thread: next });
         }
         if (command.kind === "prepare-code-project-checkout") {
           return mockJsonResponse({
@@ -1469,7 +1637,17 @@ function registration(input: {
   };
 }
 
-export function createMobileMockScenario(id: MobileMockScenarioId): MobileMockScenario {
+/**
+ * `now` places the threads in time: the preview passes the device's clock so
+ * the Activity arrangement files them under Today, Yesterday, a weekday, and
+ * Earlier; tests leave it at the fixed fixture time.
+ */
+export function createMobileMockScenario(
+  id: MobileMockScenarioId,
+  options: { readonly now?: Date } = {},
+): MobileMockScenario {
+  const nowMs = (options.now ?? new Date(NOW)).getTime();
+  const hoursAgo = (hours: number) => new Date(nowMs - hours * 3_600_000).toISOString();
   if (id === "empty") {
     return { id, label: "Empty workspace", hosts: [], health: [], transports: [] };
   }
@@ -1492,21 +1670,43 @@ export function createMobileMockScenario(id: MobileMockScenarioId): MobileMockSc
   const mainChat = createChatThread({
     id: CHAT_THREAD_ID,
     title: "Polish the mobile review loop",
-    updatedAt: NOW,
+    updatedAt: hoursAgo(0.25),
   });
   const waitingChat = createChatThread({
     id: CHAT_WAITING_ID,
     title: "Plan the TestFlight device pass",
-    updatedAt: EARLIER,
+    updatedAt: hoursAgo(26),
   });
-  const work = createWorkThread();
-  const code = createCodeThread(id === "stale" ? "waiting" : "active");
+  const earlierChat = createChatThread({
+    id: CHAT_EARLIER_ID,
+    title: "Sketch the onboarding copy",
+    updatedAt: hoursAgo(24 * 12),
+  });
+  const work = createWorkThread({ updatedAt: hoursAgo(1) });
+  const weekWork = createWorkThread({
+    id: WORK_WEEK_ID,
+    title: "Vendor contract review",
+    updatedAt: hoursAgo(24 * 3),
+  });
+  const code = createCodeThread(id === "stale" ? "waiting" : "active", {
+    updatedAt: hoursAgo(0.5),
+  });
+  const resumeCode = createCodeThread("waiting", {
+    id: CODE_RESUME_THREAD_ID,
+    title: "Speed up the sync worker",
+    updatedAt: hoursAgo(30),
+  });
   const studioTransport = createMockTransport({
     hostId: STUDIO_HOST_ID,
-    chatThreads: [mainChat, waitingChat],
-    chatViews: [createChatView(mainChat, true), createChatView(waitingChat, false)],
-    workThreads: [work],
-    codeThreads: [code],
+    chatThreads: [mainChat, waitingChat, earlierChat],
+    chatViews: [
+      createChatView(mainChat, true),
+      createChatView(waitingChat, false),
+      createChatView(earlierChat, false),
+    ],
+    workThreads: [work, weekWork],
+    codeThreads: [code, resumeCode],
+    usageResetsAt: hoursAgo(-2),
   });
   const travelTransport = createMockTransport({
     hostId: MACBOOK_HOST_ID,

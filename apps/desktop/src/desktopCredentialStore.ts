@@ -31,6 +31,8 @@ export type DesktopCredentialBackend =
       readonly pushPlatformCredentials: CredentialStore;
       /** SSH sign-in keys Octant made for registered servers, in their own Keychain service. */
       readonly sshKeys: CredentialStore;
+      /** Web search backends' API keys, in their own Keychain service. */
+      readonly webSearchCredentials: CredentialStore;
     }
   | {
       readonly kind: "secret-service";
@@ -50,6 +52,8 @@ export type DesktopCredentialBackend =
       readonly pushPlatformCredentials: CredentialStore;
       /** SSH sign-in keys Octant made for registered servers, under their own attribute. */
       readonly sshKeys: CredentialStore;
+      /** Web search backends' API keys, under their own attribute. */
+      readonly webSearchCredentials: CredentialStore;
     }
   | {
       readonly kind: "credential-manager";
@@ -62,6 +66,7 @@ export type DesktopCredentialBackend =
       readonly desktopProviderCredentials: CredentialStore;
       readonly pushPlatformCredentials: CredentialStore;
       readonly sshKeys: CredentialStore;
+      readonly webSearchCredentials: CredentialStore;
     }
   | {
       readonly kind: "unavailable";
@@ -74,6 +79,7 @@ export type DesktopCredentialBackend =
       readonly desktopProviderCredentials?: undefined;
       readonly pushPlatformCredentials?: undefined;
       readonly sshKeys?: undefined;
+      readonly webSearchCredentials?: undefined;
     };
 
 /**
@@ -130,6 +136,10 @@ export async function resolveDesktopCredentialBackend(options: {
         ...keychain,
         namespace: "ssh-key",
       }),
+      webSearchCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
+        ...keychain,
+        namespace: "web-search-credential",
+      }),
     };
   }
   if (options.platform === "linux") {
@@ -147,6 +157,7 @@ export async function resolveDesktopCredentialBackend(options: {
       desktopProviderCredentials: store("desktop-provider-credential"),
       pushPlatformCredentials: store("push-platform-credential"),
       sshKeys: store("ssh-key"),
+      webSearchCredentials: store("web-search-credential"),
     };
   }
   if (options.platform === "win32" && options.windowsCredentialHelperPath !== undefined) {
@@ -168,6 +179,7 @@ export async function resolveDesktopCredentialBackend(options: {
       desktopProviderCredentials: store("desktop-provider-credential"),
       pushPlatformCredentials: store("push-platform-credential"),
       sshKeys: store("ssh-key"),
+      webSearchCredentials: store("web-search-credential"),
     };
   }
   return { kind: "unavailable" };

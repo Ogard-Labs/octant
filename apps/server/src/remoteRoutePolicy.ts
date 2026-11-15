@@ -1120,13 +1120,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
   })),
-  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
-    kind: "exact" as const,
-    path: `/api/host-control/${name}`,
-    methods: ["POST"] as const,
-    allowedContentTypes: ["application/json"] as const,
-    maxBodyBytes: 8_192,
-  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge", "web-search/key"].map(
+    (name) => ({
+      kind: "exact" as const,
+      path: `/api/host-control/${name}`,
+      methods: ["POST"] as const,
+      allowedContentTypes: ["application/json"] as const,
+      maxBodyBytes: 8_192,
+    }),
+  ),
   // Paired devices and pairing requests, for a device the host's own person
   // paired: the lists are reads, every change a POST.
   ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({
@@ -1212,6 +1214,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/search",
+    methods: ["GET"] as const,
+    // `?q=&scope=`; the route refuses every other query key itself.
+    takesSearchQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/replica-sync/status",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
@@ -1268,7 +1278,8 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
-    allowQuery: match.kind === "prefix" || "namesProjectInQuery" in match,
+    allowQuery:
+      match.kind === "prefix" || "namesProjectInQuery" in match || "takesSearchQuery" in match,
   };
 });
 

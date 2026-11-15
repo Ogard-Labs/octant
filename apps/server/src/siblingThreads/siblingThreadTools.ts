@@ -17,6 +17,7 @@ import {
   THREADS_TOOL_BOARD_ALLOWLIST_ENTRY,
   THREADS_TOOL_SEND_ALLOWLIST_ENTRY,
   THREADS_TOOL_START_ALLOWLIST_ENTRY,
+  MAX_COORDINATOR_START_WHY_LENGTH,
   MAX_COORDINATOR_WORKER_PROMPT_LENGTH,
   MAX_COORDINATOR_WORKER_TITLE_LENGTH,
   UtcTimestamp,
@@ -374,7 +375,7 @@ const HELP_LINES: Readonly<Record<ThreadsToolOperation, string>> = {
     "receipts takes messageIds you sent and returns whether each is queued, delivered, acknowledged, or refused, never its text.",
   board:
     "board reads this Project's task board as its designated planner: each task's state, delivery evidence, checks, and helper-agent activity, at most 100 tasks with truncated stated. It changes nothing; offer new work with octant_offer_side_task and target board.",
-  start: `start creates a worker thread in this Project, as its coordinator: title (at most ${String(MAX_COORDINATOR_WORKER_TITLE_LENGTH)} characters) and prompt (at most ${String(MAX_COORDINATOR_WORKER_PROMPT_LENGTH)}), optionally providerInstanceId with modelId and a level no higher than yours. The worker gets its own worktree and runs the prompt as its first message; its approvals wait for the person. The answer is started (with the worker's reference) or proposed (a person approves it first). Message workers with send; you hear when one finishes or needs the person.`,
+  start: `start creates a worker thread in this Project, as its coordinator: title (at most ${String(MAX_COORDINATOR_WORKER_TITLE_LENGTH)} characters) and prompt (at most ${String(MAX_COORDINATOR_WORKER_PROMPT_LENGTH)}), task (small-fix, feature, ui, tests, docs or review) and size (quick, normal or hard), which pick the worker's model role, and a level no higher than yours. Optionally retries (a worker that ended without Done; the new one starts a tier higher), reviews (the worker a review reviews), risk high (a review on the top tier), needsImages, and an override: role (quick-edit, builder, hard-problems, reviewer) or model (a handle from the role card), each with why (at most ${String(MAX_COORDINATOR_START_WHY_LENGTH)} characters). Octant chooses the model from the roles and says why; a refusal lists each model's reason. Only when this turn carries no role card, providerInstanceId with modelId names a model instead. The worker gets its own worktree and runs the prompt as its first message; its approvals wait for the person. The answer is started (with the worker's reference) or proposed (a person approves it first). Message workers with send; you hear when one finishes or needs the person.`,
 };
 
 /**
@@ -470,13 +471,57 @@ function threadsToolDefinition(
                 maxLength: MAX_COORDINATOR_WORKER_PROMPT_LENGTH,
                 description: "For start: the worker's first message.",
               },
+              task: {
+                type: "string",
+                enum: ["small-fix", "feature", "ui", "tests", "docs", "review"],
+                description: "For start: the kind of work; required when the turn has a role card.",
+              },
+              size: {
+                type: "string",
+                enum: ["quick", "normal", "hard"],
+                description:
+                  "For start: how hard the work is (Quick edit, Builder, Hard problems); required with a role card.",
+              },
+              retries: {
+                type: "string",
+                description: "For start: the reference of your worker this one retries.",
+              },
+              reviews: {
+                type: "string",
+                description: "For start: the reference of your worker a review reviews.",
+              },
+              risk: {
+                type: "string",
+                enum: ["high"],
+                description: "For start: a review that should use the top tier.",
+              },
+              role: {
+                type: "string",
+                enum: ["quick-edit", "builder", "hard-problems", "reviewer"],
+                description: "For start: overrides the role size picks; needs why.",
+              },
+              model: {
+                type: "string",
+                description: "For start: a handle from the role card (b1, b2, ...); needs why.",
+              },
+              needsImages: {
+                type: "boolean",
+                description: "For start: the work needs reading screenshots or design files.",
+              },
+              why: {
+                type: "string",
+                maxLength: MAX_COORDINATOR_START_WHY_LENGTH,
+                description: "For start: why you override the role or model.",
+              },
               providerInstanceId: {
                 type: "string",
-                description: "For start: a provider instance; omit to use yours.",
+                description:
+                  "For start, only without a role card: a provider instance; omit to use yours.",
               },
               modelId: {
                 type: "string",
-                description: "For start: a model of that provider; omit to use yours.",
+                description:
+                  "For start, only without a role card: a model of that provider; omit to use yours.",
               },
               level: {
                 type: "string",

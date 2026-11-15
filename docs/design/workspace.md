@@ -476,7 +476,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
-  Settings › Code › Coordinators holds **Starting workers**, **Show workers**
+  A proposed worker's card above the coordinator's composer reads "<role> ·
+  <model> · <why>" when the roles chose its model, and offers **Use Builder
+  instead** beside Review and approve and Decline when the role is not
+  Builder. Settings › Code › Coordinators holds **Starting workers**, **Show workers**
   and **Open workers per coordinator**, and a Code Project's overview holds its
   own **Starting workers** choice (Use Settings, Start without asking, Propose
   for approval) and its own **Show workers** choice after the Project planner
@@ -498,14 +501,15 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
   with a pull request still open), **Done** (marked Done, or its pull request
   merged or closed; folded as "Done · N" with **Show more**), and **Put away**
-  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model, the
+  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model
+  (with the same fallback or chosen note as the Agents dock's worker row), the
   pull request link when there is one, and when it last changed; a row opens
   the worker. A worker waiting on a person is always under Needs you, whatever
   else is true of it. The panel reads the same window thread list the Agents
   dock's Workers section reads, so a worker this window cannot see is never
   listed, and it is offered only for a thread on this window's host.
 - **Worker cards.** In the coordinator's transcript, each worker it started
-  has a small card (title, model, live state: Working, Needs you, In review,
+  has a small card (title, model with that note, live state: Working, Needs you, In review,
   Done) at the end of the turn that was running when the host created the
   worker, from host facts, never agent text. Clicking a card opens the worker.
   A worker the transcript cannot place (created before the first turn, or turns
@@ -524,7 +528,12 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   its own subagents: one row per worker in the window's thread list, with the
   provider's mark, the title, the thread's state in words (Working, Needs
   attention, Done, Idle), and how many subagents it handed off and how many of
-  them are working. A row opens the worker. In Graph, each worker's subagents
+  them are working. A worker whose model the roles chose also shows the
+  model's name and, when it is not the role's main model, "fallback: <the
+  host's reason>", or "chosen: <the coordinator's why>" for an override, or
+  "chosen by you" after a person changed it
+  ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
   controls are the worker's. The List and Graph switch is offered when the
@@ -2498,14 +2507,22 @@ row’s leading edge. Search is a compact in-place filter for the current mode's
 threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
-hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The overlay matches
-titles among the threads the host listed and, in every mode, message text
-through that mode's host read (`GET /api/chat/transcript-search`,
-`/api/work/transcript-search`, `/api/code/transcript-search`), which lists
-the same threads as the sidebar and its Archived group. A message hit shows its
-snippet after the title matches and names the turn that holds it, and opens
-the thread scrolled to that turn in every mode
+hands its text to the command-style overlay; the overlay also stays in the
+command palette. The overlay searches every mode at once by default, with an
+All, Chat, Work, and Code filter under its field, through the host's search
+across modes (`GET /api/search`), which matches thread titles, messages, and
+tool output, attachment names, and Canvas text among the threads each mode's
+sidebar and Archived group list.
+Every word must appear, and a quoted phrase must appear as written. Titles the
+current mode listed match at once; the host's hits follow, each naming its
+mode when the filter is All, `Tool output` when a tool's text matched, and
+`Canvas` when a Canvas the thread made matched; a Canvas hit opens the Canvas
+itself, in its thread's mode and Project. A
+message or tool hit names the turn that holds it and opens the thread
+scrolled to that turn in every mode: Chat reads the page that ends with the
+turn, and Work and Code read earlier pages, one at a time, until it arrives.
+The jump happens once; a turn the thread no longer holds (an edit or rewind
+removed it) leaves the thread at its newest turns
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view
