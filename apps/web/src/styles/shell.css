@@ -1260,6 +1260,7 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   flex: 1 1 auto;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }
 
 :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__count {
@@ -1529,6 +1530,7 @@ html[data-octant-density="compact"]
 .sidebar-navigation__thread-project > svg,
 .sidebar-navigation__thread-checkout > svg {
   flex: none;
+  color: var(--oct-muted);
 }
 
 .sidebar-navigation__thread-project-label,

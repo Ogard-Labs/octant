@@ -522,13 +522,6 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         )}
       </div>
 
-      {incomplete ? (
-        <p className="code-file-explorer__status" role="status">
-          Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries. The file
-          tree is incomplete.
-        </p>
-      ) : null}
-
       {visible.length === 0 ? (
         props.loading === true && props.entries.length === 0 ? (
           <OctantEmpty state="loading" title="Loading files" />
@@ -568,6 +561,11 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                 })
               : visible.map((entry, index) => renderEntry(entry, index))}
           </div>
+          {incomplete ? (
+            <div className="code-file-explorer__more" role="status">
+              Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries
+            </div>
+          ) : null}
         </div>
       )}
     </section>

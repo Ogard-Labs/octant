@@ -6,6 +6,7 @@ import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { appendVitalsSample, formatBytes, formatRate, sparklinePoints } from "../shell/vitalsModel";
 import { useServerCodeProjects } from "../projects/serverProjectEntries";
 import { loading, unavailable } from "./moduleState";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 
 type Props = Pick<ThreadUtilityDockContentProps, "serverUrl" | "subject" | "windowCapability">;
 
@@ -139,7 +140,7 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
   if (latest === undefined) {
     return (
       <section aria-label="Vitals" className="vitals" data-state="waiting">
-        <p className="vitals__empty">Reading this host…</p>
+        <OctantEmpty state="loading" title="Reading this host" />
       </section>
     );
   }

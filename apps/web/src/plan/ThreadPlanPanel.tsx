@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { PaneBar } from "../shell/PaneBar";
 import { AlertTriangle, CloudOff, ListChecks, Loader, ShieldAlert } from "../ui/icons";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -78,7 +79,16 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
 
   return (
     <section aria-label="Plan" className="thread-plan">
-      {artifactOnly || inSheet ? null : <h3 className="thread-plan__title">Plan</h3>}
+      {artifactOnly || inSheet ? null : (
+        <PaneBar title="Plan">
+          {plan === null || plan.status === "withdrawn" ? null : (
+            <span>
+              {controller.history.length} revision
+              {controller.history.length === 1 ? "" : "s"}
+            </span>
+          )}
+        </PaneBar>
+      )}
       {plan === null || plan.status === "withdrawn" ? null : (
         <>
           <PlanCard
@@ -114,10 +124,6 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
               Revise plan
             </OctantButton>
           )}
-          <p className="thread-plan__history" role="note">
-            {controller.history.length} recorded revision
-            {controller.history.length === 1 ? "" : "s"}.
-          </p>
         </>
       )}
       {!commandable || !writing ? null : (

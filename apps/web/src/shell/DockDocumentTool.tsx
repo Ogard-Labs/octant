@@ -1,4 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { PaneBar } from "./PaneBar";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
@@ -116,9 +117,11 @@ export function DockDocumentTool(props: DockDocumentToolProps) {
   }
   return (
     <article aria-label={path} className="dock-document-tool">
-      <p className="dock-document-tool__path oct-meta oct-meta--mono">
-        <MiddleTruncatedText value={path} />
-      </p>
+      <PaneBar>
+        <span className="dock-document-tool__path oct-meta oct-meta--mono">
+          <MiddleTruncatedText value={path} />
+        </span>
+      </PaneBar>
       {isMarkdownPath(path) ? (
         <div className="preview-viewer preview-viewer--markdown dock-document-tool__body">
           {load.text === "" ? (

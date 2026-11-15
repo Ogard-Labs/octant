@@ -146,6 +146,7 @@
   height: 22px;
 }
 .git-history__subject {
+  font-weight: var(--oct-weight-medium);
   vertical-align: middle;
 }
 .git-history__refs {

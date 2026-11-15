@@ -43,11 +43,12 @@ function client(overrides: Partial<ShipClient> = {}): ShipClient {
 }
 
 describe("delivering to somewhere you own", () => {
-  it("says Octant runs no target of its own and routes nothing through itself", async () => {
+  it("states on an info tooltip that Octant runs no target of its own and routes nothing through itself", async () => {
     render(<ShipPanel client={client()} threadId={threadId} />);
 
-    expect(await screen.findByText(/runs none of its own/i)).toBeVisible();
-    expect(screen.getByText(/Nothing is routed\s+through Octant/i)).toBeVisible();
+    // The statement lives on the pane bar's info tooltip, not in a paragraph.
+    const info = await screen.findByRole("button", { name: /runs none of its own/i });
+    expect(info).toHaveAccessibleName(/Nothing is routed through Octant/i);
   });
 
   it("names the revision, destination, and digest before anyone approves anything", async () => {

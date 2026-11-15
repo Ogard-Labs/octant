@@ -3340,3 +3340,13 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     border-bottom: 0;
   }
 }
+
+/* A capped tree ends in one muted row, not a paragraph above the list. */
+.code-file-explorer__more {
+  display: flex;
+  min-height: var(--oct-file-row-h);
+  align-items: center;
+  padding-inline: var(--oct-file-inset);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

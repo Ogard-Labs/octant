@@ -358,7 +358,7 @@
 
 .dock-card__icon {
   flex: none;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
 }
 
 .dock-card__label {
@@ -505,15 +505,10 @@
   height: 100%;
 }
 
-/* The path is content, so it keeps the one secondary row: 32px on the bar's
-   insets and hairline. */
+/* The path is the pane bar's one muted line. */
 .dock-document-tool__path {
   display: flex;
-  height: 32px;
-  align-items: center;
-  margin: 0;
-  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
-  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+  min-width: 0;
   overflow: hidden;
 }
 
