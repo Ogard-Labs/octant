@@ -76,8 +76,16 @@ export function DockMiniCard(props: {
   readonly detail?: string | undefined;
   /** Output arrived while nobody was looking; a quiet dot says so to every reader. */
   readonly newOutput?: boolean;
+  /**
+   * Closes what the card stands for. When given, the card's X is a close
+   * (named "Close <tool>") and the card has no separate hide; without it the
+   * X only takes the card away.
+   */
+  readonly onClose?: () => void;
   /** Takes the card away; the tool stays open, its button in the row, and nothing is closed or stopped. */
   readonly onHide: () => void;
+  /** What stands before the title: the page's own mark. Defaults to the tool's icon. */
+  readonly icon?: ReactNode;
   /**
    * Whether the pointer or the keyboard is on the card, so what it shows is
    * being seen. Told when either arrives and when both have left.
@@ -118,7 +126,7 @@ export function DockMiniCard(props: {
     >
       <div className="dock-mini-card__head">
         <span className="dock-card__icon">
-          <DockToolIcon surface={props.surface} />
+          {props.icon ?? <DockToolIcon surface={props.surface} />}
         </span>
         <span className="dock-card__title dock-mini-card__title" title={props.title}>
           {props.title}
@@ -138,8 +146,12 @@ export function DockMiniCard(props: {
         <IconButton
           className="dock-mini-card__action text-muted-foreground"
           icon={X}
-          label={`Hide ${props.toolLabel} card`}
-          onClick={props.onHide}
+          label={
+            props.onClose === undefined
+              ? `Hide ${props.toolLabel} card`
+              : `Close ${props.toolLabel}`
+          }
+          onClick={props.onClose ?? props.onHide}
         />
       </div>
       <div className="dock-mini-card__preview">

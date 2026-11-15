@@ -728,8 +728,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       client={browserAutomationClient}
                       {...(contextId === undefined ? {} : { contextId })}
                       key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
+                      onClose={controls.onClose}
                       onExpand={controls.onShow}
-                      onHide={controls.onHide}
                       threadId={decodeBrowserThreadId(dockThread.threadId)}
                     />
                   ) : dockThread.mode === "code" ? (

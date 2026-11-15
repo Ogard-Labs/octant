@@ -1409,7 +1409,8 @@ thread's open tools; the bottom panel never has one.
   (960px and below) has no room for it and draws none; the state is kept, and
   there the tool's button reads as any open tool's, so nothing leads nowhere.
 - **A card** is one of the dock's cards: the tool's icon, a title, **Show
-  <tool>** (expand) and **Hide <tool> card** controls, and a live preview that is
+  <tool>** (expand) and a second control (the Terminal's **Hide Terminal card**, the
+  Browser's **Close Browser**, below), and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
   Show brings the tool back as a tile of its own (the Browser as the page it
@@ -1429,7 +1430,10 @@ thread's open tools; the bottom panel never has one.
   to the tool's button in the row, else the dock toggle, looked for again as the
   row re-renders so focus never falls to the page. Pressing the button shows the
   tool. Closing the tool stays the tile bar's close and **Close** on its button's
-  menu. A card never starts a process, never writes to the journal and never sends input
+  menu. The Browser card's X is the exception to Hide: it is **Close Browser** and
+  closes the page the card shows, as that page's tab close does (the card then stands
+  for the next Browser page, or goes with the last), so a page can be closed from the
+  collapsed dock without expanding it; the Browser card has no separate hide. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
 - **The Browser card** shows the page's title, or its host, with the profile's
@@ -1439,7 +1443,7 @@ thread's open tools; the bottom panel never has one.
   snapshot the Browser pane reads (a page that lives in a Browser context of its
   own is read by that context, as the pane reads it, never through the thread's
   current context, which leaves such pages out; a context that is gone or stopped
-  makes the preview say "Page not available" instead of holding a skeleton), and asks for a fresh picture only while the
+  makes the preview say "Page not available" instead of holding a skeleton; the host takes a fresh picture for that read of a native page too, because a minimised page's surface is detached and the card is the only place it is seen), and asks for a fresh picture only while the
   card is on screen: no card, no request for one. It polls every second while a
   session is live and every five otherwise, backs off while the page does not
   change, and pauses with the window. A stale or missing picture is a neutral
@@ -2742,9 +2746,10 @@ frosted parts and no new fill, an 8px inset round a 28px bar over a 104px previe
 title or host with the profile name beside it where the page lives in one, or
 "Terminal"), a detail word (such as "Exited (1)"), a quiet 6px dot named "New
 output" for a shell that printed while nobody looked, an expand icon button
-(**Show Browser**, **Show Terminal**) and a hide icon button (**Hide Browser card**,
-**Hide Terminal card**, which removes the card and closes or stops nothing: the
-tool stays open and its button in the title band's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
+(**Show Browser**, **Show Terminal**) and one more icon button: **Close Browser** on
+the Browser card, which closes the page it shows, and **Hide Terminal card** on the
+Terminal card, which removes the card and stops nothing: the shell stays open and
+its button in the title band's tool row reads open but not shown; every button a 24px target), then a preview that is itself the expand button (named
 "Show Browser, live preview"; its corner is the card's 12px minus the 8px inset, 4px). The name truncates with an ellipsis
 before a detail word or a button moves. The Browser's picture is cropped to the preview from its top left, never stretched, a neutral skeleton while stale or missing; the
 Terminal shows its last lines in the smallest terminal type, read-only, or "No

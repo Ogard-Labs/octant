@@ -8,8 +8,8 @@ import { DockMiniCard } from "./DockShelf";
  * The Browser as a card: the page a thread's session has open, as a picture
  * the host already takes for the Browser tool. The card reads the same picture
  * the tool would show this window, and asks for it only while it is mounted,
- * which is only while the shelf is drawn. It never opens, drives or closes a
- * page by being there.
+ * which is only while the shelf is drawn. It never opens or drives a page by
+ * being there; its X is the one thing that closes the page, as its tab's close does.
  */
 export function DockBrowserCard(props: {
   readonly client: BrowserAutomationClient | undefined;
@@ -18,7 +18,8 @@ export function DockBrowserCard(props: {
    * in one of its own; the thread's own page is read through the thread.
    */
   readonly contextId?: string;
-  readonly onHide: () => void;
+  /** Closes the page the card stands for. */
+  readonly onClose: () => void;
   readonly onExpand: () => void;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
@@ -47,7 +48,8 @@ export function DockBrowserCard(props: {
   return (
     <DockMiniCard
       {...(detail === "" ? {} : { detail })}
-      onHide={props.onHide}
+      onClose={props.onClose}
+      onHide={props.onClose}
       onExpand={props.onExpand}
       previewLabel={`Show Browser, live preview${
         title === "Browser" ? "" : `: ${title}`
