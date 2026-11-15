@@ -122,23 +122,29 @@ function dayMatches(cron: WakeupCron, date: Date): boolean {
  * the host's local time, within a year; undefined when none does.
  */
 export function nextWakeupCronFire(cron: WakeupCron, after: Date): Date | undefined {
-  const candidate = new Date(after.getTime());
-  candidate.setSeconds(0, 0);
-  candidate.setMinutes(candidate.getMinutes() + 1);
+  // Candidates advance in epoch time. A local-time setter inside the repeated
+  // hour of a daylight-saving fall-back resolves to the hour's first
+  // occurrence, which moved the search backwards and returned a fire time
+  // already past, so a new wake-up read as missed at once.
+  let time = Math.floor(after.getTime() / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
   const limit = after.getTime() + CRON_SEARCH_DAYS * DAY_MS;
-  while (candidate.getTime() <= limit) {
+  while (time <= limit) {
+    const candidate = new Date(time);
     if (!dayMatches(cron, candidate)) {
-      candidate.setHours(0, 0, 0, 0);
-      candidate.setDate(candidate.getDate() + 1);
+      const nextDay = new Date(
+        candidate.getFullYear(),
+        candidate.getMonth(),
+        candidate.getDate() + 1,
+      ).getTime();
+      time = nextDay > time ? nextDay : time + MINUTE_MS;
       continue;
     }
     if (!cron.hours.has(candidate.getHours())) {
-      candidate.setMinutes(0, 0, 0);
-      candidate.setHours(candidate.getHours() + 1);
+      time += (60 - candidate.getMinutes()) * MINUTE_MS;
       continue;
     }
     if (!cron.minutes.has(candidate.getMinutes())) {
-      candidate.setMinutes(candidate.getMinutes() + 1, 0, 0);
+      time += MINUTE_MS;
       continue;
     }
     return candidate;
