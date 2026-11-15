@@ -264,7 +264,9 @@ function suggest(
       reviewerNote = "from a different provider than the Builder";
     }
   }
-  const main = pool[0]!;
+  const [main] = pool;
+  if (main === undefined)
+    return { suggestion: { roleId: need.roleId, picks: [], note: "No connected model fits." } };
   const hint = REASONING_HINT[need.roleId];
   const reasoning =
     hint !== undefined && main.model.reasoningLevels?.includes(hint) === true ? hint : undefined;
