@@ -62,7 +62,8 @@ export function useAssignedWorkRows(source: AssignedWorkSource): HomeListRead {
   const [read, setRead] = useState<AssignedRead>({ kind: "loading" });
   useEffect(() => {
     let cancelled = false;
-    setRead({ kind: "loading" });
+    // A later read keeps the answer already drawn until the fresh one lands.
+    setRead((previous) => (previous.kind === "ready" ? previous : { kind: "loading" }));
     void (async () => {
       const [github, linear] = await Promise.all([
         readAssignedGithub(githubClient),
@@ -120,6 +121,7 @@ export interface ContinueSource {
 export function useContinueRows(source: ContinueSource): HomeListRead {
   const { continueCards, projectNames, onOpenThread } = source;
   return useMemo((): HomeListRead => {
+    if (continueCards?.kind === "loading") return { status: "loading" };
     if (continueCards === undefined || continueCards.kind !== "ready") {
       return { status: "ready", rows: [] };
     }

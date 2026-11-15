@@ -246,3 +246,36 @@ time.work-list__meta-text {
   margin-inline-start: var(--oct-space-4);
   font-variant-numeric: tabular-nums;
 }
+
+/* The list's loading shape: the real row's grid and 52px height, drawn as quiet
+   shapes, so the rows land in the same box. */
+.work-list__skeleton {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.work-list__row--skeleton {
+  align-items: center;
+  pointer-events: none;
+}
+
+.work-list__skeleton-state {
+  grid-area: state;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.work-list__skeleton-title {
+  grid-area: title;
+  width: 62%;
+  height: var(--oct-text-detail);
+}
+
+.work-list__skeleton-meta {
+  grid-area: meta;
+  width: 34%;
+  height: var(--oct-text-xs);
+}

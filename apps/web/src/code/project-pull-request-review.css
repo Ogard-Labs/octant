@@ -261,6 +261,19 @@
   display: grid;
 }
 
+/* The labels row's place while the labels are read: one small button tall. */
+.code-pr-actions__labels-skeleton {
+  display: flex;
+  align-items: center;
+  min-height: var(--oct-space-6);
+}
+
+.code-pr-actions__labels-skeleton-chip {
+  width: 96px;
+  height: var(--oct-space-6);
+  border-radius: var(--oct-radius-sm);
+}
+
 .code-pr-actions__threads > li {
   display: grid;
   gap: var(--oct-space-2);

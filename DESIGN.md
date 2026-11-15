@@ -66,7 +66,9 @@ same stylesheets and described in
    never places what is already drawn: the start screen's composer sits where the
    arrived list leaves it and late rows fill the space below, and a mode switch
    draws the target mode's list whole on its first frame, its pictures asked for
-   before any row shows them. A popup opens at its final size and keeps it: data
+   before any row shows them. A placeholder stays until its content can paint, in the
+   same box: a first read is never drawn as an empty section, and the content
+   replaces the placeholder without a frame of neither. A popup opens at its final size and keeps it: data
    arriving, a choice made inside it or a toggle that reveals detail never
    resizes or moves it. Its width and height are fixed, a list scrolls inside
    them, loading draws skeleton rows of the real rows' height, and the rows a

@@ -484,9 +484,21 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       ) : null}
 
       {workspace.status === "loading" ? (
-        <p className="code-project-pull-requests__status" role="status">
-          Loading pull requests
-        </p>
+        <>
+          <p className="code-project-pull-requests__status" role="status">
+            Loading pull requests
+          </p>
+          {/* The rows' own shape, so the list does not change height when it lands. */}
+          <ul aria-hidden="true" className="work-list__skeleton">
+            {[0, 1, 2, 3, 4].map((row) => (
+              <li className="work-list__row work-list__row--skeleton" key={row}>
+                <span className="skeleton work-list__skeleton-state" />
+                <span className="skeleton work-list__skeleton-title" />
+                <span className="skeleton work-list__skeleton-meta" />
+              </li>
+            ))}
+          </ul>
+        </>
       ) : null}
 
       {view === undefined ? (

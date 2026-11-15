@@ -141,7 +141,16 @@ export function ProjectPullRequestActions(props: ProjectPullRequestActionsProps)
 
       <div className="code-pr-actions__group" role="group" aria-label="Labels">
         <strong>Labels</strong>
-        {context === undefined ? null : context.labels.length === 0 && available.length === 0 ? (
+        {context === undefined ? (
+          loadFailure === undefined ? (
+            // The row of chips keeps its place until the read lands, so the
+            // comment box under it does not move.
+            <div aria-busy="true" className="code-pr-actions__labels-skeleton" role="status">
+              <span className="sr-only">Loading labels</span>
+              <span aria-hidden="true" className="skeleton code-pr-actions__labels-skeleton-chip" />
+            </div>
+          ) : null
+        ) : context.labels.length === 0 && available.length === 0 ? (
           <p className="code-pr-actions__note">This repository has no labels yet.</p>
         ) : (
           <ul className="code-pr-actions__labels">
