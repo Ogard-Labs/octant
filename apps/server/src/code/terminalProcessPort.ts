@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { constants as osConstants, homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
@@ -19,6 +19,9 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
+import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { windowsShellArguments } from "./terminalShell";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
 const execFileAsync = promisify(execFile);
@@ -112,6 +115,8 @@ export interface TerminalLaunchInput {
 interface TerminalProcessDependencies {
   readonly spawn?: (shell: string, args: readonly string[], options: PtyForkOptions) => PtyProcess;
   readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
+  /** Ends a Windows shell and every program it started. */
+  readonly stopWindowsTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly waitForExit?: (process: PtyProcess, timeoutMs: number) => Promise<boolean>;
   readonly processGroupExists?: (pid: number) => boolean;
   readonly gracefulTimeoutMs?: number;
@@ -269,6 +274,7 @@ export class TerminalProcessPort {
   readonly #dependencies: {
     readonly spawn: NonNullable<TerminalProcessDependencies["spawn"]>;
     readonly killProcessGroup: NonNullable<TerminalProcessDependencies["killProcessGroup"]>;
+    readonly stopWindowsTree: NonNullable<TerminalProcessDependencies["stopWindowsTree"]>;
     readonly waitForExit: NonNullable<TerminalProcessDependencies["waitForExit"]>;
     readonly processGroupExists: NonNullable<TerminalProcessDependencies["processGroupExists"]>;
     readonly gracefulTimeoutMs: number;
@@ -285,11 +291,14 @@ export class TerminalProcessPort {
   };
 
   constructor(dependencies: TerminalProcessDependencies = {}) {
+    const platform = dependencies.platform ?? process.platform;
+    // Bun's terminal is a POSIX pseudo-terminal; a Windows shell opens through
+    // node-pty's ConPTY instead.
     const nativeBunPtyAvailable =
       dependencies.spawn === undefined &&
+      platform !== "win32" &&
       typeof globalThis.Bun !== "undefined" &&
       typeof globalThis.Bun.Terminal === "function";
-    const platform = dependencies.platform ?? process.platform;
     this.#dependencies = {
       spawn:
         dependencies.spawn ??
@@ -298,6 +307,7 @@ export class TerminalProcessPort {
           : (shell, args, options) => nodePty.spawn(shell, [...args], options)),
       killProcessGroup:
         dependencies.killProcessGroup ?? ((pid, signal) => process.kill(pid, signal)),
+      stopWindowsTree: dependencies.stopWindowsTree ?? stopWindowsProcessTree,
       waitForExit: dependencies.waitForExit ?? waitForPtyExit,
       processGroupExists: dependencies.processGroupExists ?? defaultProcessGroupExists,
       gracefulTimeoutMs: dependencies.gracefulTimeoutMs ?? 1_000,
@@ -317,7 +327,7 @@ export class TerminalProcessPort {
         process.env.TMPDIR ??
         process.env.TMP ??
         process.env.TEMP ??
-        "/tmp",
+        tmpdir(),
       networkEgress: dependencies.networkEgress ?? "allow",
       homeDirectory: dependencies.seatbeltHomeDirectory ?? homedir(),
       shellStateDirectory:
@@ -327,7 +337,7 @@ export class TerminalProcessPort {
             process.env.TMPDIR ??
             process.env.TMP ??
             process.env.TEMP ??
-            "/tmp",
+            tmpdir(),
           "octant-terminal-shell",
         ),
       confinement:
@@ -348,7 +358,7 @@ export class TerminalProcessPort {
   }
 
   start(input: TerminalLaunchInput): TerminalProcessHandle {
-    validateLaunch(input);
+    validateLaunch(input, this.#dependencies.platform);
     if (input.executionPolicy === "plan") {
       throw new ProcessConfinementError(
         "invalid-configuration",
@@ -356,89 +366,10 @@ export class TerminalProcessPort {
       );
     }
     this.#dependencies.ensurePtyHelperExecutable();
-    const shellState = shellStateDirectoryForRoot(
-      this.#dependencies.shellStateDirectory,
-      input.cwd,
-      input.stateScope,
-    );
-    mkdirSync(shellState, { recursive: true, mode: 0o700 });
-    // A fresh HOME with no .zshrc triggers zsh's first-run configuration wizard
-    // on Ubuntu, which consumes keystrokes and can make the terminal appear to
-    // swallow commands. Provide a minimal rc so the shell starts predictably.
-    const shellRc = join(shellState, ".zshrc");
-    if (!existsSync(shellRc)) {
-      writeFileSync(shellRc, "# Octant-managed minimal zsh rc\nPS1='%# '\n", {
-        mode: 0o600,
-      });
-    }
-    let launch: { readonly command: string; readonly args: readonly string[] };
-    try {
-      const shellDirectory = dirname(input.shell);
-      launch = this.#dependencies.confinement.prepare({
-        executable: input.shell,
-        // A login shell, as the platform's own terminal opens one: the login
-        // files are where PATH is assembled, and without them the tools a
-        // person installed were missing from a shell that looked like theirs.
-        args: input.command === undefined ? ["-l"] : ["-lc", input.command],
-        boundRoot: input.cwd,
-        ...(input.extraFolders === undefined || input.extraFolders.length === 0
-          ? {}
-          : { extraBoundRoots: input.extraFolders }),
-        temporaryDirectory: this.#dependencies.temporaryDirectory,
-        additionalWriteRoots: [shellState],
-        networkEgress: this.#dependencies.networkEgress,
-        allowFileReadStar: true,
-        terminal: { shellStateDirectory: shellState },
-        // Deny the whole shared base, not the siblings that happen to exist
-        // now: another repository's state directory may be created after this
-        // profile is generated, and this shell must never gain it. The allow
-        // rules below re-grant only this launch's own subdirectory.
-        additionalDenyReadPaths: [this.#dependencies.shellStateDirectory],
-        // The base can sit under the temporary directory, whose write grant
-        // would otherwise reach every sibling through that ancestor. Deny the
-        // base for writes too; the own-directory grant below re-allows it.
-        additionalDenyWritePaths: [this.#dependencies.shellStateDirectory],
-        // shellDirectory alone (e.g. /bin, /usr/local/bin) is enough for the
-        // shell's own read needs; `allowFileReadStar` already grants the rest.
-        // A second level up used to be included too, but for shells installed
-        // directly under a top-level directory (/bin/zsh, /bin/sh) that
-        // resolves to "/", which Seatbelt's confinement builder now refuses
-        // as a launch root because it is an ancestor of every sensitive deny
-        // path (see seatbeltProfile.ts).
-        readRoots: [
-          input.cwd,
-          ...(input.extraFolders ?? []),
-          this.#dependencies.temporaryDirectory,
-          shellState,
-          shellDirectory,
-          // Only macOS runs the person's own shell configuration. On Linux the
-          // shell's HOME is its state directory, so binding these homes would
-          // widen its reads for nothing it uses.
-          ...(this.#dependencies.platform === "darwin"
-            ? shellConfigurationReadRoots(this.#dependencies.homeDirectory)
-            : []),
-          ...(input.additionalReadRoots ?? []),
-        ],
-      });
-    } catch (error) {
-      if (error instanceof ProcessConfinementError) throw error;
-      throw new ProcessConfinementError(
-        "incompatible",
-        "Terminal Seatbelt confinement could not be prepared.",
-      );
-    }
-    const baseEnv = shellStateEnvironment(shellState);
-    const pty = this.#dependencies.spawn(launch.command, launch.args, {
-      name: "xterm-256color",
-      cwd: input.cwd,
-      env: {
-        ...baseEnv,
-        ...input.environment,
-        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
-      },
-      cols: input.columns,
-      rows: input.rows,
-    });
+    const pty =
+      this.#dependencies.platform === "win32"
+        ? this.#spawnWindowsShell(input)
+        : this.#spawnConfinedShell(input);
     const rootIdentity = (this.#dependencies.processIdentity ?? readProcessIdentity)(pty.pid).catch(
       () => undefined,
     );
@@ -513,6 +444,116 @@ export class TerminalProcessPort {
     };
   }
 
+  /**
+   * A Windows terminal runs only at Full access, the one level that uses no
+   * sandbox, because Windows has none Octant can use yet. It opens the shell
+   * Settings › Code names with its own arguments (never POSIX `-l`), in the
+   * folder, with the inherited environment the terminal service allowed.
+   */
+  #spawnWindowsShell(input: TerminalLaunchInput): PtyProcess {
+    if (input.executionPolicy !== "full-access")
+      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
+    const args = windowsShellArguments(input.shell, input.command);
+    if (args === undefined)
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "A Windows terminal opens Windows PowerShell, PowerShell 7 or Command Prompt.",
+      );
+    return this.#dependencies.spawn(input.shell, args, {
+      name: "xterm-256color",
+      cwd: input.cwd,
+      env: { ...input.environment },
+      cols: input.columns,
+      rows: input.rows,
+    });
+  }
+
+  #spawnConfinedShell(input: TerminalLaunchInput): PtyProcess {
+    const shellState = shellStateDirectoryForRoot(
+      this.#dependencies.shellStateDirectory,
+      input.cwd,
+      input.stateScope,
+    );
+    mkdirSync(shellState, { recursive: true, mode: 0o700 });
+    // A fresh HOME with no .zshrc triggers zsh's first-run configuration wizard
+    // on Ubuntu, which consumes keystrokes and can make the terminal appear to
+    // swallow commands. Provide a minimal rc so the shell starts predictably.
+    const shellRc = join(shellState, ".zshrc");
+    if (!existsSync(shellRc)) {
+      writeFileSync(shellRc, "# Octant-managed minimal zsh rc\nPS1='%# '\n", {
+        mode: 0o600,
+      });
+    }
+    let launch: { readonly command: string; readonly args: readonly string[] };
+    try {
+      const shellDirectory = dirname(input.shell);
+      launch = this.#dependencies.confinement.prepare({
+        executable: input.shell,
+        // A login shell, as the platform's own terminal opens one: the login
+        // files are where PATH is assembled, and without them the tools a
+        // person installed were missing from a shell that looked like theirs.
+        args: input.command === undefined ? ["-l"] : ["-lc", input.command],
+        boundRoot: input.cwd,
+        ...(input.extraFolders === undefined || input.extraFolders.length === 0
+          ? {}
+          : { extraBoundRoots: input.extraFolders }),
+        temporaryDirectory: this.#dependencies.temporaryDirectory,
+        additionalWriteRoots: [shellState],
+        networkEgress: this.#dependencies.networkEgress,
+        allowFileReadStar: true,
+        terminal: { shellStateDirectory: shellState },
+        // Deny the whole shared base, not the siblings that happen to exist
+        // now: another repository's state directory may be created after this
+        // profile is generated, and this shell must never gain it. The allow
+        // rules below re-grant only this launch's own subdirectory.
+        additionalDenyReadPaths: [this.#dependencies.shellStateDirectory],
+        // The base can sit under the temporary directory, whose write grant
+        // would otherwise reach every sibling through that ancestor. Deny the
+        // base for writes too; the own-directory grant below re-allows it.
+        additionalDenyWritePaths: [this.#dependencies.shellStateDirectory],
+        // shellDirectory alone (e.g. /bin, /usr/local/bin) is enough for the
+        // shell's own read needs; `allowFileReadStar` already grants the rest.
+        // A second level up used to be included too, but for shells installed
+        // directly under a top-level directory (/bin/zsh, /bin/sh) that
+        // resolves to "/", which Seatbelt's confinement builder now refuses
+        // as a launch root because it is an ancestor of every sensitive deny
+        // path (see seatbeltProfile.ts).
+        readRoots: [
+          input.cwd,
+          ...(input.extraFolders ?? []),
+          this.#dependencies.temporaryDirectory,
+          shellState,
+          shellDirectory,
+          // Only macOS runs the person's own shell configuration. On Linux the
+          // shell's HOME is its state directory, so binding these homes would
+          // widen its reads for nothing it uses.
+          ...(this.#dependencies.platform === "darwin"
+            ? shellConfigurationReadRoots(this.#dependencies.homeDirectory)
+            : []),
+          ...(input.additionalReadRoots ?? []),
+        ],
+      });
+    } catch (error) {
+      if (error instanceof ProcessConfinementError) throw error;
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Terminal Seatbelt confinement could not be prepared.",
+      );
+    }
+    const baseEnv = shellStateEnvironment(shellState);
+    return this.#dependencies.spawn(launch.command, launch.args, {
+      name: "xterm-256color",
+      cwd: input.cwd,
+      env: {
+        ...baseEnv,
+        ...input.environment,
+        ...(this.#dependencies.platform === "darwin" ? {} : { HOME: shellState }),
+      },
+      cols: input.columns,
+      rows: input.rows,
+    });
+  }
+
   async reconcile(): Promise<void> {
     await reconcileProcessReceipts({
       supervisor: "terminal",
@@ -534,6 +575,7 @@ export class TerminalProcessPort {
   }
 
   async #close(pty: PtyProcess): Promise<void> {
+    if (this.#dependencies.platform === "win32") return await this.#closeWindowsTree(pty);
     // The shell gives every job a process group of its own, so ending the
     // shell's group left a job that had outlived its parent running: measured
     // on macOS 27, a command's orphaned child survived the close. Every
@@ -549,6 +591,21 @@ export class TerminalProcessPort {
     } finally {
       for (const member of members) await endTerminalSessionMember(member);
     }
+  }
+
+  /**
+   * Windows has no process groups, so the stop ends the shell and every
+   * program it started through the tree stop, where a signal to the negated
+   * pid reached nothing.
+   */
+  async #closeWindowsTree(pty: PtyProcess): Promise<void> {
+    // Listening before the stop: a shell that ends at once would otherwise
+    // report its exit before anyone waited for it.
+    const exited = this.#dependencies.waitForExit(pty, this.#dependencies.gracefulTimeoutMs);
+    const stopped = await this.#dependencies.stopWindowsTree(pty.pid);
+    if (stopped === "failed") throw new Error("Terminal process tree did not stop.");
+    if (!(await exited) && stopped !== "absent")
+      throw new Error("Terminal process tree did not exit.");
   }
 
   async #closeProcessGroup(pty: PtyProcess): Promise<void> {
@@ -720,14 +777,15 @@ function resolveNodePtyPackageRoot(): string {
   return resolve(dirname(entry), "..");
 }
 
-function validateLaunch(input: TerminalLaunchInput): void {
+function validateLaunch(input: TerminalLaunchInput, platform: NodeJS.Platform): void {
+  const paths = platform === "win32" ? win32 : posix;
   if (
     input.command !== undefined &&
     (input.command.includes("\0") ||
       Buffer.byteLength(input.command, "utf8") > MAX_TERMINAL_INPUT_BYTES)
   )
     throw new Error("Terminal command is invalid.");
-  if (!isAbsolute(input.shell) || !isAbsolute(input.cwd))
+  if (!paths.isAbsolute(input.shell) || !paths.isAbsolute(input.cwd))
     throw new Error("Terminal launch is invalid.");
   validateGeometry(input.columns, input.rows);
   for (const [name, value] of Object.entries(input.environment)) {

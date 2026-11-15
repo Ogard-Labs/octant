@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import {
   accessSync,
   chmodSync,
@@ -829,24 +830,48 @@ describe("Codex launch confinement", () => {
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
   });
 
-  it("refuses Windows Full access before an unconfined process can be prepared", () => {
+  it("launches Windows Full access unwrapped in the thread's folder and refuses a guarded Windows launch before any confinement is prepared", () => {
     const prepare = vi.fn(() => {
-      throw Error("No process may be prepared.");
+      throw Error("No confinement may be prepared.");
     });
-    const result = prepareCodexLaunch({
-      binaryPath: "C:\\fixture\\provider.exe",
-      args: [],
+    const full = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
       authority: {
         kind: "thread",
-        root: "C:\\fixture",
+        root: "C:\\fixture\\project",
         mode: "code",
         executionPolicy: "full-access",
       },
-      environment: {},
+      environment: { USERPROFILE: "C:\\Users\\fixture" },
       confinement: { prepare },
       platform: "win32",
     });
-    expect(result.status).toBe("refused");
+    expect(full).toMatchObject({
+      status: "prepared",
+      launch: {
+        command: "C:\\fixture\\codex.exe",
+        args: ["app-server"],
+        cwd: "C:\\fixture\\project",
+      },
+    });
+    for (const authority of [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "full-access", fullAccessSandbox: true },
+    ] as const) {
+      const guarded = prepareCodexLaunch({
+        binaryPath: "C:\\fixture\\codex.exe",
+        args: [],
+        authority: { kind: "thread", root: "C:\\fixture\\project", mode: "code", ...authority },
+        environment: {},
+        confinement: { prepare },
+        platform: "win32",
+      });
+      expect(guarded).toMatchObject({
+        status: "refused",
+        failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+    }
     expect(prepare).not.toHaveBeenCalled();
   });
 

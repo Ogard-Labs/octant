@@ -98,6 +98,7 @@ import {
   FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
 } from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
+import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import { Effect, Schema } from "effect";
 import type {
@@ -1378,6 +1379,15 @@ export function createCodeOperationRuntime(
       return turns.threadWithActiveTurnPosture(session);
     },
   };
+  const operationAccess = (
+    windowId: WindowId,
+    command: CodeOperationCommand,
+  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox"> => {
+    const stored =
+      "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
+    if (stored === undefined) return { executionPolicy: "plan" };
+    return authorityForTurn.effectiveThread?.(windowId, stored) ?? stored;
+  };
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
@@ -1843,13 +1853,6 @@ export function createCodeOperationRuntime(
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
     execute: async (windowId, rawCommand, executeOptions) => {
-      if (process.platform === "win32")
-        throw new CodeServiceError(
-          decodeCodeFailure({
-            category: "unavailable",
-            message: "Code execution requires Windows host confinement.",
-          }),
-        );
       // A turn counts as running for a compaction from the moment it passes the
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.
@@ -1858,6 +1861,19 @@ export function createCodeOperationRuntime(
       let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
+        // A thread's terminals, tests and other operations run on a host
+        // without Octant's sandbox only at the level that uses none, read from
+        // the posture a live turn narrows it to. An operation that names no
+        // thread has no level to read, so it refuses there. A provider turn is
+        // judged again at its own clamped level when it starts.
+        const sandboxRefusal = hostSandboxRefusal({
+          platform: process.platform,
+          access: operationAccess(windowId, command),
+        });
+        if (sandboxRefusal !== undefined)
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: sandboxRefusal }),
+          );
         if (command.kind === "start-provider-turn") {
           const thread = options.persistence.readCodeThread(command.threadId);
           // The pause state is the thread's own; a window without Open

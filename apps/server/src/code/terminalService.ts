@@ -1,3 +1,4 @@
+import { delimiter } from "node:path";
 import type { TerminalLaunchInput, TerminalProcessHandle } from "./terminalProcessPort";
 import { startServerTerminal, type ServerTerminalLogin } from "../serverProjects/serverTerminal";
 
@@ -33,6 +34,28 @@ const INHERITED_ENVIRONMENT_ALLOWLIST = new Set([
   "TERM",
   "TMP",
   "TMPDIR",
+  // What a Windows shell reads to find itself, the person's folders and its
+  // modules. Windows names are case-insensitive, so the upper-case spelling
+  // reads and sets `SystemRoot` and its kin; other hosts have none of them.
+  "APPDATA",
+  "COMPUTERNAME",
+  "COMSPEC",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LOCALAPPDATA",
+  "NUMBER_OF_PROCESSORS",
+  "OS",
+  "PATHEXT",
+  "PROCESSOR_ARCHITECTURE",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "PSMODULEPATH",
+  "SYSTEMDRIVE",
+  "SYSTEMROOT",
+  "USERDOMAIN",
+  "USERNAME",
+  "USERPROFILE",
+  "WINDIR",
 ]);
 
 export interface TerminalCredentialReference {
@@ -246,7 +269,7 @@ export class TerminalService {
       environment.PATH =
         environment.PATH === undefined || environment.PATH === ""
           ? request.launcher.directory
-          : `${request.launcher.directory}:${environment.PATH}`;
+          : `${request.launcher.directory}${delimiter}${environment.PATH}`;
     }
 
     if (request.server !== undefined && request.credentialReferences.length > 0) {

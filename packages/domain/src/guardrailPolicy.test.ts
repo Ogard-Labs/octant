@@ -9,6 +9,8 @@ import {
   guardrailLowered,
   guardrailScopeOf,
   guardrailLevelOf,
+  hostSandboxRefusal,
+  WINDOWS_SANDBOX_MISSING_REASON,
   outsideContentRecordedOnly,
   permissionModeOf,
   permissionModeOfWorkAccess,
@@ -196,6 +198,34 @@ describe("guardrail levels", () => {
           mode: "chat",
         }),
       ).toMatchObject({ egress: "none" });
+    }
+  });
+});
+
+describe("levels on a host without Octant's sandbox", () => {
+  it("runs only Full access with the sandbox off on Windows and names the missing sandbox for every other level", () => {
+    expect(
+      hostSandboxRefusal({ platform: "win32", access: { executionPolicy: "full-access" } }),
+    ).toBeUndefined();
+    for (const access of [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "approval-gated", autoApprove: true },
+      { executionPolicy: "auto-accept-edits" },
+      { executionPolicy: "plan" },
+      { executionPolicy: "full-access", fullAccessSandbox: true },
+    ] as const) {
+      expect(hostSandboxRefusal({ platform: "win32", access })).toBe(
+        WINDOWS_SANDBOX_MISSING_REASON,
+      );
+    }
+    expect(WINDOWS_SANDBOX_MISSING_REASON).toMatch(/sandbox.*Windows/);
+  });
+
+  it("refuses nothing on macOS or Linux, where the sandbox exists", () => {
+    for (const platform of ["darwin", "linux"]) {
+      expect(
+        hostSandboxRefusal({ platform, access: { executionPolicy: "approval-gated" } }),
+      ).toBeUndefined();
     }
   });
 });

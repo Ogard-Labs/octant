@@ -98,6 +98,7 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
+import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import {
   decideRunMerge,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -6166,6 +6167,12 @@ export class CodeOperationService {
     folderCurrent?: () => boolean,
     includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
+    // `thread` carries the level this turn runs at: the composer's, a
+    // recorded start's, or a coordinator's Plan, clamped to the thread's own.
+    // Checked before the worktree is prepared or any runtime starts.
+    const sandboxRefusal = hostSandboxRefusal({ platform: process.platform, access: thread });
+    if (sandboxRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(

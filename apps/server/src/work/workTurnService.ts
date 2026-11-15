@@ -116,6 +116,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
+  hostSandboxRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -865,8 +866,6 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
-    if (process.platform === "win32")
-      throw this.#failure("unavailable", "Work execution requires Windows host confinement.");
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
@@ -1015,6 +1014,17 @@ export class WorkTurnService {
       options?.accessCeiling === undefined
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
+    // Judged at that level, not only the thread's stored one, before anything
+    // is journaled or started: a host without Octant's sandbox runs only the
+    // level that uses none.
+    const sandboxRefusal = hostSandboxRefusal({
+      platform: process.platform,
+      access: {
+        ...workThreadAccessOf(turnAccess),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      },
+    });
+    if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     // A thread in a server Work Project binds its turn here, before anything
     // starts: the harness's tools on the server, or why it cannot run there.

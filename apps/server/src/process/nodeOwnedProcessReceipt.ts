@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { stopWindowsProcessTree } from "./windowsProcessTree";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -401,8 +402,14 @@ function defaultProcessGroupExists(pid: number): boolean {
 }
 
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  // Windows has no process groups: the tree stop ends the owned root and every
+  // process it started, where a signal to the pid ended only the root.
+  if (process.platform === "win32") {
+    void stopWindowsProcessTree(pid);
+    return;
+  }
   try {
-    process.kill(process.platform === "win32" ? pid : -pid, signal);
+    process.kill(-pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }

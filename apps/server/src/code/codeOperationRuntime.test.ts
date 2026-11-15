@@ -144,6 +144,7 @@ import {
   APPROVAL_POSTURE_CHANGED_MESSAGE,
   defaultWindowWorkspace,
   contextKeyForProject,
+  WINDOWS_SANDBOX_MISSING_REASON,
 } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
@@ -197,7 +198,7 @@ afterEach(() => {
 });
 
 describe("CodeOperationRuntime", () => {
-  it("refuses a Windows operation before a terminal or provider can start", async () => {
+  it("refuses a Windows terminal below Full access, naming the missing sandbox, before it can start", async () => {
     const fixture = runtimeFixture({});
     vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
     try {
@@ -212,7 +213,35 @@ describe("CodeOperationRuntime", () => {
           rows: 30,
           credentialRefs: [],
         }),
-      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("lets a Windows operation on a Full access thread past the sandbox check", async () => {
+    const fixture = runtimeFixture({});
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const outcome = await fixture.runtime
+        .execute(windowId, {
+          kind: "start-terminal",
+          threadId,
+          checkoutId,
+          operationId: operationId(1),
+          terminalId: operationId(2),
+          columns: 100,
+          rows: 30,
+          credentialRefs: [],
+        })
+        .then(
+          (result) => JSON.stringify(result),
+          (error: unknown) => JSON.stringify(error),
+        );
+      expect(outcome).not.toContain(WINDOWS_SANDBOX_MISSING_REASON);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -4349,6 +4378,46 @@ describe("CodeOperationRuntime", () => {
     expect(optionsOf("free-text")).toEqual([]);
     await fixture.runtime.close();
     fixture.close();
+  });
+
+  it("runs a Windows Code turn at Full access and refuses one the composer narrows below it", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(15),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+          executionPolicy: "approval-gated",
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+      expect(connection.send).not.toHaveBeenCalled();
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(16),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    } finally {
+      vi.unstubAllGlobals();
+      await fixture.runtime.close();
+      fixture.close();
+    }
   });
 
   it("answers an approval requested by a narrowed turn on a broader thread", async () => {

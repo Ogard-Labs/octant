@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import { isAtLeastRelease } from "./releaseVersion";
 import {
   accessSync,
@@ -17,6 +18,7 @@ import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import { processGroupHasRunningMember } from "../process/processGroupRunningMember";
 import {
@@ -440,7 +442,9 @@ function processGroupExists(child: ChildProcess): boolean {
 function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the runtime and every
+    // program it started, where `child.kill` ended only the runtime.
+    if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -724,11 +728,6 @@ export function prepareCodexLaunch(input: {
   | { readonly status: "prepared"; readonly launch: CodexLaunch }
   | { readonly status: "refused"; readonly failure: ProviderFailure } {
   const { authority } = input;
-  if (input.platform === "win32")
-    return {
-      status: "refused",
-      failure: failure("incompatible", "Provider processes require Windows host confinement."),
-    };
   if (
     authority.kind === "thread" &&
     authority.executionPolicy === "full-access" &&
@@ -745,6 +744,13 @@ export function prepareCodexLaunch(input: {
       },
     };
   }
+  // Every other launch runs inside Octant's profile, which Windows does not
+  // have yet; refused here, before a scratch directory is made for it.
+  if (input.platform === "win32")
+    return {
+      status: "refused",
+      failure: failure("incompatible", WINDOWS_SANDBOX_MISSING_REASON),
+    };
   let temporaryDirectory: string | undefined;
   const release = () => {
     if (temporaryDirectory !== undefined) {

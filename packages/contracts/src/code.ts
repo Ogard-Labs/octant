@@ -493,6 +493,16 @@ export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
 export type CodeDiffLayout = typeof CodeDiffLayout.Type;
 
 /**
+ * The shell a Code or Project terminal opens on a Windows host. Windows has no
+ * login shell to read, and guessing a POSIX shell there opened nothing, so the
+ * person names one: Windows PowerShell (`powershell`, the default, which every
+ * Windows install carries), PowerShell 7 (`pwsh`), or Command Prompt (`cmd`).
+ * macOS and Linux hosts keep the login shell and ignore this.
+ */
+export const WindowsTerminalShell = Schema.Literal("powershell", "pwsh", "cmd");
+export type WindowsTerminalShell = typeof WindowsTerminalShell.Type;
+
+/**
  * Threads without a Project once had their own Code switch beside the Git
  * requirement. It folded into that requirement: a store, journal event, or
  * window from before still carries it, so it is accepted on the way in and
@@ -592,6 +602,12 @@ export const CodeSettings = Schema.Struct({
    * store persisted before the switch existed reads as.
    */
   restartContinuation: Schema.optional(Schema.Boolean),
+  /**
+   * Settings › Code › Terminal shell on a Windows host. Absent is Windows
+   * PowerShell, which is also what a store persisted before the choice existed
+   * reads as.
+   */
+  windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -831,6 +847,8 @@ export const CodeCommand = Schema.Union(
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
     /** Absent keeps the stored choice. */
     restartContinuation: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
