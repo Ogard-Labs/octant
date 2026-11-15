@@ -183,11 +183,12 @@ read none.
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
 ([Architecture: providers](../architecture.md#providers)). An account the
-person turned off still carries the runtime's own web search and fetch in
-Work and Code outside Plan (`webTools` alone on), asking below Full access and
-marking the thread. That alone does not count as running as itself, so
-OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps
-`VIBE_INCLUDE_PROJECT_CONTEXT="false"`.
+person turned off carries none of it below Full access, and never the
+runtime's own web search and fetch: `webTools` resolves off in every mode and
+at every level, Full access, a trusted Project, and the thread's On included
+(maintainer decision, 2026-11-15). Claude Code honors it by never offering
+`WebSearch` and `WebFetch`; Codex, OpenCode outside Plan, and Mistral Vibe do
+not yet switch their own web search off.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every

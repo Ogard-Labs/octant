@@ -6576,7 +6576,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person turned it on). Each call still meets the thread's
   [guardrail level](#security-and-authority): Guarded asks, Reviewed's
   reviewer decides, Full access runs without asking. The person may turn it
-  off for an account or a thread; a Project's own hooks, MCP servers, and
+  off for an account or a thread; an account turned off also keeps the
+  runtime's own web search and fetch off in every mode, Work and Code
+  included (maintainer decision, 2026-11-15); a Project's own hooks, MCP servers, and
   plugins still load only once the person trusts that Project for that
   provider, as the providers' own folder-trust prompts require.
   Plan stays read-only and Chat's filesystem and shell stay withheld at
@@ -6699,7 +6701,10 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     `@octant/domain`): nothing for a provider that is not a key provider;
     nothing at Guarded and Reviewed unless the account, the Project, or the
     thread's On choice allows it; on at Full access unless the thread chose
-    Off. Plan leaves the account's tool servers, hooks,
+    Off. An account turned off never resolves the runtime's own web search
+    and fetch (`webTools`) on, in any mode and at any level: Full access, a
+    trusted Project, and the thread's On turn the rest on without them
+    (maintainer decision, 2026-11-15). Plan leaves the account's tool servers, hooks,
     and the Project's code off; Chat leaves hooks and the Project's code off
     and keeps the account's tool servers, which is the switch's own note.
     The Project's code needs the Project's trust at every level, Full access
