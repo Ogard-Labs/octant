@@ -799,17 +799,14 @@ describe("NativeHarnessRoutingPanel with providers that are not harness endpoint
     await user.click(await screen.findByRole("button", { name: "Use these" }));
 
     await waitFor(() => expect(updateRouting).toHaveBeenCalledOnce());
-    const sent = (
-      updateRouting.mock.calls as unknown as ReadonlyArray<ReadonlyArray<never>>
-    )[0]?.[0] as {
-      configuration: NativeHarnessRoutingConfiguration;
-      expectedVersion: number;
-    };
-    expect(sent.expectedVersion).toBe(4);
-    const builder = sent.configuration.slots.find((slot) => String(slot.id) === "default");
+    const sent = updateRouting.mock.calls[0] as unknown as readonly [
+      { configuration: NativeHarnessRoutingConfiguration; expectedVersion: number },
+    ];
+    expect(sent[0].expectedVersion).toBe(4);
+    const builder = sent[0].configuration.slots.find((slot) => String(slot.id) === "default");
     expect(String(builder?.candidates[0]?.modelId)).toBe("sonnet-5-5");
     expect(builder?.askBeforeUsing).toBe(true);
-    const planner = sent.configuration.slots.find((slot) => String(slot.id) === "plan");
+    const planner = sent[0].configuration.slots.find((slot) => String(slot.id) === "plan");
     expect(String(planner?.candidates[0]?.modelId)).toBe("opus-5-5");
   });
 
