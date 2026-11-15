@@ -120,6 +120,7 @@ import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
+import { supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
@@ -792,10 +793,12 @@ export function wireWork(deps: WorkDependencies) {
                   input.thread.providerInstanceId,
                   input.thread.modelId,
                 ),
-                readsImages:
-                  observed?.models
-                    .find((candidate) => String(candidate.id) === String(input.thread.modelId))
-                    ?.inputModalities.includes("image") === true,
+                // The same test an attached image meets.
+                readsImages: supportsConversationInput(
+                  observed,
+                  String(input.thread.modelId),
+                  "image/png",
+                ),
                 attachment: async (attachmentId) => {
                   const reference = workTurnProjection
                     .listForThread(input.thread.id)
@@ -913,8 +916,9 @@ export function wireWork(deps: WorkDependencies) {
       ...(imageDescriber === undefined
         ? {}
         : {
-            describeImages: ({ projectId, providerInstanceId, modelId, images }) =>
+            describeImages: ({ projectId, providerInstanceId, modelId, images, signal }) =>
               describeTurnImages(imageDescriber, {
+                signal,
                 projectId,
                 threadModel: modelLabelOf(
                   { persistence, providerRuntimeRegistry },

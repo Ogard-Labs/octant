@@ -256,8 +256,8 @@ export class ImageDescriber {
       kind: "chosen",
       candidate: decision.candidate,
       describedBy: {
-        model: chosen.label.slice(0, 256),
-        provider: chosen.providerName.slice(0, 256),
+        model: label(chosen.label, String(decision.candidate.modelId)),
+        provider: label(chosen.providerName, String(decision.candidate.providerInstanceId)),
       },
     };
   }
@@ -310,6 +310,12 @@ export class ImageDescriber {
   }
 }
 
+/** A name the journal's label schema takes: trimmed, non-empty, at most 256 characters. */
+function label(name: string, fallback: string): string {
+  const cut = name.trim().slice(0, 256).trim();
+  return cut.length > 0 ? cut : fallback.slice(0, 256);
+}
+
 function isFailed(skip: Skipped, failed: ReadonlyArray<Skipped>): boolean {
   return failed.some((entry) => entry.model === skip.model && entry.provider === skip.provider);
 }
@@ -352,6 +358,13 @@ export async function describeTurnImages(
     readonly text: string;
   }> = [];
   for (const image of input.images) {
+    // A stopped turn sends no further image anywhere.
+    if (input.signal?.aborted === true) {
+      return {
+        status: "refused",
+        reason: "The turn was stopped before its images were described.",
+      };
+    }
     const outcome = await describer.describe({
       projectId: input.projectId,
       threadModel: input.threadModel,

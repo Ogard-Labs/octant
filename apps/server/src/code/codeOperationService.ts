@@ -1360,6 +1360,7 @@ export interface CodeOperationServiceOptions {
   readonly describeImages?: (input: {
     readonly thread: CodeThread;
     readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
   }) => Promise<TurnImagesDescription>;
   /**
    * Every turn of a thread, oldest first, or undefined when it cannot all be
@@ -1987,7 +1988,16 @@ export class CodeOperationService {
                 this.#options.describeImages !== undefined &&
                 this.#options.supportsAttachments?.(turnThread) !== true
               ) {
-                const described = await this.#describeStartImages(turnThread, starting.attachments);
+                // A Stop while the images are described sends no further one.
+                const describing = new AbortController();
+                const watch = setInterval(() => {
+                  if (!preparationCurrent()) describing.abort();
+                }, 250);
+                const described = await this.#describeStartImages(
+                  turnThread,
+                  starting.attachments,
+                  describing.signal,
+                ).finally(() => clearInterval(watch));
                 if (described.status === "refused") {
                   turnRefusal = this.#failed(
                     command.operationId,
@@ -6463,6 +6473,7 @@ export class CodeOperationService {
   async #describeStartImages(
     thread: CodeThread,
     references: ReadonlyArray<CodeAttachmentReference>,
+    signal: AbortSignal,
   ): Promise<
     | { readonly status: "described"; readonly images: DescribedStartImages }
     | { readonly status: "refused"; readonly reason: string }
@@ -6473,6 +6484,7 @@ export class CodeOperationService {
     }
     const described = await this.#options.describeImages?.({
       thread,
+      signal,
       images: inputs.map((input) => ({
         attachmentId: input.attachmentId,
         name: input.displayName,

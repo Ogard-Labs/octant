@@ -85,6 +85,7 @@ import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStor
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
+import { supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
@@ -610,11 +611,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           thread.providerInstanceId,
           thread.modelId,
         ),
-        readsImages:
-          providerRuntimeRegistry
-            .observedState(thread.providerInstanceId)
-            ?.models.find((model) => String(model.id) === String(thread.modelId))
-            ?.inputModalities.includes("image") === true,
+        // The same test an attached image meets, so a thread that cannot
+        // take an image from Octant can always ask for one to be described.
+        readsImages: supportsConversationInput(
+          providerRuntimeRegistry.observedState(thread.providerInstanceId),
+          String(thread.modelId),
+          "image/png",
+        ),
         attachment: async (attachmentId) => {
           const reference = codeBoardEventStore.turnAttachmentOfThread(thread.id, attachmentId);
           if (reference === undefined || codeAttachments === undefined) return undefined;
@@ -1128,8 +1131,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         ...(imageDescriber === undefined
           ? {}
           : {
-              describeImages: ({ thread, images }) =>
+              describeImages: ({ thread, images, signal }) =>
                 describeTurnImages(imageDescriber, {
+                  signal,
                   projectId: thread.projectId,
                   threadModel: modelLabelOf(
                     { persistence, providerRuntimeRegistry },

@@ -387,6 +387,7 @@ export interface WorkTurnServiceDependencies {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
     readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
   }) => Promise<TurnImagesDescription>;
   readonly turnRuntime?: WorkTurnRuntimePort;
   readonly prepareProductFeedbackForTurn?: (input: {
@@ -1223,7 +1224,13 @@ export class WorkTurnService {
           "The selected model does not support images. Choose a vision model, or remove the attachments.",
         );
       }
+      // A turn stopped or revoked while its images are described sends no further one.
+      const describing = new AbortController();
+      const watch = setInterval(() => {
+        if (options?.admissionCurrent?.() === false) describing.abort();
+      }, 250);
       const described = await this.#describeImages({
+        signal: describing.signal,
         projectId: command.authority.projectId,
         providerInstanceId: command.authority.providerInstanceId,
         modelId: command.authority.modelId,
@@ -1233,7 +1240,7 @@ export class WorkTurnService {
           mediaType: input.mediaType,
           bytes: input.bytes,
         })),
-      });
+      }).finally(() => clearInterval(watch));
       if (described.status === "refused") throw this.#failure("unsupported", described.reason);
       describedImages = described.images.map((image) => ({
         attachmentId: image.attachmentId,
