@@ -101,7 +101,8 @@ if (host.status !== "ready") throw new Error(`The CLI could not open its host: $
 const local = process.env.LOCALAPPDATA ?? "";
 const root = win32.join(local, "Octant", "hosts", "octant");
 check(
-  host.paths.rootDirectory.toLowerCase() === root.toLowerCase() &&
+  // Native code names the folder in its long-path form.
+  host.paths.rootDirectory.replace(/^\\\\\?\\/, "").toLowerCase() === root.toLowerCase() &&
     host.paths.dataDirectory === win32.join(host.paths.rootDirectory, "data") &&
     host.paths.configDirectory === win32.join(host.paths.rootDirectory, "config") &&
     host.paths.stateDirectory === win32.join(host.paths.rootDirectory, "state") &&
