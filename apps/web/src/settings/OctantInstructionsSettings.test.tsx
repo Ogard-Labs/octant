@@ -213,6 +213,27 @@ describe("Project instructions in a Project's settings", () => {
     });
   });
 
+  it("keeps the refusal and the draft after a stale save of a Project's text", async () => {
+    const user = userEvent.setup();
+    const { client, change } = projectClient("Ship from main only.");
+    change.mockResolvedValueOnce(
+      decodeOctantInstructionsResult({
+        kind: "octant-instructions-refused",
+        reason: "stale-version",
+        message: "This Project's instructions changed since you opened them. Reload and try again.",
+      }),
+    );
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} />);
+
+    const field = await screen.findByRole("textbox", { name: "Project instructions" });
+    await user.type(field, " Always.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(client.readProject).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent("changed since you opened them");
+    expect(field).toHaveValue("Ship from main only. Always.");
+  });
+
   it("shows an archived Project's text read-only", async () => {
     const { client } = projectClient("Ship from main only.");
     render(<ProjectInstructionsSettings client={client} projectId={projectId} readOnly />);

@@ -277,8 +277,10 @@ export function ProjectInstructionsSettings(props: ProjectInstructionsSettingsPr
         return;
       }
       if (result.kind === "octant-instructions-refused") {
-        setProblem(result.message);
+        // The reread clears the problem when it succeeds, so the refusal is
+        // shown after it; otherwise the person keeps a draft with no reason.
         if (result.reason === "stale-version") await load();
+        setProblem(result.message);
       }
     } catch {
       setProblem("This Project's instructions could not be saved.");
