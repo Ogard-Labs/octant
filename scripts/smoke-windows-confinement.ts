@@ -227,6 +227,34 @@ try {
     afterwards.stdout,
   );
 
+  // Two launches on the same checkout at once each write the whole DACL; the
+  // launcher's session lock must keep both entries while both run, and each
+  // launch's cleanup must remove its own entry and not the other's.
+  const containerSids = () => {
+    const listing = spawnSync("icacls", [granted], { encoding: "utf8" }).stdout;
+    return new Set(listing.match(/S-1-15-2(?:-\d+){7}/gu) ?? []);
+  };
+  const waiting = [0, 1].map(() => {
+    const launch = prepare(cmd, shell("set /p OCTANT_WAIT="));
+    return spawn(launch.command, [...launch.args], { stdio: ["pipe", "ignore", "pipe"] });
+  });
+  const exits = waiting.map(
+    (child) => new Promise<number | null>((done) => child.on("exit", (code) => done(code))),
+  );
+  let concurrent = 0;
+  for (let attempt = 0; attempt < 60 && concurrent < 2; attempt += 1) {
+    await new Promise((done) => setTimeout(done, 500));
+    concurrent = containerSids().size;
+  }
+  for (const child of waiting) child.stdin.end("\r\n");
+  const codes = await Promise.all(exits);
+  const leftAfter = containerSids().size;
+  check(
+    "keeps both grants while two launches share a checkout and removes both after",
+    concurrent === 2 && codes.every((code) => code === 0) && leftAfter === 0,
+    { concurrent, codes, leftAfter },
+  );
+
   const marker = `octant-confine-${randomBytes(6).toString("hex")}`;
   const held = prepare(cmd, ["/d", "/c", "cmd", "/d", "/c", `set /p OCTANT_WAIT= & rem ${marker}`]);
   const launcher = spawn(held.command, [...held.args], { stdio: ["pipe", "ignore", "ignore"] });

@@ -104,6 +104,48 @@ describe("Windows confinement port", () => {
     );
   });
 
+  it("refuses a grant beneath an isolated root unless it is the launch's own write root", () => {
+    const port = windowsPort();
+    const isolated = { ...launch, isolatedRoots: ["D:\\private"] };
+    expect(
+      refusalOf(() => port.prepare({ ...isolated, boundRoot: "D:\\private\\captures" })),
+    ).toMatch(/isolated/u);
+    expect(
+      refusalOf(() => port.prepare({ ...isolated, readRoots: ["D:\\private\\shared"] })),
+    ).toMatch(/isolated/u);
+    expect(
+      refusalOf(() =>
+        port.prepare({ ...isolated, additionalWriteRoots: ["D:\\private\\capture-1"] }),
+      ),
+    ).toBeUndefined();
+    // The capture's one writer carries its directory as both.
+    expect(
+      refusalOf(() =>
+        port.prepare({
+          ...launch,
+          isolatedRoots: ["D:\\private\\capture-1"],
+          additionalWriteRoots: ["D:\\private\\capture-1"],
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
+  it("refuses a checkout or temporary directory the launch asked to keep unwritable", () => {
+    const port = windowsPort();
+    expect(
+      refusalOf(() => port.prepare({ ...launch, additionalDenyWritePaths: ["D:\\octant-tmp"] })),
+    ).toMatch(/unwritable/u);
+    expect(
+      refusalOf(() =>
+        port.prepare({
+          ...launch,
+          additionalDenyWritePaths: ["D:\\shared"],
+          additionalWriteRoots: ["D:\\shared\\mine"],
+        }),
+      ),
+    ).toBeUndefined();
+  });
+
   it("refuses a launch whose pattern scan cannot finish", () => {
     const crowded = Array.from({ length: 4_097 }, (_, index) => ({
       name: `f${String(index)}`,

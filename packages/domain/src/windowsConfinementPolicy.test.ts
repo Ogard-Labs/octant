@@ -65,6 +65,35 @@ describe("Windows confined launch plan", () => {
     expect(plan.activeProcessLimit).toBe(1);
   });
 
+  it("refuses a read-only checkout beneath a folder the launch may write", () => {
+    expect(
+      refusal({
+        writeBoundRoot: false,
+        boundRoot: "D:\\tmp\\checkout",
+        temporaryDirectory: "D:\\tmp",
+      }),
+    ).toBe("writable-above-read-only");
+    expect(
+      refusal({
+        writeBoundRoot: false,
+        extraBoundRoots: ["D:\\cache\\docs"],
+        additionalWriteRoots: ["D:\\cache"],
+      }),
+    ).toBe("writable-above-read-only");
+    // A write root inside a read-only checkout is its own explicit grant, as
+    // the other platforms re-allow it, and a writable checkout has nothing to
+    // keep read-only.
+    expect(
+      planned({
+        writeBoundRoot: false,
+        additionalWriteRoots: [`${HOME}\\src\\octant\\.octant-scratch`],
+      }).grants,
+    ).toContainEqual({ path: `${HOME}\\src\\octant\\.octant-scratch`, access: "modify" });
+    expect(
+      planned({ boundRoot: "D:\\tmp\\checkout", temporaryDirectory: "D:\\tmp" }).grants,
+    ).toContainEqual({ path: "D:\\tmp\\checkout", access: "modify" });
+  });
+
   it("keeps a folder's strongest grant once whatever its letter case", () => {
     const plan = planned({
       writeBoundRoot: false,

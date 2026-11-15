@@ -83,7 +83,8 @@ export type WindowsConfinementRefusal =
   | "drive-root"
   | "not-an-executable"
   | "proxied-network"
-  | "covers-protected";
+  | "covers-protected"
+  | "writable-above-read-only";
 
 export type WindowsConfinementDecision =
   | {
@@ -164,6 +165,27 @@ export function planWindowsConfinedLaunch(
         "drive-root",
         `Windows confinement does not grant a whole drive (${grant.path}\\).`,
       );
+    }
+  }
+
+  // A writable grant above a read-only checkout passes its inheritable modify
+  // entry down to it, and an allow entry for read cannot take that back (nor
+  // is a deny entry relied on), so such a launch is refused. Seatbelt denies
+  // the checkout's write after every grant instead; Windows has no such order.
+  if (!input.writeBoundRoot) {
+    const bound = requested.slice(0, 1 + input.extraBoundRoots.length);
+    for (const writable of requested.filter((grant) => grant.access === "modify")) {
+      const writableForm = guardForm(writable.path);
+      const below = bound.find((root) => {
+        const form = guardForm(root.path);
+        return form !== writableForm && isSameOrInside(form, writableForm);
+      });
+      if (below !== undefined) {
+        return refused(
+          "writable-above-read-only",
+          `Windows confinement cannot keep ${below.path} read-only beneath ${writable.path}, which the launch may write.`,
+        );
+      }
     }
   }
 

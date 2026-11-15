@@ -39,6 +39,12 @@ constexpr wchar_t container_prefix[] = L"Octant.Confined.";
 constexpr wchar_t internet_client_sid[] = L"S-1-15-3-1";
 constexpr wchar_t private_network_sid[] = L"S-1-15-3-3";
 constexpr wchar_t all_application_packages_sid[] = L"S-1-15-2-1";
+// One lock for every launcher in the session: each grant and removal reads a
+// DACL and writes it back whole, so two launches editing the same checkout at
+// once could each drop the other's entry, and one launch's cleanup could
+// erase another's live grant.
+constexpr wchar_t acl_mutex_name[] = L"Local\\octant-windows-confine-acl";
+constexpr DWORD acl_lock_wait_ms = 60000;
 
 struct Grant {
   std::wstring path;
@@ -252,6 +258,31 @@ struct Object {
   ~Object() { if (descriptor != nullptr) LocalFree(descriptor); }
 };
 
+// Holds the session's ACL lock for one read-modify-write, from reading the
+// DACL through writing it. A lock held by a launcher that died is taken over:
+// each write is one SetNamedSecurityInfo call, so the DACL it left is whole.
+// A lock that cannot be had in time refuses the edit rather than racing.
+class AclLock {
+public:
+  AclLock() {
+    mutex_ = CreateMutexW(nullptr, FALSE, acl_mutex_name);
+    if (mutex_ == nullptr) return;
+    const DWORD waited = WaitForSingleObject(mutex_, acl_lock_wait_ms);
+    held_ = waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED;
+  }
+  ~AclLock() {
+    if (held_) ReleaseMutex(mutex_);
+    if (mutex_ != nullptr) CloseHandle(mutex_);
+  }
+  AclLock(const AclLock&) = delete;
+  AclLock& operator=(const AclLock&) = delete;
+  bool held() const { return held_; }
+
+private:
+  HANDLE mutex_ = nullptr;
+  bool held_ = false;
+};
+
 // Reads one object's DACL with its whole path held (see HeldPath). A NULL
 // DACL (everyone, everything) is refused.
 Edit open_object(const std::wstring& path, Object& object) {
@@ -287,6 +318,8 @@ bool names_sid(const ACE_HEADER* header, PSID sid) {
 // container reading the file (cause not established), so the launcher writes
 // no deny entries and the host refuses such a launch instead.
 Edit remove_explicit(const std::wstring& path, PSID sid) {
+  AclLock lock;
+  if (!lock.held()) return Edit::failed;
   Object object;
   const Edit opened = open_object(path, object);
   if (opened != Edit::applied) return opened;
@@ -318,6 +351,8 @@ Edit remove_explicit(const std::wstring& path, PSID sid) {
 // Adds the container's inheritable allow entry on one folder or file, unless
 // ALL APPLICATION PACKAGES already holds that access there.
 Edit grant_acl(const std::wstring& path, PSID sid, DWORD mask) {
+  AclLock lock;
+  if (!lock.held()) return Edit::failed;
   Object object;
   const Edit opened = open_object(path, object);
   if (opened != Edit::applied) return opened;

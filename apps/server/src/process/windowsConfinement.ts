@@ -112,13 +112,21 @@ export function buildWindowsConfinedLaunch(
     }
   }
   // Outside the grants the deny-by-default container already misses a path;
-  // a carve-out matters only where an inherited grant would reach it.
+  // a carve-out matters only where an inherited grant would reach it. The
+  // shared port re-allows the launch's own write roots after an isolated root
+  // and an extra write denial (a capture's one writer carries it as both), so
+  // those two never count against a grant that is one of its write roots.
+  const ownWriteForms = (input.additionalWriteRoots ?? []).map(
+    (path) => windowsGuardPath(path) ?? "",
+  );
   const grantForms = decision.grants.map((grant) => windowsGuardPath(`${grant.path}\\`) ?? "");
-  for (const path of [
-    ...(input.isolatedRoots ?? []),
-    ...(input.additionalDenyReadPaths ?? []),
-    ...(input.additionalDenyWritePaths ?? []),
-  ]) {
+  const otherGrantForms = grantForms.filter((form) => !ownWriteForms.includes(form));
+  const carveOuts = [
+    ...(input.isolatedRoots ?? []).map((path) => ({ path, grants: otherGrantForms })),
+    ...(input.additionalDenyReadPaths ?? []).map((path) => ({ path, grants: grantForms })),
+    ...(input.additionalDenyWritePaths ?? []).map((path) => ({ path, grants: otherGrantForms })),
+  ];
+  for (const { path, grants } of carveOuts) {
     const form = windowsNativePath(path) === undefined ? undefined : windowsGuardPath(path);
     if (form === undefined) {
       throw new ProcessConfinementError(
@@ -126,12 +134,38 @@ export function buildWindowsConfinedLaunch(
         "Windows confinement denials must be drive-absolute paths.",
       );
     }
-    if (grantForms.some((grant) => isSameOrInside(form, grant))) {
+    if (grants.some((grant) => isSameOrInside(form, grant))) {
       throw new ProcessConfinementError(
         "incompatible",
         `Windows confinement cannot keep ${path} out of a folder it grants.`,
       );
     }
+  }
+  // The other direction, as the shared port means it: an isolated root denies
+  // its whole subtree and an extra write denial the writes beneath it, both
+  // after every grant, and only the launch's own write roots are re-allowed
+  // past them. Here a grant beneath one would simply be granted, so it is
+  // refused instead, unless it is one of those write roots.
+  const beneath = (paths: ReadonlyArray<string> | undefined, access: "read" | "modify") =>
+    decision.grants.find((grant) => {
+      if (access === "modify" && grant.access !== "modify") return false;
+      const form = windowsGuardPath(`${grant.path}\\`) ?? "";
+      if (ownWriteForms.includes(form)) return false;
+      return (paths ?? []).some((path) => isSameOrInside(form, windowsGuardPath(path) ?? ""));
+    });
+  const underIsolated = beneath(input.isolatedRoots, "read");
+  if (underIsolated !== undefined) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      `Windows confinement does not grant ${underIsolated.path}: it lies beneath an isolated root.`,
+    );
+  }
+  const underDenyWrite = beneath(input.additionalDenyWritePaths, "modify");
+  if (underDenyWrite !== undefined) {
+    throw new ProcessConfinementError(
+      "incompatible",
+      `Windows confinement does not let the launch write ${underDenyWrite.path}, which it asked to keep unwritable.`,
+    );
   }
   return {
     command: launcher,

@@ -18246,9 +18246,25 @@ starts the command, and removes what it added when the command ends.
   no design relies on a deny entry. So a carve-out the launch
   asks for inside a grant (isolated roots and extra denials) refuses the
   launch; one outside every grant needs nothing, since the container already
-  misses it. At exit the launcher removes its entries by rewriting the
-  object's explicit entries itself, because the standard revoke mode leaves
-  deny entries behind.
+  misses it. The other direction keeps the shared port's meaning: an isolated
+  root denies its whole subtree and an extra write denial the writes beneath
+  it, and only the launch's own write roots are allowed past them (a
+  capture's one writer carries its directory as both), so any other grant
+  beneath an isolated root, and any other writable grant beneath a write
+  denial, refuses the launch. For the same reason a read-only bound root
+  beneath a folder the launch may write (a checkout under its temporary
+  directory) refuses the launch: the writable folder's inheritable entry
+  would reach the checkout, and nothing on Windows takes it back. A write
+  root inside a read-only checkout is its own explicit grant and is allowed,
+  as the other platforms re-allow it. At exit the launcher removes its
+  entries by rewriting the object's explicit entries itself, because the
+  standard revoke mode leaves deny entries behind. Every grant and removal
+  reads a DACL and writes it back whole, so launchers in one session take a
+  shared lock (`Local\octant-windows-confine-acl`) from the read through the
+  write: two launches on one checkout would otherwise drop each other's
+  entry, or one's cleanup erase the other's live grant. Removal takes out
+  only entries naming its own container's SID. A lock not had within a
+  minute refuses the edit.
 - **Secret guard as an OS rule.** No grant is made at, inside or above a
   protected location; the plan refuses such a launch, so every protected file
   stays outside every grant and the container's default denial refuses it. A
@@ -18310,7 +18326,8 @@ starts the command, and removes what it added when the command ends.
   junction's target untouched, a child refused by the job's quota under the process limit and
   allowed without it, curl failing to resolve a host without a capability
   and fetching the same page with one, the container's entry present while
-  it runs and gone after, and the whole tree ending when the launcher is
+  it runs and gone after, two launches on one checkout at once keeping both
+  entries and removing both, and the whole tree ending when the launcher is
   killed. That runner
   is an administrator account on Windows Server; an ordinary account, a
   desktop Windows release and a real provider remain unverified.
