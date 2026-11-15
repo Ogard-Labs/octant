@@ -112,6 +112,18 @@ export function makePushPlatformCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/push-platform-credentials/", "credentialRef");
 }
 
+/**
+ * Web search backends' API keys, through the broker's own routes for them,
+ * keyed by the backend entry's credential reference. They sit apart from model
+ * provider keys, so a search backend's key and a provider's can never stand in
+ * for each other.
+ */
+export function makeWebSearchCredentialBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/web-search-credentials/", "credentialRef");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
   routePrefix:
@@ -121,7 +133,8 @@ function makeBrokerCredentialClient(
     | "/v1/canvas-public-share-secrets/"
     | "/v1/mcp-server-credentials/"
     | "/v1/desktop-provider-credentials/"
-    | "/v1/push-platform-credentials/",
+    | "/v1/push-platform-credentials/"
+    | "/v1/web-search-credentials/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

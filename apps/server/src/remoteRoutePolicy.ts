@@ -1120,13 +1120,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
   })),
-  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
-    kind: "exact" as const,
-    path: `/api/host-control/${name}`,
-    methods: ["POST"] as const,
-    allowedContentTypes: ["application/json"] as const,
-    maxBodyBytes: 8_192,
-  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge", "web-search/key"].map(
+    (name) => ({
+      kind: "exact" as const,
+      path: `/api/host-control/${name}`,
+      methods: ["POST"] as const,
+      allowedContentTypes: ["application/json"] as const,
+      maxBodyBytes: 8_192,
+    }),
+  ),
   // Paired devices and pairing requests, for a device the host's own person
   // paired: the lists are reads, every change a POST.
   ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({

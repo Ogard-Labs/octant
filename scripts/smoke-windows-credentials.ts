@@ -55,6 +55,7 @@ const auxiliary = (value: typeof desktop) => [
   value.desktopProviderCredentials,
   value.pushPlatformCredentials,
   value.sshKeys,
+  value.webSearchCredentials,
 ];
 const auxiliaryStores = auxiliary(desktop);
 const otherAuxiliary = auxiliary(await backend(randomUUID()));
@@ -252,7 +253,7 @@ try {
   const oldVersion = Buffer.from(frame);
   oldVersion[4] = 1;
   const unknownPurpose = Buffer.from(frame);
-  unknownPurpose[83] = 8;
+  unknownPurpose[83] = 9;
   const wrongFamily = Buffer.from(frame);
   wrongFamily[6] = 2;
   requireValue(
