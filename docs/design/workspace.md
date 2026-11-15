@@ -2605,9 +2605,22 @@ drawer.
 
 ### Right dock and bottom panel
 
-The right dock defaults to 640px when open, and opening a Browser or a
-Terminal widens a narrower dock to 640px once (the person can drag it back;
-the next such opening widens it again). A terminal in the dock is an inset,
+The right dock is two things side by side, left to right: the **Environment
+strip** and the **tool columns**. Environment is a thin, static, full-height
+strip, 240px wide (`ENVIRONMENT_STRIP_WIDTH`; the shell sets it as
+`--octant-dock-env-width`), with no resize handle and no expand, arrange or
+pop-out control; its header has the tool's name and a close. Its leading hairline
+runs from the top of the dock to the window's bottom edge, and the minimised
+cards stand at the foot of the strip inside it, so that hairline is unbroken.
+Every other tool opens in the tool columns to the right of the strip, never
+stacked under Environment, and only they take the person's width: opening or
+closing a tool never moves or resizes the strip, closing the last tool leaves the
+strip alone at 240px, and with only Environment open the dock is exactly the
+strip's width. The tool columns' handle stands on the seam between the strip and
+the tools, and with Environment closed on the dock's own edge (and the shelf stays
+at the foot of the dock body, as before). Opening any tool other than Environment
+widens a narrower tool column to 640px once (the person can drag it back; the
+next such opening widens it again). A terminal in the dock is an inset,
 rounded plate rather than an edge-to-edge slab; under Glass the plate and
 its cells are the page colour with 12% of the ink, a grey that sits with the
 frosted panels instead of a black slab. A fresh window
@@ -2624,8 +2637,9 @@ quarter of the viewport there. Both keep their tabs and their height and return
 with the thread, and their toggle leaves the reader rather than closing a
 region that was only stepped aside.
 On wide windows it may use at most half of the workspace beside the sidebar
-(`dockWidthCeiling`, never under the sidebar minimum or over its maximum), which
-keeps the thread readable beside any tool, and the resize handle stops there
+(`dockWidthCeiling`, never under the sidebar minimum or over its maximum; the
+Environment strip is not part of that half, so the tool columns shrink first),
+which keeps the thread readable beside any tool, and the resize handle stops there
 too; with two columns of tool tiles shown it may take all the thread's own
 minimum leaves (the thread keeps 440px beside two columns from 1100px up and
 360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
@@ -2689,12 +2703,13 @@ numbered label when siblings are open. Files, Document, Review, Agents, Canvas,
 Plan, Delivery, Simulator, and Side chat are singleton destinations. One instance
 still appears in only one region at a time.
 
-The right dock has one width whatever it shows, so a click inside it moves
-nothing: the launcher and every tool use the width the person last dragged it to.
-It never takes more than half the workspace, and its handle stops at the same
-half. A Browser or Terminal tab that needs more holds 640px while that tab stays
+The tool columns have one width whatever they show, so a click inside them moves
+nothing: the launcher and every tool use the width the person last dragged them
+to. They never take more than half the workspace, and their handle stops at the
+same half. Any open tool other than Environment holds 640px while that tab stays
 open, including one restored after a restart, and does not save it. A width the
-person drags to stands until the next Browser or Terminal opens.
+person drags to stands until the next tool opens. A pane appears at its final
+size: no width animates from narrow to wide.
 
 Without a saved show or hide choice, a wide window starts with the right dock open and a narrow window starts with it closed. The bottom panel starts closed. An explicit dock show or hide is restored per window; merely mounting the default records no choice, so an initial narrow frame does not become a saved close. The active-pane eligibility rules below still determine whether dock chrome is shown.
 
@@ -2784,7 +2799,7 @@ stack; when the tile caps are full it shows the tool in the focused tile's place
 and the tool it replaces stays open, hidden from view. Dragging an open tool's
 button onto the dock body does the same: the right third shows it
 beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
-has chosen, the dock widens to 840px (not saved), under the ceiling above;
+has chosen, the tool columns widen to 840px (not saved), under the ceiling above;
 showing a tool beside, which makes the second column, clears the person's
 sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
 narrow modal presentation has room for one tool and draws only the focused tile;

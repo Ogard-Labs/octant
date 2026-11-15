@@ -3,7 +3,9 @@ import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/co
 import { describe, expect, it } from "vitest";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
+  dockTotalWidth,
   dockWidthCeiling,
+  ENVIRONMENT_STRIP_WIDTH,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
   TILED_DOCK_WIDTH,
@@ -33,6 +35,14 @@ describe("how wide the right utility dock is", () => {
   it("stays one width from the empty launcher to any tool, so a click moves nothing", () => {
     expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: [] })).toBe(360);
     expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment"] })).toBe(360);
+  });
+
+  it("holds the workbench width for any open tool, whichever tab is in front", () => {
+    for (const tool of ["review", "canvas", "files", "terminal"]) {
+      expect(resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["environment", tool] })).toBe(
+        WORKBENCH_DOCK_WIDTH,
+      );
+    }
   });
 
   it("holds the Browser's width while its tab is open, whichever tab is in front", () => {
@@ -72,10 +82,32 @@ describe("how wide the right utility dock is", () => {
     expect(resolveDockPresentationWidth({ ...tiled, storedWidth: 900 })).toBe(900);
   });
 
-  it("asks for no extra width for one column of tiles", () => {
+  it("asks for no extra width for one column of tiles beyond the workbench width", () => {
     expect(
       resolveDockPresentationWidth({ ...narrow, tabSurfaces: ["canvas"], tileColumns: 1 }),
-    ).toBe(360);
+    ).toBe(WORKBENCH_DOCK_WIDTH);
+  });
+});
+
+describe("how wide the whole dock is around the Environment strip", () => {
+  it("is exactly the strip while only Environment is open", () => {
+    expect(dockTotalWidth({ toolsWidth: 640, environmentOpen: true, toolsShown: false })).toBe(
+      ENVIRONMENT_STRIP_WIDTH,
+    );
+  });
+
+  it("adds the tool columns to the strip without changing the strip", () => {
+    expect(dockTotalWidth({ toolsWidth: 640, environmentOpen: true, toolsShown: true })).toBe(
+      ENVIRONMENT_STRIP_WIDTH + 640,
+    );
+  });
+
+  it("is only the tool columns while Environment is closed", () => {
+    expect(dockTotalWidth({ toolsWidth: 640, environmentOpen: false, toolsShown: true })).toBe(640);
+  });
+
+  it("keeps the strip at 240px", () => {
+    expect(ENVIRONMENT_STRIP_WIDTH).toBe(240);
   });
 });
 
@@ -87,6 +119,14 @@ describe("how wide the right utility dock may get", () => {
 
   it("keeps the minimum in a window too narrow for half to fit a tool", () => {
     expect(dockWidthCeiling(400)).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
+  });
+
+  it("leaves the strip's width out of what the tool columns may take beside the thread", () => {
+    const options = { tileColumns: 2, viewportWidth: 1400 };
+    expect(dockWidthCeiling(1268, options)).toBe(1268 - 440);
+    expect(dockWidthCeiling(1268, { ...options, reservedWidth: ENVIRONMENT_STRIP_WIDTH })).toBe(
+      1268 - ENVIRONMENT_STRIP_WIDTH - 440,
+    );
   });
 
   it("does not guess before the workspace has been measured", () => {

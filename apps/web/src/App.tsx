@@ -445,6 +445,8 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
+  dockTotalWidth,
+  ENVIRONMENT_STRIP_WIDTH,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -485,6 +487,7 @@ import {
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
+import { splitEnvironmentStrip } from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
@@ -6547,11 +6550,26 @@ function LaunchedShell(
     }));
   }
 
-  const dockPresentationWidth = resolveDockPresentationWidth({
+  // Environment is a strip beside the tool columns, so the stored and the
+  // presented widths are the tool columns'; the strip adds its own.
+  const dockSplit = splitEnvironmentStrip(displayedDockState);
+  const dockEnvironmentOpen =
+    !isNarrow &&
+    dockSplit.environmentTabId !== undefined &&
+    !(dockToolsAwaitingThread !== undefined && dockResolution.kind !== "surface");
+  const dockToolColumns = dockEnvironmentOpen
+    ? (dockSplit.toolLayout?.columns.length ?? 1)
+    : dockTileColumns;
+  const dockToolsWidth = resolveDockPresentationWidth({
     storedWidth: contextSidebarWidth,
     widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
-    tileColumns: dockTileColumns,
+    tileColumns: dockToolColumns,
+  });
+  const dockPresentationWidth = dockTotalWidth({
+    toolsWidth: dockToolsWidth,
+    environmentOpen: dockEnvironmentOpen,
+    toolsShown: dockSplit.toolTabIds.length > 0,
   });
 
   /** The pages back and forward can return to, by the destination that opens them. */
@@ -8434,7 +8452,13 @@ function LaunchedShell(
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
-        dockTileColumns={dockPresentedOpen ? dockTileColumns : 1}
+        dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
+        {...(dockPresentedOpen && dockEnvironmentOpen
+          ? {
+              dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH,
+              dockToolsShown: dockSplit.toolTabIds.length > 0,
+            }
+          : {})}
         workspace={
           <ThreadNativeSetupProvider services={threadNativeSetupServices}>
             <ThreadNotesProvider services={launchedClients.threadNotesClient}>
