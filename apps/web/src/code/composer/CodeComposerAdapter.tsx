@@ -180,6 +180,12 @@ export interface CodeComposerAdapterProps {
    * composer and its suggestions, ahead of the sections in `beneath`.
    */
   readonly homeStart?: ReactNode;
+  /**
+   * Settings for what this composer starts, directly under it and ahead of
+   * the suggestions, `homeStart`, and `beneath` (the New coordinator draft's
+   * settings line).
+   */
+  readonly afterComposer?: ReactNode;
   /** Content shown under the composer (what is waiting, what to continue). */
   readonly beneath?: ReactNode;
   /**
@@ -1166,6 +1172,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           />
         )}
 
+        {/* Settings for what the composer starts (a new coordinator's) belong
+            to the box itself, so they come before the suggestions and cards. */}
+        {props.afterComposer}
         {/* The prompts sit directly under the composer they fill in, and the
             cards follow. Under the cards they were a screen away from the
             box they act on. A draft of only spaces is empty to submit, so it

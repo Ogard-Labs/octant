@@ -9,6 +9,8 @@ import type { sidebarThreadGroupsForMode } from "../shell/shellModeRouting";
  */
 export interface ShellNavigationModel {
   readonly codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem>;
+  /** The Code rows the sidebar lists: workers hidden by Show workers are left out. */
+  readonly codeSidebarThreads: ReadonlyArray<ChatThreadNavigationItem>;
   readonly liveThreadTitles: ReadonlyMap<string, string>;
   readonly markedChatNavigation: ReadonlyArray<ChatThreadNavigationItem>;
   readonly markedThreadGroups: ReturnType<typeof sidebarThreadGroupsForMode>;

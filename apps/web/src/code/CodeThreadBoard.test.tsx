@@ -509,6 +509,67 @@ describe("CodeThreadBoard", () => {
     expect(cardFor("Ordinary thread").querySelector(".board-card-coordinator")).toBeNull();
   });
 
+  it("lists no worker cards and no Coordinator filter when Show workers is off for the Project", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({
+          id: "02",
+          status: "in-progress",
+          title: "Fix the flaky test",
+          coordinatorThreadId: COORDINATOR_ID,
+        }),
+        card({ id: "03", status: "ready", title: "Ordinary thread" }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        coordinators={{
+          titleByCoordinator: new Map([[COORDINATOR_ID, "Backlog coordinator"]]),
+          projectByCoordinator: new Map([[COORDINATOR_ID, String(projects[0]?.id)]]),
+          workersOnBoard: () => false,
+        }}
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByText("Ordinary thread");
+    expect(screen.queryByText("Fix the flaky test")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const panel = await screen.findByRole("dialog", { name: "Filters" });
+    expect(within(panel).queryByRole("combobox", { name: "Coordinator" })).toBeNull();
+  });
+
+  it("marks a worker's card with the worker mark when Show workers is on", async () => {
+    render(
+      <CodeThreadBoard
+        coordinators={{
+          titleByCoordinator: new Map([[COORDINATOR_ID, "Backlog coordinator"]]),
+          projectByCoordinator: new Map([[COORDINATOR_ID, String(projects[0]?.id)]]),
+          workersOnBoard: () => true,
+        }}
+        loadBoard={vi.fn(async () =>
+          view([
+            card({
+              id: "02",
+              status: "in-progress",
+              title: "Fix the flaky test",
+              coordinatorThreadId: COORDINATOR_ID,
+            }),
+          ]),
+        )}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+    await screen.findByText("Fix the flaky test");
+    expect(
+      within(cardFor("Fix the flaky test")).getByRole("img", {
+        name: "Worker of Backlog coordinator",
+      }),
+    ).toBeVisible();
+  });
+
   it("filters the board to one coordinator's workers from the Filters popover", async () => {
     const loadBoard = vi.fn(async (_query: CodeBoardQuery) =>
       view([card({ id: "02", status: "ready", coordinatorThreadId: COORDINATOR_ID })]),

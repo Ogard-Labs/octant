@@ -222,6 +222,7 @@ function harness(
     readonly ownMemory?: () => boolean;
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
+    readonly maxTrackedToolUses?: number;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -360,6 +361,9 @@ function harness(
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
+      ...(options.maxTrackedToolUses === undefined
+        ? {}
+        : { maxTrackedToolUses: options.maxTrackedToolUses }),
       process,
       sdk,
       credentialResolver,
@@ -423,6 +427,16 @@ describe("Claude file tools and the secret guard", () => {
       "Cloud command-line credentials",
     );
     expect(refusal("Write", { file_path: `${home}/.npmrc` })).toContain("Package registry tokens");
+    expect(refusal("NotebookEdit", { notebook_path: `${home}/.ssh/id_ed25519` })).toContain(
+      "SSH private keys",
+    );
+    expect(
+      refusal("Projects", { method: "project_write", local_path: `${home}/.ssh/id_ed25519` }),
+    ).toContain("SSH private keys");
+    // A built-in tool the gate has no rule of its own for is held to the same list.
+    expect(refusal("FutureFileTool", { path: `${home}/.aws/credentials` })).toContain(
+      "Cloud command-line credentials",
+    );
   });
 
   it("lets the runtime read its own account state and ordinary files", () => {
@@ -685,17 +699,19 @@ describe("Claude execution policy", () => {
   });
 
   it("maps every Octant policy to the exact Claude permission options", () => {
-    expect(claudeExecutionOptions("full-access")).toEqual({
+    expect(claudeExecutionOptions("full-access", false, "work")).toEqual({
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
+      fullToolSet: true,
     });
     expect(claudeExecutionOptions("approval-gated", true).permissionMode).toBe("auto");
     expect(claudeExecutionOptions("auto-accept-edits", true).permissionMode).toBe("auto");
-    expect(claudeExecutionOptions("approval-gated")).toEqual({
+    expect(claudeExecutionOptions("approval-gated", false, "code")).toEqual({
       permissionMode: "default",
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
+      fullToolSet: true,
     });
     // Work and Code share one capability set at the thread's level.
     for (const [policy, autoApprove] of [
@@ -708,10 +724,26 @@ describe("Claude execution policy", () => {
         claudeExecutionOptions(policy, autoApprove, "code"),
       );
     }
+    // Chat keeps the earlier list outside Plan, without the whole built-in set.
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const chat = claudeExecutionOptions(policy, false, "chat");
+      expect(chat.tools).toEqual([
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Bash",
+        "AskUserQuestion",
+        "TodoWrite",
+      ]);
+      expect(chat.fullToolSet).toBe(false);
+    }
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Glob", "Grep", "TodoWrite"],
+      fullToolSet: false,
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
     // can name the programs; Chat has no shell, and Work never runs in Plan.
@@ -733,6 +765,120 @@ describe("Claude execution policy", () => {
         "Grep",
         "TodoWrite",
       ]);
+    }
+  });
+
+  it("keeps a Chat session on the earlier tool list without Claude Code's whole built-in set", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "chat");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const open = f.opens[0]!;
+      expect(open.withheldTools).toBeUndefined();
+      expect(open.tools).toEqual([
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "Bash",
+        "AskUserQuestion",
+        "TodoWrite",
+      ]);
+    } finally {
+      await acquired.close();
+    }
+  });
+
+  it("offers Claude Code's whole built-in tool set outside Plan and asks before any tool the gate has no rule for", async () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "work");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        expect(open.withheldTools).toEqual(
+          expect.arrayContaining(["EnterPlanMode", "EnterWorktree", "Monitor", "REPL"]),
+        );
+        // With the person's setup off, its features stay withheld too.
+        expect(open.withheldTools).toEqual(
+          expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill", "Artifact"]),
+        );
+        const signal = new AbortController().signal;
+        const tool = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const asked = executionPolicy === "full-access" ? "allow" : "ask";
+        for (const service of ["RemoteTrigger", "PushNotification", "Projects", "ClaudeDesign"]) {
+          expect(open.withheldTools).not.toContain(service);
+        }
+        // A claude.ai service call uses the person's own account and asks below Full access.
+        await expect(
+          tool("Projects", { method: "project_search", query: "roadmap" }, "projects"),
+        ).resolves.toEqual({ behavior: asked });
+        // Loading deferred tool definitions touches nothing, so it never asks.
+        await expect(
+          tool("ToolSearch", { query: "select:Read", max_results: 1 }, "tool-search"),
+        ).resolves.toEqual({ behavior: "allow" });
+        // A tool a later Claude Code release adds works on release, and asks.
+        await expect(tool("FutureTool", { anything: true }, "future")).resolves.toEqual({
+          behavior: asked,
+        });
+        // Reading a background task's output takes the shell's rules.
+        await expect(
+          tool("TaskOutput", { task_id: "t1", block: false, timeout: 1 }, "output"),
+        ).resolves.toEqual({ behavior: asked });
+        // A notebook edit is a file edit inside the Project, and nothing more.
+        const notebook = { notebook_path: `${projectRoot}/analysis.ipynb`, new_source: "1" };
+        await expect(tool("NotebookEdit", notebook, "notebook")).resolves.toEqual({
+          behavior: executionPolicy === "approval-gated" ? "ask" : "allow",
+        });
+        await expect(
+          tool(
+            "NotebookEdit",
+            { notebook_path: "/outside/project/analysis.ipynb", new_source: "1" },
+            "outside-notebook",
+          ),
+        ).resolves.toMatchObject({
+          behavior: executionPolicy === "full-access" ? "allow" : "deny",
+        });
+        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toMatchObject({
+          behavior: "deny",
+        });
+      } finally {
+        await acquired.close();
+      }
+    }
+
+    const plan = harness();
+    const acquired = await acquire(plan.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      const open = plan.opens[0]!;
+      // Plan keeps its own read-only list and nothing beyond it.
+      expect(open.withheldTools).toBeUndefined();
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "FutureTool",
+          input: {},
+          toolUseId: "plan-future",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      await acquired.close();
     }
   });
 
@@ -832,6 +978,21 @@ describe("Claude execution policy", () => {
         await expect(
           tool("Read", { file_path: "/outside/project/file.ts" }, "outside-read"),
         ).resolves.toMatchObject({ behavior: "deny" });
+        // A Projects upload is held to the Project's folders, as Artifact is.
+        await expect(
+          tool(
+            "Projects",
+            { method: "upload_file", local_path: "/outside/project/notes.md" },
+            "outside-upload",
+          ),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        await expect(
+          tool(
+            "Projects",
+            { method: "upload_file", local_path: `${projectRoot}/notes.md` },
+            "inside-upload",
+          ),
+        ).resolves.toEqual({ behavior: "allow" });
       } finally {
         await acquired.close();
       }
@@ -1259,7 +1420,7 @@ describe("Claude execution policy", () => {
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
   });
 
-  it("terminal-fails before a turn can exceed its hard unique tool-use budget", async () => {
+  it("completes a turn that makes far more than 64 tool calls", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1267,36 +1428,31 @@ describe("Claude execution policy", () => {
     );
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
-    for (let index = 0; index < 64; index += 1) {
-      const input = { file_path: `${projectRoot}/${index}.txt` };
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "long", attachments: [], tools: [] }),
+    );
+    for (let index = 0; index < 300; index += 1) {
       await expect(
         open.preToolUse({
           sessionId: "sdk-session-1",
           projectRoot,
           toolName: "Read",
-          input,
-          toolUseId: `budget-${index}`,
+          input: { file_path: `${projectRoot}/${index}.txt` },
+          toolUseId: `long-${index}`,
           signal,
         }),
       ).resolves.toEqual({ behavior: "allow" });
     }
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Read",
-        input: { file_path: `${projectRoot}/overflow.txt` },
-        toolUseId: "budget-overflow",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
-    expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+    await f.queries[0]!.emit(completed("sdk-session-1"));
+    await expect(terminalEvent).resolves.toMatchObject({ value: { kind: "completed" } });
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
     await acquired.close();
   });
 
-  it("preserves tombstones across turns and terminal-fails at the session tool-use budget", async () => {
+  it("keeps a pending approval and an unused grant answerable after forgetting more than 256 settled tool uses", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1304,7 +1460,122 @@ describe("Claude execution policy", () => {
     );
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
-    for (let turn = 0; turn < 4; turn += 1) {
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "long", attachments: [], tools: [] }),
+    );
+    const edit = (name: string) => ({
+      file_path: `${projectRoot}/${name}.ts`,
+      old_string: "before",
+      new_string: "after",
+    });
+    const preEdit = (name: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: edit(name),
+        toolUseId: name,
+        signal,
+      });
+    await expect(preEdit("pending")).resolves.toEqual({ behavior: "ask" });
+    const pending = open.canUseTool({
+      toolName: "Edit",
+      input: edit("pending"),
+      toolUseId: "pending",
+      signal,
+    });
+    await expect(preEdit("granted")).resolves.toEqual({ behavior: "ask" });
+    for (let index = 0; index < 300; index += 1) {
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: `${projectRoot}/${index}.txt` },
+          toolUseId: `settled-${index}`,
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+    }
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    await expect(pending).resolves.toEqual({ behavior: "allow" });
+    const granted = open.canUseTool({
+      toolName: "Edit",
+      input: edit("granted"),
+      toolUseId: "granted",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(
+        acquired.connection.approvalCall?.({ sessionId, requestId: "request-2" }),
+      ).toMatchObject({ tool: "Edit" }),
+    );
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-2", approved: true }),
+    );
+    await expect(granted).resolves.toEqual({ behavior: "allow" });
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("fails the turn when every remembered tool use is still unsettled", async () => {
+    const f = harness("subscription", "current-session", { maxTrackedToolUses: 3 });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const terminalEvent = Effect.runPromise(
+      collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "held", attachments: [], tools: [] }),
+    );
+    const preEdit = (name: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Edit",
+        input: { file_path: `${projectRoot}/${name}.ts`, old_string: "a", new_string: "b" },
+        toolUseId: name,
+        signal,
+      });
+    // A settled read is forgotten to make room, so it never counts against the bound.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Read",
+        input: { file_path: `${projectRoot}/read.txt` },
+        toolUseId: "settled-read",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "allow" });
+    for (const name of ["held-0", "held-1", "held-2"]) {
+      await expect(preEdit(name)).resolves.toEqual({ behavior: "ask" });
+    }
+    await expect(preEdit("held-overflow")).resolves.toMatchObject({ behavior: "deny" });
+    await expect(terminalEvent).resolves.toMatchObject({
+      value: {
+        kind: "failed",
+        failure: { message: "Claude exceeded its bounded tool authority state." },
+      },
+    });
+    await acquired.close();
+  });
+
+  it("keeps refusing a recently settled tool use across turns without ending the session", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    for (let turn = 0; turn < 5; turn += 1) {
       const terminalEvent = Effect.runPromise(
         collectTerminal(Stream.unwrapScoped(acquired.connection.subscribe)),
       );
@@ -1314,35 +1585,50 @@ describe("Claude execution policy", () => {
       for (let index = 0; index < 64; index += 1) {
         const toolUseId = `session-${turn}-${index}`;
         const input = { file_path: `${projectRoot}/${turn}-${index}.txt` };
-        await open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "Read",
-          input,
-          toolUseId,
-          signal,
-        });
-        await open.canUseTool({ toolName: "Read", input, toolUseId, signal });
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Read",
+            input,
+            toolUseId,
+            signal,
+          }),
+        ).resolves.toEqual({ behavior: "allow" });
+        // The runtime ran the read on the hook's answer; a second call for
+        // the same tool use holds no grant and is refused.
+        await expect(
+          open.canUseTool({ toolName: "Read", input, toolUseId, signal }),
+        ).resolves.toMatchObject({ behavior: "deny" });
       }
       await f.queries[0]!.emit(completed("sdk-session-1"));
       await expect(terminalEvent).resolves.toMatchObject({ value: { kind: "completed" } });
     }
     await Effect.runPromise(
-      acquired.connection.send({ sessionId, prompt: "overflow", attachments: [], tools: [] }),
+      acquired.connection.send({ sessionId, prompt: "after", attachments: [], tools: [] }),
     );
+    // The last turn's settled use stays refused, here through the hook.
     await expect(
       open.preToolUse({
         sessionId: "sdk-session-1",
         projectRoot,
         toolName: "Read",
-        input: { file_path: `${projectRoot}/overflow.txt` },
-        toolUseId: "session-overflow",
+        input: { file_path: `${projectRoot}/4-63.txt` },
+        toolUseId: "session-4-63",
         signal,
       }),
     ).resolves.toMatchObject({ behavior: "deny" });
-
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
-    expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Read",
+        input: { file_path: `${projectRoot}/after.txt` },
+        toolUseId: "session-after",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "allow" });
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
     await acquired.close();
   });
 

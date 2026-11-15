@@ -4001,3 +4001,17 @@ html[data-octant-increased-contrast="true"]
   font-size: var(--oct-text-detail);
   overflow-wrap: anywhere;
 }
+
+/* Show workers: two checkboxes in one row, stacked on a narrow control column. */
+.coordinator-worker-listing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-3);
+}
+
+.coordinator-worker-listing__choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-sm);
+}
