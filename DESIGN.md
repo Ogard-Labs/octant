@@ -286,7 +286,10 @@ under the fill).
   title band) keep the ground at full strength. No blur, and the Glass coat
   defaults are unchanged; Reduced transparency and Increased contrast resolve
   to 100%. At 80% and 82% a photo or a field of characters ran through the
-  letters and read as noise (maintainer request, 2026-11-15).
+  letters and read as noise (maintainer request, 2026-11-15). A start screen is no
+  exception: only its stage stays open on the ground, and a pane opened beside
+  it (a pull request in the dock, say) takes the same surface, the pane colour
+  or, under Glass, the workspace colour, at 94%. letters and read as noise (maintainer request, 2026-11-15).
 - **Why floats are dense on glass.** A frosted menu works over an opaque
   window because the blur hides the page under it. On a translucent window it
   cannot, so at 66% the text behind a menu would read through it. At 96% the

@@ -137,7 +137,9 @@ request 2026-11-15), so the ground is a whisper and agent replies remain bare pr
 (a Project's page, Settings, a file, a preview), and every destination page
 (Inbox, Board, Archive, Review, Projects, Agents, Automations, Artifacts, Image
 generator). A start screen (a welcome or a new thread) is the one exception and
-stays open on the ground. The veil is one rule in `surface.css` keyed on the
+stays open on the ground, but only its stage: a dock pane, the Environment
+strip and the bottom panel opened beside it take the text surface at 94%
+(`surface.css`, keyed on the start-only workspace). The veil is one rule in `surface.css` keyed on the
 pane kind and the destination layers, never a colour per screen; a page drawn
 over the panes clears their veil so the two never stack. Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›

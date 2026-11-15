@@ -163,6 +163,34 @@ describe("window glass", () => {
     );
   });
 
+  it("gives a dock pane the text surface while a start screen shows the ground, and clears only the stage", () => {
+    const surface = read("styles/surface.css");
+    const start = ".shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))";
+    // The stage's own fill is the one thing a start screen clears.
+    expect(surface).toContain(`${start} > .workspace-layer::before {\n  background: transparent;`);
+    // Every pane that holds text reads the shell's pane fill, which a start
+    // screen lays at 94% of its colour (the workspace colour under Glass).
+    const opaque = new RegExp(
+      `${start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{\\s*--octant-panel-surface: color-mix\\(\\s*in srgb,\\s*var\\(--octant-panel-opaque\\) var\\(--octant-reading-surface-keep, 94%\\),\\s*transparent`,
+    );
+    expect(surface).toMatch(opaque);
+    expect(surface).toMatch(
+      /\.shell--material-translucent:has\([\s\S]{0,120}?\)\s*\{\s*--octant-panel-surface: color-mix\(\s*in srgb,\s*var\(--octant-workspace\) var\(--octant-reading-surface-keep, 94%\),\s*transparent/,
+    );
+    // Reduced transparency and increased contrast are left to their opaque panes.
+    expect(surface).toMatch(
+      /@media \(prefers-reduced-transparency: no-preference\) \{\s*html:not\(\[data-octant-reduced-transparency="true"\], \[data-octant-increased-contrast="true"\]\)/,
+    );
+    const dock = read("styles/dock.css");
+    expect(dock).toMatch(/\.dock-tile \{[^}]*background: var\(--octant-pane-fill\);/);
+    expect(dock).toMatch(
+      /\.dock-env-strip \{[^}]*background: var\(--octant-pane-fill, var\(--oct-bg\)\);/,
+    );
+    expect(read("styles/shell.css")).toMatch(
+      /\.bottom-utility-panel \{[^}]*background: var\(--octant-pane-fill\);/,
+    );
+  });
+
   it("runs a start screen's one ground under the sidebar only where the sidebar's fill is translucent", () => {
     const surface = read("styles/surface.css");
     // One layer in the frame, shown only while a start screen is open, never a second copy.

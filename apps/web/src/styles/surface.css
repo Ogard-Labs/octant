@@ -807,6 +807,37 @@
   background: transparent;
 }
 
+/* Only the start stage stays open on the ground. A pane that holds text (a
+   tool tile or the overview in the dock, the Environment strip, the bottom
+   panel) is the text surface even while a start screen shows the ground: with
+   the stage's clearing above, the panes' own fill was clear under Glass and the
+   ground, running to the window's edge, lay straight under a pull request's
+   title, labels and comment box. Over an opaque window the fill is the pane
+   colour; under Glass it is the workspace colour, because the coat is too
+   clear to calm the ground. Reduced transparency and increased contrast keep
+   their opaque panes. */
+@media (prefers-reduced-transparency: no-preference) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
+    --octant-panel-surface: color-mix(
+      in srgb,
+      var(--octant-panel-opaque) var(--octant-reading-surface-keep, 94%),
+      transparent
+    );
+  }
+
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell-frame.shell--material-translucent:has(
+      main.workspace[data-octant-start-only]:not([hidden])
+    ) {
+    --octant-panel-surface: color-mix(
+      in srgb,
+      var(--octant-workspace) var(--octant-reading-surface-keep, 94%),
+      transparent
+    );
+  }
+}
+
 @media (min-width: 681px) {
   .app-backdrop[data-placement="welcome"] {
     top: var(--oct-title-rail-h);
