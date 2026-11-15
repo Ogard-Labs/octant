@@ -2686,6 +2686,20 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   gap: 8px;
 }
 
+/* A New coordinator draft's settings, one quiet line under the composer:
+   they came first under the heading and pushed the composer down, though
+   most people keep the defaults. */
+.coordinator-draft-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  width: min(100%, var(--oct-composer-width));
+  margin: 0 auto;
+  text-align: center;
+}
+
 .draft-thread__context-strip {
   display: flex;
   flex-wrap: wrap;
