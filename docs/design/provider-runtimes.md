@@ -1071,7 +1071,10 @@ session is offered and adoptable again. Just before it records, a Work
 adoption also reads the Project again and refuses (giving the claim back)
 when its binding, root or the thread's approved working folder changed while
 the provider was asked; a change to the thread itself is refused by its
-version. Its picker and details row
+version. A rewind that removes every turn the thread ran also leaves it with
+no turn, but its adopted session still holds them: that session is never
+resumed again, and the thread's next turn starts a fresh one, as a Code thread
+rewound to its first message does. Its picker and details row
 are Code's, above the Work composer.
 
 #### Wake-ups the model schedules

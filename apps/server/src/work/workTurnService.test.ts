@@ -5009,6 +5009,45 @@ describe("WorkTurnService", () => {
         .flatMap(([request]) => request.events)
         .map((event: { readonly payload: unknown }) => event.payload);
 
+    it("never resumes a session adopted from outside Octant once a rewind removed every turn it ran", async () => {
+      const adopted: WorkThreadAdoptedSession = {
+        nativeSessionId: "outside-1",
+        providerSessionId: "12121212-1212-4121-8121-121212121212" as never,
+        resumeCursor: decodeProviderResumeCursor({ driverKind: "pi", value: "outside-cursor" }),
+        providerInstanceId: ids.provider as never,
+        modelId: "model-a" as never,
+        bindingRevisionId: ids.binding as never,
+        workingDirectory: "." as never,
+      };
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: input.resumeCursor ?? { driverKind: "pi", value: "fresh" },
+        });
+        return { kind: "completed" as const, response: "Done" };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        adoptedSession: () => adopted,
+        resolveDriver: (_id, fallback) => ({ ...fallback, conversationOwnership: "provider" }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(String(run.mock.calls[0]?.[0].providerSessionId)).toBe(
+        String(adopted.providerSessionId),
+      );
+
+      await fixture.service.rewindThread(ids.window, rewindFrom(ids.request));
+      await fixture.service.startFirstTurn(ids.window, secondCommand());
+      await fixture.waitForIdle(secondRequest);
+
+      // The adopted session still holds the removed turn, so it is not taken up.
+      expect(String(run.mock.calls[1]?.[0].providerSessionId)).not.toBe(
+        String(adopted.providerSessionId),
+      );
+      expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+    });
+
     it("refuses a turn whose thread a move froze while the turn was still being prepared", async () => {
       // Clear when the turn is admitted, held by the time its context is ready.
       let reads = 0;

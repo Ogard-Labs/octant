@@ -1762,7 +1762,14 @@ export class WorkTurnService {
       // A thread started from a session begun outside Octant resumes it on
       // its first turn, only on the provider, model, binding and folder it
       // was adopted under; the provider's exact-resume checks still apply.
-      const adopted = previous === undefined ? thread?.adoptedSession : undefined;
+      // A thread a rewind emptied also has no turn, but its adopted session
+      // still holds the removed turns: it is not resumed, and the thread
+      // starts again in a fresh session, as a Code thread rewound to its
+      // first message does.
+      const adopted =
+        previous === undefined && !this.#projection.rewoundSinceLatest(command.threadId)
+          ? thread?.adoptedSession
+          : undefined;
       if (adopted !== undefined) {
         if (
           String(adopted.providerInstanceId) !== String(command.authority.providerInstanceId) ||

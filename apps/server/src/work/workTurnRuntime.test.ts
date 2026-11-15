@@ -20,6 +20,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { OutlivingSessions } from "../providers/outlivingSessions";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { WorkTurnRuntime, workSessionKey } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -2299,6 +2300,7 @@ describe("WorkTurnRuntime", () => {
       const { calls, driver } = runtimeWithTask();
       const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
       const promptSent = vi.fn();
+      const forTurn = vi.spyOn(heldTurnContext, "forTurn");
       try {
         const outcome = await runtime.run({
           command,
@@ -2314,7 +2316,11 @@ describe("WorkTurnRuntime", () => {
         expect(calls.send).not.toHaveBeenCalled();
         // The runtime's own turn spends tokens like any other.
         expect(promptSent).toHaveBeenCalledOnce();
+        // It sends no context, so the held-context record is neither read
+        // for it nor told it carried anything.
+        expect(forTurn).not.toHaveBeenCalled();
       } finally {
+        forTurn.mockRestore();
         await keeper.close();
       }
     });
