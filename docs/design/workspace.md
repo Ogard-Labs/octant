@@ -908,21 +908,24 @@ In a Code thread a file opens inside the **Files tool**, in the dock beside the
 thread, and a plain click never replaces the thread with a Code file tab. The
 tool is a file viewer: a strip of open files (name and ×) with the tree-toggle
 at its end, a breadcrumb path in muted ink with the checkout's name at its end,
-then the editor filling the tool, and the file tree as a column about 200px wide
+then the editor filling the tool, and the file tree as a column about 260px wide
 at the right with its filter field on top. A single click on a tree row previews
 the file in the one italic tab that the next single click replaces; a double
 click on the row or the tab, or an edit, keeps the tab. In a tool narrower than
-420px the tree and the editor take turns. The editor draws no eyebrow and no
+480px the tree and the editor take turns. The editor draws no eyebrow and no
 rows of text buttons: Save (only while the buffer is dirty) and Open externally
 are icon buttons in the tool's bar, and Commands, Find, Replace, Format, Go to
 line, Outline, Send selection to agent, Editor settings, Find references in
 checkout, Preview rename, Find quick fixes and **Open in main area** are items of
 one **File actions** menu there, with Monaco's own shortcuts unchanged. Open in
 main area is the only way to open a file as a workspace Code file tab, which
-draws the same actions in a slim header of its own. Tree rows are 24px with a
-16px chevron slot and 16px glyphs by type (code, document, image, file, folder)
-in muted ink, ellipsise long names, mark the selected file with the selected
-fill, and end a changed file's row with a small dot (warning for modified,
+draws the same actions in a slim header of its own. Tree rows are 28px, 13px
+text at weight 500 in the primary ink, with 12px of indent per level. A folder is
+a 12px muted chevron (rotated when open) and its name, with no folder icon; a
+file is a 16px glyph by type (code, document, image, file) and its name.
+Dotfolders, dotfiles and ignored folders (`node_modules`, `dist` and the like)
+are drawn in the muted ink. Rows ellipsise long names, mark the selected file
+with the full-row selected fill, take a hover fill on the others, and end a changed file's row with a small dot (warning for modified,
 success for added) read from the host's Git observation; the incomplete-tree
 note is one muted line.
 

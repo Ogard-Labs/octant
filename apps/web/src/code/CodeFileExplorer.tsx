@@ -1,18 +1,7 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import {
-  ChevronRight,
-  Code,
-  File,
-  FileText,
-  Folder,
-  FolderOpen,
-  Image,
-  RefreshCw,
-  Search,
-  X,
-} from "../ui/icons";
+import { ChevronRight, Code, File, FileText, Image, RefreshCw, Search, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -29,7 +18,7 @@ import { FileName, pathBasename, pathParent } from "../lib/fileName";
 
 export const MAX_CODE_FILE_EXPLORER_ENTRIES = 1_000;
 const EXPLORER_VIRTUALIZATION_THRESHOLD = 40;
-const EXPLORER_ROW_HEIGHT_PX = 24;
+const EXPLORER_ROW_HEIGHT_PX = 28;
 const EXPLORER_OVERSCAN = 10;
 
 export type CodeFileExplorerEntry =
@@ -398,6 +387,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
             "aria-setsize": siblingPosition.setSize,
           }),
       "data-index": index,
+      "data-muted": quietPath(label) ? "true" : undefined,
       "data-path": label,
       ref: virtualized ? virtualizer.measureElement : undefined,
       role: "treeitem" as const,
@@ -418,12 +408,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
           type="button"
           variant="bare"
         >
-          <ChevronRight aria-hidden="true" className="code-file-explorer__chevron" size={16} />
-          {open ? (
-            <FolderOpen aria-hidden="true" size={16} />
-          ) : (
-            <Folder aria-hidden="true" size={16} />
-          )}
+          <ChevronRight aria-hidden="true" className="code-file-explorer__chevron" size={12} />
           <FileName name={pathBasename(entry.path)} />
         </OctantButton>
       );
@@ -570,6 +555,27 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
       )}
     </section>
   );
+}
+
+/** Folders that hold what a checkout generates or tools keep, which a reader rarely opens. */
+const QUIET_FOLDERS: ReadonlySet<string> = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "coverage",
+  "vendor",
+  "__pycache__",
+]);
+
+/**
+ * Whether a path is a dotfolder, a dotfile or inside an ignored folder, so its
+ * row is drawn in the quiet ink. A hint for reading the tree, never a rule of
+ * what may be opened.
+ */
+function quietPath(path: string): boolean {
+  return path.split("/").some((segment) => segment.startsWith(".") || QUIET_FOLDERS.has(segment));
 }
 
 function entryLevel(path: CodeRelativePath): number {

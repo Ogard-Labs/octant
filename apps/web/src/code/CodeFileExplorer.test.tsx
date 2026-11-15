@@ -131,8 +131,8 @@ describe("CodeFileExplorer", () => {
       expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
 
       const tree = screen.getByRole("tree");
-      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 24)}px` });
-      tree.scrollTop = 500 * 24 - 280;
+      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 28)}px` });
+      tree.scrollTop = 500 * 28 - 280;
       fireEvent.scroll(tree);
       expect(screen.queryByRole("treeitem", { name: /module-000\.ts/ })).not.toBeInTheDocument();
     });
@@ -150,6 +150,55 @@ describe("CodeFileExplorer", () => {
       .type(screen.getByRole("searchbox", { name: "Filter files" }), "only-after-cap");
 
     expect(screen.getByRole("treeitem", { name: /src\/only-after-cap\.ts/ })).toBeVisible();
+  });
+
+  it("draws a folder as a 12px chevron and its name with no folder icon, and a file with its 16px type icon", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: "src" as never },
+          file("src/app.ts"),
+          file("README.md"),
+        ]}
+        onOpenFile={vi.fn()}
+        selectedPath={"src/app.ts" as never}
+      />,
+    );
+    const folder = screen.getByRole("treeitem", { name: "src" });
+    expect(folder.querySelectorAll("svg")).toHaveLength(1);
+    expect(folder.querySelector("svg")).toHaveAttribute("width", "12");
+    const row = screen.getByRole("treeitem", { name: /app\.ts/ });
+    expect(row.querySelector("svg[data-file-kind]")).toHaveAttribute("width", "16");
+  });
+
+  it("draws dotfolders and ignored folders in the quiet ink", () => {
+    render(
+      <CodeFileExplorer
+        entries={[
+          { kind: "directory", path: ".github" as never },
+          file(".github/ci.yml"),
+          { kind: "directory", path: "node_modules" as never },
+          { kind: "directory", path: "src" as never },
+        ]}
+        onOpenFile={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("treeitem", { name: ".github" })).toHaveAttribute("data-muted", "true");
+    expect(screen.getByRole("treeitem", { name: "node_modules" })).toHaveAttribute(
+      "data-muted",
+      "true",
+    );
+    expect(screen.getByRole("treeitem", { name: "src" })).not.toHaveAttribute("data-muted");
+  });
+
+  it("keeps the list's row and column dimensions: 28px rows, 13px text, 12px indent, a 260px column", () => {
+    const code = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-file-row-h:\s*28px/);
+    expect(code).toMatch(/\.code-file-explorer \{[^}]*--oct-tree-indent:\s*var\(--oct-space-3\)/);
+    expect(code).toMatch(
+      /\.code-file-explorer__entry \{[^}]*font-size:\s*var\(--oct-text-detail\)/,
+    );
+    expect(code).toMatch(/\.code-files-viewer__tree \{[^}]*width:\s*260px/);
   });
 
   it("names the folder for each file when two visible basenames match", () => {

@@ -18,7 +18,7 @@ const MonacoEditorPane = lazy(() =>
 );
 
 /** Below this width the tree and the editor take turns instead of sharing the pane. */
-const NARROW_PANE_PX = 420;
+const NARROW_PANE_PX = 480;
 
 interface OpenFile {
   readonly path: CodeRelativePath;

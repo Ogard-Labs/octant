@@ -408,7 +408,8 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .code-file-explorer {
-  --oct-file-row-h: 24px;
+  --oct-file-row-h: 28px;
+  --oct-tree-indent: var(--oct-space-3);
   --oct-file-inset: 8px;
   --oct-file-depth-max: 10;
   --oct-file-depth: 0;
@@ -539,10 +540,16 @@ html:not([data-octant-reduced-transparency="true"])
   );
   overflow: hidden;
   border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
   text-align: left;
+}
+
+/* Dotfolders, dotfiles and ignored folders are quiet: the muted ink, for the
+   row and what it holds. */
+.code-file-explorer__entry[data-muted="true"] {
+  color: var(--oct-muted);
 }
 
 /* A guide down each ancestor level, under the row's own fill. */
@@ -612,9 +619,9 @@ html:not([data-octant-reduced-transparency="true"])
 /* A file row holds the chevron's place, so a file's glyph stands under its
    sibling folders' glyphs. */
 .code-file-explorer__chevron-slot {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
 }
 
 .code-file-explorer__entry > svg[data-file-kind="code"] {
@@ -637,6 +644,7 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .code-file-explorer__chevron {
+  color: var(--oct-muted);
   transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
@@ -3141,10 +3149,10 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-files-viewer__tree {
   display: flex;
-  width: 200px;
+  width: 260px;
   min-width: 0;
   min-height: 0;
-  flex: 0 0 200px;
+  flex: 0 0 260px;
   flex-direction: column;
   box-shadow: inset 1px 0 0 var(--octant-pane-line, var(--octant-border-soft));
 }
@@ -3172,7 +3180,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 /* Too narrow for both: the tree and the editor take turns, the strip staying
    over whichever is shown. */
-@container files-viewer (max-width: 419px) {
+@container files-viewer (max-width: 479px) {
   .code-files-viewer[data-tree="open"] {
     flex-direction: column;
   }
