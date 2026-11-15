@@ -3621,6 +3621,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(
         "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
       );
+    // A turn the runtime started by itself attaches to the session the
+    // thread's last turn left and sends nothing. It opens only on that
+    // session as it stands: a switch, a rewind or a fork would journal a
+    // handoff as delivered that this turn never sends. The mark is read once,
+    // here, and carried on the turn.
+    const runtimeTurn = this.#options.isRuntimeStartedTurn?.(String(command.operationId)) === true;
+    if (
+      runtimeTurn &&
+      (!priorTurn || previous?.kind !== "provider-session-ready" || providerSwitch !== undefined)
+    )
+      return failStart("The runtime's own turn has no session of this thread to open in.");
     // Another provider, or another model this provider cannot carry the
     // session on to, cannot take up this session, so the turn starts a new
     // one with a disclosed text handoff of the thread's own conversation. The
@@ -3942,11 +3953,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // that cannot read it refuses rather than dropping it silently.
     let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
     let recoveredMergeInputs = false;
-    // A turn the runtime started by itself attaches to its kept session and
-    // sends nothing, so it carries no merged fork and journals no delivery
-    // for one: the merge stays pending for the person's next turn. The mark
-    // is read once, here, and carried on the turn.
-    const runtimeTurn = this.#options.isRuntimeStartedTurn?.(String(command.operationId)) === true;
+    // A turn the runtime started by itself sends nothing, so it carries no
+    // merged fork and journals no delivery for one: the merge stays pending
+    // for the person's next turn.
     if (runtimeTurn) forkMerges = { status: "ready", blocks: [], records: [] };
     else
       try {
@@ -6146,14 +6155,20 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // A runtime that keeps its own conversation already holds the standing
     // context an earlier completed turn of this session carried; only what is
     // new goes out, and only that is counted as this turn's copy.
+    // A turn the runtime started by itself sends nothing. It leaves the
+    // held-context record as the session's last sent turn left it, so a
+    // block this turn would have carried is never counted as held, and
+    // nothing is counted as this turn's copy.
     const delivery: ProviderTurnContextDelta =
-      active.driver.conversationOwnership === "provider"
-        ? heldTurnContext.forTurn({
-            sessionId: decodeProviderSessionId(active.sessionId),
-            resumed: active.resumeCursor !== undefined,
-            context: fullContext,
-          })
-        : { kind: "appended", context: fullContext, held: [] };
+      active.runtimeTurn === true
+        ? { kind: "appended", context: [], held: fullContext }
+        : active.driver.conversationOwnership === "provider"
+          ? heldTurnContext.forTurn({
+              sessionId: decodeProviderSessionId(active.sessionId),
+              resumed: active.resumeCursor !== undefined,
+              context: fullContext,
+            })
+          : { kind: "appended", context: fullContext, held: [] };
     const heldKeys = new Set(delivery.held.map((block) => `${block.kind}\u0000${block.text}`));
     const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
@@ -6162,22 +6177,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const wakeups = this.#options.resolveThreadWakeups?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
+      // A turn the runtime started sends nothing, so it counts no copy.
       turn: estimateSentContextParts({
-        sent: {
-          instructions: [
-            ...(delivery.kind === "restated"
-              ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
-              : []),
-            ...sentNow([
-              ...hostGuidance,
-              ...instructionBlocks,
-              ...personMemory,
-              ...projectMemory,
-              ...(active.sentContext?.instructions ?? []),
-            ]),
-          ],
-          skills: sentNow(active.sentContext?.skills ?? []),
-        },
+        sent:
+          active.runtimeTurn === true
+            ? { instructions: [], skills: [] }
+            : {
+                instructions: [
+                  ...(delivery.kind === "restated"
+                    ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
+                    : []),
+                  ...sentNow([
+                    ...hostGuidance,
+                    ...instructionBlocks,
+                    ...personMemory,
+                    ...projectMemory,
+                    ...(active.sentContext?.instructions ?? []),
+                  ]),
+                ],
+                skills: sentNow(active.sentContext?.skills ?? []),
+              },
         attachments,
       }),
     };

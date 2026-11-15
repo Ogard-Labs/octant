@@ -842,9 +842,16 @@ took its folders, read in the same step, so a folder removed while the turn
 starts makes the session's terms differ and it is not kept. A session being
 stopped stays in the way until its runtime and tasks are gone: the thread's
 next turn waits for it rather than resume the same history on a new
-connection, and a second Stop answers once it has stopped. A runtime-started
-turn sends nothing, so it carries no fork merged back into the thread and
-journals no delivery for one; the merge goes with the person's next turn. A
+connection, and a second Stop answers once it has stopped; shutdown waits for
+it too. A runtime-started turn sends nothing, so it acknowledges nothing as
+sent: it carries no fork merged back into the thread and journals no delivery
+for one (the merge goes with the person's next turn), it leaves the
+held-context record as the session's last sent turn left it, so no standing
+block it would have carried counts as held, and it counts no context copy of
+its own. It opens only on the session the thread's last turn left, as it
+stands: a thread with no turn of its own yet, or one whose next turn would
+need a provider switch, a rewind or a fork handoff, refuses it before
+anything is journaled. A
 runtime-started turn holds at most 1,024 events before it is opened; the
 event past that stops the session at once and the host's attach is
 refused. Rationale: settling the person's

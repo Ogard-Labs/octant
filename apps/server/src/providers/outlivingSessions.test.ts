@@ -385,6 +385,55 @@ describe("OutlivingSessions", () => {
     await keeper.close();
   });
 
+  it("waits at shutdown for a session that was already stopping", async () => {
+    let finishStop: (() => void) | undefined;
+    const work: ProviderBackgroundWork = {
+      tasks: [{ taskId: "dev" }],
+      turnRunning: false,
+      runtimeTurnWaiting: false,
+      ended: false,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.empty),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      send: () => Effect.void,
+      interrupt: () => Effect.void,
+      stop: () =>
+        Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              finishStop = resolve;
+            }),
+        ),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+      backgroundWork: () => ({ current: () => work, watch: () => () => undefined }),
+    };
+    const keeper = keeperFor();
+    const scope = Effect.runSync(Scope.make());
+    const held = await Effect.runPromise(
+      Scope.extend(keeper.acquire(key, "same-folder", Effect.succeed(connection)), scope),
+    );
+    await Effect.runPromise(held.start(start()));
+    await Effect.runPromise(held.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+
+    const stopping = keeper.stopThread(key);
+    await vi.waitFor(() => expect(finishStop).toBeDefined());
+    let closed = false;
+    const closing = keeper.close().then(() => {
+      closed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Shutdown is not done while that runtime and its tasks are still going.
+    expect(closed).toBe(false);
+    finishStop?.();
+    await Promise.all([stopping, closing]);
+    expect(closed).toBe(true);
+  });
+
   it("stops every kept session at shutdown", async () => {
     const runtime = fakeRuntime();
     const keeper = keeperFor();

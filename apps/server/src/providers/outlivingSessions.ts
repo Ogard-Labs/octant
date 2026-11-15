@@ -239,6 +239,9 @@ export class OutlivingSessions {
   async close(): Promise<void> {
     this.#closed = true;
     await Promise.all([...this.#kept.values()].map((kept) => this.#dispose(kept)));
+    // A session already stopping (an idle limit, a Stop) has left `#kept`;
+    // shutdown is not done until its runtime and tasks are gone too.
+    await Promise.all([...this.#closing.values()].map((closing) => closing.catch(() => undefined)));
   }
 
   #lease(kept: Kept): void {

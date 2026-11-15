@@ -173,6 +173,7 @@ import {
   threadWithActiveTurnPosture,
 } from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED, pullRequestCommentDigest } from "./codeRuntimeWorkRecorder";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
@@ -5881,6 +5882,20 @@ describe("CodeOperationRuntime", () => {
       isRuntimeStartedTurn: (operation) => operation === String(startOperation),
     });
     try {
+      // The person's turn that left the session running its background work.
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1382),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
       await fixture.runtime.execute(windowId, {
         kind: "start-provider-turn",
         operationId: startOperation,
@@ -5890,7 +5905,7 @@ describe("CodeOperationRuntime", () => {
         prompt: fixture.prompt,
       });
       await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledWith(sessionId));
-      expect(connection.send).not.toHaveBeenCalled();
+      expect(connection.send).toHaveBeenCalledOnce();
       await Effect.runPromise(
         Queue.offerAll(queue, [
           providerEvent({ kind: "runtime-turn-started", trigger: "background-task" }),
@@ -5908,6 +5923,163 @@ describe("CodeOperationRuntime", () => {
       expect(kinds.indexOf("runtime-turn-started")).toBeGreaterThan(
         kinds.indexOf("conversation-turn-started"),
       );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("never counts the standing context of a runtime-started turn as held, since it sends nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1387);
+    const forTurn = vi.spyOn(heldTurnContext, "forTurn");
+    const fixture = runtimeFixture({
+      provider: {
+        conversationOwnership: "provider",
+        acquire: () => Effect.succeed(connection),
+      } as unknown as ProviderDriver,
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1386),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      const sentTurns = forTurn.mock.calls.length;
+      expect(sentTurns).toBeGreaterThan(0);
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledOnce());
+      // The held-context record is neither read for nor marked by this turn,
+      // so the runtime's report that it keeps its prompts holds nothing new.
+      expect(forTurn).toHaveBeenCalledTimes(sentTurns);
+    } finally {
+      forTurn.mockRestore();
+      fixture.close();
+    }
+  });
+
+  it("counts no context copy for a runtime-started turn, only what its session already carried", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1390);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = providerEvent({
+      kind: "usage",
+      inputTokens: 10,
+      outputTokens: 2,
+      contextTokens: 9_000,
+      promptRetention: "kept",
+    });
+    const sentParts = async (operation: ReturnType<typeof operationId>) => {
+      let parts: ReadonlyArray<{ readonly kind: string; readonly tokens: number }> = [];
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        const report = frames.find((frame) => frame.event.kind === "usage");
+        if (report?.event.kind !== "usage") throw new Error("no report yet");
+        parts = (report.event.contextBreakdown?.parts ?? []).filter(
+          (part) => part.kind !== "octant-tools",
+        );
+      });
+      return parts;
+    };
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1389),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offerAll(queue, [usage, providerEvent({ kind: "completed" })]));
+      const first = await sentParts(operationId(1389));
+      expect(first.length).toBeGreaterThan(0);
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.attachRuntimeTurn).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offerAll(queue, [usage, providerEvent({ kind: "completed" })]));
+      // The session carries the first turn's copy; this turn added none.
+      expect(await sentParts(runtimeOperation)).toEqual(first);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a runtime-started turn on a thread with no session of its own, journaling no handoff", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = {
+      ...providerConnection(queue),
+      attachRuntimeTurn: vi.fn(() => Effect.void),
+    };
+    const runtimeOperation = operationId(1388);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isRuntimeStartedTurn: (operation) => operation === String(runtimeOperation),
+    });
+    try {
+      const result = await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: runtimeOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      expect(result).toMatchObject({
+        kind: "provider-turn-state",
+        state: "failed",
+        failure: { message: "The runtime's own turn has no session of this thread to open in." },
+      });
+      expect(connection.attachRuntimeTurn).not.toHaveBeenCalled();
+      expect(connection.start).not.toHaveBeenCalled();
     } finally {
       fixture.close();
     }
