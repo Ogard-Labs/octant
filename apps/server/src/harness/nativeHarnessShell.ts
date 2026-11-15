@@ -33,6 +33,12 @@ export interface NativeHarnessShellOptions {
    */
   readonly scriptDirectory: string;
   /**
+   * The script file a command is written to, read as each command runs:
+   * `command.sh` for the POSIX shell; a Windows shell names its own (`.ps1`,
+   * `.cmd`), and undefined when it runs none.
+   */
+  readonly scriptFileName?: () => string | undefined;
+  /**
    * Present for a shell whose commands reach the network only through the
    * host's egress proxy (`proxied`). Every run starts its own launch, and a
    * launch that cannot start never runs its command.
@@ -135,8 +141,10 @@ async function runScript(
   input: Parameters<NativeHarnessShellPort["run"]>[0],
   egressProxy: HarnessShellScriptInput["egressProxy"],
 ): Promise<NativeHarnessShellRun> {
+  const fileName = options.scriptFileName === undefined ? "command.sh" : options.scriptFileName();
+  if (fileName === undefined) return { status: "unavailable", output: "", truncated: false };
   const directory = await mkdtemp(join(options.scriptDirectory, "octant-harness-"));
-  const script = join(directory, "command.sh");
+  const script = join(directory, fileName);
   // Opened in the command's own script folder, which it reads and cannot write.
   const servers: HarnessServerAccess | undefined =
     egressProxy === undefined

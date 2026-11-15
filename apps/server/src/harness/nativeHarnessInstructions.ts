@@ -51,11 +51,25 @@ export const NATIVE_HARNESS_INSTRUCTIONS_BLOCK: ProviderContextBlock = {
   text: CORE,
 };
 
-export function nativeHarnessInstructions(mode: OctantMode): ReadonlyArray<ProviderContextBlock> {
+/**
+ * The `bash` tool keeps its name everywhere, but on a Windows host it runs the
+ * shell Settings › Code names (Windows PowerShell unless another is chosen),
+ * so the model is told before it writes a POSIX command.
+ */
+export const WINDOWS_SHELL_INSTRUCTION =
+  "This host runs Windows. The bash tool runs the command in Windows PowerShell, or in the shell the user chose in Settings, not in a POSIX shell: write PowerShell commands and Windows paths.";
+
+export function nativeHarnessInstructions(
+  mode: OctantMode,
+  platform: NodeJS.Platform = process.platform,
+): ReadonlyArray<ProviderContextBlock> {
   return [
     NATIVE_HARNESS_INSTRUCTIONS_BLOCK,
     { kind: "instructions", text: ABOUT_OCTANT },
     { kind: "instructions", text: MODE[mode] },
+    ...(platform === "win32" && mode !== "chat"
+      ? [{ kind: "instructions" as const, text: WINDOWS_SHELL_INSTRUCTION }]
+      : []),
   ];
 }
 

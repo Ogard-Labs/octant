@@ -155,6 +155,26 @@ afterAll(() => {
 });
 
 describe("sanitizeCodexEnvironment", () => {
+  it("keeps a Windows host's system, profile and path names whatever their case, and still drops Octant's own", () => {
+    expect(
+      sanitizeCodexEnvironment(
+        {
+          Path: "C:\\Windows\\System32",
+          SystemRoot: "C:\\Windows",
+          USERPROFILE: "C:\\Users\\fixture",
+          OPENAI_API_KEY: "provider-owned",
+          OCTANT_PRIVATE_SECRET: "must-not-cross",
+        },
+        "win32",
+      ),
+    ).toEqual({
+      PATH: "C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows",
+      USERPROFILE: "C:\\Users\\fixture",
+      OPENAI_API_KEY: "provider-owned",
+    });
+  });
+
   it("carries only what the Codex CLI reads and drops every other host variable", () => {
     expect(
       sanitizeCodexEnvironment({
@@ -872,6 +892,43 @@ describe("Codex launch confinement", () => {
         failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
       });
     }
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("reads the Windows catalog unconfined only for a host that starts threads at open Full access", () => {
+    const prepare = vi.fn(() => {
+      throw Error("No confinement may be prepared.");
+    });
+    const refused = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog" },
+      environment: {},
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(refused).toMatchObject({
+      status: "refused",
+      failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
+    });
+    const read = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog", forOpenFullAccess: true },
+      environment: {},
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(read).toMatchObject({
+      status: "prepared",
+      launch: { command: "C:\\fixture\\codex.exe", args: ["app-server"] },
+    });
+    if (read.status !== "prepared" || read.launch.cwd === undefined)
+      throw new Error("The catalog read was not prepared in a folder of its own.");
+    const folder = read.launch.cwd;
+    expect(existsSync(folder)).toBe(true);
+    read.launch.release();
+    expect(existsSync(folder)).toBe(false);
     expect(prepare).not.toHaveBeenCalled();
   });
 

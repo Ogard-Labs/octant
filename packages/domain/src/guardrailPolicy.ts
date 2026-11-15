@@ -192,6 +192,34 @@ export function hostSandboxRefusal(input: {
     : undefined;
 }
 
+/**
+ * Whether this host starts new threads at Full access with the sandbox off:
+ * Settings › Code's default mode, or Settings › Work's default access, with
+ * the sandbox not kept. Choosing either shows the one-time Full access
+ * warning. A Windows host reads a provider's model catalog unconfined only
+ * then, because that catalog serves turns that run unconfined.
+ */
+export function hostStartsThreadsAtOpenFullAccess(input: {
+  readonly code?:
+    | {
+        readonly defaultExecutionPolicy: ProviderExecutionPolicy;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+  readonly work?:
+    | {
+        readonly defaultAccess: WorkAccess;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+}): boolean {
+  return (
+    (input.code?.defaultExecutionPolicy === "full-access" &&
+      input.code.defaultFullAccessSandbox !== true) ||
+    (input.work?.defaultAccess === "full-access" && input.work.defaultFullAccessSandbox !== true)
+  );
+}
+
 /** The picker's words for a stored posture. */
 export function permissionModeOf(access: ThreadAccess): PermissionMode {
   switch (access.executionPolicy) {

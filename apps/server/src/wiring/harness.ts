@@ -53,6 +53,11 @@ import {
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
 import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckCommand";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
+import {
+  createWindowsFullAccessShellPort,
+  windowsScriptFileName,
+} from "../harness/windowsFullAccessShell";
+import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
   createFollowUp,
@@ -422,6 +427,11 @@ export function wireHarness(deps: HarnessDependencies) {
   // Full access runs a command the way the providers' own apps do: outside
   // Octant's OS sandbox, network open. The owned process group, receipts and
   // output capture stay, so the command is still journaled and stoppable.
+  const windowsHarnessShell = () =>
+    terminalShellFor({
+      platform: "win32",
+      windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+    });
   const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
     resourceBudget: deps.hostResourceBudget,
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
@@ -1043,13 +1053,26 @@ export function wireHarness(deps: HarnessDependencies) {
       cloudCliEnvironment,
       googleCliCredentials: googleCliCommands.prepare,
     }),
-    fullAccessShell: createNativeHarnessShell({
-      process: harnessFullAccessProcessPort,
-      scriptDirectory: harnessScriptDirectory,
-      sshAgentSocket,
-      cloudCliEnvironment,
-      googleCliCredentials: googleCliCommands.prepare,
-    }),
+    // Full access on Windows runs commands in the terminal shell Settings ›
+    // Code names, since the POSIX form runs `/bin/sh`; the levels below
+    // refuse on Windows before any command is planned.
+    fullAccessShell:
+      process.platform === "win32"
+        ? createNativeHarnessShell({
+            process: createWindowsFullAccessShellPort({
+              shell: windowsHarnessShell,
+              scriptDirectory: harnessScriptDirectory,
+            }),
+            scriptDirectory: harnessScriptDirectory,
+            scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
+          })
+        : createNativeHarnessShell({
+            process: harnessFullAccessProcessPort,
+            scriptDirectory: harnessScriptDirectory,
+            sshAgentSocket,
+            cloudCliEnvironment,
+            googleCliCredentials: googleCliCommands.prepare,
+          }),
     ...(harnessProxiedShell === undefined
       ? {}
       : {

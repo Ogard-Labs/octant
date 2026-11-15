@@ -20,6 +20,7 @@ import { Effect, type Scope } from "effect";
 
 import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
+import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
 import { processGroupHasRunningMember } from "../process/processGroupRunningMember";
 import {
   makeProcessConfinementLive,
@@ -70,7 +71,17 @@ export interface CodexAppServerConnection {
  * with nothing in it.
  */
 export type CodexLaunchAuthority =
-  | { readonly kind: "catalog" }
+  | {
+      readonly kind: "catalog";
+      /**
+       * Read for a Windows host whose new threads start at Full access with
+       * the sandbox off, the only level Windows runs. There the catalog read
+       * runs unconfined, as the turns it serves do; without it Windows refuses
+       * the read, since its confined form needs a sandbox Windows lacks.
+       * Other platforms ignore it.
+       */
+      readonly forOpenFullAccess?: true;
+    }
   | {
       readonly kind: "thread";
       readonly root: string;
@@ -124,10 +135,27 @@ export interface CodexProcessOptions {
   /** Confinement for the app-server below Full access; defaults to the platform's. */
   readonly confinement?: ProcessConfinementPort;
   readonly platform?: NodeJS.Platform;
+  /**
+   * Whether a catalog read on a Windows host is made for open Full access
+   * (the host's new threads start there); read as each catalog read starts.
+   */
+  readonly windowsCatalogForOpenFullAccess?: () => boolean;
   /** Routes the app-server through its own egress proxy below Full access. */
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
   readonly serverAccess?: ProviderServerAccessPort;
+}
+
+/** Leaves a launch as asked: the form Full access takes, with no sandbox. */
+const UNCONFINED: ProcessConfinementPort = {
+  prepare: ({ executable, args }) => ({ command: executable, args }),
+};
+
+/** Whether a launch runs with no sandbox on Windows, the only form it has there. */
+function runsUnconfinedOnWindows(authority: CodexLaunchAuthority): boolean {
+  return authority.kind === "catalog"
+    ? authority.forOpenFullAccess === true
+    : authority.executionPolicy === "full-access" && authority.fullAccessSandbox !== true;
 }
 
 const DEFAULT_OCTANT_VERSION = "0.0.0";
@@ -352,18 +380,31 @@ export function codexAppServerArgs(
   ];
 }
 
-export function sanitizeCodexEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function sanitizeCodexEnvironment(
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const kept = (key: string) =>
+    SAFE_ENVIRONMENT.has(key) ||
+    PROXY_VARIABLES.has(key) ||
+    CODEX_NATIVE_VARIABLES.has(key) ||
+    CODEX_CREDENTIALS.has(key) ||
+    AWS_REGION_VARIABLES.has(key) ||
+    key.startsWith("LC_");
+  if (platform !== "win32")
+    return Object.fromEntries(
+      Object.entries(environment).filter(([key, value]) => value !== undefined && kept(key)),
+    );
+  // Windows spells its names in any case (`Path`), so they are matched and
+  // passed on upper-cased, and the system and profile names a Windows program
+  // needs come with them.
   return Object.fromEntries(
-    Object.entries(environment).filter(
-      ([key, value]) =>
-        value !== undefined &&
-        (SAFE_ENVIRONMENT.has(key) ||
-          PROXY_VARIABLES.has(key) ||
-          CODEX_NATIVE_VARIABLES.has(key) ||
-          CODEX_CREDENTIALS.has(key) ||
-          AWS_REGION_VARIABLES.has(key) ||
-          key.startsWith("LC_")),
-    ),
+    Object.entries(environment).flatMap(([key, value]) => {
+      const name = key.toUpperCase();
+      return value !== undefined && (kept(name) || WINDOWS_PROCESS_ENVIRONMENT_NAMES.has(name))
+        ? [[name, value]]
+        : [];
+    }),
   );
 }
 
@@ -744,6 +785,29 @@ export function prepareCodexLaunch(input: {
       },
     };
   }
+  if (input.platform === "win32" && authority.kind === "catalog" && authority.forOpenFullAccess) {
+    // A scratch working directory of its own, removed when the read ends.
+    let scratch: string | undefined;
+    try {
+      scratch = mkdtempSync(join(tmpdir(), "octant-codex-catalog-"));
+    } catch {
+      return {
+        status: "refused",
+        failure: failure("unavailable", "Codex catalog folder could not be created."),
+      };
+    }
+    const folder = scratch;
+    return {
+      status: "prepared",
+      launch: {
+        command: input.binaryPath,
+        args: input.args,
+        cwd: folder,
+        environment: input.environment,
+        release: () => rmSync(folder, { recursive: true, force: true }),
+      },
+    };
+  }
   // Every other launch runs inside Octant's profile, which Windows does not
   // have yet; refused here, before a scratch directory is made for it.
   if (input.platform === "win32")
@@ -1032,9 +1096,24 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
   const confinement = options.confinement ?? makeProcessConfinementLive({ platform });
 
   return {
-    start: ({ binaryPath, authority, environment, onProcessStarted }) =>
+    start: ({ binaryPath, authority: requested, environment, onProcessStarted }) =>
       Effect.suspend(() => {
         let terminate: (() => Promise<void>) | undefined;
+        const authority: CodexLaunchAuthority =
+          requested.kind === "catalog" &&
+          platform === "win32" &&
+          options.windowsCatalogForOpenFullAccess?.() === true
+            ? { kind: "catalog", forOpenFullAccess: true }
+            : requested;
+        // On Windows a launch that runs unconfined (open Full access, or a
+        // catalog read made for it) reads its version unconfined too: the
+        // runtime it precedes has the same reach, and the confined read has
+        // no Windows form. Every other launch keeps the confined read, which
+        // refuses on Windows.
+        const versionProbeConfinement =
+          platform === "win32" && runsUnconfinedOnWindows(authority)
+            ? UNCONFINED
+            : resolved.versionProbeConfinement;
         const launchEnvironment =
           environment ??
           (resolved.inheritedEnvironment === undefined
@@ -1063,9 +1142,9 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
                 : { inheritedEnvironment: launchEnvironment }),
               shutdownTimeoutMs: resolved.shutdownTimeoutMs,
               ...(onProcessStarted === undefined ? {} : { onProcessStarted }),
-              ...(resolved.versionProbeConfinement === undefined
+              ...(versionProbeConfinement === undefined
                 ? {}
-                : { confinement: resolved.versionProbeConfinement }),
+                : { confinement: versionProbeConfinement }),
             });
             const appServerEnvironment =
               launchEnvironment ?? codexProcessEnvironment(binaryPath, process.env);

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { nativeHarnessInstructions, nativeHarnessToolGuide } from "./nativeHarnessInstructions";
+import {
+  nativeHarnessInstructions,
+  nativeHarnessToolGuide,
+  WINDOWS_SHELL_INSTRUCTION,
+} from "./nativeHarnessInstructions";
 
 const chatText = () =>
   nativeHarnessInstructions("chat")
@@ -7,6 +11,20 @@ const chatText = () =>
     .join("\n");
 
 describe("native harness instructions", () => {
+  it("tells a Work or Code lead on a Windows host that its shell is PowerShell, and says nothing of it elsewhere", () => {
+    for (const mode of ["work", "code"] as const) {
+      expect(nativeHarnessInstructions(mode, "win32").map((block) => block.text)).toContain(
+        WINDOWS_SHELL_INSTRUCTION,
+      );
+      expect(nativeHarnessInstructions(mode, "darwin").map((block) => block.text)).not.toContain(
+        WINDOWS_SHELL_INSTRUCTION,
+      );
+    }
+    expect(nativeHarnessInstructions("chat", "win32").map((block) => block.text)).not.toContain(
+      WINDOWS_SHELL_INSTRUCTION,
+    );
+  });
+
   it("tells a Chat lead what the thread lacks and sends it to the tool list for what it has", () => {
     const text = chatText();
     expect(text).toContain("no filesystem and no shell");
