@@ -10452,6 +10452,7 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["octantInstructionBlocks"];
   personMemoryBlock?: Parameters<typeof createCodeOperationRuntime>[0]["personMemoryBlock"];
+  isCoordinatorThread?: Parameters<typeof createCodeOperationRuntime>[0]["isCoordinatorThread"];
   designSystemContext?: Parameters<typeof createCodeOperationRuntime>[0]["designSystemContext"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
@@ -10882,6 +10883,9 @@ function runtimeFixture(options: {
     ...(options.personMemoryBlock === undefined
       ? {}
       : { personMemoryBlock: options.personMemoryBlock }),
+    ...(options.isCoordinatorThread === undefined
+      ? {}
+      : { isCoordinatorThread: options.isCoordinatorThread }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -12596,7 +12600,7 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
   }
 });
 
-it("gives a Code session your instructions after Octant's own, once, and an edit once as a revision", async () => {
+it("gives a Code session your and its Project's instructions after Octant's own, once, and an edit once as a revision", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const connection = providerConnection(queue);
   let instructions = "Plan in Work before coding.";
@@ -12604,6 +12608,7 @@ it("gives a Code session your instructions after Octant's own, once, and an edit
     provider: { ...providerDriver(connection), conversationOwnership: "provider" },
     octantInstructionBlocks: () => [
       { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+      { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
     ],
     personMemoryBlock: () => "Remembered: prefers short replies.",
     projectMemoryEntries: () => ["Releases ship from main only."],
@@ -12638,12 +12643,13 @@ it("gives a Code session your instructions after Octant's own, once, and an edit
     const own = first.lastIndexOf("instructions");
     const yours = first.indexOf("person-instructions");
     expect(yours).toBeGreaterThan(own);
-    expect(first.indexOf("person-memory")).toBe(yours + 1);
-    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 1);
+    expect(first.indexOf("project-instructions")).toBe(yours + 1);
+    expect(first.indexOf("person-memory")).toBe(yours + 2);
+    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 2);
 
-    expect((await turn(141, "second")).map((block) => block.kind)).not.toContain(
-      "person-instructions",
-    );
+    const second = (await turn(141, "second")).map((block) => block.kind);
+    expect(second).not.toContain("person-instructions");
+    expect(second).not.toContain("project-instructions");
 
     instructions = "Plan in Code instead.";
     const edited = await turn(142, "third");
@@ -12657,6 +12663,51 @@ it("gives a Code session your instructions after Octant's own, once, and an edit
   } finally {
     await fixture.runtime.close();
     fixture.close();
+  }
+});
+
+it("gives a coordinator the orchestration text after your and its Project's instructions, and an ordinary thread none", async () => {
+  for (const coordinator of [true, false]) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isCoordinatorThread: (id) => coordinator && id === String(threadId),
+      octantInstructionBlocks: ({ orchestrates }) => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Yours." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+        ...(orchestrates
+          ? [
+              {
+                kind: "orchestration-instructions" as const,
+                key: "octant-orchestration-instructions",
+                text: "Start a worker per failing test.",
+              },
+            ]
+          : []),
+      ],
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(coordinator ? 150 : 151),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const kinds = (vi.mocked(connection.send).mock.calls[0]?.[0].context ?? []).map(
+        (block) => block.kind,
+      );
+      const yours = kinds.indexOf("person-instructions");
+      expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+      if (coordinator) expect(kinds.indexOf("orchestration-instructions")).toBe(yours + 2);
+      else expect(kinds).not.toContain("orchestration-instructions");
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   }
 });
 

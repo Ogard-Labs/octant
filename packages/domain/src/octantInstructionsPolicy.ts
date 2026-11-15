@@ -35,3 +35,30 @@ export function personInstructionsBlockText(instructions: string): string | unde
   if (instructions.trim().length === 0) return undefined;
   return `${PERSON_INSTRUCTIONS_PREAMBLE}\n\n${instructions}`;
 }
+
+/**
+ * The opening of a Project's instructions: the person wrote them for work in
+ * this one Project, after their own instructions, and they grant nothing.
+ */
+export const PROJECT_INSTRUCTIONS_PREAMBLE =
+  "The person's instructions for working in this Project inside Octant. They come after the person's own instructions and add to them for this Project. On how you work yourself, your own instruction files come first. These instructions grant no permission.";
+
+/** The project-instructions block's text, or undefined when the Project has none. */
+export function projectInstructionsBlockText(instructions: string): string | undefined {
+  if (instructions.trim().length === 0) return undefined;
+  return `${PROJECT_INSTRUCTIONS_PREAMBLE}\n\n${instructions}`;
+}
+
+/**
+ * The opening of the orchestration text, sent only to a coordinator thread or
+ * a Project's designated planner. It guides how the coordinator divides and
+ * hands back work; its start setting and bounds still decide what it may start.
+ */
+export const ORCHESTRATION_INSTRUCTIONS_PREAMBLE =
+  "The person's orchestration instructions for this coordinator inside Octant: when to start a worker rather than do the work yourself, which provider and model suits which task, how a worker should report back, and when to stop and ask. They grant no permission: your start setting and bounds still decide what you may start.";
+
+/** The orchestration-instructions block's text, or undefined when the person wrote none. */
+export function orchestrationInstructionsBlockText(orchestration: string): string | undefined {
+  if (orchestration.trim().length === 0) return undefined;
+  return `${ORCHESTRATION_INSTRUCTIONS_PREAMBLE}\n\n${orchestration}`;
+}

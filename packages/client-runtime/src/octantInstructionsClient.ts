@@ -2,6 +2,7 @@ import { decodeHostAnswer } from "@octant/contracts";
 import {
   OctantInstructionsResult,
   OctantInstructionsView,
+  decodeOctantInstructionsCommand,
   type OctantInstructionsCommand,
 } from "@octant/contracts/octant-instructions";
 import { bindFetchPort } from "./bindFetchPort";
@@ -24,6 +25,8 @@ export class OctantInstructionsClientFailure extends Error {
 /** Settings › General: the instructions the person writes for Octant on this host. */
 export interface OctantInstructionsClient {
   read(signal?: AbortSignal): Promise<OctantInstructionsView>;
+  /** One Project's instructions; a refusal when the Project is not on this host. */
+  readProject(projectId: string, signal?: AbortSignal): Promise<OctantInstructionsResult>;
   change(
     command: OctantInstructionsCommand,
     signal?: AbortSignal,
@@ -34,6 +37,26 @@ export function createOctantInstructionsClient(
   options: OctantInstructionsClientOptions,
 ): OctantInstructionsClient {
   const fetch = bindFetchPort(options.fetch);
+  const change = async (
+    command: OctantInstructionsCommand,
+    signal?: AbortSignal,
+  ): Promise<OctantInstructionsResult> => {
+    const body = await send(
+      fetch,
+      new URL("/api/octant-instructions/commands", options.baseUrl).toString(),
+      {
+        method: "POST",
+        headers: {
+          "x-octant-window-capability": options.windowCapability,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(command),
+        ...(signal === undefined ? {} : { signal }),
+      },
+      "Your instructions could not be saved.",
+    );
+    return decodeHostAnswer(OctantInstructionsResult)(body);
+  };
   return {
     async read(signal) {
       const body = await send(
@@ -48,23 +71,12 @@ export function createOctantInstructionsClient(
       );
       return decodeHostAnswer(OctantInstructionsView)(body);
     },
-    async change(command, signal) {
-      const body = await send(
-        fetch,
-        new URL("/api/octant-instructions/commands", options.baseUrl).toString(),
-        {
-          method: "POST",
-          headers: {
-            "x-octant-window-capability": options.windowCapability,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify(command),
-          ...(signal === undefined ? {} : { signal }),
-        },
-        "Your instructions could not be saved.",
-      );
-      return decodeHostAnswer(OctantInstructionsResult)(body);
-    },
+    readProject: (projectId, signal) =>
+      change(
+        decodeOctantInstructionsCommand({ kind: "read-project-instructions", projectId }),
+        signal,
+      ),
+    change,
   };
 }
 

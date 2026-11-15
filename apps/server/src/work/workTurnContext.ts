@@ -116,6 +116,8 @@ export function planWorkTurnContext(input: {
         "workspace-context": "Workspace context",
         "octant-policy": "Work instructions",
         "person-instructions": "Your instructions",
+        "project-instructions": "Project instructions",
+        "orchestration-instructions": "Orchestration",
         "person-memory": "Person memory",
         "project-memory": "Project memory",
       }[contribution.category],

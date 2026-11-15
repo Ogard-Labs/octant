@@ -2712,12 +2712,13 @@ describe("WorkTurnService", () => {
     expect(readProjectMemory).toHaveBeenCalledWith(ids.project);
   });
 
-  it("gives a Work session your instructions after Octant's own and before person and Project memory", async () => {
+  it("gives a Work session your and its Project's instructions after Octant's own and before person and Project memory", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const fixture = serviceFixture({
       nativeConversation: true,
       octantInstructionBlocks: () => [
         { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
       ],
       personMemoryBlock: () => "Remembered: prefers tables.",
       readProjectMemory: () =>
@@ -2755,8 +2756,9 @@ describe("WorkTurnService", () => {
     const kinds = (contexts[0] ?? []).map((block) => block.kind);
     const yours = kinds.indexOf("person-instructions");
     expect(yours).toBeGreaterThan(kinds.indexOf("instructions"));
-    expect(kinds.indexOf("person-memory")).toBe(yours + 1);
-    expect(kinds.indexOf("project-memory")).toBe(yours + 2);
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(kinds.indexOf("project-memory")).toBe(yours + 3);
   });
 
   it("gives a routine's Work turn your instructions though it gets no person memory", async () => {

@@ -338,6 +338,7 @@ describe("createHostControlClient", () => {
         projects: [],
         projectMemory: [],
         personMemory: [],
+        projectInstructions: [],
         canvases: [],
         settings: { chatEnabled: true, workEnabled: false, themeMode: "dark" },
         usage: [],

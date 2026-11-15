@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { PROJECT_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
+import { OctantInstructionsStore } from "../octantInstructions/octantInstructionsStore";
 import {
   mkdirSync,
   mkdtempSync,
@@ -789,6 +791,51 @@ describe("thread purge sweep", () => {
     expect(switched(byThread)).toEqual([{ aggregate_id: uuidFor("code", "canvas") }]);
     await purgeThread(byThread, "code", threads.code.id);
     expect(switched(byThread)).toEqual([]);
+  });
+
+  it("erases a Project's instructions with the Project, and only that Project's", () => {
+    const harness = openHarness();
+    const otherProjectId = "c3630000-0000-4000-8000-000000000021";
+    const person = {
+      actor: decodeEventActor({
+        kind: "local-user",
+        actorId: "c3630000-0000-4000-8000-000000000022",
+      }),
+      actsAsHostPerson: true,
+    };
+    const store = new OctantInstructionsStore({
+      journal: harness.journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    for (const project of [projectId, otherProjectId]) {
+      store.change(
+        {
+          kind: "change-project-instructions",
+          projectId: decodeProjectId(project),
+          expectedVersion: 0,
+          instructions: `Rules for ${project}.`,
+        },
+        person,
+      );
+    }
+
+    erasePurgedProjectData({ connection: harness.connection, projectId, canvasIds: [] });
+    store.forgetProject(projectId);
+
+    expect(
+      harness.connection
+        .prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = ?`)
+        .all(PROJECT_INSTRUCTIONS_AGGREGATE_TYPE),
+    ).toEqual([{ aggregate_id: otherProjectId }]);
+    expect(store.contextBlocks({ projectId })).toEqual([]);
+    const rebuilt = new OctantInstructionsStore({
+      journal: harness.journal,
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    expect(rebuilt.contextBlocks({ projectId })).toEqual([]);
+    expect(rebuilt.contextBlocks({ projectId: otherProjectId })).toHaveLength(1);
   });
 
   it("erases a Project's language server approvals and egress records with the Project, and only that Project's", () => {

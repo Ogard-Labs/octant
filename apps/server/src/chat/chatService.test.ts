@@ -1925,11 +1925,12 @@ describe("ChatService", () => {
     ).not.toContain("Referenced thread");
   });
 
-  it("gives a Chat session your instructions after Octant's own and before person memory", async () => {
+  it("gives a Chat session your and its Project's instructions after Octant's own and before person memory", async () => {
     const { service, fakeDriver, contextHarness } = openFixture({
       nativeConversation: true,
       octantInstructionBlocks: () => [
         { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
       ],
       personMemoryBlock: () => "Remembered: prefers tables.",
     });
@@ -1952,9 +1953,10 @@ describe("ChatService", () => {
     const yours = kinds.indexOf("person-instructions");
     expect(kinds).toContain("instructions");
     expect(yours).toBeGreaterThan(kinds.lastIndexOf("instructions"));
-    expect(kinds.indexOf("person-memory")).toBe(yours + 1);
-    expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toContain(
-      "person-instructions",
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toEqual(
+      expect.arrayContaining(["person-instructions", "project-instructions"]),
     );
   });
 

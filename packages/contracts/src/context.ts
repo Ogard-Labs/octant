@@ -75,6 +75,7 @@ export const ContextEntryCategory = Schema.Literal(
   "user-instructions",
   "person-instructions",
   "project-instructions",
+  "orchestration-instructions",
   "person-memory",
   "project-memory",
   "conversation",

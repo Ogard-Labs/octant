@@ -527,7 +527,8 @@ export function wireWork(deps: WorkDependencies) {
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       conversationInputTransfer,
       liveTurns,
-      octantInstructionBlocks: () => octantInstructions.contextBlocks(),
+      octantInstructionBlocks: ({ thread }) =>
+        octantInstructions.contextBlocks({ projectId: String(thread.projectId) }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "work",

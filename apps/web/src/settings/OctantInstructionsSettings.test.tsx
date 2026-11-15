@@ -1,6 +1,8 @@
-import type {
-  OctantInstructionsResult,
-  OctantInstructionsView,
+import {
+  decodeOctantInstructionsResult,
+  type OctantInstructionsCommand,
+  type OctantInstructionsResult,
+  type OctantInstructionsView,
 } from "@octant/contracts/octant-instructions";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,7 +10,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   INSTRUCTIONS_READ_ONLY_NOTE,
   INSTRUCTIONS_SECRET_WARNING,
+  ORCHESTRATION_PURPOSE,
   OctantInstructionsSettings,
+  PROJECT_INSTRUCTIONS_PURPOSE,
+  ProjectInstructionsSettings,
   YOUR_INSTRUCTIONS_PURPOSE,
 } from "./OctantInstructionsSettings";
 
@@ -16,7 +21,9 @@ function view(overrides: Partial<OctantInstructionsView> = {}): OctantInstructio
   return {
     kind: "octant-instructions",
     instructions: "Use Work for research.",
+    orchestration: "",
     version: 3,
+    orchestrationVersion: 7,
     canChange: true,
     ...overrides,
   };
@@ -27,10 +34,13 @@ function fakeClient(
   answer: (instructions: string) => OctantInstructionsResult = (instructions) =>
     view({ instructions, version: 4 }),
 ) {
-  const change = vi.fn(async (command: { readonly instructions: string }) =>
-    answer(command.instructions),
+  const change = vi.fn(async (command: OctantInstructionsCommand) =>
+    answer("instructions" in command ? command.instructions : ""),
   );
-  return { change, client: { read: vi.fn(async () => initial), change } };
+  return {
+    change,
+    client: { read: vi.fn(async () => initial), readProject: vi.fn(async () => initial), change },
+  };
 }
 
 /** Matches an accessible description that holds `text` anywhere. */
@@ -47,7 +57,8 @@ describe("Your instructions in Settings", () => {
     const field = await screen.findByRole("textbox", { name: "Your instructions" });
     expect(screen.getByText(YOUR_INSTRUCTIONS_PURPOSE)).toBeVisible();
     expect(screen.getByText("22 / 8,000 characters")).toBeVisible();
-    const save = screen.getByRole("button", { name: "Save" });
+    const [save] = screen.getAllByRole("button", { name: "Save" });
+    if (save === undefined) throw new Error("Expected a Save button.");
     expect(save).toBeDisabled();
 
     await user.clear(field);
@@ -60,7 +71,29 @@ describe("Your instructions in Settings", () => {
       expectedVersion: 3,
       instructions: "Plan in Code.",
     });
-    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
+    expect((await screen.findAllByRole("button", { name: "Save" }))[0]).toBeDisabled();
+  });
+
+  it("offers Orchestration under Your instructions, with its 4,000 character limit, and saves it on its own", async () => {
+    const user = userEvent.setup();
+    const { client, change } = fakeClient(view(), () =>
+      view({ orchestration: "Start a worker for each failing test.", orchestrationVersion: 8 }),
+    );
+    render(<OctantInstructionsSettings client={client} />);
+
+    const field = await screen.findByRole("textbox", { name: "Orchestration" });
+    expect(screen.getByText(ORCHESTRATION_PURPOSE)).toBeVisible();
+    expect(screen.getByText("0 / 4,000 characters")).toBeVisible();
+    await user.type(field, "Start a worker for each failing test.");
+    const saves = screen.getAllByRole("button", { name: "Save" });
+    expect(saves[0]).toBeDisabled();
+    await user.click(saves[1] as HTMLElement);
+
+    expect(change).toHaveBeenCalledWith({
+      kind: "change-orchestration-instructions",
+      expectedVersion: 7,
+      orchestration: "Start a worker for each failing test.",
+    });
   });
 
   it("refuses to save a text past its limit", async () => {
@@ -73,7 +106,7 @@ describe("Your instructions in Settings", () => {
 
     expect(screen.getByText("8,001 / 8,000 characters")).toBeVisible();
     expect(field).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Save" })[0]).toBeDisabled();
   });
 
   it("describes the field by its purpose, its warnings, and its count", async () => {
@@ -108,8 +141,9 @@ describe("Your instructions in Settings", () => {
     expect(field).toHaveAttribute("readonly");
     expect(field).toHaveValue("Use Work for research.");
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-    expect(screen.getByText(INSTRUCTIONS_READ_ONLY_NOTE)).toBeVisible();
+    expect(screen.getAllByText(INSTRUCTIONS_READ_ONLY_NOTE)).toHaveLength(2);
     expect(field).toHaveAccessibleDescription(containing(INSTRUCTIONS_READ_ONLY_NOTE));
+    expect(screen.getByRole("textbox", { name: "Orchestration" })).toHaveAttribute("readonly");
   });
 
   it("keeps the unsaved draft after a stale refusal and saves it against the version reread", async () => {
@@ -126,19 +160,20 @@ describe("Your instructions in Settings", () => {
 
     const field = await screen.findByRole("textbox", { name: "Your instructions" });
     await user.type(field, " Always.");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    const [saveYours] = screen.getAllByRole("button", { name: "Save" });
+    if (saveYours === undefined) throw new Error("Expected a Save button.");
+    await user.click(saveYours);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("changed since you opened them");
     expect(field).toHaveAccessibleDescription(containing("changed since you opened them"));
     expect(client.read).toHaveBeenCalledTimes(2);
     expect(field).toHaveValue("Use Work for research. Always.");
-    const save = screen.getByRole("button", { name: "Save" });
-    await waitFor(() => expect(save).toBeEnabled());
+    await waitFor(() => expect(saveYours).toBeEnabled());
 
     change.mockResolvedValueOnce(
       view({ instructions: "Use Work for research. Always.", version: 6 }),
     );
-    await user.click(save);
+    await user.click(saveYours);
     expect(change).toHaveBeenLastCalledWith({
       kind: "change-person-instructions",
       expectedVersion: 5,
@@ -158,5 +193,82 @@ describe("Your instructions in Settings", () => {
     rerender(<OctantInstructionsSettings client={{ ...client }} />);
 
     await waitFor(() => expect(field).toHaveValue("Use Code for fixes."));
+  });
+});
+
+describe("Project instructions in a Project's settings", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const projectView = (instructions: string, canChange = true) =>
+    decodeOctantInstructionsResult({
+      kind: "project-instructions",
+      projectId,
+      instructions,
+      version: 1,
+      canChange,
+    });
+
+  function projectClient(instructions: string, canChange = true) {
+    const change = vi.fn(async (command: OctantInstructionsCommand) =>
+      projectView("instructions" in command ? command.instructions : "", canChange),
+    );
+    return {
+      change,
+      client: {
+        read: vi.fn(async () => view()),
+        readProject: vi.fn(async () => projectView(instructions, canChange)),
+        change,
+      },
+    };
+  }
+
+  it("shows the Project's text with its 4,000 character limit and saves it on the Project", async () => {
+    const user = userEvent.setup();
+    const { client, change } = projectClient("Ship from main only.");
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} />);
+
+    const field = await screen.findByRole("textbox", { name: "Project instructions" });
+    expect(screen.getByText(PROJECT_INSTRUCTIONS_PURPOSE)).toBeVisible();
+    expect(screen.getByText("20 / 4,000 characters")).toBeVisible();
+    await user.type(field, " Always.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(client.readProject).toHaveBeenCalledWith(projectId);
+    expect(change).toHaveBeenCalledWith({
+      kind: "change-project-instructions",
+      projectId,
+      expectedVersion: 1,
+      instructions: "Ship from main only. Always.",
+    });
+  });
+
+  it("keeps the refusal and the draft after a stale save of a Project's text", async () => {
+    const user = userEvent.setup();
+    const { client, change } = projectClient("Ship from main only.");
+    change.mockResolvedValueOnce(
+      decodeOctantInstructionsResult({
+        kind: "octant-instructions-refused",
+        reason: "stale-version",
+        message: "This Project's instructions changed since you opened them. Reload and try again.",
+      }),
+    );
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} />);
+
+    const field = await screen.findByRole("textbox", { name: "Project instructions" });
+    await user.type(field, " Always.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(client.readProject).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("alert")).toHaveTextContent("changed since you opened them");
+    expect(field).toHaveValue("Ship from main only. Always.");
+  });
+
+  it("shows an archived Project's text read-only", async () => {
+    const { client } = projectClient("Ship from main only.");
+    render(<ProjectInstructionsSettings client={client} projectId={projectId} readOnly />);
+
+    expect(await screen.findByRole("textbox", { name: "Project instructions" })).toHaveAttribute(
+      "readonly",
+    );
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });
