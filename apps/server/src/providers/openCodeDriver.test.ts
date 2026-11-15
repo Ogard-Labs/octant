@@ -3371,6 +3371,7 @@ describe("OpenCode driver", () => {
     const own = {
       rules: [{ action: "read", resource: "*.env.example", effect: "deny" }],
       toolServers: false,
+      webTools: true,
     } as const;
     const rulesFor = (policy: "full-access" | "approval-gated" | "auto-accept-edits" | "plan") => [
       permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map((rule) => ({
