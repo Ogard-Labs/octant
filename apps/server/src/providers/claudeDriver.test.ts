@@ -6638,7 +6638,7 @@ describe("Claude session copies for a fork or rewind", () => {
     await acquired.close();
   });
 
-  it("makes no copy for another folder or mode, so the fork reads its source as text", async () => {
+  it("makes no copy for another account, folder or mode, so the fork reads its source as text", async () => {
     const f = harness();
     const acquired = await acquire(f.driver, "code");
     const started = await Effect.runPromise(
@@ -6659,6 +6659,7 @@ describe("Claude session copies for a fork or rewind", () => {
     };
 
     for (const differing of [
+      { instanceId: otherInstanceId },
       { projectRoot: "/tmp/octant-claude-fork-worktree" },
       { mode: "work" as const },
       { source: { driverKind: "codex" as const, value: source.value } },

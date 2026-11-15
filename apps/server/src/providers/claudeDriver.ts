@@ -2200,7 +2200,7 @@ function forkClaudeSession(
   const binding = input.source.binding;
   if (
     copySession === undefined ||
-    input.instanceId !== options.instanceId ||
+    String(input.instanceId) !== String(options.instanceId) ||
     input.source.driverKind !== "claude" ||
     binding === undefined ||
     String(binding.instanceId) !== String(options.instanceId) ||
