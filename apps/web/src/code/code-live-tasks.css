@@ -34,6 +34,12 @@
   white-space: nowrap;
   font-family: var(--oct-font-mono);
 }
+/* Commands read as one run-on line without a mark between them. */
+.code-live-tasks__list li + li::before {
+  content: "·";
+  margin-inline-end: var(--oct-space-2);
+  color: var(--octant-text-secondary);
+}
 .code-live-tasks__state {
   flex: none;
   font-variant-numeric: tabular-nums;
