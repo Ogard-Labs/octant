@@ -275,6 +275,7 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "code-android-snapshot-boot",
       "code-coordinator-starting",
+      "code-coordinator-show-workers",
       "code-coordinator-open-workers",
       "project-view-switcher",
       "code-default-access",

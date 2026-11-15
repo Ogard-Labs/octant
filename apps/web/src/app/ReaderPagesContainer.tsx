@@ -28,6 +28,7 @@ import { WorkspaceRailLayers, type WorkspaceRailLayersProps } from "../shell/Wor
 import type { useWorkThreadNavigation } from "../work/useWorkThreadNavigation";
 import type { CodeController } from "../code/useCodeController";
 import { codeBoardCoordinators, coordinatorTitleByWorker } from "../code/codeBoardGrouping";
+import { workerListingFor } from "../code/coordinatorWorkerListing";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
 
@@ -105,6 +106,8 @@ export interface ReaderPagesContainerProps {
   readonly threadBoardAvailable: boolean;
   readonly codeBoardProjects: WorkspaceRailLayersProps["codeBoardProjects"];
   readonly codeNavigationRows: CodeController["navigation"];
+  /** The Show workers choice, so the board lists workers only where it was asked to. */
+  readonly codeWorkerListingSettings?: Parameters<typeof workerListingFor>[0];
   readonly codePullRequestsOpen: boolean;
   readonly codeProviderGroups: ReturnType<typeof buildModelPickerGroups>;
   readonly codeThreads: ReadonlyArray<CodeThread> | undefined;
@@ -175,6 +178,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     codeBoardOpen,
     codeBoardProjects,
     codeNavigationRows,
+    codeWorkerListingSettings,
     codePullRequestsOpen,
     codeProviderGroups,
     codeThreads,
@@ -554,7 +558,10 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         }}
         {...(selectedProjectPullRequestKey === undefined ? {} : { selectedProjectPullRequestKey })}
         onCloseWorkBoard={() => actions.setWorkBoardOpen(false)}
-        codeBoardCoordinators={codeBoardCoordinators(codeNavigationRows)}
+        codeBoardCoordinators={codeBoardCoordinators(
+          codeNavigationRows,
+          (projectId) => workerListingFor(codeWorkerListingSettings, projectId).board,
+        )}
         unreadThreadIds={
           new Set(
             (activeMode === "work" ? workNavigationRows : codeNavigationRows)

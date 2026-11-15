@@ -7,6 +7,8 @@ import type {
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
   CoordinatorWorkerChoice,
+  CoordinatorWorkerListing,
+  CoordinatorWorkerListingByProject,
   CoordinatorWorkerLevel,
   SideChatDraftReturnReference,
 } from "@octant/contracts";
@@ -174,6 +176,8 @@ export interface CodeThreadNavigationItem {
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
   readonly providerInstanceId: CodeThread["providerInstanceId"];
+  readonly modelId?: string;
+  readonly createdAt?: string;
   readonly threadId: CodeThreadId;
   readonly title: string;
   readonly updatedAt?: CodeThread["updatedAt"];
@@ -214,8 +218,6 @@ export interface CodeThreadNavigationItem {
   readonly planner?: true;
   /** The coordinator that started this worker; the host records it at creation. */
   readonly coordinatorThreadId?: CodeThreadId;
-  /** The model the thread runs on. */
-  readonly modelId?: string;
   /** How the host chose a worker's model from the roles. */
   readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /** The thread's Wake when a message arrives switch is on. */
@@ -2070,6 +2072,8 @@ export function useCodeController(options: CodeControllerOptions) {
             lifecycle: thread.lifecycle,
             projectId: thread.projectId,
             providerInstanceId: thread.providerInstanceId,
+            modelId: String(thread.modelId),
+            createdAt: thread.createdAt,
             threadId: thread.id,
             title: thread.title,
             followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
@@ -2099,7 +2103,6 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.coordinatorThreadId === undefined
               ? {}
               : { coordinatorThreadId: thread.coordinatorThreadId }),
-            modelId: String(thread.modelId),
             ...(thread.coordinatorChoice === undefined
               ? {}
               : { coordinatorChoice: thread.coordinatorChoice }),
@@ -2710,6 +2713,8 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly shieldModel?: ShieldModelChoice | null;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
       readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+      readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
+      readonly coordinatorWorkerListingByProject?: CoordinatorWorkerListingByProject;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
       readonly restartContinuation?: boolean;
     }): Promise<boolean> => {
