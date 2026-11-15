@@ -27,7 +27,8 @@ over it readable. It has no
 Colours dial. An ASCII print is always still: a wave pushing through
 characters read as flicker, so it offers no Motion. Like every print,
 increased contrast turns it off. Any other printed picture is still unless a person sets
-its Motion to Wave: then a click on a start screen pushes a ring outward
+its Motion to Wave: then a click on a start screen's empty space (never one on
+a control or anywhere in the composer's box) pushes a ring outward
 through its cells, each cell sampled from a little further in as the ring's
 edge passes and lit toward the accent through the same dither, so the ring
 stays in pixels; between clicks the print rests and draws nothing. A ground

@@ -1,4 +1,5 @@
 import {
+  CONTROL_SELECTOR,
   ECHO_DELAY,
   RING_MAX_ALPHA,
   RIPPLE_SECONDS,
@@ -66,29 +67,6 @@ const RING_SWAP_SHARE = 0.3;
 const MAX_RINGS = 8;
 /** A click further than this from where it went down is a drag, not a click. */
 const DRAG_SLOP = 6;
-/** Elements a click on which belongs to the control, not to the ground. */
-const CONTROL_SELECTOR = [
-  "button",
-  "a[href]",
-  "input",
-  "textarea",
-  "select",
-  "summary",
-  "label",
-  "[contenteditable]:not([contenteditable='false'])",
-  "[role='button']",
-  "[role='link']",
-  "[role='tab']",
-  "[role='menu']",
-  "[role='menuitem']",
-  "[role='option']",
-  "[role='checkbox']",
-  "[role='switch']",
-  "[role='slider']",
-  "[role='dialog']",
-  "[role='listbox']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(", ");
 
 /**
  * Whether a click on `target` is a click on empty ground: not on a control

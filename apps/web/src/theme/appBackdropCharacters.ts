@@ -82,12 +82,44 @@ export function rippleBrightness(ripple: Ripple, x: number, y: number, t: number
 }
 
 /**
- * Whether a click may send a ring. With `within`, only a click inside a
- * matching element counts: under the whole shell the field also lies behind
- * threads, where a ring answering every click in a transcript was a
- * distraction, so there it answers the start screen alone.
+ * Elements a click on which belongs to the control, not to the ground. The
+ * composer's box counts whole: a click on its padding puts the caret in the
+ * prompt, and a ring answering it read as the ground reacting to typing.
+ */
+export const CONTROL_SELECTOR = [
+  "button",
+  "a[href]",
+  "input",
+  "textarea",
+  "select",
+  "summary",
+  "label",
+  "[contenteditable]:not([contenteditable='false'])",
+  "[role='button']",
+  "[role='link']",
+  "[role='tab']",
+  "[role='menu']",
+  "[role='menuitem']",
+  "[role='option']",
+  "[role='checkbox']",
+  "[role='switch']",
+  "[role='slider']",
+  "[role='dialog']",
+  "[role='listbox']",
+  "[tabindex]:not([tabindex='-1'])",
+  ".thread-composer__surface",
+  ".composer",
+].join(", ");
+
+/**
+ * Whether a click may send a ring: only a click on empty ground, never one on
+ * a control. With `within`, only a click inside a matching element counts:
+ * under the whole shell the field also lies behind threads, where a ring
+ * answering every click in a transcript was a distraction, so there it answers
+ * the start screen alone.
  */
 export function acceptsRipple(target: EventTarget | null, within: string | undefined): boolean {
-  if (within === undefined) return true;
-  return target instanceof Element && target.closest(within) !== null;
+  if (!(target instanceof Element)) return within === undefined;
+  if (target.closest(CONTROL_SELECTOR) !== null) return false;
+  return within === undefined || target.closest(within) !== null;
 }
