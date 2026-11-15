@@ -391,12 +391,15 @@ async function runResponsesTurn(
       throw protocol("The provider stream ended without a terminal response.");
     }
   } catch (error) {
-    // A response that failed, was cut off, or was stopped after its search
-    // finished still read what the search found.
-    reportWebSearch(state, input.onEvent);
     attempt.accepted = state.accepted;
     attempt.outputStarted = state.outputStarted;
     throw error;
+  } finally {
+    // However the response ended (completed, stopped at its output limit,
+    // refused, failed, stopped, cut off, or unreadable), what its search found
+    // and the reply cited since is reported; a report already made is not
+    // repeated.
+    reportWebSearch(state, input.onEvent);
   }
   const terminal: ProtocolTurnResult["terminal"] =
     state.toolCalls.length > 0 ? "tool-calls" : "completed";

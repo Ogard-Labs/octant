@@ -888,50 +888,83 @@ describe("Anthropic's own web search in one response", () => {
     );
   });
 
-  it("reports the text the reply cited when the stream ends before its terminal event", async () => {
-    const events: unknown[] = [];
-    const exit = await Effect.runPromiseExit(
-      sendAnthropicMessagesTurn({
-        endpoint: makeEndpoint(
-          fixture(
-            sse([
-              start,
-              ...search(0, "srv_1"),
-              { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
-              {
-                type: "content_block_delta",
-                index: 2,
-                delta: {
-                  type: "citations_delta",
-                  citation: {
-                    type: "web_search_result_location",
-                    url: "https://example.com/octant",
-                    title: "Octant",
-                    cited_text: "Octant shipped.",
-                    encrypted_index: "x",
+  const closing = (stopReason: string) => [
+    { type: "content_block_stop", index: 2 },
+    { type: "message_delta", delta: { stop_reason: stopReason }, usage: { output_tokens: 5 } },
+    { type: "message_stop" },
+  ];
+  it.each([
+    ["completes", closing("end_turn"), false],
+    ["stops at its output limit", closing("max_tokens"), false],
+    ["refuses", closing("refusal"), false],
+    ["reports an error", [{ type: "error", error: { type: "api_error", message: "boom" } }], false],
+    ["is stopped", [{ type: "ping" }], true],
+    ["ends without a terminal event", [], false],
+    [
+      "cannot be read",
+      [{ type: "content_block_delta", index: 99, delta: { type: "text_delta", text: "x" } }],
+      false,
+    ],
+  ])(
+    "reports the text the reply cited exactly once when the response %s",
+    async (_ending, tail, stop) => {
+      const events: Array<{ readonly kind: string; readonly citedText?: ReadonlyArray<string> }> =
+        [];
+      const controller = new AbortController();
+      await Effect.runPromise(
+        Effect.either(
+          sendAnthropicMessagesTurn({
+            endpoint: makeEndpoint(
+              fixture(
+                sse([
+                  start,
+                  ...search(0, "srv_1"),
+                  {
+                    type: "content_block_start",
+                    index: 2,
+                    content_block: { type: "text", text: "" },
                   },
-                },
-              },
-            ]),
-          ),
+                  {
+                    type: "content_block_delta",
+                    index: 2,
+                    delta: {
+                      type: "citations_delta",
+                      citation: {
+                        type: "web_search_result_location",
+                        url: "https://example.com/octant",
+                        title: "Octant",
+                        cited_text: "Octant shipped.",
+                        encrypted_index: "x",
+                      },
+                    },
+                  },
+                  {
+                    type: "content_block_delta",
+                    index: 2,
+                    delta: { type: "text_delta", text: "It shipped." },
+                  },
+                  ...tail,
+                ]),
+              ),
+            ),
+            modelId: "fixture-model",
+            history: [],
+            prompt: "what shipped?",
+            webSearch: true,
+            signal: controller.signal,
+            onEvent: (event) => {
+              events.push(event);
+              // Stopped once the reply that cited the page is streaming.
+              if (stop && event.kind === "text-delta") controller.abort();
+            },
+          }),
         ),
-        modelId: "fixture-model",
-        history: [],
-        prompt: "what shipped?",
-        webSearch: true,
-        onEvent: (event) => events.push(event),
-      }),
-    );
-    expect(exit._tag).toBe("Failure");
-    expect(JSON.stringify(exit)).toContain("ended without a terminal event");
-    expect(
-      events.flatMap((event) =>
-        (event as { kind: string }).kind === "web-search"
-          ? [(event as { citedText: ReadonlyArray<string> }).citedText]
-          : [],
-      ),
-    ).toEqual([[], ["Octant shipped."]]);
-  });
+      );
+      expect(
+        events.flatMap((event) => (event.kind === "web-search" ? [event.citedText] : [])),
+      ).toEqual([[], ["Octant shipped."]]);
+    },
+  );
 
   it("refuses a second built-in search in the same response as unsupported", async () => {
     const exit = await Effect.runPromiseExit(

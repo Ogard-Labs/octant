@@ -394,16 +394,17 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
       normalizeEvent(parseJson(frame.data), state, input.onEvent);
     }
     // A stream that closes without `message_stop` ends the loop without an
-    // error, so its refusal is raised here, where the catch still reports
-    // what the reply cited before it was cut off.
+    // error, so its refusal is raised here, inside the block whose `finally`
+    // reports what the reply cited before it was cut off.
     if (!state.terminal) {
       throw protocol("The provider stream ended without a terminal event.");
     }
-  } catch (error) {
-    // A response that failed, was cut off, or was stopped after its search
-    // answered still read what the search found: report what was cited.
+  } finally {
+    // However the response ended (completed, stopped at its output limit,
+    // refused, failed, stopped, cut off, or unreadable), the text the reply
+    // cited since the search was reported is reported; text already reported
+    // is not repeated.
     reportWebSearch(state, input.onEvent);
-    throw error;
   }
   for (const block of state.contentBlocks.values()) {
     if (block.status !== "completed") {

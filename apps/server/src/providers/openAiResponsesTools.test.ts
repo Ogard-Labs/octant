@@ -624,6 +624,90 @@ describe("OpenAI's own web search in one response", () => {
     ]);
   });
 
+  it.each([
+    ["completes", [completed(5, [searchItem("ws_1", "completed")])], false],
+    [
+      "stops at its output limit",
+      [
+        {
+          type: "response.incomplete",
+          sequence_number: 5,
+          response: {
+            ...responseState("incomplete"),
+            incomplete_details: { reason: "max_output_tokens" },
+          },
+        },
+      ],
+      false,
+    ],
+    ["refuses", [{ type: "response.refusal.delta", sequence_number: 5, delta: "no" }], false],
+    [
+      "fails",
+      [
+        {
+          type: "response.failed",
+          sequence_number: 5,
+          response: {
+            ...responseState("failed"),
+            error: { code: "server_error", message: "boom" },
+          },
+        },
+      ],
+      false,
+    ],
+    [
+      "reports an error",
+      [{ type: "error", sequence_number: 5, code: "server_error", message: "boom" }],
+      false,
+    ],
+    ["is stopped", [created(5)], true],
+    ["ends without a terminal response", [], false],
+    ["cannot be read", [{ type: "response.output_text.delta", sequence_number: 9 }], false],
+  ])(
+    "reports the titles the reply cited exactly once when the response %s",
+    async (_ending, tail, stop) => {
+      const observed: ProtocolTurnEvent[] = [];
+      const controller = new AbortController();
+      const fetch = vi.fn(async () =>
+        sse(
+          created(1),
+          functionCallAdded(2, searchItem("ws_1", "in_progress")),
+          functionCallDone(3, searchItem("ws_1", "completed")),
+          {
+            type: "response.output_text.annotation.added",
+            sequence_number: 4,
+            annotation: {
+              type: "url_citation",
+              url: "https://example.com/octant",
+              title: "Octant",
+            },
+          },
+          ...tail,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.either(
+          sendResponsesTurn({
+            ...input(fetch),
+            webSearch: true,
+            signal: controller.signal,
+            onEvent: (event) => {
+              observed.push(event);
+              // Stopped once the search is reported, before the reply ends.
+              if (stop && event.kind === "web-search") controller.abort();
+            },
+          }),
+        ),
+      );
+      expect(
+        observed.flatMap((event) => (event.kind === "web-search" ? [event.sources] : [])),
+      ).toEqual([
+        [{ url: "https://example.com/octant" }],
+        [{ url: "https://example.com/octant", title: "Octant" }],
+      ]);
+    },
+  );
+
   it("refuses a second built-in search in the same response as unsupported", async () => {
     const fetch = vi.fn(async () =>
       sse(
