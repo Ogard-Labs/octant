@@ -10,6 +10,7 @@ import {
   type EventEnvelope,
 } from "@octant/contracts";
 import {
+  AGENT_RESULT_STEERED_DETAIL,
   AgentResultDeliveryService,
   type AgentResultDeliveryModePort,
 } from "./agentResultDeliveryService";
@@ -122,6 +123,7 @@ function deliveryFixture(
     readonly chat?: Partial<AgentResultDeliveryModePort>;
     readonly applyCommand?: (command: unknown) => unknown;
     readonly recordResultIngestion?: (run: AgentRun) => boolean;
+    readonly steer?: (runs: ReadonlyArray<AgentRun>) => Promise<"steered" | "not-steered">;
   } = {},
 ) {
   const runs = new Map((options.runs ?? []).map((run) => [run.id, run] as const));
@@ -174,6 +176,7 @@ function deliveryFixture(
     ...(options.recordResultIngestion === undefined
       ? {}
       : { recordResultIngestion: options.recordResultIngestion }),
+    ...(options.steer === undefined ? {} : { steer: options.steer }),
   });
   const flush = async () => {
     for (let i = 0; i < 100; i += 1) await Promise.resolve();
@@ -539,6 +542,55 @@ describe("AgentResultDeliveryService", () => {
     expect(fixture.applyCommand).toHaveBeenCalledWith(
       expect.objectContaining({ outcome: "delivered" }),
     );
+  });
+
+  it("steers a result into the parent's running turn after tainting it, and settles it delivered", async () => {
+    const run = finishedRun();
+    const order: string[] = [];
+    const fixture = deliveryFixture({
+      runs: [run],
+      recordResultIngestion: () => {
+        order.push("taint");
+        return true;
+      },
+      steer: async () => {
+        order.push("steer");
+        return "steered";
+      },
+    });
+    fixture.emit(settleStatusEvent(String(run.id)));
+    await fixture.flush();
+    expect(order).toEqual(["taint", "steer"]);
+    expect(fixture.chat.dispatch).not.toHaveBeenCalled();
+    expect(fixture.applyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: run.id,
+        outcome: "delivered",
+        detail: AGENT_RESULT_STEERED_DETAIL,
+      }),
+    );
+  });
+
+  it("falls back to a delivery turn when the running turn cannot take the result, and never steers an untainted parent", async () => {
+    const run = finishedRun();
+    const steer = vi.fn(async () => "not-steered" as const);
+    const fixture = deliveryFixture({ runs: [run], steer });
+    fixture.emit(settleStatusEvent(String(run.id)));
+    await fixture.flush();
+    expect(steer).toHaveBeenCalledTimes(1);
+    expect(fixture.chat.dispatch).toHaveBeenCalledWith([run]);
+
+    const untainted = finishedRun({ id: "d8a1b000-0000-4000-8000-000000000009" });
+    const refusedSteer = vi.fn(async () => "steered" as const);
+    const waiting = deliveryFixture({
+      runs: [untainted],
+      recordResultIngestion: () => false,
+      steer: refusedSteer,
+    });
+    waiting.emit(settleStatusEvent(String(untainted.id)));
+    await waiting.flush();
+    expect(refusedSteer).not.toHaveBeenCalled();
+    expect(waiting.applyCommand).not.toHaveBeenCalled();
   });
 
   it("arms a run that finished while the host was away when the service starts", async () => {

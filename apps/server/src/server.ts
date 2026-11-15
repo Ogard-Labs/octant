@@ -1223,6 +1223,7 @@ export function startOctantServer(
       goalLoopService,
       liftRestartRecovery,
       toolEffectLedger,
+      liveTurns,
       persistence,
       routeCodeService,
       threadMessageQueue,

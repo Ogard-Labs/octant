@@ -58,6 +58,7 @@ import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
 import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
 import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
+  createAgentResultSteering,
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
 } from "../agentRun/agentResultDeliveryPorts";
@@ -78,6 +79,7 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
     | "agentRunPersistence"
     | "agentRunsCutOffByRestart"
     | "toolEffectLedger"
+    | "liveTurns"
   > &
   Pick<
     AgentRunsWiring,
@@ -218,6 +220,10 @@ export function wireContinuation(deps: ContinuationDependencies) {
           run,
           randomUUID,
         ),
+      steer: createAgentResultSteering({
+        liveTurn: (threadId) => deps.liveTurns.connection(threadId),
+        resultText: (id) => agentRunPersistence.resultText(id),
+      }),
       ports: {
         chat: createChatAgentResultDeliveryPort({
           readThread: (threadId) => persistence.readChatThread(threadId),

@@ -11,8 +11,11 @@ import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { WorkTurnServiceError } from "../work/workTurnService";
 import {
   createCodeAgentResultDeliveryPort,
+  createAgentResultSteering,
   createWorkAgentResultDeliveryPort,
 } from "./agentResultDeliveryPorts";
+import { Effect } from "effect";
+import type { ProviderConnection } from "@octant/provider-sdk";
 
 const NOW = "2026-07-19T12:00:00.000Z" as UtcTimestamp;
 
@@ -281,5 +284,58 @@ describe("agent result delivery to a Work or Code parent", () => {
       detail: "Code Project is not active.",
     });
     expect(code.executeOperation).not.toHaveBeenCalled();
+  });
+});
+
+describe("steering a child's result into the parent's running turn", () => {
+  const live = (steer: ProviderConnection["steer"] | undefined, takesSteeredResults = true) => ({
+    connection: (steer === undefined ? {} : { steer }) as unknown as ProviderConnection,
+    sessionId: "session-1" as never,
+    providerInstanceId: "provider" as never,
+    takesSteeredResults,
+  });
+
+  it("hands the framed result to the turn's session as a relayed result", async () => {
+    const steer = vi.fn(() => Effect.succeed("steered" as const));
+    const steering = createAgentResultSteering({
+      liveTurn: (threadId) => (threadId === String(run.parentThreadId) ? live(steer) : undefined),
+      resultText: () => "The answer.",
+    });
+    await expect(steering([run])).resolves.toBe("steered");
+    expect(steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        source: "agent-result",
+        message: expect.stringContaining("The answer."),
+      }),
+    );
+  });
+
+  it("leaves the result to its own turn when no turn runs, the turn opts out, or the runtime refuses it", async () => {
+    const steer = vi.fn(() => Effect.succeed("steered" as const));
+    const resultText = () => "The answer.";
+    await expect(
+      createAgentResultSteering({ liveTurn: () => undefined, resultText })([run]),
+    ).resolves.toBe("not-steered");
+    await expect(
+      createAgentResultSteering({ liveTurn: () => live(steer, false), resultText })([run]),
+    ).resolves.toBe("not-steered");
+    expect(steer).not.toHaveBeenCalled();
+    await expect(
+      createAgentResultSteering({ liveTurn: () => live(undefined), resultText })([run]),
+    ).resolves.toBe("not-steered");
+    await expect(
+      createAgentResultSteering({
+        liveTurn: () => live(() => Effect.succeed("unsupported" as const)),
+        resultText,
+      })([run]),
+    ).resolves.toBe("not-steered");
+    await expect(
+      createAgentResultSteering({
+        liveTurn: () =>
+          live(() => Effect.fail({ category: "provider-failed" as const, message: "gone" })),
+        resultText,
+      })([run]),
+    ).resolves.toBe("not-steered");
   });
 });

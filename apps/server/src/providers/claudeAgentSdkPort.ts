@@ -497,7 +497,9 @@ export interface ClaudeQueryPort {
    * reports the stop with a task notification; this only asks for it.
    * `unsupported` when the runtime offers no single-task stop.
    */
-  readonly stopTask: (taskId: string) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
+  readonly stopTask: (
+    taskId: string,
+  ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
   /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
