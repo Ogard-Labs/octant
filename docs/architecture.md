@@ -18272,8 +18272,10 @@ starts the command, and removes what it added when the command ends.
   other platforms. A pattern entry (browser stores under `AppData`) refuses a
   grant at or above its folder, and a grant that is itself a match or sits
   inside one (a read root naming a `Cookies` file); a grant inside it with
-  levels of the pattern left is walked at launch, and a match, or a walk past 4,096 entries,
-  refuses the launch. A path the guard cannot spell is
+  levels of the pattern left is walked at launch, and a match, a walk past
+  4,096 entries, or a folder the host cannot list refuses the launch. A file
+  grant (`~/.ssh/config`) has nothing beneath it to walk, so the check of the
+  file itself is all it gets. A path the guard cannot spell is
   refused: a share, device or drive-relative path, a rewritten name (`.`,
   `..`, a trailing dot or space, a stream) and an 8.3 short name, which opens
   the same folder under a spelling no entry names. A whole drive is never
@@ -18321,8 +18323,8 @@ starts the command, and removes what it added when the command ends.
   server's own port against owned fixtures: exit-code relay, reads and writes
   inside the bound root, a read root that refuses writes, refusal of an
   ungranted folder and of a file in the home folder (each by Windows'
-  access-denied answer), the port refusing a folder that holds a browser
-  store, the launcher refusing a grant through a junction and leaving the
+  access-denied answer), a file granted on its own being readable, the port
+  refusing a folder that holds a browser store, the launcher refusing a grant through a junction and leaving the
   junction's target untouched, a child refused by the job's quota under the process limit and
   allowed without it, curl failing to resolve a host without a capability
   and fetching the same page with one, the container's entry present while

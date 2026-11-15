@@ -18,16 +18,23 @@ const launch: ProcessConfinementPrepareInput = {
   networkEgress: "none",
 };
 
-function windowsPort(
-  folders: Readonly<Record<string, ReadonlyArray<{ name: string; directory: boolean }>>> = {},
-) {
+type Fixture = ReadonlyArray<{ name: string; directory: boolean }> | "file" | "unreadable";
+
+/** A Windows disk for the walk: a listing, a file (`ENOTDIR`), or a refused read. */
+function windowsPort(folders: Readonly<Record<string, Fixture>> = {}) {
   return makeProcessConfinementLive({
     platform: "win32",
     unverifiedWindowsConfinement: {
       launcherPath: LAUNCHER,
       homeDirectory: HOME,
       launchId: LAUNCH_ID,
-      readDirectory: (path) => folders[path] ?? [],
+      readDirectory: (path) => {
+        const entry = folders[path] ?? [];
+        if (entry === "file" || entry === "unreadable") {
+          throw Object.assign(new Error(entry), { code: entry === "file" ? "ENOTDIR" : "EACCES" });
+        }
+        return entry;
+      },
     },
   });
 }
@@ -144,6 +151,24 @@ describe("Windows confinement port", () => {
         }),
       ),
     ).toBeUndefined();
+  });
+
+  it("grants a file the guard leaves readable without scanning beneath it", () => {
+    const ssh = `${HOME}\\.ssh`;
+    const port = windowsPort({ [`${ssh}\\config`]: "file", [`${ssh}\\id_ed25519`]: "file" });
+    expect(port.prepare({ ...launch, readRoots: [`${ssh}\\config`] }).args).toContain(
+      `${ssh}\\config`,
+    );
+    expect(refusalOf(() => port.prepare({ ...launch, readRoots: [`${ssh}\\id_ed25519`] }))).toMatch(
+      /secret guard protects/u,
+    );
+  });
+
+  it("still refuses a grant whose folder cannot be read for protected files", () => {
+    const port = windowsPort({ [`${HOME}\\.ssh\\work`]: "unreadable" });
+    expect(
+      refusalOf(() => port.prepare({ ...launch, readRoots: [`${HOME}\\.ssh\\work`] })),
+    ).toMatch(/could not check/u);
   });
 
   it("refuses a launch whose pattern scan cannot finish", () => {

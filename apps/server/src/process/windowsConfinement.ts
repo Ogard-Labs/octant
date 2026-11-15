@@ -36,10 +36,16 @@ export interface UnverifiedWindowsConfinementOptions {
   readonly homeDirectory?: string;
   /** Fixed only by tests; a launch otherwise gets a fresh random id. */
   readonly launchId?: string;
-  /** Lists one folder; tests substitute a fixture for the Windows disk. */
-  readonly readDirectory?: (
-    path: string,
-  ) => ReadonlyArray<{ readonly name: string; readonly directory: boolean }>;
+  /**
+   * Lists one folder, throwing as `readdirSync` does (`ENOENT`, `ENOTDIR`,
+   * ...); tests substitute a fixture for the Windows disk.
+   */
+  readonly readDirectory?: (path: string) => ReadonlyArray<DirectoryEntry>;
+}
+
+interface DirectoryEntry {
+  readonly name: string;
+  readonly directory: boolean;
 }
 
 /** How many entries a pattern scan reads before it refuses the launch. */
@@ -94,7 +100,7 @@ export function buildWindowsConfinedLaunch(
   // A deny entry cannot carve a file out of a grant (see the plan's module
   // comment), so a grant that already holds a protected store, or a
   // carve-out the launch asked for inside a grant, refuses the launch.
-  const readDirectory = options.readDirectory ?? listDirectory;
+  const readDirectory = options.readDirectory ?? readFolder;
   for (const scan of decision.patternScans) {
     const found = patternMatches(scan, readDirectory);
     if (found === "truncated") {
@@ -193,12 +199,12 @@ function refuseWhatWindowsCannotExpress(input: ProcessConfinementPrepareInput): 
 
 function patternMatches(
   scan: WindowsConfinementPatternScan,
-  readDirectory: NonNullable<UnverifiedWindowsConfinementOptions["readDirectory"]>,
+  readDirectory: (path: string) => ReadonlyArray<DirectoryEntry>,
 ): ReadonlyArray<string> | "truncated" {
   const found: string[] = [];
   let read = 0;
   const walk = (directory: string, levels: number): boolean => {
-    for (const child of readDirectory(directory)) {
+    for (const child of listForScan(directory, readDirectory)) {
       read += 1;
       if (read > PATTERN_SCAN_LIMIT) return false;
       const path = `${directory}\\${child.name}`;
@@ -213,19 +219,31 @@ function patternMatches(
   return walk(scan.directory, scan.levels) ? found : "truncated";
 }
 
-function listDirectory(
+function readFolder(path: string): ReadonlyArray<DirectoryEntry> {
+  return readdirSync(path, { withFileTypes: true }).map((entry) => ({
+    name: entry.name,
+    // A junction or link is not followed: what it reaches gets no grant.
+    directory: entry.isDirectory(),
+  }));
+}
+
+/**
+ * One folder's entries for a pattern scan. A missing path holds no store, and
+ * a file (`ENOTDIR`) has nothing beneath it: a read root naming `~/.ssh/config`
+ * was refused outright when its scan tried to list it, though the guard keeps
+ * that file readable (the planner judges the grant path itself). Any other
+ * failure might hide a store, so the launch is refused rather than granted
+ * unchecked.
+ */
+function listForScan(
   path: string,
-): ReadonlyArray<{ readonly name: string; readonly directory: boolean }> {
+  readDirectory: (path: string) => ReadonlyArray<DirectoryEntry>,
+): ReadonlyArray<DirectoryEntry> {
   try {
-    return readdirSync(path, { withFileTypes: true }).map((entry) => ({
-      name: entry.name,
-      // A junction or link is not followed: what it reaches gets no grant.
-      directory: entry.isDirectory(),
-    }));
+    return readDirectory(path);
   } catch (error) {
-    // A missing folder holds no store. One the host cannot list might, so
-    // the launch is refused rather than granted unchecked.
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR" || isFile(path)) return [];
     throw new ProcessConfinementError(
       "incompatible",
       `Windows confinement could not check ${path} for protected files, so the launch was refused.`,

@@ -107,6 +107,17 @@ try {
     readable,
   );
 
+  // A file granted on its own, inside a folder the guard scans for browser
+  // stores: the scan finds nothing beneath a file, and the grant is the file.
+  const loneFile = join(outside, "lone.txt");
+  writeFileSync(loneFile, "lone-content");
+  const lone = run(cmd, shell(`type ${loneFile}`), { readRoots: [readOnly, loneFile] });
+  check(
+    "reads a file granted on its own",
+    lone.status === 0 && lone.stdout.includes("lone-content"),
+    lone,
+  );
+
   const write = run(cmd, shell(`echo written> ${join(granted, "written.txt")}`));
   check(
     "writes inside the bound root",
