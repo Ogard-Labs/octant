@@ -186,6 +186,27 @@ const FULL_ACCESS_PROTECTED_RULES: ReadonlySet<ResolvedProtectedEntry["ruleId"]>
   "provider-sign-ins" satisfies BuiltInProtectedFilesId,
 ]);
 
+/** A protected file or folder in force, as an absolute path, with the group that protects it. */
+export interface ProtectedPath {
+  readonly ruleId: ResolvedProtectedEntry["ruleId"];
+  readonly path: string;
+}
+
+/**
+ * The protected entries a caller at this level still refuses: every one
+ * below Full access, and at Full access only {@link FULL_ACCESS_PROTECTED_RULES}.
+ * A runtime's own tools at Full access are held to the same narrowing as
+ * Octant's, so OpenCode's rules refuse what Octant's file tools refuse.
+ */
+export function protectedAtLevel<T extends { readonly ruleId: ResolvedProtectedEntry["ruleId"] }>(
+  entries: ReadonlyArray<T>,
+  fullAccess: boolean,
+): ReadonlyArray<T> {
+  return fullAccess
+    ? entries.filter((entry) => FULL_ACCESS_PROTECTED_RULES.has(entry.ruleId))
+    : entries;
+}
+
 /**
  * The refusal for a file tool that names a protected path, or undefined. The
  * OS rule refuses the read anyway; this answers first so the agent and the
@@ -211,10 +232,7 @@ export function secretGuardRefusal(
   const unjudged = unjudgedPathRefusal(path, platform, homeDirectory);
   if (unjudged !== "judge") return unjudged;
   const listed = secretGuardEntries({ platform, homeDirectory });
-  const entries =
-    options.fullAccess === true
-      ? listed.filter((entry) => FULL_ACCESS_PROTECTED_RULES.has(entry.ruleId))
-      : listed;
+  const entries = protectedAtLevel(listed, options.fullAccess === true);
   const entry = protectedEntryFor(
     pathForms(path, platform),
     withResolvedForms(entries, platform),

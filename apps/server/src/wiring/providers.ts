@@ -248,7 +248,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import { secretGuardEntries } from "../process/secretGuard";
+import { secretGuardEntries, type ProtectedPath } from "../process/secretGuard";
 
 export interface ConfiguredProviderDriverOptions {
   readonly openCodeProcess: OpenCodeProcessPort;
@@ -269,8 +269,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths. */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** The host's protected files and folders in force, as absolute paths with their groups. */
+  readonly protectedPaths?: () => ReadonlyArray<ProtectedPath>;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -539,10 +539,11 @@ function runDirectEndpointOnNativeHarness(
  * receives the list and never reads the protected-file configuration itself.
  * A name pattern is given as its whole folder.
  */
-function hostProtectedPaths(): ReadonlyArray<string> {
-  return secretGuardEntries({ platform: process.platform }).map((entry) =>
-    entry.kind === "path" ? entry.path : entry.directory,
-  );
+function hostProtectedPaths(): ReadonlyArray<ProtectedPath> {
+  return secretGuardEntries({ platform: process.platform }).map((entry) => ({
+    ruleId: entry.ruleId,
+    path: entry.kind === "path" ? entry.path : entry.directory,
+  }));
 }
 
 export function pathIsProjectConfined(projectRoot: string, absolutePath: string): boolean {

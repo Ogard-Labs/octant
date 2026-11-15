@@ -1263,8 +1263,14 @@ cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
 so nothing reopens them: OpenCode's own `.env` refusal (its default agent's
 rules come before Octant's, so the read allow would otherwise lift it), and,
 for `read` and `list`, each entry of Octant's protected-file list in force
-(`openCodeReadRefusals`), a name pattern refused as its whole folder since
-OpenCode's wildcards cannot say a regular expression. Plan also allows
+(`openCodeProtectedReadRefusals`), a name pattern refused as its whole folder
+since OpenCode's wildcards cannot say a regular expression. At Full access
+the secret-path refusals do not apply, as for Octant's own file tools: only
+the Provider sign-ins group stays refused there, on 1.x and 2.x alike, still
+last, and the person's added paths and every other group are readable
+(`protectedAtLevel`; maintainer decision, 2026-11-15). A Full access launch
+runs outside Octant's sandbox, so no OS rule narrows with it; one that kept
+its sandbox keeps the Accept edits wall and its whole OS deny list. Plan also allows
 OpenCode's other read-only tools without asking: `todowrite`, `todoread`,
 `codesearch`, `lsp`, `webfetch`, and `websearch` (maintainer decision,
 2026-11-14). A web read or code search still marks the thread as outside

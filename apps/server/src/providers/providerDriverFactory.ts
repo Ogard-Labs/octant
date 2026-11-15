@@ -14,6 +14,7 @@ import {
   isImageProfileDriverKind,
 } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { ProtectedPath } from "../process/secretGuard";
 import { lastClaudeHostEnvironmentSnapshot } from "./claudeAccountDirectory";
 import {
   claudeAccountNeedsOwnConfigDirectory,
@@ -78,8 +79,8 @@ export interface ProviderDriverFactoryOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths. */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** The host's protected files and folders in force, as absolute paths with their groups. */
+  readonly protectedPaths?: () => ReadonlyArray<ProtectedPath>;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /**
