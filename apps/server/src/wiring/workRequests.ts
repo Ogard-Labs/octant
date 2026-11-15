@@ -40,6 +40,7 @@ import { createPendingRequestRouteHandler } from "../pendingRequestRoutes";
 import { PendingRequestService, type PendingRequestReader } from "../pendingRequestService";
 import { waitingAsksFrom, type WaitingAskThread } from "../waitingAsks";
 import type { BrowserWiring } from "./browser";
+import { createThreadSearchRouteHandler } from "../threadSearchRoutes";
 import { createWorkThreadRouteHandler } from "../workThreadRoutes";
 import { createSidebarBackgroundRouteHandler } from "../theme/sidebarBackgroundRoutes";
 import { SidebarBackgroundStore } from "../theme/backgroundStore";
@@ -457,6 +458,16 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     }),
     windowAuthorityStore,
   });
+  const listCodeThreads = baseRouteCodeService.listSearchableThreads;
+  const threadSearchRoutes = createThreadSearchRouteHandler({
+    sources: {
+      search: (query, visible, limit) => persistence.searchThreads(query, visible, limit),
+      chat: () => chatService.listSearchableThreads(),
+      work: (windowId) => workThreadService.listSearchableThreads(windowId),
+      ...(listCodeThreads === undefined ? {} : { code: (windowId) => listCodeThreads(windowId) }),
+    },
+    windowAuthorityStore,
+  });
   const workThreadRoutes = createWorkThreadRouteHandler({
     service: {
       bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
@@ -605,6 +616,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     workOverviewRoutes,
     workPromotionRoutes,
     workRequestRoutes,
+    threadSearchRoutes,
     workThreadRoutes,
   };
 }

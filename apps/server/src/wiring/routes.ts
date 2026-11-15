@@ -154,6 +154,7 @@ export type RoutesDependencies = {
     | "workOverviewRoutes"
     | "workPromotionRoutes"
     | "workRequestRoutes"
+    | "threadSearchRoutes"
     | "workThreadRoutes"
   > &
   Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
@@ -269,6 +270,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     workRequestRoutes,
     workResearchRoutes,
     workspacePresetRoutes,
+    threadSearchRoutes,
     workThreadRoutes,
     workTurnRoutes,
     zenBackgroundRoutes,
@@ -336,6 +338,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await scaffoldRoutes(request)) ??
     (await workspacePresetRoutes(request)) ??
     (await productFeedbackRoutes(request)) ??
+    (await threadSearchRoutes(request)) ??
     (await workThreadRoutes(request)) ??
     (await workTurnRoutes(request)) ??
     (await workOverviewRoutes(request)) ??

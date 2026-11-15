@@ -1433,6 +1433,7 @@ export function startOctantServer(
       workOverviewRoutes,
       workPromotionRoutes,
       workRequestRoutes,
+      threadSearchRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
       agentRunInteractions,
@@ -1875,6 +1876,7 @@ export function startOctantServer(
       workRequestRoutes,
       workResearchRoutes,
       workspacePresetRoutes,
+      threadSearchRoutes,
       workThreadRoutes,
       workTurnRoutes,
       zenBackgroundRoutes,

@@ -1309,6 +1309,14 @@ export class CodeService {
     };
   }
 
+  /**
+   * The threads search may look in for this window: exactly what bootstrap
+   * lists, by the same browse rule.
+   */
+  async listSearchableThreads(authenticatedWindowId: WindowId): Promise<ReadonlyArray<CodeThread>> {
+    return this.#visibleThreads(authenticatedWindowId);
+  }
+
   async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
     const threads: CodeThread[] = [];
     for (const thread of this.#persistence.readCodeThreads()) {
