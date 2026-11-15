@@ -500,6 +500,7 @@ export function startOctantServer(
       serverProjectStore,
       bindingReceiptStore,
       githubCapabilityService,
+      githubExtensionSnapshot,
       githubIntegrationIsEffective,
       desktopRecipeKeys,
       offeredDesktopProviders,
