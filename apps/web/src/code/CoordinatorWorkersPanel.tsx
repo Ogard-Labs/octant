@@ -156,6 +156,45 @@ function Section(props: {
  * rows the Agents tool's Workers section reads, so a worker this window cannot
  * see is never listed. A row opens the worker.
  */
+/** A finished group, folded to its count until the person asks for the rows. */
+function FoldedSection(props: {
+  readonly label: string;
+  readonly rows: ReadonlyArray<CoordinatorWorkerRow>;
+  readonly now: number;
+  readonly onOpen: Parameters<typeof WorkerRow>[0]["onOpen"];
+  readonly onSelectPullRequest: Parameters<typeof WorkerRow>[0]["onSelectPullRequest"];
+}) {
+  const [shown, setShown] = useState(false);
+  if (props.rows.length === 0) return null;
+  return (
+    <section aria-label={props.label} className="coordinator-workers-panel__section">
+      <h3>{`${props.label} · ${String(props.rows.length)}`}</h3>
+      {shown ? (
+        <ul>
+          {props.rows.map((row) => (
+            <WorkerRow
+              key={row.threadId}
+              now={props.now}
+              onOpen={props.onOpen}
+              onSelectPullRequest={props.onSelectPullRequest}
+              row={row}
+            />
+          ))}
+        </ul>
+      ) : null}
+      <OctantButton
+        aria-expanded={shown}
+        onClick={() => setShown((current) => !current)}
+        size="sm"
+        type="button"
+        variant="ghost"
+      >
+        {shown ? "Show less" : "Show more"}
+      </OctantButton>
+    </section>
+  );
+}
+
 export function CoordinatorWorkersPanel(props: {
   readonly coordinatorThreadId: string;
   readonly coordinatorTitle: string;
@@ -164,7 +203,6 @@ export function CoordinatorWorkersPanel(props: {
   readonly onSelectPullRequest?: (row: CoordinatorWorkerRow) => void;
 }) {
   const [, setOpen] = useCoordinatorWorkersPanel(props.coordinatorThreadId);
-  const [showDone, setShowDone] = useState(false);
   const now = props.now ?? Date.now();
   const sections = coordinatorWorkerSections(props.source.rows);
   return (
@@ -204,33 +242,20 @@ export function CoordinatorWorkersPanel(props: {
         onSelectPullRequest={props.onSelectPullRequest}
         rows={sections.inReview}
       />
-      {sections.done.length === 0 ? null : (
-        <section aria-label="Done" className="coordinator-workers-panel__section">
-          <h3>{`Done · ${String(sections.done.length)}`}</h3>
-          {showDone ? (
-            <ul>
-              {sections.done.map((row) => (
-                <WorkerRow
-                  key={row.threadId}
-                  now={now}
-                  onOpen={props.source.onOpenWorker}
-                  onSelectPullRequest={props.onSelectPullRequest}
-                  row={row}
-                />
-              ))}
-            </ul>
-          ) : null}
-          <OctantButton
-            aria-expanded={showDone}
-            onClick={() => setShowDone((current) => !current)}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {showDone ? "Show less" : "Show more"}
-          </OctantButton>
-        </section>
-      )}
+      <FoldedSection
+        label="Done"
+        now={now}
+        onOpen={props.source.onOpenWorker}
+        onSelectPullRequest={props.onSelectPullRequest}
+        rows={sections.done}
+      />
+      <FoldedSection
+        label="Put away"
+        now={now}
+        onOpen={props.source.onOpenWorker}
+        onSelectPullRequest={props.onSelectPullRequest}
+        rows={sections.putAway}
+      />
     </aside>
   );
 }

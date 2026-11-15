@@ -42,12 +42,20 @@ describe("the Workers panel's rows", () => {
     expect(coordinatorWorkerState(worker({ id: "f", markedDone: true }))).toBe("done");
   });
 
+  it("files a worker the person put away without delivering it as Put away, never Done", () => {
+    const putAway = worker({ id: "g", completedAt: "2026-11-15T12:00:00.000Z" as never });
+    expect(coordinatorWorkerState(putAway)).toBe("put-away");
+    const sections = coordinatorWorkerSections(coordinatorWorkerRows([putAway], "c", () => "m"));
+    expect(sections.done).toHaveLength(0);
+    expect(sections.putAway.map((row) => row.threadId)).toEqual(["g"]);
+  });
+
   it("lists only this coordinator's workers, newest change first, and files them in the four sections", () => {
     const rows = coordinatorWorkerRows(
       [
         worker({
           id: "old",
-          completedAt: "2026-11-15T09:00:00.000Z" as never,
+          markedDone: true,
           updatedAt: "1" as never,
         }),
         worker({ id: "ask", awaitingInput: true, updatedAt: "2" as never }),

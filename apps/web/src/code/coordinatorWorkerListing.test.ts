@@ -45,6 +45,12 @@ describe("where a coordinator's workers are listed", () => {
     });
   });
 
+  it("keeps a put-away coordinator's workers as ordinary Project rows", () => {
+    const putAway: ChatThreadNavigationItem = { ...coordinator, shelf: "completed" };
+    const rows = sidebarThreadsWithWorkers([ordinary, putAway, working, asking], undefined);
+    expect(ids(rows)).toEqual(["t", coordinator.threadId, working.threadId, asking.threadId]);
+  });
+
   it("lists workers, with no hidden counts, when Settings shows them in the sidebar", () => {
     const listed = sidebarThreadsWithWorkers(threads, {
       coordinatorWorkerListing: { sidebar: true, board: false },

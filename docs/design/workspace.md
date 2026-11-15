@@ -441,8 +441,9 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   (with the worker count, and a screen-reader note of how many need you) that
   opens a panel beside the transcript, and a sheet over it on a narrow window.
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
-  with a pull request still open), and **Done** (folded as "Done · N" with
-  **Show more**). Each row has the title, the state in words, the model, the
+  with a pull request still open), **Done** (marked Done, or its pull request
+  merged or closed; folded as "Done · N" with **Show more**), and **Put away**
+  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model, the
   pull request link when there is one, and when it last changed; a row opens
   the worker. A worker waiting on a person is always under Needs you, whatever
   else is true of it. The panel reads the same window thread list the Agents
