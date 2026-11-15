@@ -63,7 +63,7 @@ every level; the person turns it off per account or per thread):
 
 | Provider     | With the setup off                                                                                                                                  | With the setup on                                                                                                                                                                                        | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool; `WebSearch` and `WebFetch` only in Work and Code outside Plan                                 | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
 | Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
 | Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                             |
 | OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
@@ -981,7 +981,11 @@ is recorded as approval-gated, because only the person chooses Full access),
 and an approved plan returns the thread there, or to approval-gated when the
 person put the thread in Plan. A declined ask leaves the level and the turn
 as they were. Work, Chat, and child runs do not answer level changes yet, so
-their sessions hold neither tool.
+their sessions hold neither tool. Changing the level inside the running turn,
+through the runtime's `setPermissionMode` as Claude Code does on its own, is
+decided and not built yet (maintainer decision, 2026-11-14): the port exposes
+the control, but a session's launch profile and tool set would still be the
+old level's, so the turn ends until a session can change them in place.
 
 #### Sessions started outside Octant
 
@@ -1061,6 +1065,20 @@ fire time and Cancel, and starts a turn in its thread at its time. Chat runs
 in Plan for Claude, so a Chat thread never holds these tools, and neither
 does Plan or a single-use session.
 
+#### Code Mode
+
+Claude Code's Code Mode is a recorded gap, not a refusal (maintainer
+decision, 2026-11-14; designed, not built). It runs only in an interactive
+terminal session, which an Agent SDK launch is not, and it refuses to start
+while `DISABLE_TELEMETRY` is set, which every Claude launch of Octant's sets
+(the one lift is the Claude artifacts launch above, which the person chooses
+because it sends usage telemetry). Octant adds no terminal mode to carry it
+and makes no telemetry exception for it: provider telemetry stays off as a
+hard line. Once the Agent SDK supports Code Mode, Octant offers it under the
+same gate and level as Claude's other tools. The `REPL` tool, which runs code
+in Claude's own process, is already offered outside Plan under the shell's
+rules (see [Native plan capture](#native-plan-capture)).
+
 ## Codex
 
 Below Full access every Codex app-server runs under Octant's profile, and the
@@ -1082,6 +1100,14 @@ profile allows and why. The wire mapping that follows from it:
   auto-accept-edits thread the driver answers each file-change request itself,
   so the person is asked for commands and not for patches. Plan and Chat keep
   `never`, so a write fails at the profile rather than at a prompt.
+- Ask first stays `untrusted`, the strictest mode Codex has, matching the
+  strictest mode elsewhere. Auto is decided to run `on-request` with Codex's
+  own reviewer, as Codex's own automatic mode does (maintainer decision,
+  2026-11-14); not built yet: Auto still sends `untrusted` with
+  `approvalsReviewer: "auto_review"`, because under the external sandbox
+  Octant names, `on-request` runs every command without asking and so would
+  never reach the reviewer. Building it needs a launch where `on-request`
+  still escalates to the reviewer.
 - Full access keeps `danger-full-access` and an unwrapped process.
 - A Plan session runs in Codex's own Plan mode: every `turn/start` carries the
   experimental `collaborationMode` with `mode: "plan"` and settings naming the
