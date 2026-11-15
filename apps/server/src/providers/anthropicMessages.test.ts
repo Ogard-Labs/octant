@@ -888,6 +888,51 @@ describe("Anthropic's own web search in one response", () => {
     );
   });
 
+  it("reports the text the reply cited when the stream ends before its terminal event", async () => {
+    const events: unknown[] = [];
+    const exit = await Effect.runPromiseExit(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(
+          fixture(
+            sse([
+              start,
+              ...search(0, "srv_1"),
+              { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+              {
+                type: "content_block_delta",
+                index: 2,
+                delta: {
+                  type: "citations_delta",
+                  citation: {
+                    type: "web_search_result_location",
+                    url: "https://example.com/octant",
+                    title: "Octant",
+                    cited_text: "Octant shipped.",
+                    encrypted_index: "x",
+                  },
+                },
+              },
+            ]),
+          ),
+        ),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "what shipped?",
+        webSearch: true,
+        onEvent: (event) => events.push(event),
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(JSON.stringify(exit)).toContain("ended without a terminal event");
+    expect(
+      events.flatMap((event) =>
+        (event as { kind: string }).kind === "web-search"
+          ? [(event as { citedText: ReadonlyArray<string> }).citedText]
+          : [],
+      ),
+    ).toEqual([[], ["Octant shipped."]]);
+  });
+
   it("refuses a second built-in search in the same response as unsupported", async () => {
     const exit = await Effect.runPromiseExit(
       sendAnthropicMessagesTurn({

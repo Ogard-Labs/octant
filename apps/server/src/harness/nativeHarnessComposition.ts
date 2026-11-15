@@ -1,5 +1,6 @@
 import {
   decodeNativeHarnessContextRemaining,
+  WEB_SEARCH_TOOL_DEFINITION,
   type AgentRun,
   type AgentRunAuthority,
   type ChatThread,
@@ -524,7 +525,11 @@ export function createNativeHarnessComposition(
     return {
       ...tools,
       providerWebSearch: (sessionId) => {
-        options.providerSearchGrants?.track(sessionId, decideFor);
+        options.providerSearchGrants?.track(
+          sessionId,
+          decideFor,
+          tools.definitions.find((tool) => tool.name === WEB_SEARCH_TOOL_DEFINITION.name),
+        );
         return decideFor(input.providerInstanceId);
       },
     };

@@ -3,6 +3,7 @@ import type {
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
+  ProviderToolDefinition,
   ProviderTurnInput,
 } from "@octant/contracts";
 import type {
@@ -117,7 +118,15 @@ export interface NativeHarnessProviderSearchDecisions {
     providerInstanceId: ProviderInstanceId,
   ) =>
     | { readonly status: "untracked" }
-    | { readonly status: "decided"; readonly grant: ProviderTurnInput["providerWebSearch"] };
+    | {
+        readonly status: "decided";
+        readonly grant: ProviderTurnInput["providerWebSearch"];
+        /**
+         * The turn's own `web-search`, when it has one: what a request that
+         * loses the provider's search offers in its place.
+         */
+        readonly webSearchTool: ProviderToolDefinition | undefined;
+      };
   /** The session ended; nothing is decided for it any more. */
   readonly release: (sessionId: ProviderSessionId) => void;
 }

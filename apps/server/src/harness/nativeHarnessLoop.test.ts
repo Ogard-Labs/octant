@@ -3617,6 +3617,7 @@ describe("the provider's own web search in a harness turn", () => {
               providerSearch: {
                 now: (_session, providerInstanceId) => ({
                   status: "decided",
+                  webSearchTool: undefined,
                   grant:
                     String(providerInstanceId) === String(backupTarget.providerInstanceId)
                       ? { withdrawAfterFirstStep: false }
@@ -3728,7 +3729,7 @@ describe("the provider's own web search in a harness turn", () => {
             "code",
             {
               providerSearch: {
-                now: () => ({ status: "decided", grant }),
+                now: () => ({ status: "decided", grant, webSearchTool: undefined }),
                 release: () => undefined,
               },
             },
@@ -3804,7 +3805,7 @@ describe("the provider's own web search in a harness turn", () => {
             "code",
             {
               providerSearch: {
-                now: () => ({ status: "decided", grant }),
+                now: () => ({ status: "decided", grant, webSearchTool: undefined }),
                 release: () => undefined,
               },
             },

@@ -1,4 +1,9 @@
-import type { ProviderInstanceId, ProviderSessionId, ProviderTurnInput } from "@octant/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderSessionId,
+  ProviderToolDefinition,
+  ProviderTurnInput,
+} from "@octant/contracts";
 import type { ProviderHarnessEndpoint } from "@octant/provider-sdk/harness-endpoint";
 import type { EndpointRetryOptions } from "../providers/endpointRetry";
 import type { ModelContextWindowMemory } from "../providers/modelContextWindowFacts";
@@ -35,31 +40,44 @@ export class NativeHarnessEndpointRegistry {
  * session's loop asks before each request and releases it when it ends.
  */
 export class NativeHarnessProviderSearchGrants implements NativeHarnessProviderSearchDecisions {
-  readonly #decide = new Map<
+  readonly #tracked = new Map<
     string,
-    (providerInstanceId: ProviderInstanceId) => ProviderTurnInput["providerWebSearch"]
+    {
+      readonly decide: (
+        providerInstanceId: ProviderInstanceId,
+      ) => ProviderTurnInput["providerWebSearch"];
+      readonly webSearchTool: ProviderToolDefinition | undefined;
+    }
   >();
 
-  /** Decides the session's grant from now on, for whichever endpoint a request goes to. */
+  /**
+   * Decides the session's grant from now on, for whichever endpoint a request
+   * goes to, with the turn's own `web-search` (if any) to offer in its place.
+   */
   track(
     sessionId: ProviderSessionId,
     decide: (providerInstanceId: ProviderInstanceId) => ProviderTurnInput["providerWebSearch"],
+    webSearchTool: ProviderToolDefinition | undefined,
   ): void {
-    this.#decide.set(String(sessionId), decide);
+    this.#tracked.set(String(sessionId), { decide, webSearchTool });
   }
 
   now(
     sessionId: ProviderSessionId,
     providerInstanceId: ProviderInstanceId,
   ): ReturnType<NativeHarnessProviderSearchDecisions["now"]> {
-    const decide = this.#decide.get(String(sessionId));
-    return decide === undefined
+    const tracked = this.#tracked.get(String(sessionId));
+    return tracked === undefined
       ? { status: "untracked" }
-      : { status: "decided", grant: decide(providerInstanceId) };
+      : {
+          status: "decided",
+          grant: tracked.decide(providerInstanceId),
+          webSearchTool: tracked.webSearchTool,
+        };
   }
 
   release(sessionId: ProviderSessionId): void {
-    this.#decide.delete(String(sessionId));
+    this.#tracked.delete(String(sessionId));
   }
 }
 
