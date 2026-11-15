@@ -1280,7 +1280,7 @@ describe("delegated work eligibility", () => {
       ...observed("ready", false),
       capabilities: { appManagedTools: "unsupported" as const },
     };
-    expect(modelCanTakeDelegatedWork("acp", acp, flash)).toBe(false);
+    expect(modelCanTakeDelegatedWork("gemini", acp, flash)).toBe(false);
     expect(modelCanTakeDelegatedWork("codex", observed("ready", false), flash)).toBe(false);
   });
 

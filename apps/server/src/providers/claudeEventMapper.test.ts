@@ -793,7 +793,7 @@ describe("mapClaudeMessage", () => {
   });
 
   it("names the model Claude's own subagent call asked for, and leaves it unknown otherwise", () => {
-    const start = (input: Record<string, unknown>) =>
+    const start = (input: Readonly<Record<string, string>>) =>
       eventValues(
         mapped(context(), {
           kind: "stream-event",
