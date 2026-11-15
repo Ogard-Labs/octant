@@ -27,6 +27,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
@@ -328,6 +329,11 @@ export const CodeThread = Schema.Struct({
    * this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * The person's opt-in to hand this thread to one named account when its
+   * account hits its usage limit; see {@link ThreadUsageLimitHandoff}.
+   */
+  usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
   /**
    * How this thread delivers documents: absent until the person chooses (it
    * delivers Canvases meanwhile). `native-artifacts` is the person's choice to
@@ -938,6 +944,26 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  /**
+   * The person moves the thread to another account (provider instance) of the
+   * same provider, keeping its model. The host accepts it only from the
+   * person and only while no turn runs; the next turn starts on the new
+   * account with the disclosed conversation handoff.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread-account"),
+    ...CodeThreadCommandFields,
+    providerInstanceId: ProviderInstanceId,
+  }).annotations(strict),
+  /**
+   * The person's "when this account hits its usage limit, hand off to"
+   * choice for the thread. Absent `providerInstanceId` turns it off.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-usage-limit-handoff"),
+    ...CodeThreadCommandFields,
+    providerInstanceId: Schema.optional(ProviderInstanceId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),

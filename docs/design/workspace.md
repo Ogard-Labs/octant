@@ -107,7 +107,11 @@ the access level in force and where it came from (Work and Code) with its
 **Access details**, **Reply detail**, how the thread delivers documents
 (Code), **Provider tools** (a key provider's own setup for this thread),
 **Credential commands** (Code), **Provider cloud sessions** (Code, local
-host), **Continue elsewhere**, and the thread's **Recap** and the person's
+host), **Continue elsewhere**, **On usage limit** (where the thread's provider
+has another account: **Wait for the reset** or **Hand off to** one named
+account, with **Move to account…** in the same menu in Work and Code, and a
+line saying what the last usage limit did;
+[Architecture: providers](../architecture.md#providers)), and the thread's **Recap** and the person's
 **Notes** ([Thread view](thread-view.md#thread-recap-and-notes)). A choice made once for the thread lives
 here, not in the composer's row: the row holds what a person changes
 from one message to the next (the model, the approval mode) and had grown to

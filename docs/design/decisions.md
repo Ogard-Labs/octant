@@ -43,7 +43,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 7         | 4       | 3            | 0                   |
+| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **259**   | **156** | **100**      | **3**               |
+| **All areas**                                                                         | **259**   | **157** | **99**       | **3**               |
 
 ## Principles and hard lines
 
@@ -1310,7 +1310,7 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff, now or through their per-thread usage-limit opt-in. There is no silent, unchosen or open-ended failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - The model picker is one fixed 360×440 float: icon tabs, a borderless search, rows with a ⌘1 to ⌘9 hint (live only while it is open), "Show more" for a long list, then always-present Reasoning and service-tier segmented rows, disabled with a reason when the model lacks them, so nothing moves when the person chooses (maintainer request, 2026-11-15; built). Owner: [Thread view](thread-view.md#model-picker).
@@ -1318,10 +1318,11 @@ Providers are multi-instance, and a thread stays on its instance until the perso
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
-- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
+- Move to account: the person moves a Chat, Work or Code thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on.
+- On usage limit, hand off to: a per-thread opt-in the person sets to one named account (journaled; refused from anyone but the person and while a model pool is on). When a turn stops on a provider-reported usage limit, the host moves the thread to that account by the same provider change and records both accounts and the reason on the thread, at most once per stopped turn. If that account is missing, off, cannot take the model, or is the one that just hit its limit, the host stops and records why. Without the opt-in nothing moves.
 - Adding a provider account is one in-place wizard for every agent runtime, opened from a card's Add account or from Add provider manually: provider, sign-in, details, connect, done, in a fixed 560x520 dialog that never resizes between steps (maintainer request, 2026-11-14). The account is created only by the details step; the connect step shows the host's sign-in command and Check connection result inline. Built. See [Additional CLI accounts](model-endpoints.md#additional-cli-accounts).
 
-Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 

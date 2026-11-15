@@ -46,6 +46,7 @@ import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/Perm
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
+  parkedStopReleased,
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
@@ -97,6 +98,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -981,9 +983,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     client: props.messageQueueClient,
   });
-  const latestStatus = turns.at(-1)?.status;
+  const latestTurn = turns.at(-1);
+  const latestStatus = latestTurn?.status;
+  // A turn parked on a usage limit stops holding the thread once it has moved
+  // off that account: the host records the released stop on the move, and the
+  // queue reads the same record.
+  const latestStopReleased =
+    thread !== undefined &&
+    latestTurn !== undefined &&
+    parkedStopReleased(thread, String(latestTurn.turnId));
   const turnRunning =
-    latestStatus === "accepted" || latestStatus === "running" || latestStatus === "waiting";
+    latestStatus === "accepted" ||
+    latestStatus === "running" ||
+    (latestStatus === "waiting" && !latestStopReleased);
   // A rewind or fork acts on settled turns only, so either waits while any
   // turn of the thread is still going.
   const anyTurnActive = turns.some(
@@ -2965,6 +2977,41 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       onPolicyChange={continuation.change}
                       onProviderChange={changeProvider}
                       disabled={providerChanging || creating || completionLocked || turnRunning}
+                    />
+                    <ThreadAccountControl
+                      groups={props.providerGroups ?? []}
+                      providerInstanceId={thread.providerInstanceId}
+                      modelId={thread.modelId}
+                      usageLimitHandoff={thread.usageLimitHandoff}
+                      disabled={creating || completionLocked}
+                      onMove={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "move-work-thread-account",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          providerInstanceId,
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The conversation could not be moved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
+                      onUsageLimitHandoffChange={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "set-work-thread-usage-limit-handoff",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The choice could not be saved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
                     />
                   </ThreadInfo>
                 ),

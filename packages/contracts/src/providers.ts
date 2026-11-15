@@ -42,6 +42,13 @@ export const ThreadProviderHandoff = Schema.Struct({
   nextProviderInstanceId: ProviderInstanceId,
   nextModelId: ProviderModelId,
   changedAt: UtcTimestamp,
+  /**
+   * The turn this change released: the thread's latest turn had stopped on
+   * its account's usage limit, and moving off that account means the stop no
+   * longer holds the thread. The turn keeps its limit in history; the queue,
+   * the host's admission and the composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 

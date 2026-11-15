@@ -427,6 +427,12 @@ export interface WorkTurnServiceDependencies {
    * ignored: the stop has happened and must not report as failed.
    */
   readonly onTurnCancelled?: (threadId: WorkThreadId) => void;
+  /**
+   * The thread's turn just stopped on its account's usage limit, as the
+   * provider itself reported it. Fires after the stop is journaled. A
+   * rejection is ignored: the stop has happened and stays recorded.
+   */
+  readonly onUsageLimitStop?: (threadId: WorkThreadId) => Promise<void>;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -617,6 +623,7 @@ export class WorkTurnService {
     ReturnType<typeof decodeSpendCeilingReservationId>
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
+  readonly #onUsageLimitStop: WorkTurnServiceDependencies["onUsageLimitStop"];
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
@@ -677,6 +684,7 @@ export class WorkTurnService {
     this.#personMemoryBlock = dependencies.personMemoryBlock;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
+    this.#onUsageLimitStop = dependencies.onUsageLimitStop;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
@@ -2675,6 +2683,9 @@ export class WorkTurnService {
       }
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+      if (settled?.failure?.usageLimit !== undefined) {
+        await this.#onUsageLimitStop?.(input.command.threadId).catch(() => undefined);
+      }
     } finally {
       // Every turn that reached the provider leaves a ledger row, whatever its
       // outcome: one that reported nothing is recorded as unreported, so a

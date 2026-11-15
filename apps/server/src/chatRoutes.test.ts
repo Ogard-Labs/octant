@@ -198,7 +198,7 @@ describe("Chat routes", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("lets a device the host's own person paired change Continue after restart or move a thread to another account, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000050";
@@ -219,6 +219,12 @@ describe("Chat routes", () => {
       },
       {
         kind: "move-chat-thread-account",
+        threadId: threadFixture.id,
+        expectedVersion: 1,
+        providerInstanceId: "73000000-0000-4000-8000-000000000052",
+      },
+      {
+        kind: "set-chat-thread-usage-limit-handoff",
         threadId: threadFixture.id,
         expectedVersion: 1,
         providerInstanceId: "73000000-0000-4000-8000-000000000052",
@@ -263,7 +269,7 @@ describe("Chat routes", () => {
         }),
       );
     }
-    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("rejects unsupported attachment media types", async () => {
