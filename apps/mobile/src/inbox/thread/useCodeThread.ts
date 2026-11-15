@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   loadMobileCodeConversation,
   loadMobileCodeThread,
@@ -6,11 +6,18 @@ import {
   type MobileCodeConversation,
 } from "@octant/client-runtime";
 import type { CodeThread } from "@octant/contracts";
+import { loadCodeConversationPage } from "./codeConversationPage";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 import { useThreadAttachments } from "./useThreadAttachments";
 
-export function useCodeThread(input: ThreadHookInput) {
+/**
+ * The selected Code thread. `focusOperationId` is a message search hit's
+ * provider turn: when it is older than the newest page, the thread opens on
+ * the page ending with it, anchored there across refreshes until the reader
+ * jumps to the latest turns or sends a follow-up.
+ */
+export function useCodeThread(input: ThreadHookInput, focusOperationId?: string) {
   const { transport, target, guard, ui, gate, prompt, setPrompt } = input;
   const identity = target?.identity;
   const threadId = target?.threadId;
@@ -22,12 +29,22 @@ export function useCodeThread(input: ThreadHookInput) {
     { readonly providerInstanceId: string; readonly modelId: string } | undefined
   >();
   const attachments = useThreadAttachments("code", input);
+  // The provider turn the shown page ends with, while it is not the newest.
+  const anchor = useRef<string | undefined>(undefined);
+  // The search hit is looked for once per opened thread, on its first load.
+  // The thread screen mounts afresh for every hit it opens, so the hit is
+  // read when the thread changes rather than tracked on its own.
+  const focus = useRef(focusOperationId);
+  focus.current = focusOperationId;
+  const pendingFocus = useRef<string | undefined>(focusOperationId);
 
   useEffect(() => {
     setPolicy(undefined);
     setCodeThread(undefined);
     setConversation(undefined);
     setThreadModel(undefined);
+    anchor.current = undefined;
+    pendingFocus.current = focus.current;
   }, [identity]);
 
   const refresh = useCallback(
@@ -44,9 +61,11 @@ export function useCodeThread(input: ThreadHookInput) {
         load: () =>
           Promise.all([
             loadMobileCodeThread(transport, threadId),
-            loadMobileCodeConversation(transport, threadId),
+            loadCodeConversationPage(transport, threadId, anchor.current, pendingFocus.current),
           ]),
-        onLoaded: ([thread, loaded]) => {
+        onLoaded: ([thread, { loaded, anchoredAt }]) => {
+          pendingFocus.current = undefined;
+          anchor.current = anchoredAt;
           setPolicy(thread.executionPolicy);
           setCodeThread(thread);
           setThreadModel({
@@ -88,6 +107,8 @@ export function useCodeThread(input: ThreadHookInput) {
             if (!guard.isSelected(identity)) return;
             setPrompt("");
             attachments.sent();
+            // The reply arrives at the newest turns, so the reader goes there.
+            anchor.current = undefined;
           },
           reload: () => loadMobileCodeConversation(transport, threadId),
         }),
@@ -97,6 +118,11 @@ export function useCodeThread(input: ThreadHookInput) {
     });
   };
 
+  const jumpToLatest = useCallback(async () => {
+    anchor.current = undefined;
+    await refresh();
+  }, [refresh]);
+
   const turns = conversation?.turns;
   return {
     policy,
@@ -105,6 +131,7 @@ export function useCodeThread(input: ThreadHookInput) {
     turns,
     live: (turns ?? []).some((turn) => turn.status === "waiting"),
     refresh,
+    jumpToLatest,
     sendFollowUp,
     threadModel,
     pendingAttachments: attachments.pending,

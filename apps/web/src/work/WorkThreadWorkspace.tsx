@@ -481,6 +481,13 @@ function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
   readonly threadId: WorkThreadId;
+  /**
+   * A search hit's turn to bring into view once. Earlier pages load until the
+   * turn is among them, so the reader lands on it with every newer turn below.
+   */
+  readonly revealTurnId?: WorkTurnId;
+  /** Called once `revealTurnId` is on screen or the thread proves not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
@@ -1381,6 +1388,32 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const settledTurnCount = turns.filter(
     (turn) => turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting",
   ).length;
+  const revealTurnId = props.revealTurnId;
+  const revealTurn =
+    revealTurnId === undefined
+      ? undefined
+      : turns.find((turn) => String(turn.turnId) === String(revealTurnId));
+  const onTurnRevealed = props.onTurnRevealed;
+  useEffect(() => {
+    if (revealTurnId === undefined || !firstPageSettled || revealTurn !== undefined) return;
+    // The hit is older than the loaded run: walk back a page at a time so the
+    // run stays contiguous with the newest turns. A thread with nothing
+    // earlier no longer holds the turn (a rewind dropped it), and a failed
+    // page leaves the reader at the newest turns with the Load earlier retry.
+    if (!loaded.hasEarlier || earlierState === "failed") {
+      onTurnRevealed?.();
+      return;
+    }
+    if (earlierState === "idle") void loadEarlier();
+  }, [
+    earlierState,
+    firstPageSettled,
+    loadEarlier,
+    loaded.hasEarlier,
+    onTurnRevealed,
+    revealTurn,
+    revealTurnId,
+  ]);
   const sideTasks = useThreadSideTasks();
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
@@ -1462,6 +1495,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
   }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  // The turn's first row, whichever kind opens it (its prompt, or the header
+  // a reply opens with), is where the reader lands.
+  const revealKey =
+    revealTurn === undefined
+      ? undefined
+      : transcriptRows.find((row) => row.key.startsWith(`${String(revealTurn.requestId)}-`))?.key;
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
@@ -2421,6 +2460,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             itemAt={workRowHappenedAt}
             itemKey={(row) => row.key}
             items={transcriptRows}
+            {...(revealKey === undefined ? {} : { revealKey })}
+            {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
             lead={
               <>
                 <ImportedTerminalHistory

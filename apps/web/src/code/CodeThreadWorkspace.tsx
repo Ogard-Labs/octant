@@ -25,7 +25,11 @@ import {
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts/code";
-import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
+import type {
+  CodeCheckpoint,
+  CodeOperationId,
+  CodeThreadChangedFileState,
+} from "@octant/contracts/code-operations";
 import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
   parkedStopReleased,
@@ -202,6 +206,14 @@ export interface CodeThreadWorkspaceProps {
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
   /**
+   * A search hit's provider turn to bring into view once. Earlier pages load
+   * until the turn is among them, so the reader lands on it with every newer
+   * turn below.
+   */
+  readonly revealOperationId?: CodeOperationId;
+  /** Called once `revealOperationId` is on screen or the thread proves not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
+  /**
    * Set where a paired device shows the thread: it has no window on the host
    * to take dropped files with, and is not offered provider cloud sessions.
    */
@@ -338,6 +350,49 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ? serverCodeProjectFor(serverCodeProjects, view?.thread.projectId)
     : undefined;
   const displayReady = props.controller.conversationHistory === "loaded";
+  const revealOperationId = props.revealOperationId;
+  // The turn's first own row (its prompt) is where the reader lands; a fork's
+  // inherited rows belong to its source thread, which a hit never names.
+  const revealKey =
+    revealOperationId === undefined
+      ? undefined
+      : props.controller.conversation.find(
+          (message) =>
+            message.sourceThreadId === undefined &&
+            message.operationId !== undefined &&
+            String(message.operationId) === String(revealOperationId),
+        )?.id;
+  const earlierConversation = props.controller.earlierConversation;
+  const loadEarlierConversation = props.controller.loadEarlierConversation;
+  const onTurnRevealed = props.onTurnRevealed;
+  const ownTurnsExhausted = props.controller.conversation.some(
+    (message) => message.sourceThreadId !== undefined,
+  );
+  useEffect(() => {
+    if (revealOperationId === undefined || !displayReady || revealKey !== undefined) return;
+    // The hit is older than the loaded run: walk back a page at a time so the
+    // run stays contiguous with the newest turns. Once nothing of the thread's
+    // own is left (a fork's source turns start loading), the thread no longer
+    // holds the turn; a failed page leaves the reader at the newest turns.
+    if (
+      earlierConversation === undefined ||
+      earlierConversation === "none-left" ||
+      earlierConversation === "failed" ||
+      ownTurnsExhausted
+    ) {
+      onTurnRevealed?.();
+      return;
+    }
+    if (earlierConversation === "idle") loadEarlierConversation();
+  }, [
+    displayReady,
+    earlierConversation,
+    loadEarlierConversation,
+    onTurnRevealed,
+    ownTurnsExhausted,
+    revealKey,
+    revealOperationId,
+  ]);
   const firstPromptInFlight = props.controller.firstPromptInFlight;
   // A thread whose first prompt is on its way is not empty: asking the host
   // for scaffolds and workspace presets there fetched offers nobody could use.
@@ -1732,6 +1787,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               itemKey={(message) => message.id}
               items={messages}
               key={String(props.threadId)}
+              {...(revealKey === undefined ? {} : { revealKey })}
+              {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
               listClassName="code-thread-workspace__transcript thread-column"
               {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
               lead={

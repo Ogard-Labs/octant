@@ -2481,6 +2481,7 @@ Thread Search matches message text in Chat, Work, and Code, on the desktop and t
 - Each mode's read lists exactly the threads its sidebar and Archived group list, applies that listing authority on the host before the hit cap, and never searches a deleted thread or a turn a rewind removed.
 - A hit names the turn that holds the match: the Chat or Work turn, or the operation of a Code provider turn. Queries, hit counts, and snippets share one set of bounds, and a query's LIKE wildcards are text.
 - The reads are GETs a paired device reaches under the overview read grant. Code text is searched through a rebuildable projection of the operation journal that joins a reply's streamed parts; Work text is searched in the rebuildable turn projection.
+- A hit opens its thread at the matched turn in every mode (maintainer request, 2026-11-15). On the desktop a Chat hit not loaded opens as a detached range, and a Work or Code hit loads earlier pages until its turn is loaded, so the reader lands on it with the newer turns below. On the phone a Code hit older than the newest page opens the page ending at it, with Jump to latest; the phone also offers a waiting Code turn's usage resume, because the Code conversation read now carries the usage limit a waiting turn stopped at.
 
 Status: Built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands](host-reads-and-commands.md).
 
