@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { WorkspaceViewStateContext } from "../shell/workspaceViewState";
 import { CodeProviderFileReview } from "./CodeProviderFileReview";
 import type { CodeReviewLineSelection } from "./CodeLocalReview";
@@ -20,7 +21,6 @@ import type {
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./unifiedDiff";
@@ -137,7 +137,7 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     const summary = snapshot(props.diff);
     if (summary.changedPaths.length === 0) {
       return (
-        <ShellState
+        <OctantEmpty
           message={
             props.diff.state === "turn"
               ? "This captured version has no readable changed paths. Later checkout edits may be uncaptured."
@@ -157,7 +157,7 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
       />
     );
   }
-  if (props.diff.state === "loading") return <ShellState state="loading" title="Loading diff" />;
+  if (props.diff.state === "loading") return <OctantEmpty state="loading" title="Loading diff" />;
   return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
 }
 
@@ -440,7 +440,7 @@ function AvailableDiff(
         </OctantAlert>
       ) : null}
 
-      {content.kind === "loading" ? <ShellState state="loading" title="Loading diff" /> : null}
+      {content.kind === "loading" ? <OctantEmpty state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? (
         <OctantAlert tone="warning">{content.message}</OctantAlert>
       ) : null}

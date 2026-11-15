@@ -14,3 +14,4 @@ export * as agentPlugins from "./agentPlugins";
 export * from "./computerUsePlugin";
 export * from "./browserUsePlugin";
 export * from "./replicaStoreActivation";
+export * from "./cloudMachineTargets";

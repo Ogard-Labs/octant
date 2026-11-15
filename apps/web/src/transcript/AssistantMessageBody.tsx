@@ -129,9 +129,9 @@ function AssistantResponsePart(props: { readonly part: ChatMessagePart }) {
             </span>
           )}
         </summary>
-        <div className="thinking-body">
-          <ChatRichText body={part.text} />
-        </div>
+        {/* A closed disclosure shows no body, so it does not parse one; the
+            raw text stays for find-in-page. */}
+        <div className="thinking-body">{open ? <ChatRichText body={part.text} /> : part.text}</div>
       </details>
     );
   }

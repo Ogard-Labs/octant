@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { DEFAULT_THEME_SETTINGS, type ThemePresetId } from "@octant/contracts/theme";
+import type { ThemePreset } from "@octant/theme";
+import { DEFAULT_DARK_TOKENS } from "@octant/theme/tokens";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ThemeService, ThemeServiceError } from "./themeService";
 
-function fixture() {
+function fixture(contributedThemes: ReadonlyArray<ThemePreset> = []) {
   let projected: { settings: typeof DEFAULT_THEME_SETTINGS; aggregateVersion: number } | undefined;
   const append = vi.fn();
   const persistence = {
@@ -21,6 +23,7 @@ function fixture() {
     persistence,
     uuid: randomUUID,
     clock: () => "2026-07-28T10:00:00.000Z",
+    contributedThemes: () => contributedThemes,
   });
   return {
     persistence,
@@ -164,5 +167,36 @@ describe("ThemeService", () => {
       }),
     ).toThrowError(ThemeServiceError);
     expect(test.append).not.toHaveBeenCalled();
+  });
+
+  it("checks overrides against the selected plugin theme while its plugin is on", () => {
+    // A plugin theme that paints a dark workspace in the light slot, so a
+    // near-black text colour reads on the default's white but not on it.
+    const pluginTheme: ThemePreset = {
+      id: "plugin:night-pack:dusk" as ThemePresetId,
+      displayName: "Dusk",
+      description: "Night pack",
+      supportedModes: ["light"],
+      tokens: { light: DEFAULT_DARK_TOKENS },
+    };
+    const settings = {
+      ...DEFAULT_THEME_SETTINGS,
+      mode: "light" as const,
+      lightPresetId: pluginTheme.id,
+      semanticOverrides: [{ role: "text-primary", color: "#111111" }],
+    };
+
+    const pluginOn = fixture([pluginTheme]);
+    expect(() =>
+      pluginOn.service.execute({ kind: "update-theme-settings", settings }),
+    ).toThrowError(ThemeServiceError);
+    expect(pluginOn.append).not.toHaveBeenCalled();
+
+    // Switched off, the stored choice draws the default theme, where the
+    // same colour meets contrast.
+    const pluginOff = fixture([]);
+    expect(pluginOff.service.execute({ kind: "update-theme-settings", settings })).toMatchObject({
+      kind: "theme-settings-replaced",
+    });
   });
 });

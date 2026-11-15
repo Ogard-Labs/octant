@@ -993,7 +993,7 @@ describe("Canvas create panel and card list", () => {
       // container; Electron 43 (Chromium 150) stops the wheel at it when it
       // also carries overscroll-behavior: contain, so the thread never scrolls.
       const css = readFileSync(
-        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas-inline.css"),
         "utf8",
       );
       const containing = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].filter((rule) =>
@@ -1011,7 +1011,7 @@ describe("Canvas create panel and card list", () => {
       // At the 600px minimum window height the viewport rule alone gives 376px,
       // which would clip a Canvas that fit in the 560px resting frame.
       const css = readFileSync(
-        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas.css"),
+        join(dirname(fileURLToPath(import.meta.url)), "../styles/canvas-inline.css"),
         "utf8",
       );
       const resting = /\.thread-canvas__body\s*\{[^}]*max-height:\s*(\d+)px/.exec(css)?.[1];

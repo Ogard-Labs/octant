@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { CodeFileId, CodeFileMetadata, CodeRelativePath } from "@octant/contracts/code";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight, File, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
@@ -13,7 +14,6 @@ import {
 import { useDockBarControls, useDockBarPlacement } from "../shell/dockBarControls";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { ShellState } from "../shell/ShellState";
 import { FileName, pathBasename, pathParent } from "../lib/fileName";
 
 export const MAX_CODE_FILE_EXPLORER_ENTRIES = 1_000;
@@ -462,7 +462,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
 
       {visible.length === 0 ? (
         props.loading === true && props.entries.length === 0 ? (
-          <ShellState state="loading" title="Loading files" />
+          <OctantEmpty state="loading" title="Loading files" />
         ) : (
           <p className="code-file-explorer__empty">
             {normalized === ""

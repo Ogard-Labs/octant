@@ -23,6 +23,8 @@ import {
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   askWhilePageLives,
+  admitBrowserPageToolCall,
+  browserPageToolCallArguments,
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
@@ -1754,6 +1756,54 @@ async function browserToolOne(
             }),
     });
     return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
+  }
+  if (input.operation === "page-tool-call") {
+    const declaredRead = browserToolAction({ operation: "page-tools" }, context);
+    if (declaredRead === undefined) return failure("invalid-browser-input");
+    const approvals = options.browserProfiles?.approvals;
+    let readRefusal: string | undefined;
+    const admitted = await admitBrowserPageToolCall({
+      call: input.call,
+      fullAccess: currentAuthorityFailure(options) === undefined,
+      readDeclared: async () => {
+        const read = await guardedBrowserEffect(options, threadId, "page-tools", signal, () =>
+          browser.act({
+            windowId: options.windowId,
+            threadId,
+            request: declaredRead,
+            capturedBy: "agent",
+          }),
+        );
+        if (read.kind === "snapshot") return read.snapshot;
+        readRefusal = read.reason;
+        return browser.inspectThread(options.windowId, threadId);
+      },
+      // A routine's or subagent's turn has no person at this window, and its
+      // question goes to the windows that can see the thread, as a site's does.
+      ask:
+        approvals === undefined
+          ? undefined
+          : (tool) =>
+              askWhilePageLives(pageHold, signal, (askSignal) =>
+                approvals.request({
+                  windowId: options.windowId,
+                  threadId: String(threadId),
+                  authority,
+                  origin,
+                  ...(profile === undefined ? {} : { profile }),
+                  pageTool: {
+                    name: tool.name,
+                    arguments: browserPageToolCallArguments(input.call),
+                  },
+                  ...(askSignal === undefined ? {} : { signal: askSignal }),
+                }),
+              ),
+    });
+    if (readRefusal !== undefined) return failure(readRefusal);
+    if (admitted.status === "refused") return admitted.answer;
+    const changed = browserAuthorityFailure(options, input.operation);
+    if (changed !== undefined || signal?.aborted === true)
+      return failure(changed ?? "tool-interrupted");
   }
   const request = browserToolAction(input, context);
   if (request === undefined) return failure("invalid-browser-input");

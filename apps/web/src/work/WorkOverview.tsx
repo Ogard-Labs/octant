@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
@@ -25,7 +26,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ProjectIcon } from "../projects/ProjectIcon";
-import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceSection } from "../surface/SurfaceHeader";
 
 export type OverviewSectionStatus =
   | "loading"
@@ -477,7 +478,7 @@ function SectionBody(props: {
   if (section.status === "ready") {
     const items = section.items ?? [];
     if (items.length === 0) {
-      return <SurfaceEmpty title={section.message ?? "Nothing to show"} />;
+      return <OctantEmpty layout="line" title={section.message ?? "Nothing to show"} />;
     }
     return (
       <ul className="surface-list work-overview__items">
@@ -516,7 +517,7 @@ function SectionBody(props: {
     section.status === "loading" || section.status === "empty" || section.status === "stale"
       ? "status"
       : "alert";
-  const empty = <SurfaceEmpty title={message} />;
+  const empty = <OctantEmpty layout="line" title={message} />;
   return role === "alert" ? (
     /* ui-boundary-exception: empty-state */
     <div role="alert">{empty}</div>

@@ -29,7 +29,6 @@ import {
   decodeThreadFollowUpUpdated,
   decodeThreadWorkUpdated,
   MAX_CHAT_TRANSCRIPT_SEARCH_HITS,
-  MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
   ThreadFollowUp as ThreadFollowUpSchema,
   ThreadWorkItem as ThreadWorkItemSchema,
   type ChatAttempt,
@@ -66,6 +65,11 @@ import { purgeThreadToolCallRecords } from "./threadToolCallRecordStore";
 import { purgeContextSubjectContent } from "./contextProjection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 import { readUsageResumeState } from "./usageResumeProjection";
+import {
+  clipTranscriptSearchSnippet,
+  escapeLikePattern,
+  normalizeSearchText,
+} from "./transcriptSearchText";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateIdSchema);
 const decodeThreadWorkItem = Schema.decodeUnknownSync(ThreadWorkItemSchema);
@@ -1566,15 +1570,6 @@ function hydrateThreadUsageResume(connection: SqliteConnection, thread: ChatThre
   return usageResume === undefined ? rest : { ...rest, usageResume };
 }
 
-function normalizeSearchText(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-/** Escape LIKE metacharacters so a user needle cannot widen into every row. */
-function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 /**
  * The thread's active turn ids, oldest first: what a reader of the thread sees.
  * An edit supersedes the revised turn and every turn after it, so a turn's
@@ -1759,45 +1754,6 @@ function upsertTranscriptSearchContent(
     input.updatedAt,
     input.lastSequence,
   );
-}
-
-/**
- * Clip a body around the first case-insensitive hit so the overlay can show
- * context without shipping the whole message.
- */
-export function clipTranscriptSearchSnippet(
-  body: string,
-  needle: string,
-  maxLength: number = MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
-): {
-  readonly snippet: string;
-  readonly matchRanges: ReadonlyArray<{ readonly start: number; readonly end: number }>;
-} {
-  if (maxLength <= 0) return { snippet: "", matchRanges: [] };
-  const haystack = body.toLocaleLowerCase();
-  const normalizedNeedle = needle.trim().toLocaleLowerCase();
-  if (normalizedNeedle.length === 0) {
-    return { snippet: body.slice(0, maxLength), matchRanges: [] };
-  }
-  const index = haystack.indexOf(normalizedNeedle);
-  if (index < 0) {
-    return { snippet: body.slice(0, maxLength), matchRanges: [] };
-  }
-  const matchLength = Math.min(normalizedNeedle.length, maxLength);
-  const pad = Math.max(0, Math.floor((maxLength - matchLength) / 2));
-  let start = Math.max(0, index - pad);
-  let end = Math.min(body.length, start + maxLength);
-  if (end - start < maxLength) {
-    start = Math.max(0, end - maxLength);
-  }
-  const snippet = body.slice(start, end);
-  const matchStart = index - start;
-  if (matchStart < 0 || matchStart >= snippet.length) {
-    return { snippet, matchRanges: [] };
-  }
-  const matchEnd = Math.min(snippet.length, matchStart + matchLength);
-  if (matchEnd <= matchStart) return { snippet, matchRanges: [] };
-  return { snippet, matchRanges: [{ start: matchStart, end: matchEnd }] };
 }
 
 function decodeProjection<T>(decode: () => T): T {

@@ -158,8 +158,13 @@ else from the settings document, through `GET /api/reply-detail`
 thread opens and when the app returns to the foreground, a paired browser when
 its workspace opens, when the mode changes, and when the window regains focus.
 Until an answer arrives, or if none can, they draw Low. On the phone the
-reasoning panel opens at High and shows its first line at Medium, and a
-finished tool card opens at High; a change of level remounts them.
+reasoning panel opens at High and shows its first line at Medium. A run of
+consecutive tool calls draws as one rail of 28pt rows, each with a round
+status mark (a finished call shows its check alone; Running and Failed keep
+their words); a settled run folds behind "N tool calls" at Low (naming any
+failed calls) and starts open at Medium and High, a finished call's detail
+opens at High, and an open run past five rows shows its latest five behind
+"+N earlier". A change of level remounts them.
 
 ## Streaming and earlier messages
 
@@ -186,7 +191,15 @@ arrive below. A Code fork's own messages come first; below them the row goes on
 into the messages it was forked from, at the fork point, and up the thread it
 came from, so a fork reads as one conversation. Coming back to a thread puts
 the reader back on the row they left when its loaded messages still start where
-they did, and at the end otherwise.
+they did, and at the end otherwise. While a reader is scrolled away from the
+end of a following transcript, a secondary **Jump to latest** button floats at
+the foot of the transcript; it returns to the end, resumes following, and goes
+away once the reader is back at the end.
+
+Find (⌘F, Ctrl+F) opens for the thread in the active pane, including while
+focus is still on the sidebar row that just chose it; the code editor and the
+terminal keep their own Find. Closing the find bar returns focus to what had it
+when Find opened, or to the transcript when that is gone.
 
 A jump to a Chat message that is not loaded, such as a search hit, shows the
 run of messages that ends with it in place of the newest ones, with the Load
@@ -546,7 +559,11 @@ silently clipped.
 
 A new-task composer keeps its identity while its Project binding changes.
 Message text and local input state reset only for an explicit New task action.
-A refused binding keeps the prior authorized Project and draft. Cross-Project
+A refused binding keeps the prior authorized Project and draft. A new Chat's
+first-run composer stages chosen or captured files as removable chips before the
+thread exists; they upload to the thread once it is created and leave with the
+first message, as a Work draft's images do, and the server's attachment checks
+apply to them unchanged. Cross-Project
 notices appear once beside the active draft composer, with a separate-window
 action when available, as one of the composer's notice cards above the box. A note that stays until
 the person acts is a card too; only a state its surface marks as passing is the

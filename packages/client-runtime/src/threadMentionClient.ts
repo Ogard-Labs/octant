@@ -23,6 +23,8 @@ export interface ThreadMentionClient {
     requestId: ThreadMentionRequestId,
     query: string,
     signal?: AbortSignal,
+    /** The searching composer's own thread; narrows the list to what it may attach. */
+    readerThreadId?: MentionableThreadId,
   ): Promise<ReadonlyArray<ThreadMentionCandidate>>;
   /**
    * The one thread with this id, when the host says this principal can Open
@@ -32,6 +34,8 @@ export interface ThreadMentionClient {
     requestId: ThreadMentionRequestId,
     threadId: MentionableThreadId,
     signal?: AbortSignal,
+    /** The receiving composer's own thread; a drop it may not attach finds nothing. */
+    readerThreadId?: MentionableThreadId,
   ): Promise<ReadonlyArray<ThreadMentionCandidate>>;
   /** Turns chips into bounded read-only context at send time. */
   resolve(
@@ -111,16 +115,27 @@ export function createThreadMentionClient(
 
   return {
     execute,
-    async search(requestId, query, signal) {
+    async search(requestId, query, signal, readerThreadId) {
       const result = await execute(
-        { kind: "search-mentions", requestId, query },
+        {
+          kind: "search-mentions",
+          requestId,
+          query,
+          ...(readerThreadId === undefined ? {} : { readerThreadId }),
+        },
         ...(signal === undefined ? [] : [signal]),
       );
       return result.kind === "mentions-searched" ? result.candidates : [];
     },
-    async searchThread(requestId, threadId, signal) {
+    async searchThread(requestId, threadId, signal, readerThreadId) {
       const result = await execute(
-        { kind: "search-mentions", requestId, query: "", threadId },
+        {
+          kind: "search-mentions",
+          requestId,
+          query: "",
+          threadId,
+          ...(readerThreadId === undefined ? {} : { readerThreadId }),
+        },
         ...(signal === undefined ? [] : [signal]),
       );
       return result.kind === "mentions-searched" ? result.candidates : [];

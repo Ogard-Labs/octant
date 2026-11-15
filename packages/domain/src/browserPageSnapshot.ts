@@ -119,6 +119,23 @@ export type BrowserPageReadResult =
   | { readonly mode: "performance"; readonly reading: BrowserPerformanceReading };
 
 /**
+ * What marks a field as holding a secret, matched against its type,
+ * autocomplete, name, id, and accessible label. `readBrowserPage` cannot reach
+ * this constant once its source is in the page, so it spells the same pattern
+ * inline, and a test holds the two equal; a reader that runs with a request,
+ * such as `readBrowserPageTools`, is handed this source instead.
+ */
+export const BROWSER_CREDENTIAL_HINT_SOURCE =
+  "(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|\\bcards?\\b|ssn|secret|token|api.?key)";
+/** The attributes `BROWSER_CREDENTIAL_HINT_SOURCE` is matched against, besides `type`. */
+export const BROWSER_CREDENTIAL_HINT_ATTRIBUTES = [
+  "autocomplete",
+  "name",
+  "id",
+  "aria-label",
+] as const;
+
+/**
  * Runs inside the page. See the module comment: nothing outside this body is
  * reachable once the source is handed to the page.
  */

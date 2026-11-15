@@ -22,6 +22,7 @@ import { JournalPlanStore } from "../plan/journalPlanStore";
 import { GoalService } from "../goal/goalService";
 import { JournalGoalStore } from "../goal/journalGoalStore";
 import { ThemeService } from "../theme/themeService";
+import { effectiveContributedThemes } from "@octant/plugin-host/themes";
 import { resolveConnectedGitHubRepository } from "../code/connectedRepository";
 import { createCodeBoardPlanProgressSource } from "../code/codeBoardPlanProgress";
 import { ContextHarnessService } from "../context/contextHarnessService";
@@ -44,7 +45,7 @@ import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
 import { createShellRouteHandler } from "../shellRoutes";
 import { createShellSettingsRouteHandler } from "../shellSettingsRoutes";
 import { createReplyDetailRouteHandler } from "../replyDetailRoutes";
-import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { defaultShellSettings, windowAdmitsProject } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
 import { requireJournalHydration } from "../persistence/journalHydration";
@@ -71,7 +72,10 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
     | "windowAuthorityStore"
   > &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
-  Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
+  Pick<
+    IntegrationsWiring,
+    "githubCapabilityService" | "githubExtensionSnapshot" | "githubIntegrationIsEffective"
+  > &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection"> &
   Pick<ComputerUseWiring, "desktopRecipeKeys" | "offeredDesktopProviders"> &
   Pick<HarnessStateWiring, "serverProjectStore"> & {
@@ -85,6 +89,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     serverProjectStore,
     desktopRecipeKeys,
     githubCapabilityService,
+    githubExtensionSnapshot,
     githubIntegrationIsEffective,
     imageGenerationOffers,
     isPairedDeviceScope,
@@ -212,6 +217,9 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      // The extension snapshot the renderer reads its plugin themes from, so
+      // the server checks overrides against the theme the person sees.
+      contributedThemes: () => effectiveContributedThemes(githubExtensionSnapshot.read().packages),
     });
     // Publishing to a target the person owns. Octant runs no deployment
     // infrastructure and holds no service account: a target names a remote the
@@ -286,7 +294,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
           return false;
         }
         if (thread === undefined || thread.lifecycle !== "active") return false;
-        return String(context.projectId) === String(thread.projectId);
+        return windowAdmitsProject(workspace, "code", thread.projectId);
       },
     });
     const themeRoutes = createThemeRouteHandler({ service: themeService, windowAuthorityStore });
@@ -295,7 +303,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     // commits, so a failed write leaves both the journal and the served
     // aggregate on the last durable state.
     // A Goal and its loop both belong to a Work thread, so the window must
-    // currently be in Work on the Project that owns the thread. Read the
+    // currently show, in Work, the Project that owns the thread. Read the
     // window's own workspace, never a scope the caller supplied.
     const authorizeWorkThreadForWindow = ({
       threadId,
@@ -315,7 +323,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         return false;
       }
       if (thread === undefined || thread.lifecycle !== "active") return false;
-      return String(context.projectId) === String(thread.projectId);
+      return windowAdmitsProject(workspace, "work", thread.projectId);
     };
     const goalService = new GoalService({
       store: new JournalGoalStore({ journal: persistence.journal, uuid: randomUUID }),
@@ -341,7 +349,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         return false;
       }
       if (thread === undefined || thread.lifecycle !== "active") return false;
-      return String(context.projectId) === String(thread.projectId);
+      return windowAdmitsProject(workspace, "code", thread.projectId);
     };
     const goalRoutes = createGoalRouteHandler({
       service: goalService,

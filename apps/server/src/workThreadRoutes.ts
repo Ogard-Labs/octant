@@ -6,6 +6,7 @@ import {
   decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
+  decodeWorkTranscriptSearch,
   type WorkBoardQuery,
   type WorkBoardView,
   type WorkThreadBootstrap,
@@ -13,6 +14,7 @@ import {
   type WorkThreadCommand,
   type WorkThreadCommandResult,
   type WorkThreadFailure,
+  type WorkTranscriptSearch,
   type WindowId,
 } from "@octant/contracts";
 import {
@@ -56,6 +58,11 @@ export interface WorkThreadRouteService {
     authenticatedWindowId: WindowId,
     query: WorkBoardQuery,
   ) => Promise<WorkBoardView> | WorkBoardView;
+  /** Message search over listed Work threads; absent, the route answers unavailable. */
+  readonly searchTranscript?: (
+    authenticatedWindowId: WindowId,
+    query: string,
+  ) => Promise<WorkTranscriptSearch> | WorkTranscriptSearch;
 }
 
 export interface WorkThreadRouteDependencies {
@@ -73,6 +80,7 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
     if (
       url.pathname !== "/api/work/navigation" &&
       url.pathname !== "/api/work/board" &&
+      url.pathname !== "/api/work/transcript-search" &&
       !url.pathname.startsWith("/api/work/threads")
     ) {
       return undefined;
@@ -100,7 +108,10 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
     const isNavigation = url.pathname === "/api/work/navigation";
     const isCommands = url.pathname === "/api/work/threads/commands";
     const isBoard = url.pathname === "/api/work/board";
-    if (!isBootstrap && !isNavigation && !isCommands && !isBoard) return undefined;
+    const isTranscriptSearch = url.pathname === "/api/work/transcript-search";
+    if (!isBootstrap && !isNavigation && !isCommands && !isBoard && !isTranscriptSearch) {
+      return undefined;
+    }
 
     let authenticatedWindowId: WindowId;
     try {
@@ -147,6 +158,28 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         }
         return jsonResponse(
           decodeWorkThreadNavigation(await dependencies.service.navigation(authenticatedWindowId)),
+          200,
+          origin,
+        );
+      }
+      if (isTranscriptSearch) {
+        if (request.method !== "GET" || [...url.searchParams.keys()].some((key) => key !== "q")) {
+          throw new WorkThreadRouteRejected("Work thread request is invalid.", 400);
+        }
+        if (dependencies.service.searchTranscript === undefined) {
+          return failureResponse(
+            { category: "unavailable", message: "Work message search is unavailable." },
+            503,
+            origin,
+          );
+        }
+        return jsonResponse(
+          decodeWorkTranscriptSearch(
+            await dependencies.service.searchTranscript(
+              authenticatedWindowId,
+              url.searchParams.get("q") ?? "",
+            ),
+          ),
           200,
           origin,
         );

@@ -46,6 +46,16 @@ describe("code-style check", () => {
     ]);
   });
 
+  it("counts a read of a window's lead Project in server code and nowhere else", () => {
+    const line = "const lead = workspace.contextByMode.code.projectId;";
+    expect(
+      findTextFindings({
+        "apps/server/src/someRoute.ts": line,
+        "apps/web/src/someView.tsx": line,
+      }),
+    ).toEqual([{ rule: "window-lead-read", file: "apps/server/src/someRoute.ts", line: 1 }]);
+  });
+
   it("keeps only the oxlint findings this check owns", () => {
     expect(
       findOxlintFindings({

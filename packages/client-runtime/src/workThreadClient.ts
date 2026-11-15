@@ -7,6 +7,7 @@ import {
   WorkThreadNavigation,
   type WorkThreadCommand,
   WorkThreadCommandResult,
+  WorkTranscriptSearch,
   decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -22,6 +23,8 @@ export interface WorkThreadClient {
   navigation(): Promise<WorkThreadNavigation>;
   execute(command: WorkThreadCommand): Promise<WorkThreadCommandResult>;
   queryBoard(query: WorkBoardQuery): Promise<WorkBoardView>;
+  /** Message search over the Work threads the host lists for this window. */
+  searchTranscript(query: string): Promise<WorkTranscriptSearch>;
 }
 
 export class WorkThreadClientFailure extends Error {
@@ -132,6 +135,37 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid command response.",
+          0,
+        );
+      }
+    },
+
+    async searchTranscript(query) {
+      const url = new URL("/api/work/transcript-search", options.baseUrl);
+      url.searchParams.set("q", query);
+      let response: Response;
+      try {
+        response = await fetch(url.toString(), {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+        });
+      } catch {
+        throw new WorkThreadClientFailure("Work thread service is unavailable.", 0);
+      }
+
+      const body: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new WorkThreadClientFailure(
+          responseMessage(body, "Work message search is unavailable."),
+          response.status,
+        );
+      }
+
+      try {
+        return decodeHostAnswer(WorkTranscriptSearch)(body);
+      } catch {
+        throw new WorkThreadClientFailure(
+          "Work thread service returned an invalid message search response.",
           0,
         );
       }

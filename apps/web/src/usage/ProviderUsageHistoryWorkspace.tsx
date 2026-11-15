@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
@@ -11,7 +12,6 @@ import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggl
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ProviderUsageHistoryChart } from "./ProviderUsageHistoryChart";
 import { SettingsSection } from "../settings/primitives";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import "./providerUsageHistory.css";
 
 type Range = "24h" | "7d" | "30d" | "90d";
@@ -23,6 +23,7 @@ import {
   type HistoryMetric,
   type HistoryCostBasis,
 } from "./usageHistoryPresentation";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 const ranges: ReadonlyArray<{ readonly value: Range; readonly label: string }> = [
   { value: "24h", label: "Past 24h" },
   { value: "7d", label: "7 days" },
@@ -449,15 +450,15 @@ export function ProviderUsageHistoryWorkspace(props: {
             </table>
           </div>
           {data !== undefined && data.totals.requestCount === 0 ? (
-            <SurfaceEmpty
+            <OctantEmpty
+              layout="line"
               detail="Check the source coverage below."
               title="No provider history was found in this period"
             />
           ) : null}
         </HistoryBlock>
         {data === undefined ? null : (
-          <details className="provider-history__coverage">
-            <summary>Source coverage</summary>
+          <OctantCollapsible className="provider-history__coverage" summary="Source coverage">
             <ul>
               {data.coverage.map((source) => (
                 <li
@@ -490,7 +491,7 @@ export function ProviderUsageHistoryWorkspace(props: {
               Activity recorded by provider tools on this computer can include Octant sessions. It
               is not added to Octant’s own ledger. Read {new Date(data.queryAt).toLocaleString()}.
             </p>
-          </details>
+          </OctantCollapsible>
         )}
       </div>
     </section>

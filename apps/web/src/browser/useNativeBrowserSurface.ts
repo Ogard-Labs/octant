@@ -180,11 +180,31 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     };
     const resize = new ResizeObserver(() => void sync());
     const visibility = new IntersectionObserver(() => void sync());
-    const overlays = new MutationObserver(() => void sync());
+    // Every DOM insertion anywhere in the document reached here, streamed
+    // transcript text included, and each one cost a bridge call. Coalesce to
+    // one check per frame and sync only when an overlay opened or closed.
+    let overlayOpen = document.querySelector(input.overlaySelector) !== null;
+    let overlayFrame: number | undefined;
+    const overlays = new MutationObserver(() => {
+      if (overlayFrame !== undefined) return;
+      overlayFrame = requestAnimationFrame(() => {
+        overlayFrame = undefined;
+        const open = document.querySelector(input.overlaySelector) !== null;
+        if (open === overlayOpen) return;
+        overlayOpen = open;
+        void sync();
+      });
+    });
     const layout = new MutationObserver(() => void sync());
     resize.observe(element);
     visibility.observe(element);
-    overlays.observe(document.body, { childList: true, subtree: true });
+    // Some overlays open by toggling `hidden` rather than by insertion.
+    overlays.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden"],
+    });
     layout.observe(element.parentElement ?? element, {
       attributes: true,
       attributeFilter: ["class", "style"],
@@ -203,6 +223,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
       resize.disconnect();
       visibility.disconnect();
       overlays.disconnect();
+      if (overlayFrame !== undefined) cancelAnimationFrame(overlayFrame);
       layout.disconnect();
       window.removeEventListener("resize", sync);
       if (attached) void detach({ contextId, threadId }).catch(() => undefined);

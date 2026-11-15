@@ -46,7 +46,10 @@ export function NavBar(props: NavBarProps) {
           paddingRight: space.sm,
         },
         backLabel: { color: colors.accent, fontSize: 17, marginLeft: -2 },
-        center: { flex: 2.4, alignItems: "center" },
+        // Without a back label the sides hold one 44pt control each, so the
+        // title takes the rest: at 2.4 a thread title was cut at about 212pt
+        // with room to spare on both sides.
+        center: { flex: props.backLabel === undefined ? 5 : 2.4, alignItems: "center" },
         title: {
           color: colors.textPrimary,
           fontSize: typography.pageTitle.fontSize,
@@ -55,7 +58,7 @@ export function NavBar(props: NavBarProps) {
         },
         subtitle: { color: colors.textTertiary, fontSize: typography.meta.fontSize, marginTop: 1 },
       }),
-    [colors],
+    [colors, props.backLabel],
   );
 
   return (
@@ -174,7 +177,8 @@ export interface ListSectionProps {
 
 /** An inset grouped section: a quiet header over one rounded group of rows. */
 export function ListSection(props: ListSectionProps) {
-  const { colors } = useTheme();
+  const { colors, surfaceStyle } = useTheme();
+  const glass = surfaceStyle === "glass";
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -196,9 +200,10 @@ export function ListSection(props: ListSectionProps) {
           marginHorizontal: space.md,
           borderRadius: radii.md,
           overflow: "hidden",
-          backgroundColor: colors.surfaceElevatedSolid,
+          // On glass a grouped list lets the ground through like any panel.
+          backgroundColor: glass ? colors.glassFillRegular : colors.surfaceElevatedSolid,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: colors.hairline,
+          borderColor: glass ? colors.glassStroke : colors.hairline,
         },
         footer: {
           color: colors.textTertiary,
@@ -208,7 +213,7 @@ export function ListSection(props: ListSectionProps) {
           marginTop: 6,
         },
       }),
-    [colors],
+    [colors, glass],
   );
   return (
     <View style={styles.section} testID={props.testID}>
@@ -247,6 +252,8 @@ export interface ListRowProps {
   readonly labelTone?: string | undefined;
   readonly last?: boolean;
   readonly onPress?: (() => void) | undefined;
+  /** A long press opens the row's actions, as a desktop row's context menu does. */
+  readonly onLongPress?: (() => void) | undefined;
   readonly testID?: string | undefined;
   readonly accessibilityLabel?: string | undefined;
 }
@@ -259,7 +266,7 @@ export function ListRow(props: ListRowProps) {
     () =>
       StyleSheet.create({
         row: {
-          minHeight: props.detail === undefined ? 46 : 58,
+          minHeight: props.detail === undefined ? 44 : 52,
           flexDirection: "row",
           alignItems: "center",
           paddingLeft: space.md,
@@ -276,7 +283,7 @@ export function ListRow(props: ListRowProps) {
         bareIcon: { width: 26, marginRight: 12, alignItems: "center" },
         main: {
           flex: 1,
-          minHeight: props.detail === undefined ? 46 : 58,
+          minHeight: props.detail === undefined ? 44 : 52,
           flexDirection: "row",
           alignItems: "center",
           paddingRight: space.md,
@@ -286,7 +293,7 @@ export function ListRow(props: ListRowProps) {
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.hairline,
         },
-        text: { flex: 1, paddingVertical: 8, gap: 2 },
+        text: { flex: 1, paddingVertical: 6, gap: 1 },
         label: {
           color: colors.textPrimary,
           fontSize: typography.rowLabel.fontSize,
@@ -366,6 +373,15 @@ export function ListRow(props: ListRowProps) {
     <Pressable
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
+      {...(props.onLongPress === undefined
+        ? {}
+        : {
+            onLongPress: props.onLongPress,
+            accessibilityActions: [{ name: "longpress", label: "Thread actions" }],
+            onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => {
+              if (event.nativeEvent.actionName === "longpress") props.onLongPress?.();
+            },
+          })}
       onPress={props.onPress}
       style={({ pressed }) => [styles.row, pressed ? styles.pressed : null]}
       testID={props.testID}
@@ -415,7 +431,8 @@ export interface SegmentedControlProps<Id extends string> {
 
 /** The system segmented control: one track, the chosen segment raised. */
 export function SegmentedControl<Id extends string>(props: SegmentedControlProps<Id>) {
-  const { colors, scheme } = useTheme();
+  const { colors, scheme, surfaceStyle } = useTheme();
+  const glass = surfaceStyle === "glass";
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -423,7 +440,7 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
           flexDirection: "row",
           padding: 2,
           borderRadius: 9,
-          backgroundColor: colors.control,
+          backgroundColor: glass ? colors.glassFillThin : colors.control,
         },
         segment: {
           flex: 1,
@@ -436,7 +453,11 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
         // In dark the raised fill matched the track, so the thumb takes the
         // strong border grey there, as the system's dark thumb is lighter.
         selected: {
-          backgroundColor: scheme === "dark" ? colors.hairlineStrong : colors.surfaceElevatedSolid,
+          backgroundColor: glass
+            ? colors.glassThumb
+            : scheme === "dark"
+              ? colors.hairlineStrong
+              : colors.surfaceElevatedSolid,
           shadowColor: colors.shadow,
           shadowOpacity: 0.12,
           shadowRadius: 3,
@@ -445,7 +466,7 @@ export function SegmentedControl<Id extends string>(props: SegmentedControlProps
         },
         label: { fontSize: typography.detail.fontSize, color: colors.textPrimary },
       }),
-    [colors, scheme],
+    [colors, glass, scheme],
   );
   return (
     <View accessibilityRole="tablist" style={styles.track} testID={props.testID}>

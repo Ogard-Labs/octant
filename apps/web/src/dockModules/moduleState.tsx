@@ -1,7 +1,7 @@
-import { ShellState } from "../shell/ShellState";
 export function unavailable(title: string, message: string) {
-  return <ShellState message={message} state="neutral" title={`${title} is unavailable`} />;
+  return <OctantEmpty message={message} state="neutral" title={`${title} is unavailable`} />;
 }
 export function loading(title: string) {
-  return <ShellState state="loading" title={`Loading ${title}`} />;
+  return <OctantEmpty state="loading" title={`Loading ${title}`} />;
 }
+import { OctantEmpty } from "../ui/base/OctantEmpty";

@@ -1,3 +1,4 @@
+import { useMinuteNow } from "../polling/useMinuteTick";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AutomationClient } from "@octant/client-runtime";
 import type { AutomationSummary } from "@octant/contracts";
@@ -59,6 +60,7 @@ type FailureRead =
   | { readonly status: "unavailable" };
 
 function useCiFailuresContent(source: CiFailuresCardSource): HomeCardContent {
+  const now = useMinuteNow(source.now);
   const read = useFailureRead(source.load);
   const [routines, setRoutines] = useState<ReadonlyArray<AutomationSummary>>([]);
   useEffect(() => {
@@ -90,7 +92,7 @@ function useCiFailuresContent(source: CiFailuresCardSource): HomeCardContent {
     count: model.rows.length,
     body: (
       <FailureRows
-        now={source.now}
+        now={now}
         onStartFix={source.onStartFix}
         rows={model.rows}
         routines={routines}

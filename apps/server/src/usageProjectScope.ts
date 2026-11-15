@@ -1,4 +1,5 @@
 import type { WindowWorkspace } from "@octant/contracts";
+import { admissionSet } from "@octant/domain/shell-policy";
 
 /**
  * The usage a read is allowed to cover.
@@ -46,10 +47,9 @@ export function resolveWindowProjectScope(
   if (workspace === undefined) return { kind: "unfiled" };
   const projectIds = [
     ...new Set(
-      Object.values(workspace.contextByMode)
-        .map((context) => context.projectId)
-        .filter((projectId) => projectId !== null)
-        .map(String),
+      (["chat", "work", "code"] as const).flatMap((mode) =>
+        admissionSet(workspace, mode).map(String),
+      ),
     ),
   ];
   return projectIds.length === 0 ? { kind: "unfiled" } : { kind: "projects", projectIds };

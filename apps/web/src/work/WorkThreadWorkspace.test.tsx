@@ -36,6 +36,7 @@ const alternateModelId = "model-two" as never;
 
 function queuedWorkClients() {
   const threadClient: WorkThreadClient = {
+    searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
     navigation: vi.fn(),
     execute: vi.fn(),
@@ -214,6 +215,7 @@ describe("WorkThreadWorkspace", () => {
         initialThread={thread}
         projects={[]}
         threadClient={{
+          searchTranscript: vi.fn(),
           bootstrap: vi.fn(),
           navigation: vi.fn(),
           execute: vi.fn(),
@@ -256,6 +258,7 @@ describe("WorkThreadWorkspace", () => {
           initialThread={thread}
           projects={[project]}
           threadClient={{
+            searchTranscript: vi.fn(),
             bootstrap: vi.fn(),
             navigation: vi.fn(),
             execute: vi.fn(),
@@ -296,6 +299,7 @@ describe("WorkThreadWorkspace", () => {
         initialThread={thread}
         projects={[project]}
         threadClient={{
+          searchTranscript: vi.fn(),
           bootstrap: vi.fn(),
           navigation: vi.fn(),
           execute: vi.fn(),
@@ -333,6 +337,7 @@ describe("WorkThreadWorkspace", () => {
           initialThread={thread}
           providerGroups={[providerGroup()]}
           threadClient={{
+            searchTranscript: vi.fn(),
             bootstrap: vi.fn(),
             navigation: vi.fn(),
             execute: vi.fn(),
@@ -692,6 +697,7 @@ describe("WorkThreadWorkspace", () => {
           },
         ]}
         threadClient={{
+          searchTranscript: vi.fn(),
           bootstrap: vi.fn(async () => ({ threads: [workThread()], runtime: [] })),
           navigation: vi.fn(),
           queryBoard: vi.fn(),
@@ -2854,6 +2860,7 @@ describe("WorkThreadWorkspace", () => {
         turn: decodeWorkTurnState(workTurn({ status: "completed" })),
       });
     const threadClient: WorkThreadClient = {
+      searchTranscript: vi.fn(),
       bootstrap: vi.fn(async () => ({ threads: [workThread()], runtime: [] })),
       execute: vi.fn(),
       navigation: vi.fn(),
@@ -3566,6 +3573,7 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
       title="Draft brief"
       projects={[]}
       threadClient={{
+        searchTranscript: vi.fn(),
         bootstrap: vi.fn(),
         navigation: vi.fn(),
         execute: vi.fn(),

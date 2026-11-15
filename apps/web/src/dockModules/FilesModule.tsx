@@ -1,10 +1,10 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { WorkFilesPanel } from "../work/WorkFilesPanel";
 import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import { decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { Suspense } from "react";
-import { ShellState } from "../shell/ShellState";
 import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverProjectEntries";
 
 type Props = Pick<
@@ -42,7 +42,7 @@ export default function FilesModule(props: Props) {
     return unavailable("Files", "Files opens from a Code thread.");
   }
   return (
-    <Suspense fallback={<ShellState state="loading" title="Loading files" />}>
+    <Suspense fallback={<OctantEmpty state="loading" title="Loading files" />}>
       <CodeFileExplorerPanel
         {...(props.subject.checkoutId === undefined
           ? {}

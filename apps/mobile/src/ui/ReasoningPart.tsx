@@ -30,6 +30,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
           alignItems: "center",
           gap: space.sm,
         },
+        markColumn: { width: 20, alignItems: "center" },
         title: {
           color: colors.textSecondary,
           fontSize: typography.detail.fontSize,
@@ -42,7 +43,7 @@ export function ReasoningPart(props: ReasoningPartProps) {
         },
         // Open thinking hangs off a hairline under its row, quieter than the reply.
         body: {
-          marginLeft: 7,
+          marginLeft: 9,
           paddingLeft: space.md,
           paddingVertical: space.xs,
           borderLeftWidth: 2,
@@ -68,7 +69,10 @@ export function ReasoningPart(props: ReasoningPartProps) {
           style={styles.header}
           testID="mobile-reasoning-toggle"
         >
-          <Ionicons color={colors.textTertiary} name="sparkles-outline" size={15} />
+          {/* The same 20pt column as the tool rail's marks, so the two rows start their text together. */}
+          <View style={styles.markColumn}>
+            <Ionicons color={colors.textTertiary} name="sparkles-outline" size={15} />
+          </View>
           <Text style={styles.title}>{MOBILE_COPY.reasoningTitle}</Text>
           {preview === "" ? null : (
             <Text

@@ -172,6 +172,9 @@ export function withCodeOperationRuntime(
     ...(service.searchFiles === undefined
       ? {}
       : { searchFiles: service.searchFiles.bind(service) }),
+    ...(service.searchTranscript === undefined
+      ? {}
+      : { searchTranscript: service.searchTranscript.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -218,6 +221,9 @@ function withCodeBoard(
     ...(service.searchFiles === undefined
       ? {}
       : { searchFiles: service.searchFiles.bind(service) }),
+    ...(service.searchTranscript === undefined
+      ? {}
+      : { searchTranscript: service.searchTranscript.bind(service) }),
     queryBoard,
     ...(service.executeOperation === undefined
       ? {}
@@ -832,8 +838,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           currentProjectAccess: (windowId, projectId) =>
-            codeProjectAccess.standingAuthority(() => canAccessCodeProject(windowId, projectId)),
-          standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
+            codeProjectAccess.standingAuthority(projectId, () =>
+              canAccessCodeProject(windowId, projectId),
+            ),
+          standingAuthority: (turnProjectId, run) =>
+            codeProjectAccess.standingAuthority(turnProjectId, run),
           retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout, signal) => {
@@ -1674,7 +1683,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     const codeThreadMetadataService = new CodeThreadMetadataService({
       git: { observe: () => ({ status: "unavailable" }) },
       history: {
-        read: (threadId) => codeBoardEventStore.historyForThread(threadId),
+        read: (threadId) => codeBoardEventStore.summaryForThread(threadId),
       },
     });
     // Persistent Code follow-up. Follow-up is a durable user

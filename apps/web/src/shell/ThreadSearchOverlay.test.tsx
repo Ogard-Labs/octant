@@ -90,6 +90,35 @@ describe("ThreadSearchOverlay", () => {
     expect(screen.queryByText("Release branch")).toBeNull();
   });
 
+  it("lists a Work message match after the title matches and opens it at its turn", async () => {
+    const user = userEvent.setup();
+    const { onOpenThread } = renderOverlay({
+      mode: "work",
+      threads: [thread({ threadId: "w1", mode: "work", title: "Release brief" })],
+      contentHits: [
+        {
+          threadId: "w2",
+          title: "Quiet title",
+          projectId: "p1",
+          lifecycle: "active",
+          turnId: "turn-7",
+          snippet: "the release moved",
+        },
+      ],
+    });
+
+    await user.type(screen.getByRole("combobox"), "release");
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(2);
+    expect(options[1]).toHaveTextContent("Quiet title");
+    expect(options[1]).toHaveTextContent("the release moved");
+    await user.click(options[1] as HTMLElement);
+
+    expect(onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "work", threadId: "w2", turnId: "turn-7", projectId: "p1" }),
+    );
+  });
+
   it("opens on a query handed over from the sidebar filter and lists its hits", () => {
     renderOverlay({ initialQuery: "release" });
 

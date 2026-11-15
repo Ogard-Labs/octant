@@ -2,6 +2,7 @@ export * from "./manifest";
 export * from "./contributions";
 export * from "./integration";
 export * from "./replicaStore";
+export * from "./cloudMachineTarget";
 export * from "./desktopProvider";
 export * from "./providerDriverCatalog";
 export * from "./languageServerPackage";

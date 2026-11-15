@@ -1,8 +1,9 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useState } from "react";
 import type { WorkResearchBriefView } from "@octant/client-runtime/work-research-client";
 import { AlertTriangle, BookOpen, FileText, Quote } from "lucide-react";
 import type { WorkResearchMutationOutcome, WorkResearchStatus } from "./useWorkResearchController";
-import { SurfaceEmpty, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -71,7 +72,8 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
   if (props.status !== "ready") {
     return (
       <SurfaceSection className="work-research" label="Research">
-        <SurfaceEmpty
+        <OctantEmpty
+          layout="line"
           action={
             props.onRetry !== undefined && props.status !== "loading" ? (
               <OctantButton
@@ -96,7 +98,7 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
         <NewBriefForm onCreateBrief={props.onCreateBrief} />
       )}
       {props.briefs.length === 0 ? (
-        <SurfaceEmpty title="This Project has no research briefs" />
+        <OctantEmpty layout="line" title="This Project has no research briefs" />
       ) : (
         <ul className="work-research__briefs">
           {props.briefs.map((view) => (

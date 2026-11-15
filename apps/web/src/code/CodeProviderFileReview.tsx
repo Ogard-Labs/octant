@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { useEffect, useRef, useState } from "react";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import {
@@ -9,9 +10,9 @@ import type { ProviderFileReviewRead } from "@octant/contracts/provider-file-rev
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 type Reader = NonNullable<CodeClient["readProviderFileReview"]>;
 const refusal: Readonly<
@@ -103,7 +104,7 @@ export function CodeProviderFileReview(props: {
       </header>
       <p>Supplementary session history. Git remains the checkout comparison.</p>
       {result === undefined ? (
-        <ShellState state="loading" title="Reading provider checkpoint" />
+        <OctantEmpty state="loading" title="Reading provider checkpoint" />
       ) : result.status === "refused" ? (
         <OctantAlert
           tone="warning"
@@ -152,14 +153,13 @@ export function CodeProviderFileReview(props: {
               />
             </div>
           )}
-          <details>
-            <summary>Session checkpoint</summary>
+          <OctantCollapsible summary="Session checkpoint">
             {result.file.checkpoint.length === 0 ? (
               <p>The checkpoint is empty.</p>
             ) : (
               <pre>{result.file.checkpoint}</pre>
             )}
-          </details>
+          </OctantCollapsible>
           {result.file.anchors.length === 0 ? null : (
             <p className="code-provider-file-review__anchors">
               Scope anchors:{" "}

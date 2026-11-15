@@ -4,7 +4,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { space, useTheme } from "../../design-system";
 import type { MobileIconName } from "./IconButton";
 
-export type MobileTabId = "inbox" | "chat" | "work" | "code" | "settings";
+// Chat and Work share the Work tab, as on the desktop: a thread is a Chat
+// when it has no folder and a Work thread when it is bound to one.
+export type MobileTabId = "inbox" | "work" | "code" | "settings";
 
 const TABS: ReadonlyArray<{
   readonly id: MobileTabId;
@@ -13,7 +15,6 @@ const TABS: ReadonlyArray<{
   readonly activeIcon: MobileIconName;
 }> = [
   { id: "inbox", label: "Inbox", icon: "file-tray-outline", activeIcon: "file-tray" },
-  { id: "chat", label: "Chat", icon: "chatbubble-outline", activeIcon: "chatbubble" },
   { id: "work", label: "Work", icon: "briefcase-outline", activeIcon: "briefcase" },
   { id: "code", label: "Code", icon: "code-slash-outline", activeIcon: "code-slash" },
   { id: "settings", label: "Settings", icon: "settings-outline", activeIcon: "settings" },

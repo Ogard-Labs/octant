@@ -300,6 +300,7 @@ describe("Code persistence restart", () => {
       { projection_name: "canvas", reason: "unsupported-event-version" },
       { projection_name: "chat", reason: "unsupported-event-version" },
       { projection_name: "code", reason: "unsupported-event-version" },
+      { projection_name: "code-transcript-search", reason: "unsupported-event-version" },
       { projection_name: "code-usage", reason: "unsupported-event-version" },
       { projection_name: "contexts", reason: "unsupported-event-version" },
       { projection_name: "desktop-leases", reason: "unsupported-event-version" },

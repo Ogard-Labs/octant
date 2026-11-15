@@ -9,7 +9,7 @@ const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 // and the mobile theme modules (its data, its materials, and the arithmetic
 // that tints a theme hue). All other views consume CSS variables or theme
 // tokens, including React Native views.
-const EXEMPT_PREFIXES = [`${WEB_SOURCE}/ui/shadcn/`, `${WEB_SOURCE}/theme/`, `${WEB_SOURCE}/zen/`];
+const EXEMPT_PREFIXES = [`${WEB_SOURCE}/ui/shadcn/`, `${WEB_SOURCE}/theme/`];
 const EXEMPT_FILES = new Set([
   `${MOBILE_SOURCE}/design-system/materials.ts`,
   `${MOBILE_SOURCE}/design-system/tokens.ts`,

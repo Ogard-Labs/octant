@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ContinuityScreenContext } from "../continuity/ContinueElsewhere";
 import { readContinuationLink } from "../continuity/continuationLink";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -19,7 +20,6 @@ import { OctantCard } from "../ui/base/OctantCard";
 import { HostStatus } from "../shell/HostSelector";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
-import { ShellState } from "../shell/ShellState";
 import { RemoteDeviceSelfPanel } from "./RemoteDeviceSelfPanel";
 import {
   createRemoteExtensionClient,
@@ -107,7 +107,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
     state.kind === "authenticating"
   ) {
     return (
-      <ShellState
+      <OctantEmpty
         message="Establishing the authenticated remote session."
         state="loading"
         title="Connecting to Octant"
@@ -117,7 +117,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
   if (state.kind === "reconnecting") {
     return (
-      <ShellState
+      <OctantEmpty
         message="Your draft is preserved locally. Reconnecting does not queue authority offline."
         state="loading"
         title="Reconnecting"
@@ -127,7 +127,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
   if (state.kind === "incompatible") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Start over", onClick: () => props.onReset() }}
         message={state.reason}
         role="alert"
@@ -139,7 +139,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
   if (state.kind === "unauthorized") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Start over", onClick: () => props.onReset() }}
         message={state.reason}
         role="alert"
@@ -151,7 +151,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
 
   if (state.kind === "unavailable") {
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Try reconnect", onClick: supervisor.retryNow }}
         message={state.reason}
         role="alert"
@@ -177,7 +177,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       </header>
 
       {state.kind === "stale" ? (
-        <ShellState
+        <OctantEmpty
           action={{ label: "Reconnect", onClick: () => props.bridge.reconnect() }}
           message="The host connection is stale. What you see may be behind; reconnect to send a turn."
           role="status"

@@ -1048,6 +1048,7 @@ function client(
   options: { readonly saveResult?: unknown; readonly text?: string } = {},
 ): CodeClient {
   return {
+    searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
     navigation: vi.fn(),
     queryBoard: vi.fn(),

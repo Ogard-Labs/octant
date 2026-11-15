@@ -455,7 +455,9 @@ describe("funnel, radar, and sankey charts", () => {
       })),
     );
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [fan, chain] }} />);
-    const [fanSvg, chainSvg] = [...document.querySelectorAll(".canvas-block__chart--sankey svg")];
+    const [fanSvg, chainSvg] = [
+      ...document.querySelectorAll(".canvas-block__chart--sankey svg.canvas-chart__svg"),
+    ];
     if (fanSvg === undefined || chainSvg === undefined) throw new Error("Sankeys were not drawn.");
 
     const sources = [...fanSvg.querySelectorAll("rect.canvas-chart__node")]

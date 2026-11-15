@@ -10,6 +10,7 @@ import {
   FolderInput,
   Handshake,
   PanelsTopLeft,
+  UserRoundCog,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
@@ -21,6 +22,7 @@ import {
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { buildChatMarkdownExport } from "./chatMarkdownExport";
+import { MoveToAccountDialog, type MoveToAccountDialogProps } from "./MoveToAccountDialog";
 import { MoveToProjectDialog, type MoveToProjectDialogProps } from "./MoveToProjectDialog";
 
 export interface ChatThreadActionsMenuProps {
@@ -44,6 +46,14 @@ export interface ChatThreadActionsMenuProps {
    */
   readonly moveToProject?: Pick<MoveToProjectDialogProps, "projects" | "onCreateProject"> & {
     readonly onMove: MoveToProjectDialogProps["onMove"];
+  };
+  /**
+   * Present when the thread's provider has other accounts set up. The host
+   * decides whether the move is allowed; the menu only offers it.
+   */
+  readonly moveToAccount?: Pick<MoveToAccountDialogProps, "accounts" | "onMove"> & {
+    /** Why the move is not available now; the item shows it, disabled. */
+    readonly unavailableReason?: string;
   };
   /** Present only when this window has a canvas surface to disclose. */
   readonly canvas?: {
@@ -69,6 +79,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   const [exporting, setExporting] = useState(false);
   const [handingOff, setHandingOff] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
+  const [accountMoveOpen, setAccountMoveOpen] = useState(false);
   const handOffClient = useMemo(
     () =>
       resolveThreadHandOffClient({
@@ -229,6 +240,18 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
             value: "move-to-project",
           },
         ]),
+    ...(props.moveToAccount === undefined
+      ? []
+      : [
+          {
+            icon: <UserRoundCog aria-hidden="true" size={14} />,
+            label: "Move to account…",
+            value: "move-to-account",
+            ...(props.moveToAccount.unavailableReason === undefined
+              ? {}
+              : { disabled: true, description: props.moveToAccount.unavailableReason }),
+          },
+        ]),
     ...(props.canvas === undefined
       ? []
       : [
@@ -252,6 +275,7 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
           else if (value === "export-thread") exportThread();
           else if (value === "hand-off") handOff();
           else if (value === "move-to-project") setMoveOpen(true);
+          else if (value === "move-to-account") setAccountMoveOpen(true);
           else if (value === "canvas") props.canvas?.onToggle();
         }}
         trigger={<Ellipsis aria-hidden="true" className="icon" size={16} />}
@@ -270,6 +294,13 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
             {...(props.moveToProject.onCreateProject === undefined
               ? {}
               : { onCreateProject: props.moveToProject.onCreateProject })}
+          />
+        ) : null}
+        {accountMoveOpen && props.moveToAccount !== undefined ? (
+          <MoveToAccountDialog
+            accounts={props.moveToAccount.accounts}
+            onClose={() => setAccountMoveOpen(false)}
+            onMove={props.moveToAccount.onMove}
           />
         ) : null}
       </OctantDialogPresence>
