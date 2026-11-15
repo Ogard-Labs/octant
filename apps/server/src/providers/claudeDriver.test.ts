@@ -1331,9 +1331,13 @@ describe("Claude execution policy", () => {
     });
     const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
     await expect(call("Edit", edit, "rules-edit")).resolves.toEqual({ behavior: "own-rules" });
-    // Octant's refusals answer before the person's rules could allow the call.
+    // A path outside the Project's folders keeps Octant's own ask.
     await expect(
       call("Edit", { ...edit, file_path: "/tmp/octant-claude-elsewhere/a.ts" }, "outside"),
+    ).resolves.toEqual({ behavior: "ask" });
+    // Octant's refusals answer before the person's rules could allow the call.
+    await expect(
+      call("Bash", { command: "ls", cwd: "/tmp/octant-claude-elsewhere" }, "outside-shell"),
     ).resolves.toMatchObject({ behavior: "deny" });
     // A question needs the person's answer, so Octant still asks it.
     const question = {
@@ -1853,14 +1857,14 @@ describe("Claude execution policy", () => {
         toolUseId: name,
         signal,
       });
-    await expect(preEdit("pending")).resolves.toEqual({ behavior: "ask" });
+    await expect(preEdit("pending")).resolves.toEqual({ behavior: "own-rules" });
     const pending = open.canUseTool({
       toolName: "Edit",
       input: edit("pending"),
       toolUseId: "pending",
       signal,
     });
-    await expect(preEdit("granted")).resolves.toEqual({ behavior: "ask" });
+    await expect(preEdit("granted")).resolves.toEqual({ behavior: "own-rules" });
     for (let index = 0; index < 300; index += 1) {
       await expect(
         open.preToolUse({
@@ -1931,7 +1935,7 @@ describe("Claude execution policy", () => {
       }),
     ).resolves.toEqual({ behavior: "allow" });
     for (const name of ["held-0", "held-1", "held-2"]) {
-      await expect(preEdit(name)).resolves.toEqual({ behavior: "ask" });
+      await expect(preEdit(name)).resolves.toEqual({ behavior: "own-rules" });
     }
     await expect(preEdit("held-overflow")).resolves.toMatchObject({ behavior: "deny" });
     await expect(terminalEvent).resolves.toMatchObject({
@@ -4494,9 +4498,10 @@ describe("Claude artifact delivery", () => {
           behavior: "own-rules",
         },
       );
-      // The account's own MCP server's tool asks at Guarded.
+      // The account's own MCP server's tool is left to the person's own rules
+      // at Guarded, which ask unless they allow it.
       await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toEqual({
-        behavior: "ask",
+        behavior: "own-rules",
       });
     } finally {
       await acquired.close();

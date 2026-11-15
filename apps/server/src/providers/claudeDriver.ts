@@ -3355,7 +3355,9 @@ function makeConnection(
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
           };
-          const askThroughGrant = async (outsideProject = false): Promise<ClaudePreToolDecision> => {
+          const askThroughGrant = async (
+            outsideProject = false,
+          ): Promise<ClaudePreToolDecision> => {
             // Past the grant cap a call waits for a slot: a grant frees when
             // its call reaches `canUseTool`, its result arrives, or it expires.
             while (
@@ -3383,11 +3385,24 @@ function makeConnection(
               ...(outsideProject ? { outsideProject: true as const } : {}),
               ...(asksUnsandboxed ? { unsandboxed: true as const } : {}),
             });
+            // Octant keeps its own ask, whatever the person's rules allow, for
+            // a command leaving the sandbox (it runs with the person's whole
+            // access to their files and credentials), a path outside the
+            // folders the session holds (asked as Claude Code asks on its own,
+            // and Reviewed's reviewer decides it), and a switch into a
+            // worktree outside them, which the session holds only once
+            // `canUseTool` sees the switch allowed: a rule answering it inside
+            // the runtime would leave every later call there refused.
+            const worktreeTarget =
+              request.toolName === CLAUDE_ENTER_WORKTREE_TOOL
+                ? claudeWorktreeTarget(requestInput, request.projectRoot)
+                : undefined;
+            const entersUnheldWorktree =
+              worktreeTarget !== undefined && !sessionHolds(activeState, worktreeTarget);
             return claudeOwnRulesDecide(input.executionPolicy, request.toolName) &&
-              // A command leaving the sandbox runs with the person's whole
-              // access to their files and credentials, so Octant always asks
-              // about it itself, whatever their own rules allow.
-              !asksUnsandboxed
+              !asksUnsandboxed &&
+              !outsideProject &&
+              !entersUnheldWorktree
               ? { behavior: "own-rules" }
               : { behavior: "ask" };
           };
