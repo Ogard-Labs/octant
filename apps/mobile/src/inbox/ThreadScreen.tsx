@@ -308,6 +308,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
       setResumeBusy(false);
     }
   };
+  // A turn the provider stopped at a usage limit still holds the thread, as on
+  // the desktop, but nothing runs until the limit resets, so the composer must
+  // not say the computer is working.
+  const latestTurnAtUsageLimit =
+    selected?.mode === "work"
+      ? work.turns?.at(-1)?.status === "waiting" &&
+        work.turns.at(-1)?.failure?.usageLimit !== undefined
+      : selected?.mode === "code"
+        ? code.conversation?.hasLater === false &&
+          code.conversation.turns.at(-1)?.usageLimit !== undefined
+        : false;
   // Only over an empty composer: a draft the person is writing is the next turn.
   const resumeOffer: ResumeOffer | undefined = (() => {
     if (prompt.trim().length > 0 || !staleGate.allowProductMutations || offlineDemo)
@@ -737,7 +748,11 @@ export function ThreadScreen(props: ThreadScreenProps) {
       ) : (
         <FloatingComposer
           busy={busy || workTurnLive || codeTurnLive}
-          busyLabel={MOBILE_COPY.turnRunning}
+          busyLabel={
+            !busy && latestTurnAtUsageLimit
+              ? MOBILE_COPY.turnWaitingOnUsageLimit
+              : MOBILE_COPY.turnRunning
+          }
           editable={composerEditable}
           footerHint={followUpComposerCopy?.footerHint}
           modelLabel={

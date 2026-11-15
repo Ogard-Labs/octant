@@ -28,6 +28,7 @@ import {
   type CodexLaunchAuthority,
 } from "./codexProcess";
 import { CodexRpcClientFailure } from "./codexRpcClient";
+import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 import type { CodexServerMessage } from "./codexProtocol";
 import type {
   CodexAccountReadResult,
@@ -712,7 +713,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
       capabilities: {
         streaming: "supported",
         resume: "supported",
-        userQuestions: "unsupported",
+        userQuestions: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
       },
@@ -3540,25 +3541,144 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it.each(["full-access", "approval-gated", "plan"] as const)(
-    "keeps stable user questions unsupported in %s mode",
-    async (policy) => {
-      const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()));
-      await startSession(acquired.connection, sessionId, policy);
-      const answer = await Effect.runPromise(
-        Effect.exit(
-          acquired.connection.answerUserInput({
-            sessionId,
-            requestId: "question",
-            answer: "private answer",
-          }),
-        ),
+  it("asks Codex's question set through the questionnaire in Plan and answers Codex by question id", async () => {
+    const f = fixture();
+    let request = 0;
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+    );
+    await startSession(acquired.connection, sessionId, "plan");
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+    );
+    const asked = takeEvents(acquired.connection, 2);
+    const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
+      ({
+        kind: "request",
+        id,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: `item-${id}`, questions },
+      }) as CodexServerMessage;
+    f.emit(
+      userInput("ask-1", [
+        {
+          id: "scope",
+          header: "Scope",
+          question: "Which module first?",
+          isOther: true,
+          options: [
+            { label: "Parser", description: "Start with parsing" },
+            { label: "Writer", description: "Start with output" },
+          ],
+        },
+        { id: "tests", header: "Tests", question: "Add tests too?", options: null },
+      ]),
+    );
+    const events = await asked;
+    expect(events).toMatchObject([
+      {
+        kind: "user-input-request",
+        prompt: "Which module first?",
+        options: [
+          { label: "Parser", description: "Start with parsing" },
+          { label: "Writer", description: "Start with output" },
+        ],
+        questionIndex: 1,
+        questionCount: 2,
+      },
+      { kind: "user-input-request", prompt: "Add tests too?", questionIndex: 2, questionCount: 2 },
+    ]);
+    for (const [event, answer] of [
+      [events[0], "Parser"],
+      [events[1], "Yes, unit tests"],
+    ] as const) {
+      if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+      await Effect.runPromise(
+        acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
       );
-      expect(String(answer)).toContain("unsupported");
-      await acquired.close();
-    },
-  );
+    }
+    expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+      {
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-1",
+          result: {
+            answers: { scope: { answers: ["Parser"] }, tests: { answers: ["Yes, unit tests"] } },
+          },
+        },
+      },
+    ]);
+
+    // A password is never collected in chat: Codex is told why, and nobody is asked.
+    f.emit(
+      userInput("ask-2", [
+        {
+          id: "pw",
+          header: "Database",
+          question: "What is the database password?",
+          isSecret: true,
+        },
+      ]),
+    );
+    await vi.waitFor(() =>
+      expect(f.calls.at(-1)).toEqual({
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-2",
+          result: { answers: { pw: { answers: [SECRET_QUESTION_REFUSAL] } } },
+        },
+      }),
+    );
+    await acquired.close();
+  });
+
+  it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
+    const plan = fixture();
+    const planned = await acquireConnection(makeCodexDriver(plan.options()));
+    await startSession(planned.connection, sessionId, "plan");
+    await Effect.runPromise(
+      planned.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+    );
+    // Plan's own sandbox and approval answers stay as they are (see the Plan
+    // authority tests); only Codex's mode joins them.
+    expect(plan.calls.find((call) => call.method === "turn/start")?.input).toMatchObject({
+      collaborationMode: {
+        mode: "plan",
+        settings: { model: "gpt-5.4", developer_instructions: null },
+      },
+    });
+    await planned.close();
+
+    const work = fixture({
+      threadResume: async (value) => ({
+        thread: { id: value.threadId },
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        serviceTier: null,
+        cwd: projectRoot,
+        reasoningEffort: "high",
+        collaborationMode: { mode: "plan" },
+      }),
+    });
+    const resumed = await acquireConnection(makeCodexDriver(work.options()));
+    await Effect.runPromise(
+      resumed.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-1" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    await Effect.runPromise(
+      resumed.connection.send({ sessionId, prompt: "build it", attachments: [], tools: [] }),
+    );
+    expect(work.calls.find((call) => call.method === "turn/start")?.input).toMatchObject({
+      collaborationMode: {
+        mode: "default",
+        settings: { model: "gpt-5.4", reasoning_effort: "high", developer_instructions: null },
+      },
+    });
+    await resumed.close();
+  });
 });
 
 function compactOf(connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) {

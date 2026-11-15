@@ -85,6 +85,7 @@ export * from "./validationEvents";
 export * from "./host";
 export * from "./hostResources";
 export * from "./hostControl";
+export * from "./webSearch";
 export * from "./hostDataMap";
 export * from "./hostExport";
 export * from "./remoteAccess";

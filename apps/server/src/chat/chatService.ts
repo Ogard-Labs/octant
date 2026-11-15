@@ -709,6 +709,12 @@ export interface ChatServiceOptions {
     readonly settle: import("../spendCeilingService").SpendCeilingService["settle"];
   };
   readonly researchRouter: ResearchRouter;
+  /**
+   * Whether the host's data policy leaves a web search backend eligible, given
+   * the SearXNG address Chat settings hold or are saving. Absent, the address
+   * alone decides, as the list reads before its person saves one.
+   */
+  readonly webSearchReady?: (chatSearxngBaseUrl: string | undefined) => boolean;
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
   /**
@@ -1163,6 +1169,7 @@ export class ChatService {
   readonly #toolStepsPerTurn: () => number;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
+  readonly #webSearchReady: (chatSearxngBaseUrl: string | undefined) => boolean;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerChangeProbeSettleMs: number;
@@ -1236,6 +1243,8 @@ export class ChatService {
       this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     }
     this.#researchRouter = options.researchRouter;
+    this.#webSearchReady =
+      options.webSearchReady ?? ((address) => address !== undefined && address.trim().length > 0);
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
     }
@@ -1509,8 +1518,10 @@ export class ChatService {
     this.#assertReady();
     const projected = this.#persistence.readChatSettings();
     const hidden = this.#hiddenThreadIds();
+    const settings = projected?.settings ?? this.#defaultChatSettings();
     return {
-      settings: projected?.settings ?? this.#defaultChatSettings(),
+      settings,
+      webSearchReady: this.#webSearchReady(settings.searxngBaseUrl),
       threads: this.#persistence
         .readChatThreads()
         .filter((thread) => thread.lifecycle === "active" && !hidden.has(String(thread.id)))
@@ -2556,7 +2567,7 @@ export class ChatService {
         const route = this.#researchRouter.resolve({
           researchEnabled: true,
           routing: command.defaultResearchRouting,
-          searxngConfigured: searxngBaseUrl !== undefined && searxngBaseUrl.trim().length > 0,
+          webSearchReady: this.#webSearchReady(searxngBaseUrl),
           appManagedTools:
             selectedModelId !== undefined
               ? this.#effectiveAppManagedTools(selectedProbe, selectedModelId)
@@ -5891,8 +5902,7 @@ export class ChatService {
     return this.#researchRouter.resolve({
       researchEnabled: thread.researchEnabled,
       routing: thread.researchRouting,
-      searxngConfigured:
-        settings.searxngBaseUrl !== undefined && settings.searxngBaseUrl.trim().length > 0,
+      webSearchReady: this.#webSearchReady(settings.searxngBaseUrl),
       appManagedTools: this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)),
       nativeResearch: probe.capabilities.nativeWebResearch,
     });
@@ -5913,7 +5923,8 @@ export class ChatService {
   }
 
   /**
-   * Octant's web search for a turn whose research searches through SearXNG,
+   * Octant's web search for a turn whose research searches through its own
+   * backends,
    * or nothing. A harness thread is already offered the same `web-search` by
    * its own tool set, under the harness's tool-call policy and its rules for
    * a tainted thread's queries, so it is not given a second copy.

@@ -795,7 +795,7 @@ export function ChatComposer(props: ChatComposerProps) {
               }
               options={[
                 { id: "automatic", label: "Automatic" },
-                { id: "searxng", label: "SearXNG" },
+                { id: "searxng", label: "Octant web search" },
                 { id: "provider-native", label: "Provider-native" },
               ]}
               value={props.research.routing}
@@ -1010,7 +1010,7 @@ function composeStatus(input: {
     });
   } else if (input.research.kind === "selected") {
     quiet.push(
-      `Research uses ${input.research.backend === "searxng" ? "SearXNG" : "provider-native research"}.`,
+      `Research uses ${input.research.backend === "searxng" ? "Octant web search" : "provider-native research"}.`,
     );
   }
   if (input.statusMessage !== undefined) {

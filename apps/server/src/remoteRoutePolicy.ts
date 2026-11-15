@@ -1106,12 +1106,16 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     namesProjectInQuery: true as const,
   },
   // Host control, for a device the host's own person paired: status, the
-  // data map and the retention windows are reads; service lifecycle, backup,
-  // memory limits, retention and purge are changes the route holds to 8 KiB.
-  ...["status", "data-map", "thread-retention"].map((name) => ({
+  // data map, the retention windows and web search are reads; service
+  // lifecycle, backup, memory limits, retention, web search and purge are
+  // changes the route holds to 8 KiB.
+  ...["status", "data-map", "thread-retention", "web-search"].map((name) => ({
     kind: "exact" as const,
     path: `/api/host-control/${name}`,
-    methods: name === "thread-retention" ? (["GET", "POST"] as const) : (["GET"] as const),
+    methods:
+      name === "thread-retention" || name === "web-search"
+        ? (["GET", "POST"] as const)
+        : (["GET"] as const),
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,

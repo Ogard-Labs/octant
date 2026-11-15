@@ -124,7 +124,7 @@ export default function App() {
     // Development configuration never enables a production scenario. The public
     // offline demo loads the same fixtures only after an explicit entry choice.
     const dev: typeof import("./dev/mobileMockScenario") = require("./dev/mobileMockScenario");
-    return dev.createMobileMockScenario(id);
+    return dev.createMobileMockScenario(id, { now: new Date() });
   }, []);
   // Fonts load before the theme provider mounts, so follow the system setting
   // to avoid a light flash on dark phones.

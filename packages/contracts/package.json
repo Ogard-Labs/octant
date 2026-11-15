@@ -101,6 +101,7 @@
     "./host-oauth": "./src/hostOAuth.ts",
     "./provider-key-journal": "./src/providerKeyJournal.ts",
     "./host-control": "./src/hostControl.ts",
+    "./web-search": "./src/webSearch.ts",
     "./host-data-map": "./src/hostDataMap.ts",
     "./host-export": "./src/hostExport.ts",
     "./integration": "./src/integration.ts",

@@ -1746,7 +1746,55 @@ describe("useChatController", () => {
 
     expect(client.execute).toHaveBeenCalledWith(command);
     await waitFor(() => expect(result.current.bootstrap?.settings).toEqual(updated.settings));
-    expect(client.bootstrap).toHaveBeenCalledOnce();
+    // The readiness read-back after the save fails here; the saved settings
+    // stand and the window does not read as disconnected.
+    await waitFor(() => expect(client.bootstrap).toHaveBeenCalledTimes(2));
+    expect(result.current.bootstrap?.settings).toEqual(updated.settings);
+    expect(result.current.status).toBe("ready");
+  });
+
+  it("reads web search readiness back from the host after a Chat settings save", async () => {
+    const current = decodeChatBootstrap({ ...bootstrap(), webSearchReady: false });
+    const saved = decodeChatBootstrap({
+      ...current,
+      settings: {
+        ...current.settings,
+        searxngBaseUrl: "https://search.example.test",
+        version: 2,
+      },
+      webSearchReady: true,
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn().mockResolvedValueOnce(current).mockResolvedValue(saved),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(async () => ({
+        kind: "settings-updated" as const,
+        settings: saved.settings,
+      })),
+    });
+    const { result } = renderHook(() =>
+      useChatController({ client, serverUrl: "http://127.0.0.1", windowCapability: capability }),
+    );
+    await waitFor(() => expect(result.current.bootstrap?.webSearchReady).toBe(false));
+
+    await act(async () =>
+      expect(
+        await result.current.updateSettings({
+          kind: "update-chat-settings" as const,
+          expectedVersion: current.settings.version,
+          defaultProviderInstanceId: current.settings.defaultProviderInstanceId,
+          defaultModelId: current.settings.defaultModelId,
+          defaultResearchEnabled: current.settings.defaultResearchEnabled,
+          defaultResearchRouting: current.settings.defaultResearchRouting,
+          searxngBaseUrl: "https://search.example.test",
+          defaultPersonalityInstructions: current.settings.defaultPersonalityInstructions,
+        }),
+      ).toBe(true),
+    );
+
+    await waitFor(() => expect(result.current.bootstrap?.webSearchReady).toBe(true));
+    expect(result.current.bootstrap?.settings).toEqual(saved.settings);
   });
 
   it("does not let a second immediate defaults change race the first", async () => {
