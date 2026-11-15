@@ -3,6 +3,7 @@ import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  LOCAL_HOST_ID,
   type ChatThread,
   type ChatThreadId,
   decodeAgentRunParentThreadId,
@@ -607,6 +608,14 @@ export function wireChat(deps: ChatDependencies) {
                   parentThreadId: String(thread.id),
                   mode: "chat",
                   ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                  // A Side Chat is offered no helpers at all (withheld above).
+                  askThroughHost: {
+                    lead: {
+                      hostId: LOCAL_HOST_ID,
+                      providerInstanceId: thread.providerInstanceId,
+                      modelId: thread.modelId,
+                    },
+                  },
                 }),
                 // Outside the taint wrapper, as in Work and Code: an offer's
                 // answer is Octant's own receipt of what the model wrote, and

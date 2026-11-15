@@ -1,4 +1,4 @@
-import { DEFAULT_HOST_RESOURCE_POLICY } from "@octant/contracts";
+import { DEFAULT_HOST_RESOURCE_POLICY, type NativeHarnessSlotCandidate } from "@octant/contracts";
 import { HostResourceBudget } from "../process/hostResourceBudget";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
@@ -1248,13 +1248,57 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     readonly projectId?: ProjectId;
     /**
      * How the calling turn asks its person, in the thread, to allow one thing.
-     * Only a Code turn has one today, so only a Code thread below Full access
-     * asks before a helper once it has read outside content; elsewhere that
-     * delegation is still refused.
+     * A Code turn asks in its own tool approval; a Chat or Work turn passes
+     * `askThroughHost` instead. A thread with neither (a routine run, Plan)
+     * still refuses a helper once it has read outside content.
      */
     readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
-  }): AppManagedToolSet =>
-    createAgentsManagedTools({
+    /**
+     * The model a Chat or Work turn runs on, so it can ask its person through
+     * the host's approval card (the one every thread's composer shows). Absent
+     * where nobody can answer: a routine run, a Side Chat, or Plan.
+     */
+    readonly askThroughHost?: { readonly lead: NativeHarnessSlotCandidate };
+  }): AppManagedToolSet => {
+    const hostLead = input.askThroughHost?.lead;
+    const ask:
+      | ((
+          summary: string,
+          signal?: AbortSignal,
+        ) => Promise<"approved" | "denied" | "cancelled" | "expired">)
+      | undefined =
+      input.ask ??
+      (hostLead === undefined
+        ? undefined
+        : async (summary, signal) => {
+            const outcome = await nativeHarnessApprovals.ask({
+              threadId: input.parentThreadId,
+              mode: input.mode,
+              ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+              lead: hostLead,
+              toolName: "provider-action",
+              summary,
+              approvalClass: "agents.delegate",
+              // The thread has read outside content, so no remembered class
+              // may answer this and an "always" would be a lie.
+              singleUse: true,
+              signal,
+            });
+            return outcome === "too-many-waiting" ? ("denied" as const) : outcome;
+          });
+    const askMarkedDelegation =
+      ask === undefined
+        ? undefined
+        : async (signal?: AbortSignal): Promise<boolean> => {
+            const answer = await ask(
+              "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
+              signal,
+            );
+            if (answer !== "approved") return false;
+            threadStandingAnswers.record(input.parentThreadId, "delegation", true);
+            return true;
+          };
+    return createAgentsManagedTools({
       admission: agentRunAdmission,
       orchestration: agentRunOrchestration,
       persistence: agentRunPersistence,
@@ -1305,18 +1349,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           { runningWorkTurnAccess, codeParentActiveTurn },
           input.parentThreadId,
         ) && !threadStandingAnswers.covers(input.parentThreadId, "delegation", true),
-      ...(input.ask === undefined
-        ? {}
-        : {
-            askMarkedDelegation: async () => {
-              const answer = await input.ask?.(
-                "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
-              );
-              if (answer !== "approved") return false;
-              threadStandingAnswers.record(input.parentThreadId, "delegation", true);
-              return true;
-            },
-          }),
+      ...(askMarkedDelegation === undefined ? {} : { askMarkedDelegation }),
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,
@@ -1332,6 +1365,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         ),
       uuid: randomUUID,
     });
+  };
   // The routes are built where they are dispatched, with the Canvas snapshot
   // the Canvas area provides.
   const agentRunRouteDependencies: Omit<AgentRunRouteDependencies, "snapshotCanvas"> = {

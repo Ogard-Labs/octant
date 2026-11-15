@@ -42,7 +42,7 @@ export interface AgentsManagedToolsOptions {
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
   readonly listUnavailableTargets?: () => ReadonlyArray<AgentsToolUnavailableTarget>;
   readonly isTainted: () => boolean;
-  readonly askMarkedDelegation?: () => Promise<boolean>;
+  readonly askMarkedDelegation?: (signal?: AbortSignal) => Promise<boolean>;
   readonly isPaused?: () => boolean;
   readonly routing?: AgentRunDelegationRouting;
   readonly projectId?: string | undefined;
@@ -505,7 +505,7 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
 
       if (input.operation === "delegate") {
         if (input.task === undefined) return failure("invalid-agents-input");
-        const result = await startAgentRunDelegation(options, { ...input, task: input.task });
+        const result = await startAgentRunDelegation(options, { ...input, task: input.task }, signal);
         if (
           result.status === "refused" &&
           (result.reason === "delegate-tainted" || result.reason === "delegate-target-unavailable")
@@ -522,11 +522,15 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
         )
           return failure("invalid-agents-input");
         return answer(
-          await followUpAgentRunDelegation(options, {
-            runId: input.runId,
-            expectedVersion: input.expectedVersion,
-            message: input.message,
-          }),
+          await followUpAgentRunDelegation(
+            options,
+            {
+              runId: input.runId,
+              expectedVersion: input.expectedVersion,
+              message: input.message,
+            },
+            signal,
+          ),
         );
       }
 

@@ -132,7 +132,7 @@ export interface AgentRunDelegationOptions {
    * reading outside content, and keeps a yes. Absent where the turn has no way
    * to ask its person, or runs in Plan; the delegation is then refused.
    */
-  readonly askMarkedDelegation?: () => Promise<boolean>;
+  readonly askMarkedDelegation?: (signal?: AbortSignal) => Promise<boolean>;
   readonly isPaused?: () => boolean;
   readonly projectId?: string | undefined;
   /** Absent when this host cannot reach other members; a target member is then refused. */
@@ -180,9 +180,14 @@ const TAINTED_DELEGATION_MESSAGE =
  * person does, once: their yes is kept for the thread, so the next call finds
  * the thread no longer gated and asks nobody.
  */
-async function markedDelegationRefused(options: AgentRunDelegationOptions): Promise<boolean> {
+async function markedDelegationRefused(
+  options: AgentRunDelegationOptions,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
   if (options.isTainted?.() !== true) return false;
-  return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation());
+  return (
+    options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation(signal))
+  );
 }
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
@@ -222,6 +227,8 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
 export async function startAgentRunDelegation(
   options: AgentRunDelegationOptions,
   input: AgentRunDelegationInput,
+  /** The tool call's signal, so an ask for this call ends with its turn. */
+  signal?: AbortSignal,
 ): Promise<AgentRunDelegationResult> {
   if (options.admission.settings.current().creationPosture !== "automatic")
     return {
@@ -236,7 +243,7 @@ export async function startAgentRunDelegation(
       reason: "session-paused",
       message: "This run is paused, so no new helper starts until it is resumed.",
     };
-  if (await markedDelegationRefused(options))
+  if (await markedDelegationRefused(options, signal))
     return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (input.targetProjectId !== undefined && input.targetMemberId === undefined)
     return {
@@ -595,6 +602,7 @@ export function isAgentRunTargetEligible(
 export async function followUpAgentRunDelegation(
   options: AgentRunDelegationOptions,
   input: AgentRunFollowUpInput,
+  signal?: AbortSignal,
 ): Promise<AgentRunFollowUpResult> {
   let request: ReturnType<typeof decodeAgentRunResumeRequest>;
   try {
@@ -606,7 +614,7 @@ export async function followUpAgentRunDelegation(
   if (options.admission.settings.current().creationPosture !== "automatic")
     return { status: "refused", reason: "creation-posture-off" };
   if (options.isPaused?.()) return { status: "refused", reason: "session-paused" };
-  if (await markedDelegationRefused(options))
+  if (await markedDelegationRefused(options, signal))
     return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   const run = options.persistence.getById(request.runId);
   if (run === undefined || String(run.parentThreadId) !== options.parentThreadId)
