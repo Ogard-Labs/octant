@@ -75,6 +75,7 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.thread-composer__surface[data-shape="pill"]',
   ".chat-composer__model-options-dot",
   ".board-status-mark__dot",
+  ".code-file-explorer__mark",
   ".content-tab__attention",
   ".settings-accent__dot",
   ".thread-activity-pip__pulse",

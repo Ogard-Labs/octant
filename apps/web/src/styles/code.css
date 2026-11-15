@@ -414,7 +414,7 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .code-file-explorer {
-  --oct-file-row-h: 28px;
+  --oct-file-row-h: 24px;
   --oct-file-inset: 8px;
   --oct-file-depth-max: 10;
   --oct-file-depth: 0;
@@ -479,7 +479,7 @@ html:not([data-octant-reduced-transparency="true"])
 .code-file-explorer__empty {
   margin: 0;
   padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-muted);
+  color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: var(--oct-leading-snug);
 }
@@ -613,6 +613,33 @@ html:not([data-octant-reduced-transparency="true"])
   font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A file row holds the chevron's place, so a file's glyph stands under its
+   sibling folders' glyphs. */
+.code-file-explorer__chevron-slot {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+}
+
+.code-file-explorer__entry > svg[data-file-kind="code"] {
+  color: var(--oct-muted);
+}
+
+/* A changed file: one small dot at the row's end, in the status tokens the
+   review surfaces use. The row's title names the change in words. */
+.code-file-explorer__mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-inline-start: auto;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-warn);
+}
+
+.code-file-explorer__mark[data-change="added"] {
+  background: var(--oct-success);
 }
 
 .code-file-explorer__chevron {
@@ -2999,4 +3026,179 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   border-top: 1px solid var(--oct-hairline);
   box-sizing: content-box;
   padding-top: var(--oct-space-1);
+}
+
+/* The editor's own header, drawn only where no dock tile hosts its actions: the
+   file name and one cluster of icon buttons. Save stands at the cluster's left
+   end, so the buttons beside it keep their places when it appears. */
+.code-editor-pane__toolbar:has(> .code-editor-pane__actions) {
+  min-height: 36px;
+  padding: 2px var(--oct-space-2) 2px var(--oct-space-3);
+  background: transparent;
+}
+
+.code-editor-pane__toolbar > h1 {
+  flex: 1 1 auto;
+}
+
+.code-editor-pane__toolbar > .code-editor-pane__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The path in muted ink, with the checkout and the posture at its end. The row
+   is one line at every width; the path gives way first. */
+.code-editor-pane__crumbs {
+  display: flex;
+  min-width: 0;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-editor-pane__path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-editor-pane__crumb-note {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The Files tool in a Code thread: a strip of open files over the editor, and
+   the tree as a column at the right. The container is sized by the dock, so the
+   editor has its final size from the first frame whatever is open. */
+.code-files-viewer {
+  container: files-viewer / inline-size;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--oct-bg);
+}
+
+.code-files-viewer__main {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+.code-files-viewer__strip {
+  display: flex;
+  height: 32px;
+  flex: none;
+  align-items: center;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-files-viewer__tabs,
+.code-files-viewer__strip-fill {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.code-files-viewer__tabs {
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.code-files-viewer__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.code-files-viewer__tab-list {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+/* The preview tab is the one the next single click replaces. */
+.code-files-viewer__tab[data-preview="true"] .content-tab__select > span:first-child {
+  font-style: italic;
+}
+
+.code-files-viewer__tab .content-tab__select > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-files-viewer__tree-toggle {
+  flex: none;
+}
+
+.code-files-viewer__body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  flex-direction: column;
+}
+
+.code-files-viewer__body > .code-editor-pane {
+  min-height: 0;
+  flex: 1 1 0;
+}
+
+.code-files-viewer__empty {
+  margin: 0;
+  padding: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.code-files-viewer__tree {
+  display: flex;
+  width: 200px;
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 200px;
+  flex-direction: column;
+  box-shadow: inset 1px 0 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-files-viewer[data-tree="closed"] > .code-files-viewer__tree {
+  display: none;
+}
+
+.code-files-viewer__tree .code-file-explorer-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Too narrow for both: the tree and the editor take turns, the strip staying
+   over whichever is shown. */
+@container files-viewer (max-width: 419px) {
+  .code-files-viewer[data-tree="open"] {
+    flex-direction: column;
+  }
+
+  .code-files-viewer[data-tree="open"] > .code-files-viewer__main {
+    flex: 0 0 auto;
+  }
+
+  .code-files-viewer[data-tree="open"] .code-files-viewer__body {
+    display: none;
+  }
+
+  .code-files-viewer[data-tree="open"] > .code-files-viewer__tree {
+    width: auto;
+    flex: 1 1 0;
+    box-shadow: none;
+  }
 }

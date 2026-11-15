@@ -165,7 +165,21 @@ export interface MonacoDiffRuntime {
   ) => MonacoDiffSession;
 }
 
+/**
+ * The editor's commands for a host that draws its own menu: the pane's header
+ * menu runs them instead of the adapter's row of text buttons.
+ */
+export interface MonacoEditorControls {
+  readonly run: (commandId: string) => Promise<void>;
+  readonly toggleOutline: () => Promise<void>;
+  readonly sendSelection: () => void;
+  readonly toggleSettings: () => void;
+}
+
 export interface MonacoEditorAdapterProps {
+  /** False when the host offers the commands through `controlsRef` instead. */
+  readonly toolbar?: boolean;
+  readonly controlsRef?: { current: MonacoEditorControls | undefined };
   readonly viewState?: MonacoEditorView | undefined;
   readonly onViewState?: ((view: MonacoEditorView) => void) | undefined;
   readonly ariaLabel: string;
@@ -277,6 +291,31 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
   useLayoutEffect(() => {
     latestProps.current = props;
   }, [props]);
+
+  const sendSelection = () => {
+    const selected = session.current?.selection?.();
+    if (selected === undefined) setNotice("Select some text in the editor first.");
+    else {
+      props.onAddSelectionToChat?.(selected);
+      setNotice(
+        "Selection added to the conversation draft. Send it from the conversation to ask the agent.",
+      );
+    }
+  };
+  if (props.controlsRef !== undefined) {
+    props.controlsRef.current = {
+      run: command,
+      toggleOutline: showOutline,
+      sendSelection,
+      toggleSettings: () => setPreferencesOpen((open) => !open),
+    };
+  }
+  useEffect(
+    () => () => {
+      if (props.controlsRef !== undefined) props.controlsRef.current = undefined;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     latestTypography.current = typography;
@@ -390,78 +429,80 @@ export function MonacoEditorAdapter(props: MonacoEditorAdapterProps) {
 
   return (
     <>
-      <div className="editor-tools" role="toolbar" aria-label="Editor commands">
-        <OctantButton
-          size="sm"
-          variant="ghost"
-          onClick={() => void command("editor.action.quickCommand")}
-        >
-          Commands
-        </OctantButton>
-        <OctantButton size="sm" variant="ghost" onClick={() => void command("actions.find")}>
-          Find
-        </OctantButton>
-        <OctantButton
-          size="sm"
-          variant="ghost"
-          disabled={props.readOnly}
-          onClick={() => void command("editor.action.startFindReplaceAction")}
-        >
-          Replace
-        </OctantButton>
-        <OctantButton
-          size="sm"
-          variant="ghost"
-          disabled={props.readOnly}
-          onClick={() => void command("editor.action.formatDocument")}
-        >
-          Format
-        </OctantButton>
-        <OctantButton
-          size="sm"
-          variant="ghost"
-          onClick={() => void command("editor.action.gotoLine")}
-        >
-          Go to line
-        </OctantButton>
-        {props.languageBridge?.intelligence === undefined ? null : (
+      {props.toolbar === false ? null : (
+        <div className="editor-tools" role="toolbar" aria-label="Editor commands">
           <OctantButton
             size="sm"
             variant="ghost"
-            disabled={outlineBusy}
-            aria-expanded={outline !== undefined}
-            onClick={() => void showOutline()}
+            onClick={() => void command("editor.action.quickCommand")}
           >
-            Outline
+            Commands
           </OctantButton>
-        )}
-        {props.onAddSelectionToChat === undefined ? null : (
+          <OctantButton size="sm" variant="ghost" onClick={() => void command("actions.find")}>
+            Find
+          </OctantButton>
           <OctantButton
             size="sm"
             variant="ghost"
-            onClick={() => {
-              const selected = session.current?.selection?.();
-              if (selected === undefined) setNotice("Select some text in the editor first.");
-              else {
-                props.onAddSelectionToChat?.(selected);
-                setNotice(
-                  "Selection added to the conversation draft. Send it from the conversation to ask the agent.",
-                );
-              }
-            }}
+            disabled={props.readOnly}
+            onClick={() => void command("editor.action.startFindReplaceAction")}
           >
-            Send selection to agent
+            Replace
           </OctantButton>
-        )}
-        <OctantButton
-          size="sm"
-          variant="ghost"
-          aria-expanded={preferencesOpen}
-          onClick={() => setPreferencesOpen(!preferencesOpen)}
-        >
-          Editor settings
-        </OctantButton>
-      </div>
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            disabled={props.readOnly}
+            onClick={() => void command("editor.action.formatDocument")}
+          >
+            Format
+          </OctantButton>
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            onClick={() => void command("editor.action.gotoLine")}
+          >
+            Go to line
+          </OctantButton>
+          {props.languageBridge?.intelligence === undefined ? null : (
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              disabled={outlineBusy}
+              aria-expanded={outline !== undefined}
+              onClick={() => void showOutline()}
+            >
+              Outline
+            </OctantButton>
+          )}
+          {props.onAddSelectionToChat === undefined ? null : (
+            <OctantButton
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const selected = session.current?.selection?.();
+                if (selected === undefined) setNotice("Select some text in the editor first.");
+                else {
+                  props.onAddSelectionToChat?.(selected);
+                  setNotice(
+                    "Selection added to the conversation draft. Send it from the conversation to ask the agent.",
+                  );
+                }
+              }}
+            >
+              Send selection to agent
+            </OctantButton>
+          )}
+          <OctantButton
+            size="sm"
+            variant="ghost"
+            aria-expanded={preferencesOpen}
+            onClick={() => setPreferencesOpen(!preferencesOpen)}
+          >
+            Editor settings
+          </OctantButton>
+        </div>
+      )}
       {preferencesOpen ? (
         <fieldset className="editor-tools">
           <legend>Editor settings</legend>
