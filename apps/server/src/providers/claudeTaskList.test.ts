@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,6 +110,21 @@ describe("readClaudeStoredTaskList", () => {
       reason: "too many tasks",
     });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a FIFO named like a task without waiting for a writer",
+    async () => {
+      const config = await configDirectory();
+      const folder = await storeTasks(config, session, {});
+      execFileSync("mkfifo", [join(folder, "1.json")], { stdio: "ignore" });
+
+      const outcome = await Promise.race([
+        readClaudeStoredTaskList(config, session),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+      expect(outcome).toEqual({ status: "refused", reason: "task is not a file" });
+    },
+  );
 
   it("follows no symlink out of the configuration directory", async () => {
     const config = await configDirectory();

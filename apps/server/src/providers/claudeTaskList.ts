@@ -328,8 +328,13 @@ export async function readClaudeStoredTaskList(
     let text: string;
     try {
       // `O_NOFOLLOW` refuses a symlinked task file at open, after the check
-      // above could have been raced.
-      const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      // above could have been raced. `O_NONBLOCK` keeps a FIFO named like a
+      // task from holding the open until a writer comes, which hung resume;
+      // the descriptor's own check below then refuses it.
+      const handle = await open(
+        path,
+        constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+      );
       try {
         const stats = await handle.stat();
         if (!stats.isFile()) return refused("task is not a file");
