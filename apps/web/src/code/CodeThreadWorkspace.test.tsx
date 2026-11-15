@@ -603,9 +603,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("log")).toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
+    expect(screen.getByRole("log")).toHaveTextContent("Send a prompt to begin");
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeVisible();
     // Opening a surface is the tab launcher's job, so no row of openers is
     // rendered above the conversation.
@@ -802,10 +800,8 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Loading conversation" })).toBeVisible();
-    expect(screen.getByRole("log")).not.toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).not.toHaveTextContent("Send a prompt to begin");
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
@@ -825,10 +821,8 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("article", { name: "Your message" })).toHaveTextContent(
       "Fix the failing test",
     );
-    expect(
-      screen.queryByText("No messages yet. Send a prompt to start this thread."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Send a prompt to begin/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
 
     // Starting the turn re-reads the transcript. The prompt stays where it is
@@ -870,10 +864,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("log")).not.toHaveTextContent(
-      "No messages yet. Send a prompt to start this thread.",
-    );
-    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("log")).not.toHaveTextContent("Send a prompt to begin");
+    expect(screen.queryByRole("region", { name: "Start from a template" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
@@ -3663,9 +3655,10 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(
-      screen.queryByRole("heading", { name: "find bugs in this repo" }),
-    ).not.toBeInTheDocument();
+    // The title is the empty thread's own start heading and nowhere else.
+    const titled = screen.getAllByRole("heading", { name: "find bugs in this repo" });
+    expect(titled).toHaveLength(1);
+    expect(titled[0]).toHaveClass("empty-start__title");
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark for follow-up" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Complete follow-up" })).not.toBeInTheDocument();

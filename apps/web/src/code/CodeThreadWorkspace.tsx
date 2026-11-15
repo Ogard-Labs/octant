@@ -177,6 +177,7 @@ import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControl
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "./codeWorkspaceApprovals";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
+import { EmptyThreadStart } from "./EmptyThreadStart";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
@@ -1805,7 +1806,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             role="log"
             aria-live="polite"
           >
-            <div className="code-thread-workspace__transcript thread-column">
+            <div className="code-thread-workspace__transcript code-thread-workspace__transcript--empty thread-column">
               {props.controller.conversationHistory === "loading" ? (
                 <OctantEmpty
                   message="Loading the existing thread transcript from this host."
@@ -1814,33 +1815,32 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 />
               ) : showEmptyConversation ? (
                 <>
-                  <p className="code-thread-workspace__empty" role="status">
-                    No messages yet. Send a prompt to start this thread.
-                  </p>
                   {/* A thread on an empty checkout has nothing to talk about yet.
                     Offering the curated scaffolds here, and only here, keeps the
                     choice next to the moment it matters. */}
-                  {presets.available ? (
-                    <WorkspacePresetPicker
-                      busy={presets.busy}
-                      {...(presets.message === undefined ? {} : { message: presets.message })}
-                      onApply={(preset) => void presets.apply(preset)}
-                      presets={presets.presets}
-                      skills={presets.skills}
-                    />
-                  ) : null}
-                  {scaffolds.available ? (
-                    <ScaffoldPicker
-                      busy={scaffolds.busy}
-                      entries={scaffolds.entries}
-                      {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
-                      {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
-                      onStart={(entry, directoryName) => {
-                        void scaffolds.start(entry, directoryName);
-                      }}
-                      runnable={scaffolds.runnable}
-                    />
-                  ) : null}
+                  <EmptyThreadStart title={thread.title}>
+                    {presets.available ? (
+                      <WorkspacePresetPicker
+                        busy={presets.busy}
+                        {...(presets.message === undefined ? {} : { message: presets.message })}
+                        onApply={(preset) => void presets.apply(preset)}
+                        presets={presets.presets}
+                        skills={presets.skills}
+                      />
+                    ) : null}
+                    {scaffolds.available ? (
+                      <ScaffoldPicker
+                        busy={scaffolds.busy}
+                        entries={scaffolds.entries}
+                        {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
+                        {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
+                        onStart={(entry, directoryName) => {
+                          void scaffolds.start(entry, directoryName);
+                        }}
+                        runnable={scaffolds.runnable}
+                      />
+                    ) : null}
+                  </EmptyThreadStart>
                 </>
               ) : null}
             </div>

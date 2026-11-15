@@ -11,7 +11,6 @@ import {
   MessageSquare,
   SquareTerminal,
 } from "../ui/icons";
-import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -48,42 +47,37 @@ interface PaneFace {
  */
 export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
   return (
-    <section aria-label="Set up this workspace" className="workspace-presets">
-      <header className="workspace-presets__header">
-        <span className="start-card__tile">
-          <LayoutTemplate aria-hidden="true" size={16} />
-        </span>
-        <div className="start-card__heading">
-          <h3 className="start-card__title">Set up this workspace</h3>
-          <p className="start-card__subtitle">Pick a ready layout for this thread's tools</p>
-        </div>
-      </header>
-      <ul className="workspace-presets__list">
+    <section aria-label="Set up this workspace" className="empty-start__group">
+      <h3 className="oct-section-label empty-start__label">Set up this workspace</h3>
+      <ul className="empty-start__rows">
         {props.presets.map((preset) => (
-          <li className="workspace-presets__entry" key={String(preset.id)}>
-            <div>
-              <strong>{preset.displayName}</strong>
-              <p>{preset.summary}</p>
-              <p className="workspace-presets__panes">
-                <span>Opens</span>
-                {preset.panes.map((pane) => {
+          <li className="empty-start__row empty-start__row--preset" key={String(preset.id)}>
+            <LayoutTemplate aria-hidden="true" className="empty-start__icon" size={16} />
+            <span className="empty-start__text">
+              <span className="empty-start__name">{preset.displayName}</span>
+              <span className="empty-start__summary">{preset.summary}</span>
+              <span className="empty-start__opens">
+                <span>Opens:</span>
+                {preset.panes.map((pane, index) => {
                   const face = PANE_FACES[pane];
                   return (
-                    <OctantBadge key={pane} variant="secondary">
+                    <span className="empty-start__pane" key={pane}>
+                      {index === 0 ? null : <span aria-hidden="true">·</span>}
                       <face.Icon aria-hidden={true} size={12} />
                       {face.label}
-                    </OctantBadge>
+                    </span>
                   );
                 })}
-              </p>
-            </div>
+              </span>
+            </span>
             <OctantButton
               aria-label={`Apply ${preset.displayName}`}
+              className="empty-start__apply"
               disabled={props.busy}
               onClick={() => props.onApply(preset)}
-              size="sm"
+              size="xs"
               type="button"
-              variant="default"
+              variant="outline"
             >
               Apply
             </OctantButton>

@@ -1,13 +1,6 @@
 import type { ScaffoldEntry, ScaffoldRun } from "@octant/contracts/scaffolds";
 import { planScaffold } from "@octant/domain";
-import {
-  ChevronRight,
-  Code2,
-  Globe,
-  type IconComponent,
-  Sparkles,
-  TabletSmartphone,
-} from "../ui/icons";
+import { ChevronRight, Code2, Globe, type IconComponent, TabletSmartphone } from "../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -54,44 +47,36 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
         });
 
   return (
-    <section aria-label="Start a project" className="scaffolds">
-      <header className="scaffolds__header">
-        <span className="start-card__tile">
-          <Sparkles aria-hidden="true" size={16} />
-        </span>
-        <div className="start-card__heading">
-          <h3 className="start-card__title">Start a project</h3>
-          <p className="start-card__subtitle">Start from a template</p>
-        </div>
-      </header>
-
-      <ul className="scaffolds__list">
+    <section aria-label="Start from a template" className="empty-start__group">
+      <h3 className="oct-section-label empty-start__label">Start from a template</h3>
+      <ul className="empty-start__rows">
         {props.entries.map((candidate) => {
           const id = String(candidate.id);
           const runnable = props.runnable.get(id) === true;
           const KindIcon = KIND_ICONS[candidate.target];
           return (
-            <li className="scaffolds__entry" key={id}>
+            <li className="empty-start__row-item" key={id}>
               <OctantButton
                 aria-pressed={selected === id}
-                className="scaffolds__entry-button"
+                className="empty-start__row empty-start__row--action"
                 disabled={!runnable || props.busy}
                 onClick={() => setSelected(selected === id ? undefined : id)}
                 type="button"
                 variant="bare"
               >
-                <KindIcon aria-hidden={true} className="scaffolds__entry-icon" size={16} />
-                <span className="scaffolds__entry-text">
-                  <span className="scaffolds__entry-name">{candidate.displayName}</span>
-                  <span className="scaffolds__entry-summary">{candidate.summary}</span>
+                <KindIcon aria-hidden={true} className="empty-start__icon" size={16} />
+                <span className="empty-start__text">
+                  <span className="empty-start__name">{candidate.displayName}</span>
+                  {runnable ? (
+                    <span className="empty-start__summary">{candidate.summary}</span>
+                  ) : (
+                    <span className="empty-start__summary empty-start__summary--blocked">
+                      Needs {candidate.requiresTool}, which is not on this machine.
+                    </span>
+                  )}
                 </span>
-                <ChevronRight aria-hidden={true} className="scaffolds__entry-chevron" size={16} />
+                <ChevronRight aria-hidden={true} className="empty-start__chevron" size={16} />
               </OctantButton>
-              {runnable ? null : (
-                <p className="scaffolds__entry-blocked">
-                  Needs {candidate.requiresTool}, which is not on this machine.
-                </p>
-              )}
             </li>
           );
         })}

@@ -1,5 +1,5 @@
 import { decodeScaffoldEntry } from "@octant/contracts/scaffolds";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ScaffoldPicker } from "./ScaffoldPicker";
@@ -59,6 +59,15 @@ describe("choosing a scaffold to start a project from", () => {
 
     expect(screen.getByRole("button", { name: /Native Swift package/ })).toBeDisabled();
     expect(screen.getByText(/Needs swift, which is not on this machine/)).toBeInTheDocument();
+  });
+
+  it("shows a template this machine cannot run as a row whose description is the reason", () => {
+    picker();
+
+    const native = screen.getByRole("button", { name: /Native Swift package/ });
+    const reason = within(native).getByText(/Needs swift, which is not on this machine/);
+    expect(reason).toHaveClass("empty-start__summary--blocked");
+    expect(native).not.toHaveTextContent("A Swift package the Apple toolchain builds directly");
   });
 
   it("gives each kind of project its own glyph and keeps the row's name readable", () => {

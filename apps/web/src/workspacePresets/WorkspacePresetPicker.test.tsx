@@ -26,6 +26,7 @@ describe("choosing a workspace preset", () => {
     picker();
 
     const entry = screen.getByRole("listitem");
+    expect(entry).toHaveTextContent("Opens:");
     expect(within(entry).getByText("Overview")).toBeInTheDocument();
     expect(within(entry).getByText("Browser")).toBeInTheDocument();
     expect(within(entry).getByText("Side chat")).toBeInTheDocument();
@@ -33,12 +34,12 @@ describe("choosing a workspace preset", () => {
     expect(entry.querySelector(".octant-icon-globe")).not.toBeNull();
   });
 
-  it("applies the preset from a primary action", async () => {
+  it("applies the preset from a secondary action, keeping the block to no filled accent", async () => {
     const user = userEvent.setup();
     const { onApply } = picker();
 
     const apply = screen.getByRole("button", { name: "Apply Design studio" });
-    expect(apply).toHaveAttribute("data-variant", "default");
+    expect(apply).toHaveAttribute("data-variant", "outline");
     await user.click(apply);
 
     expect(onApply).toHaveBeenCalledWith(designStudio);
