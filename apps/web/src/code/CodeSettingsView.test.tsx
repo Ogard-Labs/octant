@@ -54,6 +54,26 @@ describe("CodeSettingsView", () => {
     expect(update.mock.lastCall?.[0]).not.toHaveProperty("coordinatorStarting");
   });
 
+  it("saves where workers are listed from two checkboxes, both off by default", async () => {
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(<CodeSettingsView onUpdate={update} settings={settings as never} />);
+    const user = userEvent.setup();
+    const group = screen.getByRole("group", { name: "Show workers" });
+    const sidebar = within(group).getByRole("checkbox", { name: "In the sidebar" });
+    const board = within(group).getByRole("checkbox", { name: "On the board" });
+    expect(sidebar).not.toBeChecked();
+    expect(board).not.toBeChecked();
+
+    await user.click(sidebar);
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ coordinatorWorkerListing: { sidebar: true, board: false } }),
+    );
+    await user.click(board);
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ coordinatorWorkerListing: { sidebar: true, board: true } }),
+    );
+  });
+
   it("returns Starting workers to the stored choice when the host refuses it", async () => {
     const update = vi.fn(async () => false);
     render(

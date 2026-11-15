@@ -1,3 +1,4 @@
+import { sidebarThreadsWithWorkers } from "../code/coordinatorWorkerListing";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1632,6 +1633,55 @@ describe("coordinators in a Project's thread list", () => {
     renderList();
     expect(screen.getByRole("button", { name: "Show workers of Backlog" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Bump the parser/ })).toBeNull();
+    sessionStorage.clear();
+  });
+
+  it("marks a listed worker with the worker mark, named for its coordinator", () => {
+    sessionStorage.clear();
+    render(
+      <ProjectThreadList
+        groupCoordinators
+        onSelectThread={vi.fn()}
+        threads={[coordinator, { ...working, coordinatorTitle: "Backlog" }]}
+      />,
+    );
+    const mark = screen.getByRole("img", { name: "Worker of Backlog" });
+    expect(mark.closest("[data-thread-id]")).toHaveAttribute("data-thread-id", "worker-working");
+    sessionStorage.clear();
+  });
+
+  it("lists only the coordinator when its workers are hidden, and still counts every request", () => {
+    sessionStorage.clear();
+    render(
+      <ProjectThreadList
+        groupCoordinators
+        onSelectThread={vi.fn()}
+        threads={[{ ...coordinator, hiddenWorkers: { working: 2, attention: 1 } }]}
+      />,
+    );
+    expect(document.querySelectorAll("[data-thread-id]")).toHaveLength(1);
+    expect(
+      screen.getByRole("img", { name: "Backlog: 1 needs attention, 2 working" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Workers of Backlog are in its thread" }),
+    ).toBeDisabled();
+    sessionStorage.clear();
+  });
+
+  it("does not list a hidden worker because it is open", () => {
+    sessionStorage.clear();
+    const listed = sidebarThreadsWithWorkers([coordinator, working], undefined);
+    render(
+      <ProjectThreadList
+        activeThreadId="worker-working"
+        groupCoordinators
+        onSelectThread={vi.fn()}
+        openThreadIds={["worker-working"]}
+        threads={listed}
+      />,
+    );
+    expect(document.querySelector("[data-thread-id='worker-working']")).toBeNull();
     sessionStorage.clear();
   });
 });
