@@ -202,6 +202,7 @@ import { UsersIcon } from "@phosphor-icons/react/dist/csr/Users";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { WarningCircleIcon } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import { WifiSlashIcon } from "@phosphor-icons/react/dist/csr/WifiSlash";
+import { WrenchIcon } from "@phosphor-icons/react/dist/csr/Wrench";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { XCircleIcon } from "@phosphor-icons/react/dist/csr/XCircle";
 
@@ -474,6 +475,7 @@ export const Users = /* @__PURE__ */ makeIcon("users", UsersIcon);
 export const Volume1 = /* @__PURE__ */ makeIcon("volume1", SpeakerLowIcon);
 export const Volume2 = /* @__PURE__ */ makeIcon("volume2", SpeakerHighIcon);
 export const WifiOff = /* @__PURE__ */ makeIcon("wifi-off", WifiSlashIcon);
+export const Wrench = /* @__PURE__ */ makeIcon("wrench", WrenchIcon);
 export const X = /* @__PURE__ */ makeIcon("x", XIcon);
 export const XCircle = /* @__PURE__ */ makeIcon("xcircle", XCircleIcon);
 

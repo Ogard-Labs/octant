@@ -560,9 +560,9 @@ describe("a tool row that read outside content", () => {
         running
       />,
     );
-    const row = screen.getByRole("button", { name: /^web-fetch/ });
+    const row = screen.getByRole("button", { name: /^Web fetch/ });
     expect(row).toHaveAccessibleName(
-      "web-fetch, done, Outside content · instructions aimed at the agent, a false claim of authority",
+      "Web fetch, done, Outside content · instructions aimed at the agent, a false claim of authority",
     );
     const tag = within(row).getByText(/^Outside content ·/).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "false");
@@ -579,7 +579,7 @@ describe("a tool row that read outside content", () => {
         running
       />,
     );
-    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+    const tag = within(screen.getByRole("button", { name: /^Web fetch/ })).getByText(
       "Outside content · instructions aimed at the agent",
     ).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "true");
@@ -591,7 +591,7 @@ describe("a tool row that read outside content", () => {
 
   it("marks a plain outside read quietly with no finding", () => {
     render(<TurnActivityRows activity={rows({ labels: [] })} running />);
-    const tag = within(screen.getByRole("button", { name: /^web-fetch/ })).getByText(
+    const tag = within(screen.getByRole("button", { name: /^Web fetch/ })).getByText(
       "Outside content",
     ).parentElement;
     expect(tag).toHaveAttribute("data-quiet", "true");
@@ -848,5 +848,50 @@ describe("a tool row's kept input and output", () => {
     await userEvent.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("exit 0")).toBeVisible();
     expect(screen.queryByText(/kept/)).toBeNull();
+  });
+});
+
+describe("activity row marks and names", () => {
+  it("leads each row with an icon for its kind and ends it with a reserved status slot", () => {
+    render(<TurnActivityRows activity={mixed} running={false} />);
+    const bash = disclosure("Bash, done");
+    const read = disclosure("Read, failed");
+    expect(bash.querySelector("svg.turn-activity__kind-icon")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(bash.querySelector("svg.turn-activity__kind-icon")).not.toBe(
+      read.querySelector("svg.turn-activity__kind-icon"),
+    );
+    expect(disclosure("Thinking").querySelector("svg.turn-activity__kind-icon")).not.toBeNull();
+    for (const row of [bash, read]) {
+      expect(
+        row.querySelector(".turn-activity__status svg.turn-activity__status-icon"),
+      ).not.toBeNull();
+    }
+  });
+
+  it("never shows a raw internal tool name", () => {
+    render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [{ kind: "tool", id: "p", toolName: "provider-tool", state: "completed" }],
+        }}
+        running={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Provider tool, done" })).toBeInTheDocument();
+    expect(screen.queryByText("provider-tool")).not.toBeInTheDocument();
+  });
+
+  it("says how long thinking took when the turn recorded it", () => {
+    render(
+      <TurnActivityRows
+        activity={{ reasoning: "Weighing options.", rows: [], reasoningMs: 12_000 }}
+        running={false}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Thought for 12s" })).toBeInTheDocument();
   });
 });

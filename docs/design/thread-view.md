@@ -113,6 +113,30 @@ Code, wherever `TurnActivityRows` and `AssistantMessageBody` draw a turn:
   turn's tool rows are open; Settings › Chat › Stream replies still alone
   decides whether the partial answer shows, at every level.
 
+### Turn activity rows
+
+Every row of a turn's work leads with a 14px icon for its kind in the muted ink,
+in one column so the names line up: Thinking a brain, a tool call the mark of
+what it did (command, file read, edit, search, web, connector or subagent) and
+a generic wrench for a kind the transcript cannot read. The chevron stays at the
+start. A row ends in one 16px status slot that is reserved whether or not a mark
+shows, so a call that finishes swaps its mark and moves nothing: a spinner
+while it runs, a check when done, a cross in the danger ink when failed, a
+hollow circle when it never finished. The state word stays in the row's
+accessible name and in text only a screen reader reads.
+
+A tool's name is the tool's own display name. The host's internal kinds, which
+are kebab-case ("provider-tool"), read as words ("Provider tool"), and an
+`mcp__server__tool` name reads "tool (server)". Thinking says "Thought for 12s"
+when the turn recorded how long reasoning ran ("Thought briefly" under a
+second) and "Thinking" otherwise.
+
+A Code turn's checkout capture notes (the latest capture and its time, what the
+changes are measured from, a note that no paths were captured, and that a final
+comparison is missing) are one quiet, closed line below the reply: a camera
+icon and "Checkout capture · 19:04". The sentences sit inside it, so they do not
+read as part of the answer.
+
 The thread's own choice is a row of the thread's
 [info panel](workspace.md#thread-info) in Chat, Work, and Code. The
 row reads "Reply detail" with the level in effect ("Low") at its trailing

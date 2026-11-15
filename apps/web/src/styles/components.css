@@ -2006,6 +2006,24 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   text-overflow: ellipsis;
 }
 
+/* The kind mark leads every row in one 14px column so the names line up. */
+.turn-activity__kind-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+/* The state mark sits in a slot of its own width at the row's end, shown or
+   not, so a call that finishes swaps a glyph and moves nothing. */
+.turn-activity__status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  position: relative;
+}
+
 .turn-activity__outcome {
   flex: none;
   color: var(--oct-meta);
@@ -2058,6 +2076,21 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
 
 /* The journaled summary, expanded: detail-size mono on a surface set into
    the row, indented to where the name starts. */
+/* The checkout capture's sentences, under their one summary line: quiet text
+   indented to where the line's name starts, with no surface of their own. */
+.turn-activity__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px 40px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.turn-activity__notes > p {
+  margin: 0;
+}
+
 .turn-activity__body {
   display: flex;
   flex-direction: column;

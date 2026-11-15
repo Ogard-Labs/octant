@@ -3,16 +3,26 @@ import type { ToolOutsideContentMark } from "@octant/contracts/shield";
 import { SHIELD_WATCHER_LABEL_WORDS } from "@octant/domain/shield-watcher-policy";
 import { ChatRichText } from "../chat/ChatRichText";
 import {
+  Bot,
+  Brain,
   Check,
   ChevronRight,
   Circle,
-  CircleX,
   Clock3,
+  FileText,
+  Globe,
   LoaderCircle,
+  Pencil,
+  Plug,
+  Search,
   ShieldAlert,
   ShieldCheck,
   ShieldX,
+  Terminal,
+  Wrench,
+  X,
 } from "../ui/icons";
+import type { IconComponent } from "../ui/icons";
 import {
   useCallback,
   useEffect,
@@ -23,6 +33,7 @@ import {
   type ToggleEvent,
 } from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
+import { thinkingDurationLabel, toolDisplayName, toolKind, type ToolKind } from "./toolKinds";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
 import { RoutineReceiptCard } from "./RoutineReceiptCard";
@@ -120,8 +131,24 @@ function outcomeIcon(row: DisclosureRow, settled: boolean) {
     case "completed":
       return Check;
     case "failed":
-      return CircleX;
+      return X;
   }
+}
+
+/** The leading mark of a tool row: what kind of work it was, in the muted ink. */
+const KIND_ICONS: Readonly<Record<ToolKind, IconComponent>> = {
+  command: Terminal,
+  read: FileText,
+  edit: Pencil,
+  search: Search,
+  web: Globe,
+  mcp: Plug,
+  agent: Bot,
+  other: Wrench,
+};
+
+function rowKindIcon(row: DisclosureRow): IconComponent {
+  return row.kind === "tool" ? KIND_ICONS[toolKind(row.toolName)] : Bot;
 }
 
 type PublishedToolRow = Extract<TurnActivityRow, { kind: "tool" }> & {
@@ -146,11 +173,12 @@ function boundAccessibleSummary(text: string): string {
 }
 
 function collapsedName(row: DisclosureRow): string {
-  return row.kind === "tool" ? row.toolName : row.summary;
+  return row.kind === "tool" ? toolDisplayName(row.toolName) : row.summary;
 }
 
 function disclosureName(row: DisclosureRow, settled: boolean): string {
-  const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
+  const name =
+    row.kind === "tool" ? toolDisplayName(row.toolName) : boundAccessibleSummary(row.summary);
   const outside =
     row.kind === "tool" && row.outsideContent !== undefined
       ? `, ${outsideContentText(row.outsideContent)}`
@@ -277,6 +305,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   };
 
   const thinkingOpen = isOpen(THINKING_ID);
+  const thinkingLabel = thinkingDurationLabel(activity.reasoningMs);
   const thinkingPreview =
     opening.thinkingPreview && !thinkingOpen ? thinkingPreviewLine(activity.reasoning) : "";
   const thinkingDisclosure = hasReasoning ? (
@@ -287,12 +316,13 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
     >
       <summary
         aria-expanded={thinkingOpen}
-        aria-label="Thinking"
+        aria-label={thinkingLabel}
         onKeyDown={onSummaryKeyDown(THINKING_ID)}
         role="button"
       >
         <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
-        <span className="turn-activity__name">Thinking</span>
+        <Brain aria-hidden="true" className="turn-activity__kind-icon" size={14} />
+        <span className="turn-activity__name">{thinkingLabel}</span>
         {/* Hidden from assistive technology: the button's name stays
             "Thinking", and the same words are read from the body once it
             opens. */}
@@ -335,6 +365,7 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
               role="button"
             >
               <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
+              <Wrench aria-hidden="true" className="turn-activity__kind-icon" size={14} />
               <span className="turn-activity__name">{summary}</span>
             </summary>
             <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
@@ -461,6 +492,7 @@ function ActivityDisclosure(props: {
 }) {
   const { row } = props;
   const StateIcon = outcomeIcon(row, props.settled);
+  const KindIcon = rowKindIcon(row);
   const { onLoadRecords, open } = props;
   const state = row.state;
   useEffect(() => {
@@ -481,12 +513,19 @@ function ActivityDisclosure(props: {
         role="button"
       >
         <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
+        <KindIcon aria-hidden="true" className="turn-activity__kind-icon" size={14} />
         <span className="turn-activity__name">{collapsedName(row)}</span>
         {row.kind === "tool" && row.outsideContent !== undefined ? (
           <OutsideContentTag mark={row.outsideContent} />
         ) : null}
-        <span className="turn-activity__outcome">{outcomeLabel(row, props.settled)}</span>
-        <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={12} />
+        {/* One reserved slot, so a row that finishes changes its mark and
+            nothing beside it moves. The word is for assistive technology. */}
+        <span className="turn-activity__status">
+          <span className="visually-hidden turn-activity__outcome">
+            {outcomeLabel(row, props.settled)}
+          </span>
+          <StateIcon aria-hidden="true" className="turn-activity__status-icon" size={14} />
+        </span>
       </summary>
       <div className="turn-activity__body">
         {activityDetail(row, props)}

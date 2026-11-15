@@ -51,6 +51,8 @@ export interface TurnActivity {
   readonly rows: ReadonlyArray<TurnActivityRow>;
   /** Accumulated reasoning-channel text, in arrival order. */
   readonly reasoning: string;
+  /** How long the reasoning channel ran, when the host recorded start and end times. */
+  readonly reasoningMs?: number;
   /**
    * Whether the durable turn journaled more steps than the conversation page
    * carries back. Only replayed history can set this; a live turn is watched
