@@ -444,6 +444,41 @@ describe("ThreadMentionService resolve", () => {
     expect(code.readTranscript).not.toHaveBeenCalled();
   });
 
+  it("judges a send's preflight on the composer the renderer names, as its search did", async () => {
+    const asked: Array<string | undefined> = [];
+    const service = new ThreadMentionService({
+      directories: [
+        directory(
+          "code",
+          [thread(chatThreadId, { mode: "code" })],
+          new Map([[String(chatThreadId), [entry("the composer's own Project")]]]),
+        ),
+      ],
+      sidecars,
+      sideChatThreads: sideChatThreads(),
+      clock: () => "2026-08-14T11:00:00.000Z",
+      uuid: sequentialUuid(),
+      admitsMention: ({ readerThreadId }) => {
+        asked.push(readerThreadId);
+        return readerThreadId === String(workThreadId);
+      },
+    });
+
+    const result = await service.execute(
+      {
+        kind: "resolve-mentions",
+        requestId,
+        threadIds: [chatThreadId],
+        readerThreadId: String(workThreadId),
+      },
+      { windowId },
+    );
+
+    if (result.kind !== "mentions-resolved") throw new Error("expected resolve result");
+    expect(result.unavailable).toEqual([]);
+    expect(asked).toEqual([String(workThreadId)]);
+  });
+
   it("marks a thread whose transcript read failed as not-found", async () => {
     const { service } = createService([directory("chat", [thread(chatThreadId)])]);
 

@@ -229,7 +229,15 @@ export class ThreadMentionService {
         return decodeThreadMentionCommandResult({
           kind: "mentions-resolved",
           requestId: command.requestId,
-          ...(await this.#resolve(context.windowId, command.threadIds, context.readerThreadId)),
+          // A turn's own reader wins; the renderer's preflight names its
+          // composer as its search did. Either way only threads this window
+          // can Open are judged, so naming a reader never widens the set.
+          ...(await this.#resolve(
+            context.windowId,
+            command.threadIds,
+            context.readerThreadId ??
+              (command.readerThreadId === undefined ? undefined : String(command.readerThreadId)),
+          )),
         });
       case "open-side-chat":
         return await this.#openSideChat(context.windowId, command);

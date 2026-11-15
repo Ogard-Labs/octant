@@ -171,6 +171,20 @@ describe("useThreadMentions", () => {
     );
   });
 
+  it("asks the host to check a send's mentions for the composer's own thread, as its search did", async () => {
+    const user = userEvent.setup();
+    const client = stubClient();
+    const reader = decodeMentionableThreadId("00000000-0000-4000-8000-0000000003a1");
+    render(<Harness client={client} initialDraft="#[Release notes]" readerThreadId={reader} />);
+
+    await user.click(screen.getByRole("button", { name: "pick" }));
+    await user.click(screen.getByRole("button", { name: "resolve" }));
+
+    await waitFor(() =>
+      expect(client.resolve).toHaveBeenCalledWith(requestId, ["thread-1"], undefined, reader),
+    );
+  });
+
   it("shows no candidates when the host search fails", async () => {
     const user = userEvent.setup();
     const client = stubClient({ search: vi.fn().mockRejectedValue(new Error("offline")) });

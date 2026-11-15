@@ -42,6 +42,8 @@ export interface ThreadMentionClient {
     requestId: ThreadMentionRequestId,
     threadIds: ReadonlyArray<MentionableThreadId>,
     signal?: AbortSignal,
+    /** The composing thread; the preflight then judges the reach a send will. */
+    readerThreadId?: MentionableThreadId,
   ): Promise<{
     readonly mentions: ReadonlyArray<ResolvedThreadMention>;
     readonly unavailable: ReadonlyArray<UnavailableThreadMention>;
@@ -140,10 +142,15 @@ export function createThreadMentionClient(
       );
       return result.kind === "mentions-searched" ? result.candidates : [];
     },
-    async resolve(requestId, threadIds, signal) {
+    async resolve(requestId, threadIds, signal, readerThreadId) {
       if (threadIds.length === 0) return { mentions: [], unavailable: [] };
       const result = await execute(
-        { kind: "resolve-mentions", requestId, threadIds: [...threadIds] },
+        {
+          kind: "resolve-mentions",
+          requestId,
+          threadIds: [...threadIds],
+          ...(readerThreadId === undefined ? {} : { readerThreadId }),
+        },
         ...(signal === undefined ? [] : [signal]),
       );
       // A non-resolution is never treated as "resolved nothing quietly": every
