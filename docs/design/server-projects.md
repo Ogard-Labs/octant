@@ -21,8 +21,9 @@ the server, with the Work sidebar, composer, and thread view that open them
 chosen in Automation Center's editor or confirmed from a thread there and
 run by this host's scheduler ([Routines](#routines)); person-operated
 loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
-and the seam and host lifecycle for machines in the person's own cloud
-account, with no target plugin yet
+and the seam, host lifecycle, host-key pinning, suspended refusal and
+Settings screen for machines in the person's own cloud account, with no
+target plugin yet
 ([Machines in the person's cloud account](#machines-in-the-persons-cloud-account)).
 Remaining items are under [Not built yet](#not-built-yet).
 
@@ -153,7 +154,9 @@ checks never change registry/configuration or journal state.
   no SSH config, and forwards no agent to the server. Each connection runs
   with `BatchMode=yes` (no password or passphrase prompt),
   `StrictHostKeyChecking=yes` (an unknown or changed host key refuses; the
-  person accepts a new server's key by running `ssh` to it once themselves),
+  person accepts a new server's key by running `ssh` to it once themselves,
+  except for a cloud machine whose provider-reported key the host pinned:
+  [Machines in the person's cloud account](#machines-in-the-persons-cloud-account)),
   `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`,
   `PermitLocalCommand=no`, a ten-second connect timeout, and keepalives that
   end a silent connection after about thirty seconds.
@@ -718,6 +721,51 @@ service stays out of scope
   behind a Project and the state its provider last reported (`cloudMachine`
   on the catalog entry). Octant never claims a state or a cost it did not
   read.
+- **Host keys are pinned at creation.** A target reports the machine's SSH
+  host public keys with its endpoint (`hostKeys`, at most eight, OpenSSH
+  key types only, read from the provider's own record of the machine, never
+  by connecting to it). They are journaled in `created@1`, and from then on
+  every connection to that server (calls, terminals, previews, setup checks,
+  and the binding's own folder check) checks the host key against those keys
+  alone: the host writes them to a known hosts file in the private folder
+  its shared connections use and adds `UserKnownHostsFile` (that file),
+  `GlobalKnownHostsFile=none`, `KnownHostsCommand=none`,
+  `VerifyHostKeyDNS=no`, `CheckHostIP=no` and a fixed `HostKeyAlias`, with
+  `StrictHostKeyChecking=yes` and `UpdateHostKeys=no` unchanged, so no
+  setting of the person's (DNS SSHFP records included) can vouch for another
+  key. The pinned keys are part of the shared connection's identity, so a
+  connection opened before a pin was installed or changed is never reused
+  under it. So a
+  brand-new machine is accepted without a manual first login, and a machine
+  that answers with any other key is refused as `server-unreachable`. The
+  pin never changes after creation, whatever a later describe reports, and a
+  destroyed machine pins nothing, so an address the provider reuses is not
+  held to an old key. A target that reports no keys leaves the person's
+  known hosts to decide, as for any registered server. This is the one file
+  Octant writes for SSH; it holds only public keys the person's own
+  provider reported.
+- **A suspended machine refuses by name.** While a machine's last reported
+  state is `suspended`, a turn in its Project is refused before it launches,
+  and every call, terminal and preview stream to its server is refused
+  before ssh starts, with "This
+  machine is suspended; resume it first in Settings › Permissions ›
+  Servers." instead of failing as an unreachable server. The Project's row
+  in Settings › Permissions › Servers says so and offers Resume there.
+- **Reported cost only.** A target may report the provider's own hourly
+  cost (`costPerHour`: the amount as the provider wrote it, an ISO 4217
+  currency, and the provider record it came from), with creation or any
+  later answer. The host journals it with the answer and shows it as
+  reported, with its source and when it was read; it never estimates,
+  converts or totals a cost, and shows none when the provider reports none.
+- **Screen.** Settings › Permissions › Servers lists the machines (state,
+  target, when the provider last answered, reported cost, endpoint and
+  whether its key is pinned) with Refresh, Suspend, Resume, Bind Project and
+  Destroy, Destroy asking the host's one-time confirmation in a dialog, and
+  a Create form for an offered target (name, Project kind, folder, image,
+  size, region, the credential broker reference and an optional setup
+  script). The section is absent when no target is offered and no live
+  machine is on record, and when the host refuses the list, as it does for a
+  restricted device; every act is still the host's to refuse.
 
 _Rationale:_ creation is journaled first because the failure that matters is
 a paid machine nobody knows about; a refused or uncertain creation still
@@ -729,16 +777,11 @@ cannot stand in for the person's answer.
 
 - The first real target plugin for one cloud provider, with the launch class
   that confines it, its credential broker namespace and the person's
-  credential setup, and pinning the machine's provider-reported host key so
-  the strict host check accepts a new machine without a manual first login.
+  credential setup (the Create form takes a broker reference until then).
+  With no target plugin, the screen stays absent.
 - A key Octant makes for each machine (`octant-key` sign-in), installed at
   creation.
-- A suspended machine's Project refusing turns with a named reason until the
-  person resumes it (today its calls fail closed as `server-unreachable`), and
-  waking a suspended machine when the person opens its Project.
-- The provider's reported cost, shown only when the provider reports it.
-- The Settings and Project interface, which stays absent until a target
-  plugin exists.
+- Waking a suspended machine when the person opens its Project.
 
 ## Person-operated dev-server previews
 

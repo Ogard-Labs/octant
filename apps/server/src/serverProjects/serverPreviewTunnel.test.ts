@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { ServerPreviewTunnels, serverPreviewSshArguments } from "./serverPreviewTunnel";
 
@@ -8,7 +11,10 @@ const owned: ServerPreviewTunnels[] = [];
 afterEach(async () => {
   await Promise.all(owned.splice(0).map((tunnel) => tunnel.close()));
 });
-function fixture(now: () => number = () => Date.now()) {
+function fixture(
+  now: () => number = () => Date.now(),
+  extra: { readonly refuses?: () => string | undefined; readonly sshPath?: string } = {},
+) {
   let current = true;
   const closedOwners = new Set<string>();
   const records: unknown[] = [];
@@ -21,6 +27,8 @@ function fixture(now: () => number = () => Date.now()) {
       return true;
     },
     now,
+    ...(extra.refuses === undefined ? {} : { refuses: extra.refuses }),
+    ...(extra.sshPath === undefined ? {} : { sshPath: extra.sshPath }),
   });
   owned.push(tunnels);
   return {
@@ -53,6 +61,38 @@ describe("owned server previews", () => {
     revoke();
     expect(await tunnels.start("project", "window", 5173, 0)).toMatchObject({ kind: "refused" });
     expect(records).toEqual([]);
+  });
+  it("refuses a suspended machine before listening, and starts no ssh stream once it is suspended", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "octant-preview-ssh-"));
+    const marker = join(scratch, "spawned");
+    const ssh = join(scratch, "ssh");
+    writeFileSync(ssh, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`, { mode: 0o755 });
+    let suspended = true;
+    const { tunnels, records } = fixture(undefined, {
+      refuses: () => (suspended ? "This machine is suspended." : undefined),
+      sshPath: ssh,
+    });
+    try {
+      expect(await tunnels.start("project", "window", 5173, 0)).toEqual({
+        kind: "refused",
+        reason: "machine-suspended",
+      });
+      expect(records).toEqual([]);
+
+      suspended = false;
+      const opened = await tunnels.start("project", "window", 5173, 0);
+      if (opened.kind !== "tunnel") throw new Error("Expected a listening preview");
+      suspended = true;
+      await new Promise<void>((resolve) => {
+        const socket = connect(opened.view.localPort, "127.0.0.1");
+        socket.on("close", () => resolve());
+        socket.on("error", () => resolve());
+      });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
   it("refuses a stale capability before creating a listener or recording ownership", async () => {
     const { tunnels, records } = fixture();

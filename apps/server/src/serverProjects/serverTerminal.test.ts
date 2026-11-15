@@ -10,6 +10,21 @@ import {
   type ThrowawaySshd,
 } from "./throwawaySshd.test-support";
 
+describe("a terminal on a server the host refuses now", () => {
+  it("is refused with the host's reason before any ssh login is made", () => {
+    const connection = new ServerConnection({
+      agentSocket: () => undefined,
+      sshPath: "/nonexistent/ssh",
+      refuses: () => "This machine is suspended; resume it first.",
+    });
+    const loginCommand = vi.spyOn(connection, "loginCommand");
+    expect(
+      serverTerminalLogin(connection, { alias: "m-1.machines.test", user: "octant" }, "/w"),
+    ).toEqual({ kind: "refused", message: "This machine is suspended; resume it first." });
+    expect(loginCommand).not.toHaveBeenCalled();
+  });
+});
+
 describe.skipIf(!canRunThrowawaySshd)("a terminal in a server Project", () => {
   let sshd: ThrowawaySshd;
   let connection: ServerConnection;
@@ -39,6 +54,12 @@ describe.skipIf(!canRunThrowawaySshd)("a terminal in a server Project", () => {
     };
   }
 
+  const login = () => {
+    const opened = serverTerminalLogin(connection, { alias: sshd.alias, user: sshd.user }, folder);
+    if ("kind" in opened) throw new Error(opened.message);
+    return opened;
+  };
+
   const text = (terminals: TerminalService, id: string) =>
     terminals.attach(id).transcript.chunks.join("");
 
@@ -52,7 +73,7 @@ describe.skipIf(!canRunThrowawaySshd)("a terminal in a server Project", () => {
       columns: 100,
       rows: 30,
       credentialReferences: [],
-      server: serverTerminalLogin(connection, { alias: sshd.alias, user: sshd.user }, folder),
+      server: login(),
     });
     terminals.write("server-terminal-1", "pwd -P; echo done-$((40 + 2))\n");
     await vi.waitFor(() => expect(text(terminals, "server-terminal-1")).toContain("done-42"), {
@@ -73,7 +94,7 @@ describe.skipIf(!canRunThrowawaySshd)("a terminal in a server Project", () => {
       columns: 100,
       rows: 30,
       credentialReferences: [],
-      server: serverTerminalLogin(connection, { alias: sshd.alias, user: sshd.user }, folder),
+      server: login(),
     });
     terminals.write("server-terminal-2", "echo ready-$((1 + 1))\n");
     await vi.waitFor(() => expect(text(terminals, "server-terminal-2")).toContain("ready-2"), {
@@ -96,7 +117,7 @@ describe.skipIf(!canRunThrowawaySshd)("a terminal in a server Project", () => {
         columns: 100,
         rows: 30,
         credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
-        server: serverTerminalLogin(connection, { alias: sshd.alias, user: sshd.user }, folder),
+        server: login(),
       }),
     ).rejects.toThrow("no credentials");
   });

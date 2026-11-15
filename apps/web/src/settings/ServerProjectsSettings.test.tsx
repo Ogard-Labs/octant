@@ -5,6 +5,12 @@ import type {
   ServerProjectsView,
 } from "@octant/contracts/server-projects";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
+import type {
+  CloudMachine,
+  CloudMachinesCommand,
+  CloudMachinesCommandResult,
+  CloudMachinesView,
+} from "@octant/contracts/cloud-machines";
 import {
   decodeAggregateVersion,
   decodeProjectId,
@@ -15,7 +21,7 @@ import {
 import { ServerProject as ServerProjectSchema } from "@octant/contracts/server-projects";
 import { Schema } from "effect";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
-import { render, screen, within, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, within, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ServerAccessSettings, ServerProjectsSettings } from "./ServerProjectsSettings";
@@ -416,5 +422,190 @@ describe("ServerProjectsSettings", () => {
     await user.click(within(add).getByRole("button", { name: "Add server" }));
 
     expect(await screen.findByRole("form", { name: "Bind a folder on a server" })).toBeVisible();
+  });
+});
+
+describe("machines in the person's cloud account", () => {
+  const TARGET = { targetId: "example.machines/fake", displayName: "Example Cloud" };
+  const MACHINE: CloudMachine = {
+    id: "c1000000-0000-4000-8000-000000000001" as CloudMachine["id"],
+    targetId: TARGET.targetId,
+    name: "Build box",
+    recipe: { image: "ubuntu-24.04", size: "small", region: "eu-1" },
+    credentialReference: "0b7e5c1a-4c1e-4f3a-9d2b-7a6c5e4d3c2b",
+    folder: "/home/octant/work" as CloudMachine["folder"],
+    requestedAt: "2026-11-14T12:00:00.000Z" as CloudMachine["requestedAt"],
+    lifecycle: "created",
+    providerMachineId: "m-1",
+    state: "running",
+    stateObservedAt: "2026-11-14T12:05:00.000Z" as CloudMachine["requestedAt"],
+    endpoint: {
+      host: "m-1.machines.test" as NonNullable<CloudMachine["endpoint"]>["host"],
+      user: "octant" as NonNullable<CloudMachine["endpoint"]>["user"],
+      hostKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeHostKey"],
+    },
+    costPerHour: {
+      amount: "0.0179",
+      currency: "USD",
+      source: "Example Cloud price list",
+      observedAt: "2026-11-14T12:00:00.000Z" as CloudMachine["requestedAt"],
+    },
+  };
+
+  function cloudSetup(options: {
+    readonly cloud: CloudMachinesView | "refused";
+    readonly projects?: ServerProjectsView;
+    readonly answer?: (command: CloudMachinesCommand) => CloudMachinesCommandResult;
+  }) {
+    const cloudMachinesRead = vi.fn(async () => {
+      if (options.cloud === "refused")
+        throw new Error("Cloud machines are reached only at this computer.");
+      return options.cloud;
+    });
+    const cloudMachinesCommand = vi.fn(
+      async (sent: CloudMachinesCommand): Promise<CloudMachinesCommandResult> =>
+        options.answer?.(sent) ?? {
+          kind: "cloud-machines-updated",
+          view: options.cloud === "refused" ? { targets: [], machines: [] } : options.cloud,
+        },
+    );
+    const projects = options.projects ?? { projects: [] };
+    const user = userEvent.setup();
+    render(
+      <ServerProjectsSettings
+        client={{
+          read: async () => projects,
+          command: async () => ({ kind: "server-projects-updated", view: projects }),
+          cloudMachinesRead,
+          cloudMachinesCommand,
+        }}
+        servers={{ read: async () => ({ servers: [WEB], sshAgent: "available" as const }) }}
+      />,
+    );
+    return { cloudMachinesRead, cloudMachinesCommand, user };
+  }
+
+  it("is absent when no cloud machine plugin is offered and nothing is on record, and when the host refuses the list", async () => {
+    const empty = cloudSetup({ cloud: { targets: [], machines: [] } });
+    await screen.findByText("Projects on your servers");
+    await waitFor(() => expect(empty.cloudMachinesRead).toHaveBeenCalled());
+    expect(screen.queryByText("Machines in your cloud account")).toBeNull();
+    cleanup();
+
+    const refused = cloudSetup({ cloud: "refused" });
+    await screen.findByText("Projects on your servers");
+    await waitFor(() => expect(refused.cloudMachinesRead).toHaveBeenCalled());
+    expect(screen.queryByText("Machines in your cloud account")).toBeNull();
+    expect(screen.queryByRole("form", { name: "Create a cloud machine" })).toBeNull();
+  });
+
+  it("lists each machine with its reported state, cost and pinned key, and destroys only after the host's one confirmation", async () => {
+    const { cloudMachinesCommand, user } = cloudSetup({
+      cloud: { targets: [TARGET], machines: [MACHINE] },
+      answer: (sent) =>
+        sent.kind === "request-cloud-machine-destroy"
+          ? {
+              kind: "cloud-machine-destroy-confirmation",
+              machineId: MACHINE.id,
+              name: MACHINE.name,
+              confirmation: "once-for-build-box",
+              expiresAt: "2026-11-14T12:10:00.000Z" as CloudMachine["requestedAt"],
+            }
+          : { kind: "cloud-machines-updated", view: { targets: [TARGET], machines: [MACHINE] } },
+    });
+    const list = await screen.findByRole("list", { name: "Cloud machines" });
+    const row = within(list).getByText("Build box").closest("li");
+    if (row === null) throw new Error("Expected the machine's row");
+    expect(row.textContent).toContain("Running · Example Cloud · last seen");
+    expect(row.textContent).toContain(
+      "0.0179 USD per hour, as reported by Example Cloud price list",
+    );
+    expect(row.textContent).toContain("host key pinned as the provider reported it");
+
+    await user.click(within(row).getByRole("button", { name: "Suspend Build box" }));
+    expect(cloudMachinesCommand).toHaveBeenLastCalledWith({
+      kind: "suspend-cloud-machine",
+      machineId: MACHINE.id,
+    });
+
+    await user.click(within(row).getByRole("button", { name: "Destroy Build box" }));
+    expect(cloudMachinesCommand).toHaveBeenLastCalledWith({
+      kind: "request-cloud-machine-destroy",
+      machineId: MACHINE.id,
+    });
+    const dialog = await screen.findByRole("dialog", { name: "Destroy Build box?" });
+    await user.click(within(dialog).getByRole("button", { name: "Destroy machine" }));
+    expect(cloudMachinesCommand).toHaveBeenLastCalledWith({
+      kind: "destroy-cloud-machine",
+      machineId: MACHINE.id,
+      confirmation: "once-for-build-box",
+    });
+  });
+
+  it("creates a machine from an offered target's recipe and shows the host's refusal as it arrived", async () => {
+    const { cloudMachinesCommand, user } = cloudSetup({
+      cloud: { targets: [TARGET], machines: [] },
+      answer: () => ({
+        kind: "cloud-machines-refused",
+        reason: "credential-unavailable",
+        message: "The cloud account's credential is not available from the credential broker.",
+      }),
+    });
+    const form = await screen.findByRole("form", { name: "Create a cloud machine" });
+    await user.type(within(form).getByLabelText("Machine and Project name"), "Build box");
+    await user.type(within(form).getByLabelText("Folder on the machine"), "/home/octant/work");
+    await user.type(within(form).getByLabelText("Image"), "ubuntu-24.04");
+    await user.type(within(form).getByLabelText("Size"), "small");
+    await user.type(within(form).getByLabelText("Region"), "eu-1");
+    await user.type(
+      within(form).getByLabelText("Cloud account credential reference"),
+      "0b7e5c1a-4c1e-4f3a-9d2b-7a6c5e4d3c2b",
+    );
+    await user.click(within(form).getByRole("button", { name: "Create machine" }));
+
+    expect(cloudMachinesCommand).toHaveBeenCalledWith({
+      kind: "create-cloud-machine",
+      targetId: TARGET.targetId,
+      name: "Build box",
+      folder: "/home/octant/work",
+      credentialReference: "0b7e5c1a-4c1e-4f3a-9d2b-7a6c5e4d3c2b",
+      recipe: { image: "ubuntu-24.04", size: "small", region: "eu-1" },
+    });
+    expect(
+      await within(form).findByText(
+        "The cloud account's credential is not available from the credential broker.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("names a suspended machine on its Project and resumes it from there", async () => {
+    const suspended = { ...MACHINE, state: "suspended" as const, projectId: SITE.id };
+    const { cloudMachinesCommand, user } = cloudSetup({
+      cloud: { targets: [TARGET], machines: [suspended] },
+      projects: {
+        projects: [
+          {
+            ...SITE,
+            cloudMachine: {
+              machineId: MACHINE.id,
+              targetId: TARGET.targetId,
+              state: "suspended",
+              stateObservedAt: "2026-11-14T12:05:00.000Z" as CloudMachine["requestedAt"],
+            },
+          },
+        ],
+      },
+    });
+    const projectList = await screen.findByRole("list", { name: "Server Projects" });
+    expect(
+      within(projectList).getByText(/This machine is suspended; resume it first/),
+    ).toBeTruthy();
+    await user.click(
+      within(projectList).getByRole("button", { name: "Resume the machine for Website" }),
+    );
+    expect(cloudMachinesCommand).toHaveBeenCalledWith({
+      kind: "resume-cloud-machine",
+      machineId: MACHINE.id,
+    });
   });
 });

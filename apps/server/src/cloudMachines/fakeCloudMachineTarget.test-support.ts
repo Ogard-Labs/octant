@@ -24,8 +24,22 @@ export function fakeCloudMachineTarget(
      * once, as a provider that finishes an act after it accepted it does.
      */
     readonly transitional?: boolean;
+    /** The host keys the provider reports with the endpoint; a later answer may report others. */
+    readonly hostKeys?: ReadonlyArray<string>;
+    readonly hostKeysAfterCreate?: ReadonlyArray<string>;
+    readonly costPerHour?: {
+      readonly amount: string;
+      readonly currency: string;
+      readonly source: string;
+    };
   } = {},
 ) {
+  const endpointOf = (providerMachineId: string, hostKeys: ReadonlyArray<string> | undefined) => ({
+    host: `${providerMachineId}.machines.test`,
+    user: "octant",
+    ...(hostKeys === undefined ? {} : { hostKeys }),
+  });
+  const cost = options.costPerHour === undefined ? {} : { costPerHour: options.costPerHour };
   const machines = new Map<string, "running" | "suspended" | "destroyed">();
   const calls: Array<{ readonly act: string; readonly credential: CloudCredentialHandle }> = [];
   let next = 0;
@@ -50,7 +64,11 @@ export function fakeCloudMachineTarget(
         machine: {
           providerMachineId: input.providerMachineId,
           state: answered,
-          endpoint: { host: `${input.providerMachineId}.machines.test`, user: "octant" },
+          endpoint: endpointOf(
+            input.providerMachineId,
+            options.hostKeysAfterCreate ?? options.hostKeys,
+          ),
+          ...cost,
         },
       };
     };
@@ -71,7 +89,8 @@ export function fakeCloudMachineTarget(
         machine: {
           providerMachineId,
           state: "running",
-          endpoint: { host: `${providerMachineId}.machines.test`, user: "octant" },
+          endpoint: endpointOf(providerMachineId, options.hostKeys),
+          ...cost,
         },
       };
     },
