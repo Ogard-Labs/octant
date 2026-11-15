@@ -158,7 +158,7 @@ describe("DraftThreadWorkspace", () => {
       }
     },
   );
-  it("lets a person fix the workers' level, Full access included, and set bounds while creating a coordinator", async () => {
+  it("puts a new coordinator's settings under the composer, and lets a person fix the workers' level, Full access included, and set bounds", async () => {
     const user = userEvent.setup();
     const onChoicesChange = vi.fn();
     render(
@@ -170,16 +170,44 @@ describe("DraftThreadWorkspace", () => {
         coordinator={{ projectId: codeProjectId, onCancel: () => {}, onChoicesChange }}
       />,
     );
-    const level = screen.getByRole("combobox", { name: "Workers start at" });
-    expect(level).toHaveTextContent("Workers start at this thread's level or lower");
-    await user.click(level);
-    // Base UI renders the popup's options a frame after the click; a slow runner needs the wait.
-    await user.click(
-      await screen.findByRole("option", { name: "Workers always start at Full access" }),
+    const settings = screen.getByRole("group", { name: "Coordinator settings" });
+    // The box the person types the work into comes before the settings.
+    expect(
+      screen.getByRole("textbox", { name: "First message" }).compareDocumentPosition(settings),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(settings).toHaveTextContent(
+      "Workers at this thread's level or lower · 30 check-ins an hour · 10 back-and-forths · 60 new workers an hour",
     );
-    expect(onChoicesChange).toHaveBeenLastCalledWith({ workerLevel: "full-access" });
-    await user.type(screen.getByRole("spinbutton", { name: "Rounds" }), "4");
-    expect(onChoicesChange).toHaveBeenLastCalledWith({ bounds: { rounds: 4 } });
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Change…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Coordinator settings" });
+    await user.click(within(dialog).getByRole("combobox", { name: "Workers start at" }));
+    // Base UI renders the popup's options a frame after the click; a slow runner needs the wait.
+    await user.click(await screen.findByRole("option", { name: "Full access" }));
+    await user.click(within(dialog).getByRole("button", { name: "Decrease Back-and-forths" }));
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(onChoicesChange).toHaveBeenLastCalledWith({
+      workerLevel: "full-access",
+      bounds: { rounds: 9 },
+    });
+  });
+  it("keeps a new coordinator's settings above the start screen's suggested prompts", () => {
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projects={projects}
+        projectId={codeProjectId}
+        startPresentation="home"
+        coordinator={{ projectId: codeProjectId, onCancel: () => {}, onChoicesChange: vi.fn() }}
+      />,
+    );
+    expect(
+      screen
+        .getByRole("group", { name: "Coordinator settings" })
+        .compareDocumentPosition(screen.getByRole("group", { name: "Suggested prompts" })),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
   it("keeps the context chips in the tray above the composer card with model controls below the prompt", () => {
     const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);

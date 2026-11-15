@@ -38,3 +38,28 @@
   justify-content: flex-end;
   gap: var(--oct-space-2);
 }
+
+/* What each number limits, under its name: the names alone ("Back-and-forths")
+   still left a person guessing what the number counts. */
+.coordinator-bounds-dialog__detail {
+  display: block;
+}
+
+/* The workers' level select takes the stepper column's place in its row and
+   needs room for its longest choice. */
+/* Wide enough for "This thread's level or lower": at 190px a render clipped
+   it with an ellipsis. On a phone the row stacks and the select takes the
+   dialog's width, since beside its label it had no room. */
+.coordinator-bounds-dialog__level {
+  width: calc(var(--oct-space-6) * 9);
+}
+
+@media (max-width: 480px) {
+  .coordinator-bounds-dialog__row--level {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .coordinator-bounds-dialog__level {
+    width: 100%;
+  }
+}

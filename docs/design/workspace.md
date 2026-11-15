@@ -393,15 +393,23 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
 - **Menus.** A Code Project's sidebar menu has **New coordinator**, which
   opens the ordinary Code draft under a "New coordinator" heading and makes the
   thread a coordinator once its creation is confirmed, before the first
-  message is sent. Under the heading the draft has **Workers start at** (this
-  thread's level or lower, or always at one named level, Full access included)
-  and three number fields for the coordinator's bounds (wakes an hour, rounds,
-  worker starts an hour), each empty for its default
-  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). A Code thread's row menu has **Make coordinator**, a submenu
+  message is sent. The heading says in one line what a coordinator does, with
+  **Start an ordinary thread instead** on its own line, and the composer comes
+  next. Directly under the composer, before the start screen's suggestions
+  and cards, one line states the coordinator's settings with
+  their defaults filled in (the workers' level, check-ins an hour,
+  back-and-forths, new workers an hour) and **Change…** opens **Coordinator
+  settings**: **Workers start at** (this thread's level or lower, or always at
+  one named level, Full access included) and a stepper per bound, each named
+  with what it limits and its default
+  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). The settings
+  sat above the composer as a select and three number fields until 2026-11-15;
+  most people keep the defaults, and the box for the work came after them. A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
-  **Coordinator limits…**, which opens a dialog with the three bounds and
-  Save; the **Wake when a message
+  **Coordinator limits…**, which opens the same dialog with the three bounds
+  and Save, without the workers' level, since the host refuses a later change
+  to it; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
