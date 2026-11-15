@@ -164,6 +164,9 @@ async function searchAcrossModes(
       threadId: thread.id,
       ...(match.anchorId === "" ? {} : { [anchorKey]: match.anchorId }),
       field: match.field,
+      ...(match.canvasTitle === undefined || match.canvasTitle.trim() === ""
+        ? {}
+        : { canvasTitle: match.canvasTitle.trim() }),
       title: thread.title,
       // A waiting or interrupted Code thread is listed with the live ones.
       lifecycle: thread.lifecycle === "archived" ? "archived" : "active",

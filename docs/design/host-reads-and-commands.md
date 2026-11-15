@@ -247,7 +247,8 @@ turn's prompt (its bytes live outside the journal and are not read), and a
 purged attachment leaves it. A Canvas is one `canvas` document filed under the
 thread its provenance names: its title and the text, titles, labels and cells
 of its blocks, read by field name (never an id, URL or colour); each version
-replaces the words, and a Canvas hit names its `canvasId` and no turn. Who may
+replaces the words, and a Canvas hit names its `canvasId` and `canvasTitle`
+and no turn. Who may
 read a Canvas is who may open that thread, so the listing rule above covers
 it. A title, prompt, or Work reply keeps at most its
 first 256 KB, and a turn's joined tool steps their newest 32 KB.

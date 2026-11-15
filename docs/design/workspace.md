@@ -2229,7 +2229,8 @@ sidebar and Archived group list.
 Every word must appear, and a quoted phrase must appear as written. Titles the
 current mode listed match at once; the host's hits follow, each naming its
 mode when the filter is All, `Tool output` when a tool's text matched, and
-`Canvas` when a Canvas the thread made matched (it opens the thread). A
+`Canvas` when a Canvas the thread made matched; a Canvas hit opens the Canvas
+itself, in its thread's mode and Project. A
 message or tool hit names the turn that holds it and opens the thread
 scrolled to that turn in every mode: Chat reads the page that ends with the
 turn, and Work and Code read earlier pages, one at a time, until it arrives.

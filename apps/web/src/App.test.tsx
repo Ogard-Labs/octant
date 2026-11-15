@@ -5326,6 +5326,61 @@ describe("App", () => {
     );
   });
 
+  it("opens the Canvas itself, in its thread's mode and Project, from a Canvas search hit", async () => {
+    const user = userEvent.setup();
+    const canvasId = "00000000-0000-4000-8000-0000000009c1";
+    const shellApi = client(codeShellBootstrap());
+    const threadSearchClient = {
+      search: vi.fn(async () => ({
+        status: "ready" as const,
+        search: {
+          query: "pricing",
+          scope: "all" as const,
+          truncated: false,
+          unavailable: [],
+          hits: [
+            {
+              mode: "code" as const,
+              threadId: codeThreadId,
+              field: "canvas" as const,
+              canvasId: canvasId as never,
+              canvasTitle: "Launch plan",
+              title: "Controller foundation",
+              lifecycle: "active" as const,
+              projectId,
+              updatedAt: "2026-11-15T10:00:00.000Z",
+              snippet: "Ship the pricing page on Friday.",
+            },
+          ],
+        },
+      })),
+    };
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+        threadSearchClient={threadSearchClient}
+      />,
+    );
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "pricing");
+    const hit = await screen.findByRole("option", { name: /Ship the pricing page/ });
+    expect(hit).toHaveTextContent("Canvas");
+    await user.click(hit);
+
+    await waitFor(() =>
+      expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain(canvasId),
+    );
+    expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain("Launch plan");
+  });
+
   it("opens a palette thread command from a non-active Project with the thread's own Project", async () => {
     const user = userEvent.setup();
     const bound = codeShellBootstrap();

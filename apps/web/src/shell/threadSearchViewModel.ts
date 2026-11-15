@@ -50,8 +50,9 @@ export interface ThreadSearchHit {
   readonly turnId?: string;
   /** Where the host found the text; absent on a title match made from the listed threads. */
   readonly field?: ThreadSearchField;
-  /** The Canvas whose words matched, on a `canvas` hit. */
+  /** The Canvas whose words matched, on a `canvas` hit, and its own title. */
   readonly canvasId?: string;
+  readonly canvasTitle?: string;
   readonly snippet?: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
 }
@@ -74,6 +75,7 @@ export interface ThreadSearchContentHit {
   readonly turnId?: string;
   readonly field?: ThreadSearchField;
   readonly canvasId?: string;
+  readonly canvasTitle?: string;
   readonly snippet: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
   readonly updatedAt?: string;
@@ -251,6 +253,7 @@ function toContentHit(
     ...(hit.turnId === undefined ? {} : { turnId: hit.turnId }),
     ...(hit.field === undefined ? {} : { field: hit.field }),
     ...(hit.canvasId === undefined ? {} : { canvasId: hit.canvasId }),
+    ...(hit.canvasTitle === undefined ? {} : { canvasTitle: hit.canvasTitle }),
     // A title match's snippet is the title the row already shows.
     ...(hit.field === "title" ? {} : { snippet: hit.snippet }),
     ...(hit.field === "title" || hit.matchRanges === undefined || hit.matchRanges.length === 0

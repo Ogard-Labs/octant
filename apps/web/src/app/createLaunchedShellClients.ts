@@ -171,6 +171,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly planClient: PlanClient | undefined;
   readonly shipClient: ShipClient | undefined;
   readonly workThreadClient: WorkThreadClient | undefined;
+  readonly threadSearchClient?: ThreadSearchClient | undefined;
   readonly workTurnClient: WorkTurnClient | undefined;
 }
 
@@ -391,7 +392,7 @@ export function createLaunchedShellClients(
       fetch,
       windowCapability: options.windowCapability,
     }),
-    threadSearchClient: createThreadSearchClient(port),
+    threadSearchClient: options.threadSearchClient ?? createThreadSearchClient(port),
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),

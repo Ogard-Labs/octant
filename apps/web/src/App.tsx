@@ -392,6 +392,7 @@ import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
 import { threadSearchAnswer, useTranscriptSearch } from "./shell/useTranscriptSearch";
+import type { ThreadSearchClient } from "@octant/client-runtime/thread-search-client";
 import type { ThreadSearchScope } from "./shell/threadSearchViewModel";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
@@ -479,6 +480,7 @@ import {
 import { useAppleSimulatorPaneOffer } from "./apple/useAppleSimulatorPaneOffer";
 import { useAndroidEmulatorPaneOffer } from "./android/useAndroidEmulatorPaneOffer";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { decodeCanvasId } from "@octant/contracts/canvas";
 import { resolveThreadHandOffClient } from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import {
@@ -595,6 +597,7 @@ export interface AppProps {
   readonly computerUseClient?: ComputerUseClient;
   readonly contextClient?: ContextClient;
   readonly workThreadClient?: WorkThreadClient;
+  readonly threadSearchClient?: ThreadSearchClient;
   readonly workTurnClient?: WorkTurnClient;
   readonly hostBridge?: OctantHostBridge;
   readonly hostClient?: HostClient;
@@ -1693,6 +1696,9 @@ function LaunchedShell(
         planClient: props.planClient,
         shipClient: props.shipClient,
         workThreadClient: props.workThreadClient,
+        ...(props.threadSearchClient === undefined
+          ? {}
+          : { threadSearchClient: props.threadSearchClient }),
         workTurnClient: props.workTurnClient,
       }),
     [
@@ -1716,6 +1722,7 @@ function LaunchedShell(
       props.planClient,
       props.projectWindowCapability,
       props.shipClient,
+      props.threadSearchClient,
       props.workThreadClient,
       props.workTurnClient,
     ],
@@ -8337,6 +8344,20 @@ function LaunchedShell(
             // server-authoritative workspace policy rejects.
             const hitProjectId =
               hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
+            // A Canvas hit opens the Canvas, in its thread's mode and Project
+            // (none for a Chat Canvas owned by a thread outside a Project),
+            // through the same open every Canvas card uses.
+            if (hit.field === "canvas" && hit.canvasId !== undefined) {
+              setRevealChatTurn(undefined);
+              setRevealThreadTurn(undefined);
+              void controller.openCanvas({
+                mode: hit.mode,
+                title: hit.canvasTitle ?? hit.title,
+                canvasId: decodeCanvasId(hit.canvasId),
+                projectId: hitProjectId ?? null,
+              });
+              return;
+            }
             if (hit.mode === "chat") {
               const threadId = decodeChatThreadId(hit.threadId);
               if (hit.turnId === undefined) {

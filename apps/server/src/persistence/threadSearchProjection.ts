@@ -797,6 +797,8 @@ export interface ThreadSearchMatch {
   /** Empty for a title match. */
   readonly anchorId: string;
   readonly field: ThreadSearchDocumentField;
+  /** On a `canvas` match, the Canvas's own title, which its document opens with. */
+  readonly canvasTitle?: string;
   readonly snippet: string;
   readonly matchRanges: ReadonlyArray<{ readonly start: number; readonly end: number }>;
 }
@@ -916,6 +918,7 @@ export function searchThreads(
         threadId: row.thread_id,
         anchorId: row.anchor_id,
         field: row.field,
+        ...(row.field === "canvas" ? { canvasTitle: row.body.split("\n", 1)[0] ?? "" } : {}),
         snippet: clipped.snippet,
         matchRanges: clipped.matchRanges,
       };

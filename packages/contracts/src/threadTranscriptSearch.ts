@@ -98,6 +98,8 @@ const ThreadSearchHitFields = {
   field: ThreadSearchField,
   /** The Canvas whose title or blocks matched, on a `canvas` hit. */
   canvasId: Schema.optional(CanvasId),
+  /** That Canvas's own title, so a client can open it by name. */
+  canvasTitle: Schema.optional(Schema.NonEmptyTrimmedString),
   /** When the thread last changed, so a client can order or label hits. */
   updatedAt: Schema.String,
 };

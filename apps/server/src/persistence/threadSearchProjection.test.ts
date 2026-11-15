@@ -218,6 +218,9 @@ describe("search across modes", () => {
         ]);
 
       expect(found("pricing friday")).toEqual([["canvas", ids.canvas]]);
+      expect(searchThreads(store.connection, "pricing", visible, 50).matches[0]?.canvasTitle).toBe(
+        "Launch plan",
+      );
       expect(found("launch plan")).toEqual([["canvas", ids.canvas]]);
       // A block's kind is structure, not words the Canvas shows.
       expect(found("rich-text")).toEqual([]);
