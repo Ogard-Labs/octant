@@ -11,6 +11,7 @@
  * `@octant/contracts/acp-agent-profiles`; the record below must hold a runtime
  * profile for every row there.
  */
+import { providerRunsAsItself } from "@octant/domain";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -691,8 +692,7 @@ const vibeProfile: AcpProviderProfile = {
     // it loads them. Telemetry, update checks, notifications, the voice and
     // narrator features, the keyring, and the agent allowlist stay as above.
     nativeSetup: (setup, launch) => {
-      const on =
-        setup.skills || setup.toolServers || setup.hooks || setup.projectCode || setup.webTools;
+      const on = providerRunsAsItself(setup);
       return {
         releasedGuards: [
           ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),

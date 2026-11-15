@@ -118,13 +118,18 @@ describe("ResearchRouter.resolve", () => {
     ).toEqual({ kind: "unavailable", reason: "native-research-unsupported" });
   });
 
-  it("automatic routing prefers SearXNG without exposing a forced native fallback path", () => {
+  it("automatic routing prefers the provider's own search and falls back to SearXNG", () => {
     const searxngSearch = vi.fn();
     const router = new ResearchRouter({
       searxngClient: { search: searxngSearch },
     });
 
-    const resolved = router.resolve(input({ routing: "automatic" }));
-    expect(resolved).toMatchObject({ kind: "ready", backend: "searxng" });
+    expect(router.resolve(input({ routing: "automatic" }))).toMatchObject({
+      kind: "ready",
+      backend: "provider-native",
+    });
+    expect(
+      router.resolve(input({ routing: "automatic", nativeResearch: "unsupported" })),
+    ).toMatchObject({ kind: "ready", backend: "searxng" });
   });
 });
