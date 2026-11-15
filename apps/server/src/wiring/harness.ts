@@ -54,6 +54,7 @@ import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSe
 import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckCommand";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
+import { createHostImageDescriber, modelLabelOf, windowSeesProject } from "./imageDescriber";
 import {
   createFollowUp,
   type FollowUpCreationDependencies,
@@ -146,6 +147,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
     | "providerUsageLimitsService"
+    | "providerAvailabilityMarks"
   > &
   Pick<
     HarnessStateWiring,
@@ -164,6 +166,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     FoundationsWiring,
     | "codeBoardEventStore"
     | "codeEvidence"
+    | "isProjectPolicyTargetAllowed"
     | "providerRuntimeRegistry"
     | "workThreadProjection"
     | "workTurnProjection"
@@ -489,9 +492,40 @@ export function wireHarness(deps: HarnessDependencies) {
               launchId: () => decodeEgressLaunchId(randomUUID()),
             },
           });
+  // Sees images: one describer for Code and Work, deciding on the same facts
+  // a coordinator worker's choice reads.
+  const imageDescriber = createHostImageDescriber({
+    persistence,
+    providerRuntimeRegistry,
+    nativeHarnessRoutingStore,
+    providerAvailabilityMarks: deps.providerAvailabilityMarks,
+    providerUsageLimitsService,
+    isProjectPolicyTargetAllowed: deps.isProjectPolicyTargetAllowed,
+    configuredDriverOptions: () => configuredDriverOptions,
+    providerDataDirectory,
+    spendCeiling,
+  });
   const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore,
     store: nativeHarnessRoutingStore,
+    windowSeesProject: (windowId, projectId) =>
+      windowSeesProject(
+        {
+          readProject: (id) => persistence.readProject(id),
+          readWorkspace: (id) => persistence.readWindowWorkspace(id)?.workspace,
+        },
+        windowId,
+        projectId,
+      ),
+    seesImages: (input) =>
+      imageDescriber.available({
+        projectId: input.projectId,
+        threadModel: modelLabelOf(
+          { persistence, providerRuntimeRegistry },
+          input.providerInstanceId,
+          input.modelId,
+        ),
+      }),
   });
   const followUpCreation: { current: FollowUpCreationDependencies | undefined } = {
     current: undefined,
@@ -1160,6 +1194,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
+    imageDescriber,
     shieldServerRoutes,
     shieldServerStore,
     serverProjectRoutes,

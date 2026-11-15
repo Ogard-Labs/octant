@@ -91,6 +91,12 @@ export interface CoordinatorServicePorts {
   readonly readRoles?: (projectId: ProjectId) => WorkerRoles;
   /** What the host knows about one role model for a worker in this Project. */
   readonly candidateFacts?: (project: Project, model: WorkerModelRef) => CoordinatorCandidateFacts;
+  /**
+   * Whether Sees images can describe an image for this Project now, on the
+   * same rules a described attachment and `look` use. Absent, the role's
+   * list is judged from the candidate facts alone.
+   */
+  readonly seesImagesAvailable?: (project: Project) => boolean;
   /** Records a provider as down for the next starts (its first request failed). */
   readonly markProviderDown?: (providerInstanceId: string) => void;
   /**
@@ -534,13 +540,15 @@ export class CoordinatorService {
         : known;
     };
     const seesImages = effectiveWorkerRoleSlot(roles, "vision")?.candidates ?? [];
-    return {
-      candidate: facts,
-      seesImagesAvailable: seesImages.some((candidate) => {
+    // A builder that cannot read images is given `look`, which only works
+    // when Sees images can take an image for this Project.
+    const seesImagesAvailable =
+      this.#ports.seesImagesAvailable?.(project) ??
+      seesImages.some((candidate) => {
         const fact = facts(candidate);
         return fact.notReady === undefined && fact.usageLimit === undefined && fact.allowed;
-      }),
-    };
+      });
+    return { candidate: facts, seesImagesAvailable };
   }
 
   #verdictLines(

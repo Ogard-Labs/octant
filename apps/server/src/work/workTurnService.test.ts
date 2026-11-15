@@ -3457,6 +3457,108 @@ describe("WorkTurnService", () => {
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("gives a model that cannot read images the words Sees images wrote, keeping the image on the turn", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000011");
+    const sent: Array<{
+      readonly attachments: ReadonlyArray<unknown>;
+      readonly context: ReadonlyArray<{ readonly text: string }>;
+    }> = [];
+    const asked: unknown[] = [];
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async (input) => {
+        asked.push(input.images.map((image) => image.name));
+        return {
+          status: "described",
+          images: input.images.map((image) => ({
+            attachmentId: image.attachmentId,
+            name: image.name,
+            describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+            text: "A sign-in form with a red error.",
+          })),
+        };
+      },
+      turnRuntime: {
+        run: async (input) => {
+          sent.push({ attachments: input.attachments ?? [], context: input.context ?? [] });
+          return { kind: "completed", response: "Read the description" };
+        },
+      },
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      prompt: "What is wrong here?",
+      attachmentIds: [attachmentId],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(asked).toEqual([["login.png"]]);
+    expect(sent[0]?.attachments).toEqual([]);
+    expect(sent[0]?.context.map((block) => block.text)).toContain(
+      "[Image login.png (attachment 30000000-0000-4000-8000-000000000011), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
+    );
+    const accepted = fixture.projection.lookup(ids.request);
+    expect(accepted?.attachments?.map((attachment) => String(attachment.attachmentId))).toEqual([
+      String(attachmentId),
+    ]);
+    expect(accepted?.describedImages).toEqual([
+      {
+        attachmentId: String(attachmentId),
+        name: "login.png",
+        describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+        description: "A sign-in form with a red error.",
+      },
+    ]);
+    // A later history rebuild or compaction reads the words with the message.
+    expect(
+      fixture.service
+        .sessionCompactionConversation(ids.thread)
+        .find((message) => message.role === "user")?.content,
+    ).toContain("A sign-in form with a red error.");
+  });
+
+  it("refuses an image for a model that cannot read it, with Sees images' reason, and journals nothing", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000012");
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async () => ({
+        status: "refused",
+        reason: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        prompt: "What is wrong here?",
+        attachmentIds: [attachmentId],
+      }),
+    ).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "unsupported",
+        message: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("does not send a discarded image on a later turn", async () => {
     const store = await attachmentStore();
     const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000003");
@@ -5844,6 +5946,7 @@ function serviceFixture(
     readonly prepareProductFeedbackForTurn?: WorkTurnServiceDependencies["prepareProductFeedbackForTurn"];
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
+    readonly describeImages?: WorkTurnServiceDependencies["describeImages"];
     readonly supportsModelSwitch?: () => boolean;
     readonly conversationInputTransfer?: WorkTurnServiceDependencies["conversationInputTransfer"];
     readonly contextHarness?: ContextHarnessService;
@@ -6041,6 +6144,7 @@ function serviceFixture(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    ...(options.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: options.supportsModelSwitch }),

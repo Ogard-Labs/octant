@@ -7,7 +7,8 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
-import { validateQuestionnaireAnswer } from "@octant/domain";
+import { describedImageText, validateQuestionnaireAnswer } from "@octant/domain";
+import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
   THREAD_DIALOGUE_TOOL_NAME,
@@ -599,6 +600,15 @@ interface PreparedChatTurn {
   readonly sideChatSourceReceipt?: SideChatSourceReceipt;
   readonly nativeSession?: ChatAttempt;
   readonly inputReceipt?: ConversationInputReceipt;
+  /** The images Sees images described for this attempt, journaled with it. */
+  readonly describedImages?: ChatAttempt["describedImages"];
+  /** The words the model gets for those images, sent with the person's message. */
+  readonly describedContext?: ReadonlyArray<string>;
+  /**
+   * The words as content rows, written in the same journal transaction as the
+   * attempt that names them, so a send refused before that leaves none behind.
+   */
+  readonly describedContents?: ReadonlyArray<PreparedChatContent>;
   /**
    * Set when the turn starts a new provider session with the thread's earlier
    * conversation handed over as text. The record is journaled with the turn's
@@ -622,6 +632,12 @@ interface PreparedChatTurn {
 export interface ChatServiceExecutionContext {
   /** Host-only revalidation after asynchronous preparation, before durable admission. */
   readonly admissionCurrent?: () => boolean;
+  /**
+   * Whether the request that sent a turn still stands (its window's authority
+   * and the request itself), read only while Sees images describes the
+   * turn's images, so a revoked or abandoned send sends no further image.
+   */
+  readonly imagesCurrent?: () => boolean;
   /**
    * A renderer window the caller speaks for; absent for host-owned callers
    * (usage-limit recovery) that have no window to attach.
@@ -753,6 +769,15 @@ export interface ChatServiceOptions {
    */
   readonly stopConfirmationMs?: number;
   readonly providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
+  /**
+   * Sees images: describes a turn's images for a model that cannot read
+   * them, or refuses with the reason. Absent, such a turn is refused as before.
+   */
+  readonly describeImages?: (input: {
+    readonly thread: ChatThread;
+    readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
+  }) => Promise<TurnImagesDescription>;
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
@@ -1176,6 +1201,7 @@ export class ChatService {
   readonly #stopConfirmationMs: number;
   readonly #providerRuntimeRegistry?: ProviderRuntimeRegistryLike;
   readonly #resolveAppManagedTools?: ChatServiceOptions["resolveAppManagedTools"];
+  readonly #describeImages?: ChatServiceOptions["describeImages"];
   readonly #nativeHarness?: ChatServiceOptions["nativeHarness"];
   readonly #resolveExtensionSelectionContext?: ChatExtensionSelectionContextResolver;
   readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
@@ -1257,6 +1283,7 @@ export class ChatService {
     if (options.resolveAppManagedTools !== undefined) {
       this.#resolveAppManagedTools = options.resolveAppManagedTools;
     }
+    if (options.describeImages !== undefined) this.#describeImages = options.describeImages;
     this.#nativeHarness = options.nativeHarness;
     if (options.resolveExtensionSelectionContext !== undefined) {
       this.#resolveExtensionSelectionContext = options.resolveExtensionSelectionContext;
@@ -3077,6 +3104,9 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3133,7 +3163,13 @@ export class ChatService {
               : []),
           ],
         },
-        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
+        {
+          beforeEvents: (connection) => {
+            this.#writePreparedContent(connection, userMessage);
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
       );
       return {
         kind: "accepted" as const,
@@ -3279,6 +3315,9 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -3333,7 +3372,13 @@ export class ChatService {
               : []),
           ],
         },
-        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
+        {
+          beforeEvents: (connection) => {
+            this.#writePreparedContent(connection, userMessage);
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
       );
       return {
         kind: "accepted" as const,
@@ -3992,6 +4037,9 @@ export class ChatService {
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
         ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         ...(prepared.inputReceipt === undefined ? {} : { inputReceipt: prepared.inputReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
@@ -4012,17 +4060,28 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
-      this.#persistence.journal.append({
-        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-        expectedVersion: command.expectedVersion,
-        events: [
-          this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
-          this.#pending("chat.attempt-updated@1", {
-            kind: "attempt-updated",
-            attempt: nextAttempt,
-          }),
-        ],
-      });
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending("chat.thread-updated@1", {
+              kind: "thread-updated",
+              thread: updatedThread,
+            }),
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: nextAttempt,
+            }),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
+      );
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
@@ -4342,6 +4401,9 @@ export class ChatService {
         ...(prepared.sideChatSourceReceipt === undefined
           ? {}
           : { sideChatSourceReceipt: prepared.sideChatSourceReceipt }),
+        ...(prepared.describedImages === undefined
+          ? {}
+          : { describedImages: prepared.describedImages }),
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
       });
@@ -4354,17 +4416,28 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
-      this.#persistence.journal.append({
-        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-        expectedVersion: command.expectedVersion,
-        events: [
-          this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
-          this.#pending("chat.attempt-updated@1", {
-            kind: "attempt-updated",
-            attempt: nextAttempt,
-          }),
-        ],
-      });
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending("chat.thread-updated@1", {
+              kind: "thread-updated",
+              thread: updatedThread,
+            }),
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: nextAttempt,
+            }),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
+      );
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
@@ -4712,6 +4785,20 @@ export class ChatService {
       sinceRewind?.turn ?? (rewoundTail && keptTurns.length === 0 ? undefined : tailTurn);
     const previous = sinceRewind?.attempt ?? previousTurn?.attempts.at(-1);
     let attachments = await this.#loadFinalizedAttachments(thread.id, attachmentIds);
+    // A model that cannot read images gets the words Sees images writes for
+    // each one; the images stay on the turn for the record. With no model to
+    // describe them the turn is refused rather than sent without them.
+    const described = await this.#describeTurnImages(
+      thread,
+      probe,
+      attachments,
+      () =>
+        executionContext?.admissionCurrent?.() !== false &&
+        executionContext?.imagesCurrent?.() !== false,
+    );
+    if (described !== undefined) attachments = [];
+    const promptForModel =
+      described === undefined ? prompt : [...described.texts, prompt].join("\n\n");
     const researchRoute = this.#resolveResearchRoute(thread, settings, probe);
     this.#assertResearchAvailable(thread, researchRoute);
     const carriesAppTools =
@@ -5018,7 +5105,7 @@ export class ChatService {
       const planWith = (sideChatContext: string | undefined) =>
         this.#planContext(
           thread,
-          prompt,
+          promptForModel,
           currentRef,
           attachmentIds,
           previewSelections,
@@ -5064,6 +5151,13 @@ export class ChatService {
         executionThread: thread,
         ...(inputsCurrent === undefined ? {} : { inputsCurrent }),
         ...(inputReceipt === undefined ? {} : { inputReceipt }),
+        ...(described === undefined
+          ? {}
+          : {
+              describedImages: described.records,
+              describedContext: described.texts,
+              describedContents: described.contents,
+            }),
         ...(nativeSession === undefined ? {} : { nativeSession }),
         ...(handoff === undefined ? {} : { handoff: handoff.record }),
         context:
@@ -6191,7 +6285,14 @@ export class ChatService {
         ),
       );
     const transcriptEntries = selectedTurns.flatMap((turn) => {
-      const user = requireContent(turn.userMessageRef);
+      const stored = requireContent(turn.userMessageRef);
+      // An image Sees images described was read as its words, so the
+      // history carries them with the person's message.
+      const describedWords = describedWordsOf(turn, contentById);
+      const user =
+        describedWords.length === 0
+          ? stored
+          : { ...stored, body: [...describedWords, stored.body].join("\n\n") };
       const userSource = { kind: "message", referenceId: String(user.contentId) } as const;
       const userTokens = Math.max(16, Math.ceil(user.body.length / 4));
       const compactedUser = compactedEntry(userSource, user.body, userTokens);
@@ -6809,6 +6910,12 @@ export class ChatService {
               context: [
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,
+                // Planned with the person's message (it was sized with them),
+                // the words stand in for the images the model cannot read.
+                ...(input.prepared.describedContext ?? []).map((text) => ({
+                  kind: "user-message" as const,
+                  text,
+                })),
               ],
               onTurnEnded: (ended) => {
                 endedTurn = withPromptDigest(
@@ -7128,6 +7235,80 @@ export class ChatService {
         ),
       ],
     });
+  }
+
+  /**
+   * Describe a turn's images with Sees images when the thread's model cannot
+   * take them. Undefined when nothing needs describing; throws the refusal.
+   * The words go to the thread's content store, so they are purged with it.
+   */
+  async #describeTurnImages(
+    thread: ChatThread,
+    probe: ProviderProbeResult,
+    attachments: ReadonlyArray<ProviderAttachmentInput>,
+    admissionCurrent: (() => boolean) | undefined,
+  ): Promise<
+    | {
+        readonly records: NonNullable<ChatAttempt["describedImages"]>;
+        readonly texts: ReadonlyArray<string>;
+        readonly contents: ReadonlyArray<PreparedChatContent>;
+      }
+    | undefined
+  > {
+    if (attachments.length === 0 || this.#describeImages === undefined) return undefined;
+    // A turn that also carries a document is left to the ordinary check,
+    // which names the document the model cannot take.
+    if (!attachments.every((attachment) => attachment.mediaType.startsWith("image/"))) {
+      return undefined;
+    }
+    const model = probe.models.find((candidate) => String(candidate.id) === String(thread.modelId));
+    const takes =
+      probe.capabilities.nativeAttachments === "supported" &&
+      attachments.every((attachment) => {
+        const modality = attachmentMediaTypeToModality(attachment.mediaType);
+        return modality !== undefined && model?.inputModalities.includes(modality) === true;
+      });
+    if (takes) return undefined;
+    const describing = new AbortController();
+    const watch = setInterval(() => {
+      if (admissionCurrent?.() === false) describing.abort();
+    }, 250);
+    const outcome = await this.#describeImages({
+      thread,
+      signal: describing.signal,
+      images: attachments.map((attachment) => ({
+        attachmentId: attachment.attachmentId,
+        name: attachment.displayName,
+        mediaType: attachment.mediaType,
+        bytes: attachment.bytes,
+      })),
+    }).finally(() => clearInterval(watch));
+    if (outcome.status === "refused") {
+      throw new ChatServiceError({ category: "unsupported", message: outcome.reason });
+    }
+    const texts = outcome.images.map((image) =>
+      describedImageText({
+        name: image.name,
+        attachmentId: image.attachmentId,
+        describedBy: image.describedBy,
+        description: image.text,
+      }),
+    );
+    const contents = outcome.images.map((image, index) =>
+      this.#prepareContent(thread.id, "user", texts[index] ?? image.text),
+    );
+    const records = outcome.images.map((image, index) => {
+      const content = contents[index] ?? this.#prepareContent(thread.id, "user", image.text);
+      return {
+        attachmentId: decodeChatAttachmentId(image.attachmentId),
+        name: image.name,
+        describedBy: image.describedBy,
+        description: content.reference,
+      };
+    });
+    const [first, ...rest] = records;
+    if (first === undefined) return undefined;
+    return { records: [first, ...rest], texts, contents };
   }
 
   #prepareContent(
@@ -7503,6 +7684,9 @@ export class ChatService {
     return activeChatTurns(view.turns).flatMap((turn) => {
       const exchangeKey = String(turn.id);
       const user = contentById.get(turn.userMessageRef.contentId);
+      // As the turn's context entry sources it: the words Sees images wrote
+      // for the turn's images, then the person's message.
+      const describedWords = describedWordsOf(turn, contentById);
       const messages: Array<SessionConversationMessage> =
         user === undefined
           ? []
@@ -7511,7 +7695,7 @@ export class ChatService {
                 source: { kind: "message", referenceId: String(user.contentId) },
                 role: "user",
                 exchangeKey,
-                content: user.body,
+                content: [...describedWords, user.body].join("\n\n"),
               },
             ];
       const attempt = chatTurnAnsweredAttempt(turn);
@@ -7845,4 +8029,18 @@ export class ChatService {
       }),
     );
   }
+}
+
+/** The words Sees images wrote for a turn's images, from its latest attempt that has them. */
+function describedWordsOf(
+  turn: ChatTurn,
+  contentById: ReadonlyMap<string, { readonly body: string }>,
+): ReadonlyArray<string> {
+  return (
+    turn.attempts.findLast((attempt) => attempt.describedImages !== undefined)?.describedImages ??
+    []
+  ).flatMap((image) => {
+    const content = contentById.get(String(image.description.contentId));
+    return content === undefined ? [] : [content.body];
+  });
 }

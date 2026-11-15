@@ -109,6 +109,7 @@ export * from "./remoteServerGrants";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";
+export * from "./imageDescription";
 export * from "./harnessRetry";
 export * from "./nativeHarness";
 export * from "./nativeHarnessTranscript";

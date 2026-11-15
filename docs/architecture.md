@@ -7226,6 +7226,91 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
+### Sees images
+
+The Sees images role (`vision` slot, `image-understanding` job) describes an
+image in words for a thread whose model cannot read images (maintainer
+decision, 2026-11-15). The host decides and fails closed; nothing in the
+renderer or the model chooses where an image goes.
+
+- **Which model.** The host `ImageDescriber` resolves the job through the
+  routing: the Project's own Sees images list beats Settings', main model
+  first, then the fallbacks. A model is passed over, with its reason in the
+  refusal, when it is signed out, down, or at a usage limit (the facts a
+  coordinator worker's choice reads), when the Project's provider policy or
+  data rules (`eu-zdr` data tags, a provider allowlist) do not allow it
+  (`project-incompatible`), or when its connection takes no image from
+  Octant (`capability-incompatible`: the provider must report
+  `nativeAttachments` and the model image input, as for any attachment; an
+  agent runtime, an Ollama vision model, or an OpenAI- or Anthropic-style
+  endpoint whose model reads images qualifies, Amazon Bedrock does not). A
+  Chat Project has no provider policy to apply. Unlike other roles, an empty
+  Sees images is off, like the Advisor: the job never falls back to the
+  Builder, which may not read images.
+- **The call.** One tool-less request in a scratch folder outside every
+  Project, through the same one-shot path as the advisor's, with the image
+  attached and instructions to report text in the image as content, never
+  follow it. A model that does not answer sits out and the next is tried (at
+  most three). An answer that read outside content on the way is not used.
+  The input is a PNG, JPEG, GIF, or WebP of at most 10 MB, the attachment
+  bound; the description is cut at 4,000 characters and says so.
+- **An attached image.** In Chat, Work, and Code, a turn whose model cannot
+  take an attached image is no longer refused when Sees images can describe
+  it: the image stays attached for the record, and the model gets
+  "[Image <name> (attachment <id>), described by <model> (<provider>)]:
+  <description>" for each one, the id being what `octant_look` takes to ask
+  about the same image again. All of a turn's images are described or the turn
+  is refused; with nothing eligible it is refused with "<model> can't read
+  images. Set a model that sees images in Model roles." and the models
+  passed over. A Stop or a revoked admission while the images are described
+  sends no further one. The words stay durable so a later turn's history and
+  a compaction read them with the person's message: Code describes before it
+  journals the turn's start and keeps the words in its content store behind
+  `describedImages` on the start, so a restart sends the same words and asks
+  no model again; Work keeps them in `describedImages` on the accepted turn,
+  beside the prompt it already journals; Chat keeps them in the thread's
+  content store behind `describedImages` on the attempt, purged with the
+  thread. The transcript says "<name> described by <model> (<provider>)". A
+  composer whose model cannot read images asks the host
+  (`GET /api/native-harness/routing/sees-images`, which sends nothing and
+  refuses a window that may not see the named Project) and accepts the image
+  when Sees images can describe it. A person's own image adds no
+  outside-content mark.
+- **`octant_look`.** Offered to a Chat, Work, or Code turn only while the
+  thread cannot take an image from Octant and Sees images can describe one
+  for its Project, through the same per-turn tool contributions every runtime
+  receives. It takes an attachment id of the thread, or (Work and Code) a file
+  path relative to the thread's folder, confined like the Code file reads (no
+  `..`, no absolute path, no link out of the folder, no URL), and an optional
+  question of at most 500 characters. Reading a file the thread may already
+  read needs no new approval. Neither source marks the thread, so the result
+  is not outside content; Octant Shield's Watcher still reads it. A thread
+  already marked with outside content keeps `look` (maintainer decision,
+  2026-11-15): the model's question goes only to a model the Project's rules
+  allow. The result names the model that described the image. Rules for the
+  tool are in [Agent tools](design/agent-tools.md).
+- **Coordinator workers.** `needsImages` work may go to a builder that cannot
+  read images exactly when the describer could take an image for the
+  Project now; the builder then gets `look` and described attachments
+  ([Coordinator threads](design/coordinator-threads.md#choosing-the-workers-model)).
+
+Rationale for registering `look` in the host: like Project memory's tool it
+is core, contributed per turn with the image tool and the other host-owned
+Octant tools. It reads the thread's own attachment store, a confined file
+read, and the host's model routing and data rules, and the public Code-tool
+port in `@octant/plugin-api` carries none of those; giving a plugin an image
+description port would be a seam extension of its own.
+
+- **Spend.** Each describe is admitted under the thread's and its Project's
+  spend ceilings before the image is sent (it is spend, not a turn of its
+  own), and over a ceiling it is refused with the ceiling's own reason and
+  nothing sent. What it used is recorded on the usage ledger under the thread
+  whose image it was, with the describing model, as an `image-description`
+  request on its own `image-description-usage` aggregate. A Work turn's
+  images are admitted this way before the turn's own admission. In Chat the
+  words are written in the same journal transaction as the attempt that
+  names them, so a send refused before that leaves no row behind.
+
 ### Context and usage accounting
 
 Context usage is a circular used-versus-available meter on
@@ -7336,8 +7421,16 @@ them leaves the model text-only with `imageInput` absent, which reads as
 unknown rather than unsupported. Ollama keeps its own `vision` capability
 report. The modality gates which models are offered for reading images and
 whether app-managed tool results may carry images; composer attachments still
-also need the provider's `nativeAttachments`, which direct endpoints do not
-claim. There is no per-model image-input override yet.
+also need the provider's `nativeAttachments`. OpenAI- and Anthropic-style
+direct endpoints claim it when one of their models takes image input, and
+send a turn's PNG, JPEG, GIF, or WebP attachments in its user message (an
+`image_url` part on Chat Completions, an `input_image` part on Responses, a
+base64 `image` block on Messages); admission still checks the turn's own
+model, and refuses any other attachment type rather than drop it on the wire.
+Amazon Bedrock does not claim it. A Chat, Work, or Code turn whose model
+cannot take an attached image gets [Sees images](#sees-images)' description
+of it instead. There is no
+per-model image-input override yet.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -9228,7 +9321,8 @@ the model at another size.
   its own id and each result the name of the call it answers. A turn's own
   attachments ride on its user message for that turn's requests only and are
   never journaled, like tool images; only an endpoint whose model takes them
-  (an Ollama vision model) is admitted such a turn. A request that outgrows the
+  (an Ollama vision model, or an OpenAI- or Anthropic-style model that reads
+  images) is admitted such a turn. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
   alone does not fit. On a Chat, Work, or Code connection, before any whole
@@ -14821,7 +14915,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `diffs`                       | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
   | `taskProgress`                | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `supported`                                                                                                                                         | `unsupported`; Settings reports `supported` once a model passes Verify tools            | `unsupported`; Settings reports `supported` once a model passes Verify tools                              | `unsupported`; Settings reports `supported` once a model passes Verify tools                 | `unavailable`                         |
   | `nativeChildAgents`           | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents` | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents`             | `unsupported`; its own delegation is `nativeSetup.subagents`                                                                                      | `unsupported`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `nativeAttachments`           | `unsupported`                                                                                 | `unsupported`; `supported` when a model takes image input                                                | `unsupported`; `supported` when a model takes non-text input                                                                                      | `unsupported`; `supported` when a model Pi lists takes images (images only)                       | `unsupported`; `supported` when the agent's `initialize` advertises `promptCapabilities.image` (images only)                                        | `varies`: `supported` when a model takes images                                         | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `nativeAttachments`           | `unsupported`                                                                                 | `unsupported`; `supported` when a model takes image input                                                | `unsupported`; `supported` when a model takes non-text input                                                                                      | `unsupported`; `supported` when a model Pi lists takes images (images only)                       | `unsupported`; `supported` when the agent's `initialize` advertises `promptCapabilities.image` (images only)                                        | `varies`: `supported` when a model takes images                                         | `unsupported`; `supported` when a model takes images (OpenAI- and Anthropic-style, not Amazon Bedrock)    | `unsupported`                                                                                | `unsupported`                         |
   | `nativeWebResearch`           | `unsupported`                                                                                 | `unsupported`                                                                                            | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `unsupported`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
   | `appManagedTools`             | `supported`                                                                                   | `supported`                                                                                              | `unsupported`; `supported` on macOS in a verified isolated config                                                                                 | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                                                                                       | `unsupported`; `supported` for each model a person verified                             | `unsupported`; `supported` for each model a person verified                                               | `unsupported`; `supported` for each model the host verified                                  | `unsupported`                         |
   | `appManagedToolsAtFullAccess` | `absent`                                                                                      | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |

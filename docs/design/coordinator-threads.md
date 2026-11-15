@@ -224,9 +224,11 @@ every `start`; the renderer and the agent decide nothing.
    filters), the Project's
    policy or data rules disallow it, an endpoint Octant runs has not proven its
    tools, or `needsImages` is set and it cannot read images while Sees images
-   has no model. Until Sees images describes images for such a model (not
-   built yet), image work can go to a model that cannot read images whenever
-   Sees images has a model. A review passes over models on the reviewed worker's provider
+   cannot describe one for this Project. With Sees images able to (a model in
+   the role the Project's rules allow, ready, and on a connection that takes
+   images from Octant), image work may go to a builder that cannot read
+   images: the builder is offered `look`, and an image attached to its turn
+   is described for it ([Architecture: Sees images](../architecture.md#sees-images)). A review passes over models on the reviewed worker's provider
    while one on another provider is left.
 4. **Answer.** The first model left starts. The host records whether it was
    the main model or the n-th fallback, and why ("main Opus 5.5 at usage limit
@@ -283,8 +285,7 @@ request clears both. A restart forgets them.
   card holds only host facts, provider-reported model names and names the
   person chose, so it never marks the coordinator.
 
-Not in this slice: describing images for a model that cannot see (`needsImages`
-only filters here), continuing a running worker on a fallback (**Continue on
+Not in this slice: continuing a running worker on a fallback (**Continue on
 the fallback if the model stops** is stored and not read), and an `escalate`
 reply. Rationale: fallback happens only at the start, so a running worker
 keeps its model, as threads do; the person's fallback order is the consent for
@@ -523,9 +524,10 @@ jobs, each a list with a main model and fallbacks, and two choices per role,
 **Ask before using** and **Continue on the fallback if the model stops**.
 Choosing by task and size, falling back at the start, borrowing the next
 tier, and asking before a role are built
-([Choosing the worker's model](#choosing-the-workers-model)). Continuing a
-running worker on the fallback, and describing images for a model that cannot
-see, are designed, not built.
+([Choosing the worker's model](#choosing-the-workers-model)), and Sees images
+describes an image for a worker whose model cannot read one
+([Architecture: Sees images](../architecture.md#sees-images)). Continuing a
+running worker on the fallback is designed, not built.
 
 ## Not in this design
 

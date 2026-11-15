@@ -6,6 +6,7 @@ import {
   type ProviderToolDefinition,
   type ProviderToolImage,
 } from "@octant/contracts";
+import { anthropicUserContent, promptImagesOf } from "./promptImages";
 import { Effect } from "effect";
 import {
   type AnthropicCompatibleEndpoint,
@@ -38,6 +39,10 @@ export interface AnthropicToolResult {
 export interface AnthropicHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
+  /** Images the person attached to this user message, sent with it as image blocks. */
+  readonly attachments?:
+    | ReadonlyArray<{ readonly mediaType: string; readonly bytes: Uint8Array }>
+    | undefined;
   readonly toolCalls?: readonly AnthropicToolCall[] | undefined;
   readonly toolResults?: readonly AnthropicToolResult[] | undefined;
 }
@@ -180,7 +185,11 @@ export function buildAnthropicMessagesBody(
       continue;
     }
     if (entry.toolCalls === undefined) {
-      messages.push({ role: entry.role, content: entry.text });
+      const images = entry.role === "user" ? promptImagesOf(entry.attachments) : [];
+      messages.push({
+        role: entry.role,
+        content: images.length === 0 ? entry.text : [...anthropicUserContent(entry.text, images)],
+      });
       continue;
     }
     messages.push({

@@ -99,7 +99,10 @@ function countStore() {
   return createCoordinatorCountStore(connection);
 }
 
-function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
+function harness(
+  slots: ReadonlyArray<NativeHarnessSlot>,
+  options: { readonly seesImagesAvailable?: () => boolean } = {},
+) {
   const threads = new Map<string, CodeThread>([
     [COORDINATOR, codeThread(COORDINATOR, { coordinator: true, messageWake: true })],
   ]);
@@ -174,6 +177,9 @@ function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
       contextTokens: 200_000,
       ...facts.get(String(model.modelId)),
     }),
+    ...(options.seesImagesAvailable === undefined
+      ? {}
+      : { seesImagesAvailable: options.seesImagesAvailable }),
     markProviderDown: (id) => downMarks.push(id),
     moveWorkerToModel: async (worker, model, choice) => {
       moves.push({ workerId: String(worker.id), model, choice });
@@ -477,6 +483,25 @@ describe("choosing a worker's model from the roles", () => {
     expect(h.service.rechooseAsBuilder(COORDINATOR, { needsImages: true })).toMatchObject({
       status: "chosen",
       resolved: { modelId: "astra" },
+    });
+  });
+
+  it("lets image work reach a builder that cannot read images only while Sees images can describe one", () => {
+    const able = harness([slot("default", [sonnet]), slot("vision", [haiku])], {
+      seesImagesAvailable: () => true,
+    });
+    able.facts.set("sonnet", { readsImages: false });
+    expect(able.service.rechooseAsBuilder(COORDINATOR, { needsImages: true })).toMatchObject({
+      status: "chosen",
+      resolved: { modelId: "sonnet" },
+    });
+    // The role lists a model, but the host cannot send it an image now.
+    const unable = harness([slot("default", [sonnet]), slot("vision", [haiku])], {
+      seesImagesAvailable: () => false,
+    });
+    unable.facts.set("sonnet", { readsImages: false });
+    expect(unable.service.rechooseAsBuilder(COORDINATOR, { needsImages: true })).not.toMatchObject({
+      status: "chosen",
     });
   });
 
