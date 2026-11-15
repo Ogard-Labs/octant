@@ -34,6 +34,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -69,6 +70,7 @@ import {
   CLAUDE_PLAN_EXIT_TOOL,
   CLAUDE_SUBAGENT_TOOL,
   claudeStoredTaskListEvents,
+  CLAUDE_WORKFLOW_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
   claudeToolUseStepId,
@@ -289,18 +291,6 @@ const CLAUDE_WITHHELD_TOOLS = [
   // no plan to hand over and nothing to leave.
   "EnterPlanMode",
   CLAUDE_PLAN_EXIT_TOOL,
-  // A workflow's agents report under the `Workflow` call, not an `Agent`
-  // call, so the child-run display cannot show them and the decoder refuses
-  // their task frames; offering it waits on that display.
-  "Workflow",
-  // Each of these wakes the model at a later time. A session lasts one turn,
-  // so a wake-up kept in memory never fires and the call's success would be
-  // untrue, and a durable one is written to the Project's own Claude files
-  // and fires in whatever later session opens there, unseen by this thread.
-  // Background commands and `Monitor` watches are held instead: the turn that
-  // started them stays open until they end (see `ClaudeHeldTurn`).
-  "CronCreate",
-  "ScheduleWakeup",
 ] as const;
 /**
  * Claude Code's tools that move the session's working directory into a git
@@ -342,6 +332,23 @@ export function claudeWorktreeTarget(
     ? resolve(managed, input.name)
     : managed;
 }
+/**
+ * Claude Code's tools that wake the model later (Claude Code 2.1.211's
+ * `sdk-tools`): `ScheduleWakeup` (a delay of one minute to one hour),
+ * `CronCreate` (a cron expression, once or recurring), and `CronList` and
+ * `CronDelete` over them. Octant answers each call itself from the thread's
+ * own schedule ({@link ProviderWakeupSchedule}) and the runtime runs none of
+ * them: its scheduler would keep a wake-up in a session that ends with the
+ * turn, or write a durable one to the Project's `.claude/scheduled_tasks.json`
+ * that fires in a later session Octant never sees. A session without such a
+ * schedule (Chat, Plan, a single-use session) does not hold them.
+ */
+const CLAUDE_WAKEUP_TOOLS = new Set<string>([
+  "ScheduleWakeup",
+  "CronCreate",
+  "CronList",
+  "CronDelete",
+]);
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
@@ -414,16 +421,23 @@ const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skil
 
 /**
  * The built-in tools a session with the full tool set does not hold: the
- * fixed list above, the person's own setup features they turned off, and
- * Claude's Artifact tool unless the session offers it.
+ * fixed list above, the person's own setup features they turned off,
+ * Claude's Artifact tool unless the session offers it, and the wake-up tools
+ * unless the host keeps a schedule for the session's thread.
  */
 export function claudeWithheldTools(
   setup: ProviderNativeSetup | undefined,
   offersArtifacts: boolean,
+  schedulesWakeups = false,
 ): readonly string[] {
   return [
     ...CLAUDE_WITHHELD_TOOLS,
-    ...(setup?.subagents === true ? [] : [CLAUDE_SUBAGENT_TOOL]),
+    ...(schedulesWakeups ? [] : [...CLAUDE_WAKEUP_TOOLS]),
+    // A workflow starts agents, so it rides the subagent switch. Starting
+    // one asks below Full access, unlike `Agent`: its script runs as
+    // JavaScript inside the runtime process, so the person sees the script
+    // first. Each agent's own tool calls then pass this gate on their own.
+    ...(setup?.subagents === true ? [] : [CLAUDE_SUBAGENT_TOOL, CLAUDE_WORKFLOW_TOOL]),
     ...(setup?.webTools === true ? [] : [...CLAUDE_WEB_TOOLS]),
     ...(setup?.skills === true ? [] : ["Skill"]),
     ...(offersArtifacts ? [] : [CLAUDE_ARTIFACT_TOOL]),
@@ -1307,6 +1321,102 @@ function deferred<A>(): DeferredValue<A> {
 
 function approvalReuseKey(toolName: string, digest: string): string {
   return `${toolName}:${digest}`;
+}
+
+/** A wake-up call Octant answers without asking: it reads or removes this thread's own. */
+function isUnaskedClaudeWakeupCall(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): boolean {
+  return (
+    toolName === "CronList" ||
+    toolName === "CronDelete" ||
+    (toolName === "ScheduleWakeup" && input.stop === true)
+  );
+}
+
+const claudeWakeupPrompt = (input: Readonly<Record<string, unknown>>): string =>
+  typeof input.prompt === "string" ? input.prompt : "";
+
+/**
+ * Octant's answer to one of Claude's wake-up calls, from the thread's own
+ * schedule, carrying the fields the runtime's own result would. The runtime's
+ * permission callback and pre-tool hook can only allow or refuse a call, so
+ * the answer reaches the model as the refusal's text: the runtime runs none
+ * of these calls and its scheduler never holds a wake-up. `answered` is false
+ * when Octant refused the request itself.
+ */
+async function answerClaudeWakeupCall(
+  wakeups: ProviderWakeupSchedule,
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+): Promise<{ readonly answered: boolean; readonly message: string }> {
+  const answer = (sentence: string, result: unknown) => ({
+    answered: true,
+    message: `${sentence} Octant holds this thread's wake-ups, not this session: one that comes due starts a turn in this thread, the person sees each one and can cancel it, and one missed while Octant was closed waits for the person instead of firing late. Result: ${JSON.stringify(result)}`,
+  });
+  const refused = (reason: string) => ({
+    answered: false,
+    message: `Octant did not do this: ${reason}`,
+  });
+  if (toolName === "CronList") {
+    const jobs = (await wakeups.list()).map((wakeup) => ({
+      id: wakeup.id,
+      cron: wakeup.schedule.kind === "cron" ? wakeup.schedule.cron : "",
+      humanSchedule:
+        wakeup.status === "missed"
+          ? `${wakeup.humanSchedule} (missed at ${wakeup.nextFireAt}; waiting for the person)`
+          : wakeup.humanSchedule,
+      prompt: wakeup.prompt,
+      recurring: wakeup.schedule.kind === "cron" && wakeup.schedule.recurring,
+      durable: true,
+    }));
+    return answer(`This thread has ${jobs.length} wake-up(s) waiting.`, { jobs });
+  }
+  if (toolName === "CronDelete") {
+    const id = typeof input.id === "string" ? input.id : "";
+    const cancelled = await wakeups.cancel(id);
+    return cancelled.status === "cancelled"
+      ? answer(`Cancelled wake-up ${id}.`, { id })
+      : refused(cancelled.reason);
+  }
+  if (toolName === "ScheduleWakeup" && input.stop === true) {
+    const cancelledWakeups = await wakeups.cancelDelayed();
+    return answer(`Ended the loop; cancelled ${cancelledWakeups} pending wake-up(s).`, {
+      stopped: true,
+      cancelledWakeups,
+    });
+  }
+  const scheduled =
+    toolName === "ScheduleWakeup"
+      ? await wakeups.schedule({
+          kind: "delay",
+          providerToolName: toolName,
+          delaySeconds: input.delaySeconds,
+          prompt: claudeWakeupPrompt(input),
+          ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
+        })
+      : await wakeups.schedule({
+          kind: "cron",
+          providerToolName: toolName,
+          cron: typeof input.cron === "string" ? input.cron : "",
+          recurring: input.recurring !== false,
+          prompt: claudeWakeupPrompt(input),
+        });
+  if (scheduled.status === "refused") return refused(scheduled.reason);
+  const { wakeup } = scheduled;
+  if (toolName === "ScheduleWakeup") {
+    return answer(`Scheduled wake-up ${wakeup.id} for ${wakeup.nextFireAt}.`, {
+      scheduledFor: Date.parse(wakeup.nextFireAt),
+      clampedDelaySeconds: scheduled.clampedDelaySeconds ?? 0,
+      wasClamped: scheduled.wasClamped === true,
+    });
+  }
+  const recurring = wakeup.schedule.kind === "cron" && wakeup.schedule.recurring;
+  return answer(
+    `Scheduled ${recurring ? "recurring job" : "one-shot task"} ${wakeup.id} (${wakeup.humanSchedule}); its next fire is ${wakeup.nextFireAt}.`,
+    { id: wakeup.id, humanSchedule: wakeup.humanSchedule, recurring, durable: true },
+  );
 }
 
 function denyClaudeToolRequest(
@@ -2424,6 +2534,7 @@ function makeConnection(
         readonly nativeArtifacts?: boolean;
         readonly nativeSetup?: ProviderNativeSetup;
         readonly compactionPoint?: ProviderCompactionPoint;
+        readonly wakeups?: ProviderWakeupSchedule;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -2600,8 +2711,10 @@ function makeConnection(
           : baseExecutionOptions;
         // Outside Plan the session holds Claude Code's whole built-in set
         // less what Octant withholds, so the gate below sees every tool.
+        // A single-use session starts no later turn, so it schedules none.
+        const wakeups = input.singleUse === true ? undefined : input.wakeups;
         const withheldTools = executionOptions.fullToolSet
-          ? claudeWithheldTools(nativeSetup, offersArtifacts)
+          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined)
           : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
@@ -2664,7 +2777,7 @@ function makeConnection(
           const target = claudeWorktreeTarget(toolInput, workingDirectory);
           if (target !== undefined && !sessionHolds(state, target)) state.worktrees.add(target);
         };
-        const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
+        const gateToolUse: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
           const deny = (message: string) =>
             denyClaudeToolRequest(activeState, request.toolUseId, message);
@@ -2861,7 +2974,7 @@ function makeConnection(
           }
           return decision;
         };
-        const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
+        const gatePreToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
           const activeState = callbackState;
           const deny = (message: string) =>
             denyClaudeToolRequest(activeState, request.toolUseId, message);
@@ -3076,6 +3189,54 @@ function makeConnection(
             return askThroughGrant(true);
           }
           return decide();
+        };
+        // A wake-up call passes the gate like any other tool, asking below
+        // Full access, and then Octant answers it from the thread's schedule
+        // in place of the runtime. Reading or removing one of the thread's
+        // own wake-ups answers without asking.
+        const answerWakeupCall = async (
+          toolUseId: string,
+          toolName: string,
+          toolInput: Readonly<Record<string, unknown>>,
+          schedule: ProviderWakeupSchedule,
+        ) => {
+          const activeState = callbackState;
+          const answer = await answerClaudeWakeupCall(schedule, toolName, toolInput);
+          const call = activeState?.context?.toolStates.get(toolUseId);
+          if (answer.answered && call !== undefined) call.answeredByOctant = true;
+          return denyClaudeToolRequest(activeState, toolUseId, answer.message);
+        };
+        const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
+          const decision = await gateToolUse(request);
+          if (
+            decision.behavior !== "allow" ||
+            wakeups === undefined ||
+            !CLAUDE_WAKEUP_TOOLS.has(request.toolName)
+          ) {
+            return decision;
+          }
+          return answerWakeupCall(request.toolUseId, request.toolName, request.input, wakeups);
+        };
+        const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
+          const decision = await gatePreToolUse(request);
+          if (
+            decision.behavior === "deny" ||
+            wakeups === undefined ||
+            !CLAUDE_WAKEUP_TOOLS.has(request.toolName) ||
+            typeof request.input !== "object" ||
+            request.input === null ||
+            Array.isArray(request.input)
+          ) {
+            return decision;
+          }
+          const toolInput = request.input as Readonly<Record<string, unknown>>;
+          if (
+            decision.behavior === "ask" &&
+            !isUnaskedClaudeWakeupCall(request.toolName, toolInput)
+          ) {
+            return decision;
+          }
+          return answerWakeupCall(request.toolUseId, request.toolName, toolInput, wakeups);
         };
         const artifactEnvironment = offersArtifacts
           ? claudeArtifactLaunchEnvironment(environment.environment)
@@ -3392,6 +3553,7 @@ function makeConnection(
               ...(input.compactionPoint === undefined
                 ? {}
                 : { compactionPoint: input.compactionPoint }),
+              ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
             },
             signal,
             input.resumeCursor.value,

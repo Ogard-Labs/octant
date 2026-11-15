@@ -239,6 +239,19 @@ export interface ClaudeTaskUsage {
   readonly durationMs: number;
 }
 
+/**
+ * One agent a workflow started, as the runtime's `workflow_progress` reports
+ * it (Claude Code 2.1.211): its place in the script, its label, and how far
+ * it got. The agent's own messages stay inside the runtime; each tool call it
+ * makes reaches Octant's gate on its own.
+ */
+export interface ClaudeWorkflowAgent {
+  readonly index: number;
+  readonly label: string;
+  readonly state: "start" | "progress" | "done" | "error";
+  readonly lastToolName?: string;
+}
+
 export type ClaudeResultSubtype =
   | "success"
   | "error_during_execution"
@@ -395,8 +408,20 @@ export type ClaudeDecodedMessage =
       readonly subtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
       readonly taskId: string;
       readonly toolUseId?: string;
-      /** A command or watch the runtime runs in the background (`local_bash`). */
+      /**
+       * Work the runtime runs in the background and wakes the model for when
+       * it ends: a command or watch (`local_bash`), or a workflow
+       * (`local_workflow`).
+       */
       readonly background?: true;
+      /**
+       * A workflow's task: `task_started` names the workflow, and its
+       * `task_progress` frames say where each agent it started stands.
+       */
+      readonly workflow?: {
+        readonly name?: string;
+        readonly agents?: readonly ClaudeWorkflowAgent[];
+      };
       readonly status?: string;
       readonly description?: string;
       readonly summary?: string;
@@ -1022,6 +1047,13 @@ function unavailableBackgroundWork(
     fields.run_in_background !== false
   ) {
     return "Claude background commands are unavailable in Plan.";
+  }
+  // A remote workflow is sent to a cloud session that clones the Project
+  // outside this host, its sandbox, and its gate.
+  if (toolName === "Workflow") {
+    return fields.remote !== undefined && fields.remote !== false
+      ? "Claude's Workflow runs on this host; a remote run is unavailable."
+      : undefined;
   }
   if (toolName !== "Monitor") return undefined;
   if (fields.ws !== undefined) return "Claude's Monitor may watch a command, not a WebSocket.";

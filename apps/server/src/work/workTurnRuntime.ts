@@ -49,7 +49,11 @@ import {
   type ThreadTaskProgress,
   type ThreadTaskProgressList,
 } from "@octant/contracts";
-import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderSessionHandle,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
@@ -123,6 +127,8 @@ export interface WorkTurnRuntimePort {
     readonly nativeArtifacts?: boolean;
     /** What the session may load of the provider's own setup; absent keeps it all off. */
     readonly nativeSetup?: ProviderNativeSetup;
+    /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
+    readonly wakeups?: ProviderWakeupSchedule;
     readonly appManagedTools?: AppManagedToolSet;
     /**
      * The turn's record of tool calls about to take effect: each call the host
@@ -444,6 +450,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+        ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })

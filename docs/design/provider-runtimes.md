@@ -522,13 +522,13 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                  | Why                                                                                                                                                                                                                     |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`           | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)                                                                                 |
-| `Workflow`                                | A workflow's agents report under the `Workflow` call rather than an `Agent` call, so the child-run display cannot show them, and the decoder refuses `local_workflow` task frames                                       |
-| `CronCreate`, `ScheduleWakeup`            | Each wakes the model at a later time. A session lasts one turn, so a wake-up kept in memory never fires and the call's success would be untrue; a durable one is written to the Project's Claude files and fires unseen |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill` | Only while the person's own setup has that feature off                                                                                                                                                                  |
-| `Artifact`                                | Unless the session offers Claude artifacts                                                                                                                                                                              |
+| Withheld                                                 | Why                                                                                                                                     |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below) |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                  |
+| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                           |
+| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)            |
+| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                              |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
 inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
@@ -719,6 +719,62 @@ Rationale: holding the person's turn keeps one journaled turn per send and
 reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
 host-side runner for turns that start on an idle thread would add a second
 turn lifecycle the thread model does not have.
+
+#### Workflows
+
+`Workflow` runs outside Plan in a session whose person's setup has subagents
+on (maintainer decision, 2026-11-14). The call returns at once and the
+workflow runs in the runtime as a `local_workflow` background task, so the
+held turn above holds the person's turn until it ends, and the runtime's turn
+for its result is folded in the same way. The decoder reads its
+`task_started` (`workflow_name`; the script in `prompt` is never kept) and
+the `workflow_progress` list each `task_progress` restates, reading only each
+`workflow_agent` entry's index, label, state (`start`, `progress`, `done`,
+`error`), and last tool. The mapper shows the workflow as a child run whose
+id is its `Workflow` call's, and each agent as a child of it
+(`parentChildAgentId`), through the same child-run display a subagent
+`Agent` starts; only an agent whose state or last tool moved is shown again.
+Each agent's own tool calls reach the gate as a subagent's do (the runtime's
+permission callback names the agent), at the thread's level. Starting a
+workflow asks below Full access, unlike `Agent`: its script runs as
+JavaScript in the runtime process (a Node `vm` context, Claude Code 2.1.211),
+so the person sees the script before it runs. A `remote` workflow, which a
+cloud session would run on a clone of the Project, is refused before the
+gate, and a `remote_agent` task stays an unsupported frame. Rationale: a
+workflow is a batch of subagents, so the subagent switch, display, and gate
+cover it unchanged, and the held turn covers its background lifetime.
+
+#### Wake-ups the model schedules
+
+`ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a
+five-field cron expression in local time, once or recurring), `CronList`,
+and `CronDelete` run in Work and Code outside Plan (maintainer decision,
+2026-11-14), answered by Octant and never run by the runtime. A session
+lasts one person's turn, so a wake-up the runtime keeps in memory would die
+with it, and a `durable` one is written to the Project's
+`.claude/scheduled_tasks.json` and fires in whatever later session opens
+there. The host therefore hands each session a wake-up schedule for its
+thread (`ProviderSessionStart.wakeups`), and the driver answers each call
+from it: a wake-up passes the gate as any built-in tool does, asking below
+Full access, and then the driver records it with the host and returns the
+runtime's result fields (`scheduledFor`, `clampedDelaySeconds`, `wasClamped`;
+or `id`, `humanSchedule`, `recurring`) in the refusal's text, because the
+runtime's permission callback and `PreToolUse` hook can only allow or refuse
+a call. The runtime runs none of these calls, so its scheduler never holds a
+wake-up and no file is written. The mapper shows such a call as done, not
+failed. Listing, deleting, and `ScheduleWakeup`'s `stop` act only on this
+thread's own wake-ups and answer without asking. Rationale: importing a
+`scheduled_tasks.json` the runtime wrote would leave a window in which a
+later session could fire it before Octant read it, and a session-only
+wake-up would still sit in the runtime's scheduler of a held turn; answering
+the call leaves the runtime nothing to fire.
+
+The host's side, a `thread-wakeup` aggregate of its own, owns everything
+after that ([Architecture: wake-ups](../architecture.md#modes-chat-work-and-code)):
+each wake-up is journaled, listed above the thread's composer with its next
+fire time and Cancel, and starts a turn in its thread at its time. Chat runs
+in Plan for Claude, so a Chat thread never holds these tools, and neither
+does Plan or a single-use session.
 
 ## Codex
 

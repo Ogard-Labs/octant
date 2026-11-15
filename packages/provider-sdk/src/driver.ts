@@ -137,6 +137,71 @@ export interface ProviderSessionStart {
   readonly nativeSetup?: ProviderNativeSetup;
   /** The person's compaction point for this session; absent leaves the runtime its own. */
   readonly compactionPoint?: ProviderCompactionPoint;
+  /** The host's schedule for this session's thread; see {@link ProviderWakeupSchedule}. */
+  readonly wakeups?: ProviderWakeupSchedule;
+}
+
+/**
+ * A wake-up as the host holds it for a session's thread, in the words a
+ * driver hands back to its runtime.
+ */
+export interface ProviderWakeup {
+  readonly id: string;
+  readonly schedule:
+    | { readonly kind: "delay" }
+    | { readonly kind: "cron"; readonly cron: string; readonly recurring: boolean };
+  readonly prompt: string;
+  readonly humanSchedule: string;
+  /** ISO time of the next fire, or of the fire that was missed. */
+  readonly nextFireAt: string;
+  readonly status: "pending" | "missed";
+}
+
+export type ProviderWakeupRequest =
+  | {
+      readonly kind: "delay";
+      readonly providerToolName: string;
+      readonly delaySeconds: unknown;
+      readonly prompt: string;
+      readonly reason?: string;
+    }
+  | {
+      readonly kind: "cron";
+      readonly providerToolName: string;
+      readonly cron: string;
+      readonly recurring: boolean;
+      readonly prompt: string;
+    };
+
+/**
+ * The host's schedule for one session's thread. A runtime that can wake its
+ * model later keeps no schedule of its own: its driver hands each wake-up
+ * here, and the host journals it, shows it in the thread, lets the person
+ * cancel it, and starts the thread's turn when it comes due. A wake-up that
+ * comes due while the host is down is shown as missed and never fired late.
+ * Absent on a session the host starts no such turns for (Chat, Plan, a
+ * single-use session); a driver then offers its runtime no wake-up tool.
+ */
+export interface ProviderWakeupSchedule {
+  readonly schedule: (request: ProviderWakeupRequest) => Promise<
+    | {
+        readonly status: "scheduled";
+        readonly wakeup: ProviderWakeup;
+        readonly clampedDelaySeconds?: number;
+        readonly wasClamped?: boolean;
+      }
+    | { readonly status: "refused"; readonly reason: string }
+  >;
+  /** The thread's waiting wake-ups, soonest first. */
+  readonly list: () => Promise<ReadonlyArray<ProviderWakeup>>;
+  /** Cancels one of this thread's wake-ups at the agent's request. */
+  readonly cancel: (
+    id: string,
+  ) => Promise<
+    { readonly status: "cancelled" } | { readonly status: "refused"; readonly reason: string }
+  >;
+  /** Cancels every delayed wake-up of this thread; answers how many. */
+  readonly cancelDelayed: () => Promise<number>;
 }
 
 export interface ProviderSessionHandle {
@@ -178,6 +243,8 @@ export interface ProviderSessionResume {
   readonly nativeSetup?: ProviderNativeSetup;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly compactionPoint?: ProviderCompactionPoint;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly wakeups?: ProviderWakeupSchedule;
 }
 
 export interface ProviderSessionCompactionRequest {

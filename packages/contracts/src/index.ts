@@ -216,6 +216,7 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadWakeups";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

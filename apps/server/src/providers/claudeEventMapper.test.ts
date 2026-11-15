@@ -26,6 +26,7 @@ import type {
   ClaudeJsonValue,
   ClaudeToolRequest,
   ClaudeUsage,
+  ClaudeWorkflowAgent,
 } from "./claudeAgentSdkPort";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000091");
@@ -896,6 +897,153 @@ describe("mapClaudeMessage", () => {
         toolUses: [],
       }),
     ).toMatchObject([{ kind: "failure" }]);
+  });
+
+  it("shows a workflow as a child run under its Workflow call and each agent it starts as a child of the workflow", () => {
+    const ctx = context();
+    const started = mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-workflow",
+          toolName: "Workflow",
+          input: { script: "private script" },
+        },
+      },
+    });
+    expect(eventValues(started)).toMatchObject([{ kind: "tool-start", toolName: "Workflow" }]);
+    const call = eventValues(started)[0];
+    if (call?.kind !== "tool-start") throw new Error("Expected the Workflow call");
+    // The call returns at once; the workflow runs on as a background task.
+    mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [{ toolUseId: "sdk-workflow", isError: false }],
+    });
+
+    const opened = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_started",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      background: true,
+      workflow: { name: "review" },
+      description: "Review the change",
+    });
+    expect(eventValues(opened)).toMatchObject([
+      { kind: "task-progress", status: "in-progress" },
+      {
+        kind: "child-agent-activity",
+        childAgentId: call.toolCallId,
+        task: "review",
+        status: "starting",
+      },
+    ]);
+
+    const progress = (agents: ClaudeWorkflowAgent[]) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "task",
+          sessionId: claudeSessionId,
+          subtype: "task_progress",
+          taskId: "sdk-workflow-task",
+          toolUseId: "sdk-workflow",
+          description: "Review the change",
+          usage: { totalTokens: 10, toolUses: 1, durationMs: 5 },
+          workflow: { agents },
+        }),
+      ).filter((next) => next.kind === "child-agent-activity");
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "progress", lastToolName: "Read" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([
+      {
+        childAgentId: `${call.toolCallId}:agent-0`,
+        parentChildAgentId: call.toolCallId,
+        task: "read the diff",
+        status: "running",
+        summary: "The workflow agent is using Read.",
+      },
+      { childAgentId: `${call.toolCallId}:agent-1`, status: "running" },
+    ]);
+    // The runtime restates the whole list; only an agent that moved is shown again.
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "done" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([{ childAgentId: `${call.toolCallId}:agent-0`, status: "completed" }]);
+
+    const ended = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_notification",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      status: "completed",
+      summary: "Dynamic workflow completed",
+    });
+    expect(eventValues(ended)).toMatchObject([
+      { kind: "task-progress", status: "completed" },
+      { kind: "child-agent-activity", childAgentId: call.toolCallId, status: "completed" },
+    ]);
+    expect(JSON.stringify([started, opened, ended])).not.toContain("private script");
+
+    // A workflow task that names no Workflow call of this session is not one Octant opened.
+    expect(
+      mapped(context(), {
+        kind: "task",
+        sessionId: claudeSessionId,
+        subtype: "task_started",
+        taskId: "sdk-other",
+        toolUseId: "sdk-unknown",
+        background: true,
+        workflow: {},
+        description: "Unknown",
+      }),
+    ).toMatchObject([{ kind: "failure" }]);
+  });
+
+  it("shows a wake-up call Octant answered in place of the runtime as done, not failed", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-wake",
+          toolName: "ScheduleWakeup",
+          input: { delaySeconds: 300, prompt: "Check it." },
+        },
+      },
+    });
+    const call = ctx.toolStates.get("sdk-wake");
+    if (call === undefined) throw new Error("Expected the call's state");
+    call.answeredByOctant = true;
+    const answered = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-wake", isError: true }],
+      }),
+    );
+    expect(answered.map((next) => next.kind)).not.toContain("tool-failure");
+    expect(answered).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "Octant answered from this thread's wake-ups.",
+      }),
+    );
   });
 
   it("marks the answer of each claude.ai service tool as outside content", () => {

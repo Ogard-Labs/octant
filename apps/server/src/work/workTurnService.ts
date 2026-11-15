@@ -95,7 +95,11 @@ import {
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderSessionHandle,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
@@ -291,6 +295,11 @@ export interface ServerWorkTurns {
 export interface WorkTurnServiceDependencies {
   /** Whether a move holds a thread; a held thread starts no turn. */
   readonly moveHold?: (threadId: string) => boolean;
+  /**
+   * The host's schedule for a thread's wake-ups, read at each session start;
+   * absent, or answering undefined, offers the runtime no wake-up tool.
+   */
+  readonly wakeupsForThread?: (threadId: string) => ProviderWakeupSchedule | undefined;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -681,9 +690,11 @@ export class WorkTurnService {
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
+  readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
+    this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -2505,6 +2516,7 @@ export class WorkTurnService {
               input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
           }),
         ),
+        ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"
@@ -3712,4 +3724,10 @@ function describedImageLines(images: DescribedTurnImages | undefined): ReadonlyA
           }),
         ],
   );
+}
+
+function wakeupsOption(wakeups: ProviderWakeupSchedule | undefined): {
+  readonly wakeups?: ProviderWakeupSchedule;
+} {
+  return wakeups === undefined ? {} : { wakeups };
 }

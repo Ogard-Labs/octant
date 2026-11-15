@@ -50,6 +50,7 @@ import { uncertainToolCallHold, type ToolEffectLedger } from "../toolEffects/too
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
+import { ThreadWakeupService } from "../wakeups/threadWakeupService";
 import { createUsageResumePorts } from "../usage/usageResumePorts";
 import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencyScheduler";
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
@@ -86,17 +87,25 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<
     CodeRuntimeWiring,
-    "codeOperationRuntime" | "coordinatorService" | "coordinatorWakes" | "routeCodeService"
+    | "codeOperationRuntime"
+    | "coordinatorService"
+    | "coordinatorWakes"
+    | "routeCodeService"
+    | "codeThreadWakeupPort"
   > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
-  Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
+  Pick<
+    WorkWiring,
+    "goalLoopService" | "threadMessageQueue" | "workTurnService" | "workThreadWakeupPort"
+  > &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
     | "workThreadProjection"
     | "workTurnProjection"
     | "workTurnsCutOffByRestart"
+    | "threadWakeups"
   >;
 
 export function wireContinuation(deps: ContinuationDependencies) {
@@ -113,8 +122,34 @@ export function wireContinuation(deps: ContinuationDependencies) {
     workThreadProjection,
     workTurnProjection,
     workTurnService,
+    threadWakeups,
+    workThreadWakeupPort,
+    codeThreadWakeupPort,
   } = deps;
   return Effect.gen(function* () {
+    // Wake-ups a thread's agent asked for: the journal is the record, the
+    // service rebuilds what waits after a restart (calling missed what came
+    // due while the host was down), and each due one starts its thread's
+    // turn through the mode's ordinary admission.
+    const threadWakeupService = new ThreadWakeupService({
+      journal: persistence.journal,
+      clock: () => new Date(),
+      uuid: randomUUID,
+      ports: { work: workThreadWakeupPort, code: codeThreadWakeupPort },
+      onError: (message, error) => console.error(`[wake-ups] ${message}`, error),
+    });
+    const unsubscribeThreadWakeups = persistence.journal.subscribeCommitted((append) =>
+      threadWakeupService.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeThreadWakeups();
+        threadWakeupService.stop();
+        threadWakeups.service = undefined;
+      }),
+    );
+    threadWakeupService.start();
+    threadWakeups.service = threadWakeupService;
     // Host-owned recovery for provider usage-limited stops: the journal record
     // is the opt-in, the projection rebuilds what is armed after a restart, and
     // every reset fires through the mode's ordinary turn admission.

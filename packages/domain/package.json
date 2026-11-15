@@ -142,7 +142,8 @@
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
-    "./command-credential-policy": "./src/commandCredentialPolicy.ts"
+    "./command-credential-policy": "./src/commandCredentialPolicy.ts",
+    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

@@ -35,6 +35,7 @@ import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderSessionHandle,
+  ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
@@ -248,6 +249,8 @@ export interface CodeTurnRunnerInput {
   readonly harnessAutoReviewEnabled?: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
+  readonly wakeups?: ProviderWakeupSchedule;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -470,6 +473,7 @@ export class CodeTurnRunner {
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+        ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),

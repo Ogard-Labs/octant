@@ -69,6 +69,8 @@ import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
   applyComposerCaret,
@@ -324,6 +326,8 @@ export interface CodeThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -2511,7 +2515,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="code"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}

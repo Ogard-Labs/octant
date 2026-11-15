@@ -19,6 +19,7 @@ import type {
   ClaudeJsonValue,
   ClaudeTaskUsage,
   ClaudeToolRequest,
+  ClaudeWorkflowAgent,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
 import { isClaudeTaskTool, type ClaudeTaskList } from "./claudeTaskList";
@@ -50,6 +51,12 @@ export const CLAUDE_SUBAGENT_TOOL = "Agent";
  * never leaves Plan (see `claudeDriver.ts`).
  */
 export const CLAUDE_PLAN_EXIT_TOOL = "ExitPlanMode";
+/**
+ * Claude Code's workflow tool: it runs a script that starts several agents,
+ * offered on the same switch as `Agent`. The call returns at once and the
+ * workflow runs as a background task, whose frames say where each agent is.
+ */
+export const CLAUDE_WORKFLOW_TOOL = "Workflow";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -119,6 +126,12 @@ export interface ClaudeToolState {
   taskInput?: { readonly [key: string]: ClaudeJsonValue };
   /** The start's journaled notice, once one went out. */
   noticed?: true;
+  /**
+   * Octant answered this call itself in place of the runtime (a wake-up
+   * call): the runtime reports the answer as a refused call, which is not a
+   * failure.
+   */
+  answeredByOctant?: true;
 }
 
 export interface ClaudeRequestCorrelation {
@@ -135,6 +148,15 @@ export interface ClaudeTaskState {
   readonly lifecycle: "pending" | "running" | "paused" | "completed" | "failed";
   readonly lastSubtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
   readonly summary: string;
+  /**
+   * A workflow's task: the child run that stands for the workflow (its
+   * `Workflow` call's id), and what was last shown for each of its agents, so
+   * a progress frame that restates the whole list shows only what moved.
+   */
+  readonly workflow?: {
+    readonly childAgentId: string;
+    readonly shownAgents: Map<number, string>;
+  };
 }
 
 export interface ClaudeEventContext {
@@ -1047,7 +1069,7 @@ function mapToolResults(
         }),
       );
     }
-    if (pair.result.isError) {
+    if (pair.result.isError && state.answeredByOctant !== true) {
       results.push(
         event(context, {
           kind: "tool-failure",
@@ -1088,7 +1110,12 @@ function mapToolResults(
       event(context, {
         kind: "tool-success",
         toolCallId: state.toolCallId,
-        summary: published === undefined ? "Tool completed." : "Published to claude.ai.",
+        summary:
+          published !== undefined
+            ? "Published to claude.ai."
+            : state.answeredByOctant === true
+              ? "Octant answered from this thread's wake-ups."
+              : "Tool completed.",
         ...(published === undefined ? {} : { published }),
       }),
     );
@@ -1203,11 +1230,23 @@ function mapTask(
     if (existing !== undefined || providedSummary === undefined) {
       return [failure("Claude returned an invalid task lifecycle transition.")];
     }
+    let workflow: ClaudeTaskState["workflow"];
+    if (message.workflow !== undefined) {
+      // A workflow's task names the `Workflow` call that started it; one that
+      // names no such call of this session is not one Octant opened.
+      const call =
+        message.toolUseId === undefined ? undefined : context.toolStates.get(message.toolUseId);
+      if (call === undefined || call.toolName !== CLAUDE_WORKFLOW_TOOL) {
+        return [failure("Claude workflow activity did not match a workflow call.")];
+      }
+      workflow = { childAgentId: call.toolCallId, shownAgents: new Map() };
+    }
     next = {
       taskId: context.makeTaskId(),
       lifecycle: "running",
       lastSubtype: message.subtype,
       summary: providedSummary,
+      ...(workflow === undefined ? {} : { workflow }),
     };
   } else {
     if (existing === undefined) {
@@ -1266,6 +1305,9 @@ function mapTask(
       next = { ...existing, lifecycle, lastSubtype: message.subtype, summary };
     }
   }
+  if (message.workflow?.agents !== undefined && next.workflow === undefined) {
+    return [failure("Claude workflow activity did not match a workflow call.")];
+  }
   context.taskIds.set(message.taskId, next);
   return [
     event(context, {
@@ -1274,7 +1316,88 @@ function mapTask(
       status: normalizedTaskStatus(next.lifecycle),
       summary: next.summary,
     }),
+    ...workflowChildActivity(context, message, existing, next),
   ];
+}
+
+const WORKFLOW_AGENT_STATUS: Readonly<
+  Record<ClaudeWorkflowAgent["state"], "running" | "completed" | "failed">
+> = { start: "running", progress: "running", done: "completed", error: "failed" };
+
+/**
+ * A workflow shown as child runs under its `Workflow` call: the workflow
+ * itself is the call's child, and each agent it starts is a child of the
+ * workflow, through the same display a subagent `Agent` starts. Each agent's
+ * tool calls reach Octant's gate on their own, at the thread's level.
+ */
+function workflowChildActivity(
+  context: ClaudeEventContext,
+  message: Extract<ClaudeDecodedMessage, { readonly kind: "task" }>,
+  previous: ClaudeTaskState | undefined,
+  next: ClaudeTaskState,
+): ReadonlyArray<ClaudeMappedMessage> {
+  const workflow = next.workflow;
+  if (workflow === undefined) return [];
+  const results: ClaudeMappedMessage[] = [];
+  if (message.subtype === "task_started") {
+    const task = normalized(message.workflow?.name ?? next.summary, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: workflow.childAgentId,
+        ...(task === undefined ? {} : { task }),
+        status: "starting",
+        summary: "Claude started a workflow.",
+      }),
+    );
+  }
+  for (const agent of message.workflow?.agents ?? []) {
+    const lastToolName =
+      agent.lastToolName === undefined
+        ? undefined
+        : normalized(agent.lastToolName, LABEL_MAX_CHARACTERS);
+    const shown = `${agent.state}\u0000${lastToolName ?? ""}`;
+    if (workflow.shownAgents.get(agent.index) === shown) continue;
+    workflow.shownAgents.set(agent.index, shown);
+    const status = WORKFLOW_AGENT_STATUS[agent.state];
+    const task = normalized(agent.label, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: `${workflow.childAgentId}:agent-${agent.index}`,
+        parentChildAgentId: workflow.childAgentId,
+        ...(task === undefined ? {} : { task }),
+        status,
+        summary:
+          status === "completed"
+            ? "The workflow agent finished."
+            : status === "failed"
+              ? "The workflow agent failed."
+              : lastToolName === undefined
+                ? "The workflow agent is working."
+                : `The workflow agent is using ${lastToolName}.`,
+      }),
+    );
+  }
+  const ended =
+    (next.lifecycle === "completed" || next.lifecycle === "failed") &&
+    previous !== undefined &&
+    previous.lifecycle !== "completed" &&
+    previous.lifecycle !== "failed";
+  if (ended) {
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: workflow.childAgentId,
+        status: next.lifecycle === "completed" ? "completed" : "failed",
+        summary:
+          next.lifecycle === "completed"
+            ? "The workflow finished."
+            : "The workflow did not finish.",
+      }),
+    );
+  }
+  return results;
 }
 
 /**
