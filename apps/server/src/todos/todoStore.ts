@@ -100,6 +100,7 @@ export interface TodoStoreDependencies {
   readonly clock: () => UtcTimestamp;
   /** This host's stable id, which names its own Projects in a to-do's links. */
   readonly hostId: () => StableHostId;
+  readonly defaultListHost?: () => Extract<TodoListHostChoice, { kind: "other-host" }> | undefined;
 }
 
 /**
@@ -112,6 +113,9 @@ export class TodoStore {
   readonly #dependencies: TodoStoreDependencies;
   readonly #todos = new Map<string, TodoRecord>();
   readonly #deleted = new Set<string>();
+  #defaultListHost:
+    | (() => Extract<TodoListHostChoice, { kind: "other-host" }> | undefined)
+    | undefined;
   #listHost: { readonly choice: TodoListHostChoice; readonly version: number } = {
     choice: { kind: "this-host" },
     version: 0,
@@ -119,6 +123,7 @@ export class TodoStore {
 
   constructor(dependencies: TodoStoreDependencies) {
     this.#dependencies = dependencies;
+    this.#defaultListHost = dependencies.defaultListHost;
     for (const envelope of replayAggregateTypesInOrder(dependencies.journal, [
       TODO_AGGREGATE_TYPE,
       TODO_LIST_HOST_AGGREGATE_TYPE,
@@ -147,11 +152,22 @@ export class TodoStore {
     };
   }
 
+  setDefaultListHost(
+    read: () => Extract<TodoListHostChoice, { kind: "other-host" }> | undefined,
+  ): void {
+    this.#defaultListHost = read;
+  }
+
+  #effectiveListHost(): TodoListHostChoice {
+    if (this.#listHost.version !== 0 || this.#todos.size > 0) return this.#listHost.choice;
+    return this.#defaultListHost?.() ?? this.#listHost.choice;
+  }
+
   listHost(): TodoListHostView {
     return {
       kind: "todo-list-host",
       thisHostId: this.#dependencies.hostId(),
-      choice: this.#listHost.choice,
+      choice: this.#effectiveListHost(),
       ownListEmpty: this.#todos.size === 0,
     };
   }
@@ -187,7 +203,7 @@ export class TodoStore {
         (current.kind === "other-host" &&
           String(current.hostId) === String(choice.hostId) &&
           current.name === choice.name));
-    if (unchanged) return this.listHost();
+    if (unchanged && this.#listHost.version !== 0) return this.listHost();
     const appended = this.#dependencies.journal.append({
       aggregate: {
         aggregateType: TODO_LIST_HOST_AGGREGATE_TYPE,
@@ -214,7 +230,7 @@ export class TodoStore {
     // A list kept elsewhere is changed there. A to-do added here, by a stale
     // window or a phone paired with this host, would sit in a list nobody is
     // shown, and would lock the choice that hid it.
-    const keptOn = this.#listHost.choice;
+    const keptOn = this.#effectiveListHost();
     if (keptOn.kind === "other-host") {
       return decodeTodoResult({
         kind: "todo-refused",

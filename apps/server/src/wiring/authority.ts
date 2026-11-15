@@ -448,6 +448,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     protectedFilesRoutes,
     simulatorInputGrants,
     todoRoutes,
+    todos,
     unsubscribeMachineChanges,
     unsubscribeThreadArchivals,
     windowAuthorityStore,

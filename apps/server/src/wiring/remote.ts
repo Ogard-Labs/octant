@@ -31,6 +31,7 @@ import {
   type MovedThreadReference,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { StableHostId } from "@octant/contracts/remote-access";
 import {
   decodeBrowserCaptureId,
   decodeBrowserThreadId,
@@ -2577,6 +2578,16 @@ export function wireRemote(deps: RemoteDependencies) {
     externalContentRoutes,
   ]);
   return {
+    defaultTodoListHost: () => {
+      const status = spokeLinkService.status();
+      return status.membership === "member"
+        ? {
+            kind: "other-host" as const,
+            hostId: Schema.decodeUnknownSync(StableHostId)(String(status.hub.memberId)),
+            name: status.hub.name,
+          }
+        : undefined;
+    },
     ownerBrowserControlService,
     composeHostDiagnostics,
     delegationAdministrationRoutes,

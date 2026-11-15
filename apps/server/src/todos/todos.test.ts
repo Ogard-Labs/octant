@@ -41,7 +41,15 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function host() {
+function host(
+  defaultListHost?: () =>
+    | {
+        readonly kind: "other-host";
+        readonly hostId: ReturnType<typeof decodeStableHostId>;
+        readonly name: string;
+      }
+    | undefined,
+) {
   const directory = mkdtempSync(join(tmpdir(), "octant-todos-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -70,6 +78,7 @@ function host() {
       uuid: () => crypto.randomUUID(),
       clock: () => decodeUtcTimestamp(START),
       hostId: () => decodeStableHostId(HOST_ID),
+      ...(defaultListHost === undefined ? {} : { defaultListHost }),
     });
   const store = start();
   const windows = new WindowAuthorityStore();
@@ -359,6 +368,44 @@ describe("the person's to-do list", () => {
     expect(refused?.status).toBe(409);
     expect(await refused?.json()).toMatchObject({ reason: "list-not-empty" });
     expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
+  });
+
+  it("uses the hub by default without hiding an existing list or overriding an explicit choice", async () => {
+    let joined = false;
+    const hub = {
+      kind: "other-host" as const,
+      hostId: decodeStableHostId("22222222-2222-4222-8222-222222222222"),
+      name: "Hub",
+    };
+    const h = host(() => (joined ? hub : undefined));
+    expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
+    joined = true;
+    expect(h.store.listHost().choice).toEqual(hub);
+    expect(
+      (
+        await h.fromWindow("/api/todos/commands", {
+          kind: "add-todo",
+          todoId: TODO_1,
+          title: "Hidden",
+        })
+      )?.status,
+    ).toBe(409);
+    await h.fromWindow("/api/todos/list-host", {
+      kind: "choose-todo-list-host",
+      choice: { kind: "this-host" },
+    });
+    await h.fromWindow("/api/todos/commands", { kind: "add-todo", todoId: TODO_1, title: "Mine" });
+    expect(h.start().listHost().choice).toEqual({ kind: "this-host" });
+
+    let otherJoined = false;
+    const existing = host(() => (otherJoined ? hub : undefined));
+    await existing.fromWindow("/api/todos/commands", {
+      kind: "add-todo",
+      todoId: TODO_2,
+      title: "Existing",
+    });
+    otherJoined = true;
+    expect(existing.store.listHost().choice).toEqual({ kind: "this-host" });
   });
 
   it("refuses to name this computer as another, and a device or an agent grant that would move the list", async () => {
