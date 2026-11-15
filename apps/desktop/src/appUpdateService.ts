@@ -22,6 +22,7 @@ import {
   updateFeedUrl,
 } from "./appUpdateFeed";
 import type { PortableImageApplyResult, PortableImagePort } from "./portableImageUpdate";
+import type { WindowsInstallerApplyResult, WindowsInstallerPort } from "./windowsInstallerUpdate";
 
 /**
  * Platforms that publish a signed desktop update feed.
@@ -30,9 +31,21 @@ import type { PortableImageApplyResult, PortableImagePort } from "./portableImag
  * able to install: a package or archive launch still refuses before any
  * request, because the only file this service will replace is the portable
  * image it was started from.
+ *
+ * Windows publishes one too, but reads it only when the app was given its
+ * installer hand-off. Without one (today's packaged app), Windows refuses as
+ * before: its feed builds on the Linux path and is not trusted until that has
+ * been exercised on a real image.
  */
-export function supportsSignedDesktopUpdateChannel(platform: string): boolean {
-  return platform === "darwin" || platform === "linux";
+export function supportsSignedDesktopUpdateChannel(
+  platform: string,
+  windowsInstaller: "wired" | "absent" = "absent",
+): boolean {
+  return (
+    platform === "darwin" ||
+    platform === "linux" ||
+    (platform === "win32" && windowsInstaller === "wired")
+  );
 }
 
 /**
@@ -94,6 +107,14 @@ export interface AppUpdateServiceOptions {
    * runtime named.
    */
   readonly portableImage?: PortableImagePort;
+  /**
+   * How a Windows copy hands a verified installer over.
+   *
+   * Absent means Windows has no signed update channel. When present, only a
+   * copy the per-user installer placed is offered anything, and the installer
+   * runs only after its Authenticode signature names Octant's publisher.
+   */
+  readonly windowsInstaller?: WindowsInstallerPort;
 }
 
 /**
@@ -232,6 +253,98 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     });
   }
 
+  /**
+   * Refuse a Windows copy the installer did not place, before any request:
+   * running the installer would write a second copy, not replace this one.
+   */
+  async function windowsLaunchRefusal(
+    requestedGeneration = generation,
+  ): Promise<AppUpdateState | undefined> {
+    if (options.app.platform !== "win32" || options.windowsInstaller === undefined) {
+      return undefined;
+    }
+    let location: Awaited<ReturnType<WindowsInstallerPort["locate"]>>;
+    try {
+      location = await options.windowsInstaller.locate();
+    } catch {
+      location = { kind: "not-installed" };
+    }
+    if (requestedGeneration !== generation) return state;
+    if (location.kind === "installed") return undefined;
+    return publishWithoutOffer({
+      status: "refused",
+      refusal: "unsupported-install",
+      checkedAt: clock() as AppUpdateState["checkedAt"],
+      message: WINDOWS_UNSUPPORTED_INSTALL_MESSAGE,
+    });
+  }
+
+  async function launchRefusal(
+    requestedGeneration = generation,
+  ): Promise<AppUpdateState | undefined> {
+    return (
+      (await linuxLaunchRefusal(requestedGeneration)) ??
+      (await windowsLaunchRefusal(requestedGeneration))
+    );
+  }
+
+  async function applyWindowsInstaller(): Promise<
+    { readonly kind: "installing" } | { readonly kind: "not-ready" }
+  > {
+    const installer = stagedImage;
+    const port = options.windowsInstaller;
+    if (installer === undefined || port === undefined) return { kind: "not-ready" };
+    const blocked = await windowsLaunchRefusal();
+    if (blocked !== undefined) return { kind: "not-ready" };
+    let applied: WindowsInstallerApplyResult;
+    try {
+      applied = await port.verifyAndRun(installer.bytes, installer.sha256);
+    } catch {
+      applied = { kind: "launch-failed" };
+    }
+    switch (applied.kind) {
+      case "launched":
+        return { kind: "installing" };
+      case "corrupt":
+        publishWithoutOffer({
+          status: "refused",
+          refusal: "corrupt-artifact",
+          message: "The downloaded update did not match the signed release, so it was discarded.",
+        });
+        return { kind: "not-ready" };
+      case "untrusted-publisher":
+        publishWithoutOffer({
+          status: "refused",
+          refusal: "untrusted-signature",
+          message:
+            "The downloaded installer is not signed by Octant's publisher, so it was discarded.",
+        });
+        return { kind: "not-ready" };
+      case "not-installed":
+        publishWithoutOffer({
+          status: "refused",
+          refusal: "unsupported-install",
+          checkedAt: clock() as AppUpdateState["checkedAt"],
+          message: WINDOWS_UNSUPPORTED_INSTALL_MESSAGE,
+        });
+        return { kind: "not-ready" };
+      case "check-unavailable":
+        stagedImage = undefined;
+        publish({
+          status: "failed",
+          message: "Windows could not check the installer's signature, so nothing was installed.",
+        });
+        return { kind: "not-ready" };
+      case "launch-failed":
+        stagedImage = undefined;
+        publish({
+          status: "failed",
+          message: "Octant could not start the installer, so nothing was installed.",
+        });
+        return { kind: "not-ready" };
+    }
+  }
+
   async function applyPortableImage(): Promise<
     { readonly kind: "installing" } | { readonly kind: "not-ready" }
   > {
@@ -333,10 +446,15 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       const requestedRing = ring;
       // A successful retry must not keep the old failure beside its new offer.
       publishWithoutOffer({ status: "checking" });
-      const blocked = await linuxLaunchRefusal();
+      const blocked = await launchRefusal();
       if (requestedGeneration !== generation) return state;
       if (blocked !== undefined) return blocked;
-      if (!supportsSignedDesktopUpdateChannel(options.app.platform)) {
+      if (
+        !supportsSignedDesktopUpdateChannel(
+          options.app.platform,
+          options.windowsInstaller === undefined ? "absent" : "wired",
+        )
+      ) {
         return publishWithoutOffer({
           status: "refused",
           refusal: "untrusted-signature",
@@ -428,7 +546,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
           message: "Wait for the previous update download to finish, then try again.",
         });
       }
-      const blocked = await linuxLaunchRefusal();
+      const blocked = await launchRefusal();
       if (requestedGeneration !== generation) return state;
       if (blocked !== undefined) return blocked;
       releaseLoopback();
@@ -458,12 +576,16 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
               : "The update could not be downloaded.",
         });
       }
-      if (options.app.platform === "linux") {
+      if (
+        options.app.platform === "linux" ||
+        (options.app.platform === "win32" && options.windowsInstaller !== undefined)
+      ) {
         // The hash already matched. Hold the bytes until the person asks to
-        // relaunch — writing now would replace the image under work that has
-        // not been asked to stop. The platform updater is not told about the
-        // URL: it does not perform this replace, and giving it one would be a
-        // second fetch of bytes we have already verified.
+        // relaunch — writing now would replace the image (or start the
+        // installer) under work that has not been asked to stop. The platform
+        // updater is not told about the URL: it does not perform this replace,
+        // and giving it one would be a second fetch of bytes we have already
+        // verified.
         stagedImage = { bytes: artifact.bytes, sha256: release.sha256 };
         const { message: _stale, refusal: _previous, ...rest } = state;
         state = {
@@ -512,6 +634,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       const readiness = resolveUpdateInstallReadiness(work);
       if (readiness.kind === "wait") return readiness;
       if (options.app.platform === "linux") return applyPortableImage();
+      if (options.app.platform === "win32") return applyWindowsInstaller();
       options.updater.quitAndInstall();
       return { kind: "installing" };
     },
@@ -540,6 +663,8 @@ const AUTOMATIC_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const UNSUPPORTED_INSTALL_MESSAGE =
   "This install cannot replace itself. Octant updates a portable image in place; a package or archive has to be replaced by hand.";
+const WINDOWS_UNSUPPORTED_INSTALL_MESSAGE =
+  "This copy was not placed by the Octant installer, so it cannot update itself. Install Octant with its installer to receive updates.";
 const NOT_WRITABLE_MESSAGE =
   "Octant cannot write a replacement beside this portable image, so it will not install an update.";
 const ROLLED_BACK_MESSAGE =

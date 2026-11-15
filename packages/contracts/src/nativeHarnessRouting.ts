@@ -105,8 +105,9 @@ function uniqueCandidates(candidates: ReadonlyArray<NativeHarnessSlotCandidate>)
  * Two person-set flags ride with the role. `askBeforeUsing` (absent = off)
  * turns a start in this role into a proposal the person approves.
  * `continueOnFallback` (absent = on) lets a thread with this role carry on
- * with the next model when its own stops. Both are stored and shown today;
- * the resolver does not read them yet. Absent means the default, so settings
+ * with the next model when its own stops. A coordinator worker's start reads
+ * `askBeforeUsing`; the harness resolver reads neither, and nothing reads
+ * `continueOnFallback` yet. Absent means the default, so settings
  * stored before the flags existed decode unchanged.
  */
 export const NativeHarnessSlot = Schema.Struct({

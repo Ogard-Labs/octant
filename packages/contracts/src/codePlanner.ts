@@ -7,6 +7,7 @@ import {
   CreateManagedCodeThreadCommand,
   MAX_CODE_THREAD_TITLE_LENGTH,
 } from "./code";
+import { CoordinatorWorkerChoice } from "./coordinator";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import { ProviderExecutionPolicy, ProviderInstanceId, ProviderModelId } from "./providers";
@@ -82,6 +83,23 @@ const CodePlannerProposalFields = {
       providerInstanceId: Schema.optional(ProviderInstanceId),
       modelId: Schema.optional(ProviderModelId),
       executionPolicy: ProviderExecutionPolicy,
+      /**
+       * How the host chose the model from the roles, when it did: the card
+       * shows the role, the model and the coordinator's why, and approving
+       * on that model journals it on the worker.
+       */
+      choice: Schema.optional(CoordinatorWorkerChoice),
+      /** The model's name as its provider reports it, for the card. */
+      modelName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+      /**
+       * The request's filters, kept so **Use Builder instead** applies them
+       * again: the work needs images, and the provider family a review must
+       * avoid.
+       */
+      needsImages: Schema.optional(Schema.Literal(true)),
+      reviewedProviderKind: Schema.optional(
+        Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      ),
     }).annotations(strict),
   ),
   /** Host-authored admission; a draft cannot assert that creation did not start. */
@@ -205,6 +223,16 @@ export const CodePlannerProposalCommand = Schema.Union(
     proposalId: CodePlannerProposalId,
     expectedVersion: AggregateVersion,
   }).annotations(strict),
+  /**
+   * **Use Builder instead** on a coordinator proposal the roles chose: the
+   * host runs the choice again in the Builder role and keeps the proposal
+   * pending on that model.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("use-builder-for-planner-work-proposal"),
+    proposalId: CodePlannerProposalId,
+    expectedVersion: AggregateVersion,
+  }).annotations(strict),
 );
 export type CodePlannerProposalCommand = typeof CodePlannerProposalCommand.Type;
 
@@ -215,6 +243,8 @@ export const CodePlannerProposalRefusalReason = Schema.Literal(
   "creation-above-proposed-level",
   "proposal-changed",
   "creation-not-started",
+  /** Use Builder instead found no eligible Builder model, or the proposal was not chosen from roles. */
+  "builder-unavailable",
 );
 export type CodePlannerProposalRefusalReason = typeof CodePlannerProposalRefusalReason.Type;
 
@@ -226,6 +256,10 @@ export const CodePlannerProposalOutcome = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     status: Schema.Literal("declined"),
+    proposal: CodePlannerWorkProposal,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("rechosen"),
     proposal: CodePlannerWorkProposal,
   }).annotations(strict),
   Schema.Struct({

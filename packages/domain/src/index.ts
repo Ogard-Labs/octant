@@ -194,6 +194,8 @@ export * from "./agentRunLiveGrant";
 export * from "./agentMessagePolicy";
 export * from "./siblingThreadPolicy";
 export * from "./coordinatorPolicy";
+export * from "./coordinatorWorkerChoicePolicy";
+export * from "./providerAvailabilityPolicy";
 export * from "./automationPolicy";
 export * from "./linkedThreadPolicy";
 export * from "./linkedThreadPromptPolicy";

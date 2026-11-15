@@ -74,4 +74,31 @@ describe("the Workers panel's rows", () => {
     expect(sections.inReview.map((row) => row.threadId)).toEqual(["pr"]);
     expect(sections.done.map((row) => row.threadId)).toEqual(["old"]);
   });
+
+  it("says why beside the model when a worker did not start on its role's main model", () => {
+    const rows = coordinatorWorkerRows(
+      [
+        worker({
+          id: "fell",
+          coordinatorChoice: {
+            role: "default",
+            rank: { fallback: 1 },
+            reason: "main at usage limit until 14:00",
+          },
+          updatedAt: "2" as never,
+        }),
+        worker({
+          id: "main",
+          coordinatorChoice: { role: "default", rank: "main" },
+          updatedAt: "1" as never,
+        }),
+      ],
+      "c",
+      () => "Sonnet 5.5",
+    );
+    expect(rows.map((row) => row.modelLabel)).toEqual([
+      "Sonnet 5.5 · fallback: main at usage limit until 14:00",
+      "Sonnet 5.5",
+    ]);
+  });
 });

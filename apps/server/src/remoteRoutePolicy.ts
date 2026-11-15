@@ -1217,7 +1217,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     path: "/api/search",
     methods: ["GET"] as const,
     // `?q=&scope=`; the route refuses every other query key itself.
-    takesSearchQuery: true,
+    allowQuery: true,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
   },
   {
@@ -1278,8 +1278,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
+    // An exact route takes a query only when it says so: one naming a Project
+    // there, or one that declares `allowQuery` because its own handler reads
+    // and bounds the query (the load read's `?detail=vitals`, search's
+    // `?q=&scope=`). Dropping the declaration refused those reads from every
+    // paired device before they reached their route.
     allowQuery:
-      match.kind === "prefix" || "namesProjectInQuery" in match || "takesSearchQuery" in match,
+      match.kind === "prefix" ||
+      "namesProjectInQuery" in match ||
+      ("allowQuery" in match && match.allowQuery === true),
   };
 });
 

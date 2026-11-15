@@ -782,6 +782,54 @@ describe("CoordinatorProposalCards", () => {
     );
   });
 
+  it("shows the role, model and why of a proposal chosen from the roles, and offers Use Builder instead", async () => {
+    const value = coordinatorController([
+      proposal("01", {
+        workerOptions: {
+          executionPolicy: "approval-gated",
+          providerInstanceId: "60000000-0000-4000-8000-000000000001",
+          modelId: "opus",
+          modelName: "Opus 5.5",
+          choice: { role: "deep", rank: "main", why: "a race across two services" },
+        },
+      }),
+      proposal("02", {
+        workerOptions: {
+          executionPolicy: "approval-gated",
+          modelId: "sonnet",
+          modelName: "Sonnet 5.5",
+          providerInstanceId: "60000000-0000-4000-8000-000000000001",
+          choice: { role: "default", rank: "main" },
+        },
+      }),
+    ]);
+    render(
+      <CoordinatorProposalCards
+        controller={value}
+        coordinatorThreadId={ids.thread as never}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+      />,
+    );
+    const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
+    expect(
+      within(card).getByText("Hard problems · Opus 5.5 · a race across two services"),
+    ).toBeVisible();
+    const builder = within(card).getByRole("button", { name: "Use Builder instead" });
+    await waitFor(() => expect(builder).toBeEnabled());
+    fireEvent.click(builder);
+    await waitFor(() =>
+      expect(value.decline).toHaveBeenCalledWith({
+        kind: "use-builder-for-planner-work-proposal",
+        proposalId: "70000000-0000-4000-8000-000000000101",
+        expectedVersion: 2,
+      }),
+    );
+    const builderCard = screen.getByRole("article", { name: "Proposed worker: Worker 02" });
+    expect(within(builderCard).getByText("Builder · Sonnet 5.5")).toBeVisible();
+    expect(within(builderCard).queryByRole("button", { name: "Use Builder instead" })).toBeNull();
+  });
+
   it("opens the ordinary creation review with the proposed worker's intent fixed", async () => {
     const onCreateThread = vi.fn();
     render(

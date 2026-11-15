@@ -1,4 +1,5 @@
 import type { ThreadBoardPullRequestSummary } from "@octant/contracts";
+import { coordinatorChoiceNote } from "../agents/coordinatorWorkers";
 import { codeThreadActivity } from "../shell/shellModeRouting";
 import type { CodeThreadNavigationItem } from "./useCodeController";
 
@@ -41,6 +42,7 @@ export type CoordinatorWorkerSource = Pick<
   | "unread"
   | "pullRequestSummaries"
   | "modelId"
+  | "coordinatorChoice"
   | "updatedAt"
   | "createdAt"
 >;
@@ -103,7 +105,11 @@ export function coordinatorWorkerRows(
         title: thread.title,
         projectId: thread.projectId,
         state: coordinatorWorkerState(thread),
-        modelLabel: modelLabel(thread),
+        // A fallback or an override says why beside the model, as the Agents
+        // dock's worker row does.
+        modelLabel: [modelLabel(thread), coordinatorChoiceNote(thread.coordinatorChoice)]
+          .filter((part): part is string => part !== undefined)
+          .join(" · "),
         ...(pullRequest === undefined ? {} : { pullRequest }),
         ...(thread.updatedAt === undefined ? {} : { updatedAt: String(thread.updatedAt) }),
         ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),

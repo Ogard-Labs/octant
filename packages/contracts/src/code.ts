@@ -15,6 +15,7 @@ import {
   CoordinatorWorkerListing,
   CoordinatorWorkerListingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerChoice,
   CoordinatorWorkerLevel,
 } from "./coordinator";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
@@ -368,6 +369,12 @@ export const CodeThread = Schema.Struct({
    * creation and never changed. No wire command can set it.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /**
+   * How the host chose this worker's model from the model roles, recorded at
+   * creation (and again only when its first request failed before any work
+   * and the host started it on the next model). No wire command can set it.
+   */
+  coordinatorChoice: Schema.optional(CoordinatorWorkerChoice),
   /**
    * The person's **Wake when a message arrives** switch: an idle thread with
    * it on starts one host turn to carry an admitted agent message. Absent is

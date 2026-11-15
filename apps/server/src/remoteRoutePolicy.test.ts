@@ -1081,6 +1081,28 @@ describe("remote route policy", () => {
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
   });
 
+  it("lets a paired device send the query an exact route declares, and refuses a query on an exact route that declares none", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string) =>
+      routePolicy.inspect(
+        request(path, { method: "GET", headers: { origin, "sec-fetch-site": "same-origin" } }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+
+    // The load read takes `?detail=vitals`, and the route itself refuses any
+    // other query; the listener has to let the query through to it.
+    expect(inspect("/api/host/resources?detail=vitals")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/search?q=release&scope=all")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
+  });
+
   it("admits a paired device's reply detail read and nothing that could change it", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string, method: "GET" | "POST") =>

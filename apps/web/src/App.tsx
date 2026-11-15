@@ -5175,6 +5175,9 @@ function LaunchedShell(
             ...(thread.coordinator === true ? { coordinator: true } : {}),
             ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.coordinatorChoice === undefined
+              ? {}
+              : { coordinatorChoice: thread.coordinatorChoice }),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),

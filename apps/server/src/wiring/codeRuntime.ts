@@ -1,7 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport, usageLimitFromReading } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -82,6 +82,7 @@ import {
 import { CoordinatorService } from "../coordinator/coordinatorService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
+import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
@@ -315,6 +316,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "agentsManagedToolsFor"
     | "coordinatorWorkersHolder"
     | "externalContentIngestionStore"
+    | "nativeHarnessRoutingStore"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
@@ -367,6 +369,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "imageJobService"
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
+    | "providerAvailabilityMarks"
+    | "providerUsageLimitsService"
     | "providerDataDirectory"
     | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
@@ -405,6 +409,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "browserAuthority"
     | "codeBoardEventStore"
     | "codeEvidence"
+    | "isProjectPolicyTargetAllowed"
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
     | "codeSessionConversation"
@@ -1758,6 +1763,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
       isMarkedWithOutsideContent: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      // Use Builder instead re-runs the coordinator's model choice; the
+      // coordinator service is wired just below.
+      rechooseAsBuilder: (coordinatorThreadId, filters) =>
+        coordinatorService.rechooseAsBuilder(coordinatorThreadId, filters),
     });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
@@ -1799,6 +1808,83 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         persistence
           .readProviderInstances()
           .some((instance) => String(instance.id) === providerInstanceId),
+      // Workers choose their model from the person's roles: Settings, with
+      // the Project's own choice per role on top.
+      readRoles: (projectId) => ({
+        host: deps.nativeHarnessRoutingStore.host().configuration,
+        project: deps.nativeHarnessRoutingStore.projectOverride(projectId)?.configuration,
+      }),
+      candidateFacts: (project, candidate) =>
+        coordinatorCandidateFacts(
+          {
+            readProviderInstance: (id) => persistence.readProviderInstance(id),
+            observedState: (id) => providerRuntimeRegistry.observedState(id),
+            catalogModel: (providerInstanceId, modelId) =>
+              persistence
+                .readProviderCatalog?.(providerInstanceId)
+                ?.models.find((model) => String(model.id) === modelId),
+            isTargetAllowed: (target, providerInstanceId, modelId) =>
+              deps.isProjectPolicyTargetAllowed(target, providerInstanceId, modelId),
+            availability: (providerInstanceId) =>
+              deps.providerAvailabilityMarks.read(providerInstanceId),
+            usageReading: (providerInstanceId) =>
+              usageLimitFromReading(
+                deps.providerUsageLimitsService
+                  .snapshot()
+                  .entries.find((entry) => String(entry.providerInstanceId) === providerInstanceId),
+                Date.now(),
+              ),
+          },
+          project,
+          candidate,
+        ),
+      markProviderDown: (providerInstanceId) =>
+        deps.providerAvailabilityMarks.markDown(providerInstanceId),
+      // The host moves a worker whose first request failed before any work as
+      // the host, like the usage-limit hand-off, never as the person.
+      moveWorkerToModel: async (worker, model, choice) => {
+        if (!(codeService instanceof CodeService)) return "refused";
+        const moved = await codeService.execute(
+          ROUTINE_HOST_SCOPE_ID,
+          {
+            kind: "change-code-thread-provider",
+            threadId: worker.id,
+            expectedVersion: worker.version,
+            providerInstanceId: model.providerInstanceId,
+            modelId: model.modelId,
+          },
+          undefined,
+          {
+            actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+            coordinatorChoice: choice,
+          },
+        );
+        return moved.kind === "thread-updated" ? "moved" : "refused";
+      },
+      firstTurnFailedBeforeWork: (workerId, operationId) => {
+        const threadId = decodeCodeThreadId(workerId);
+        const works = persistence.readCodeRuntimeWorks(threadId);
+        // Any other work (a file, a terminal, a test) is work done; earlier
+        // provider turns are the first requests the host already moved past.
+        if (
+          works.length === 0 ||
+          works.some(({ work }) => work.kind !== "provider-turn" || work.state !== "failed") ||
+          String(works.at(-1)?.work.id) !== operationId
+        )
+          return false;
+        const recovered = codeBoardEventStore.providerSessionForThread(
+          threadId,
+          decodeCodeOperationId(operationId),
+        );
+        // Only the session this turn opened, and only when its own request
+        // failed for availability before any text or tool call.
+        return (
+          recovered.status === "ok" &&
+          recovered.session !== undefined &&
+          String(recovered.sessionOperationId) === operationId &&
+          deps.providerAvailabilityMarks.failedBeforeOutput(String(recovered.session.sessionId))
+        );
+      },
       executeCode: async (windowId, command, executionContext) => {
         if (!(codeService instanceof CodeService)) {
           throw new Error("Coordinators need the host's own Code service.");
