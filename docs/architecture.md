@@ -18234,7 +18234,12 @@ starts the command, and removes what it added when the command ends.
   never edits a folder it does not own. A grant on a junction or link is
   refused, because an entry set through it lands on what it points at.
   Carve-outs inside a grant (isolated roots and extra denials) become
-  explicit deny entries, which Windows orders before inherited grants.
+  explicit deny entries, which Windows orders before inherited grants. The
+  launcher writes those entries, and removes its own at exit, by rewriting
+  the object's explicit entries itself: measured on Windows Server 2025, the
+  standard merge call given a deny for a SID that already held an inherited
+  grant there left an allow entry with no rights and no deny, so the file
+  stayed readable, and its revoke mode leaves deny entries behind.
 - **Secret guard as an OS rule.** No grant is made at, inside or above a
   protected location; the plan refuses such a launch, so every protected file
   stays outside every grant and the container's default denial refuses it. A

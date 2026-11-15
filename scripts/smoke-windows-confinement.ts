@@ -148,6 +148,12 @@ try {
     cookies.status !== 0 && accessDenied(cookies) && !cookies.stdout.includes("cookie-content"),
     { cookies, denies: cookiesLaunch.args.includes("--deny"), acl: cookiesAcl.stdout },
   );
+  const cookiesAfter = spawnSync("icacls", [cookiesPath], { encoding: "utf8" });
+  check(
+    "removes the container's deny entries when the command ends",
+    cookiesAfter.status === 0 && !/S-1-15-2-\d+-\d+/u.test(cookiesAfter.stdout),
+    cookiesAfter.stdout,
+  );
 
   const nested = run(cmd, shell("cmd /d /c echo nested-ran"));
   check(

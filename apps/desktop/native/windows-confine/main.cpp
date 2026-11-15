@@ -192,42 +192,107 @@ bool packages_already_hold(PACL dacl, DWORD mask) {
 
 enum class Edit { applied, unnecessary, missing, failed };
 
-// Adds (or with REVOKE_ACCESS removes) the container's explicit ACE on one
-// object. A reparse point is refused: an ACE set through a junction or link
-// lands on whatever it points at, which the plan never judged.
-Edit edit_acl(const std::wstring& path, PSID sid, ACCESS_MODE mode, DWORD mask) {
-  const DWORD attributes = GetFileAttributesW(path.c_str());
-  if (attributes == INVALID_FILE_ATTRIBUTES) {
+struct Object {
+  DWORD attributes = 0;
+  PACL dacl = nullptr;
+  PSECURITY_DESCRIPTOR descriptor = nullptr;
+  bool is_protected = false;
+  ~Object() { if (descriptor != nullptr) LocalFree(descriptor); }
+};
+
+// Reads one object's DACL. A reparse point is refused: an ACE set through a
+// junction or link lands on whatever it points at, which the plan never
+// judged. A NULL DACL (everyone, everything) is refused as well.
+Edit open_object(const std::wstring& path, Object& object) {
+  object.attributes = GetFileAttributesW(path.c_str());
+  if (object.attributes == INVALID_FILE_ATTRIBUTES) {
     const DWORD error = GetLastError();
     return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? Edit::missing : Edit::failed;
   }
-  if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Edit::failed;
-  PACL dacl = nullptr;
-  PSECURITY_DESCRIPTOR descriptor = nullptr;
-  if (GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &dacl,
-        nullptr, &descriptor) != ERROR_SUCCESS) {
+  if ((object.attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Edit::failed;
+  if (GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &object.dacl,
+        nullptr, &object.descriptor) != ERROR_SUCCESS || object.dacl == nullptr) {
     return Edit::failed;
   }
-  if (mode == GRANT_ACCESS && packages_already_hold(dacl, mask)) {
-    LocalFree(descriptor);
-    return Edit::unnecessary;
+  SECURITY_DESCRIPTOR_CONTROL control = 0;
+  DWORD revision = 0;
+  if (!GetSecurityDescriptorControl(object.descriptor, &control, &revision)) return Edit::failed;
+  object.is_protected = (control & SE_DACL_PROTECTED) != 0;
+  return Edit::applied;
+}
+
+bool names_sid(const ACE_HEADER* header, PSID sid) {
+  if (header->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+    return EqualSid(const_cast<DWORD*>(&reinterpret_cast<const ACCESS_ALLOWED_ACE*>(header)->SidStart), sid) != FALSE;
   }
+  if (header->AceType == ACCESS_DENIED_ACE_TYPE) {
+    return EqualSid(const_cast<DWORD*>(&reinterpret_cast<const ACCESS_DENIED_ACE*>(header)->SidStart), sid) != FALSE;
+  }
+  return false;
+}
+
+// Rewrites the object's explicit ACEs without any that name `sid`, with an
+// explicit deny for it first when `deny` is set. Measured on Windows Server
+// 2025: SetEntriesInAcl with DENY_ACCESS over an inherited grant for the same
+// SID left an allow entry with no rights and no deny, so the inherited grant
+// still read the file; and REVOKE_ACCESS leaves deny entries behind. Inherited
+// entries are left to the system, which re-merges them from the parent.
+Edit rewrite_explicit(const std::wstring& path, PSID sid, bool deny) {
+  Object object;
+  const Edit opened = open_object(path, object);
+  if (opened != Edit::applied) return opened;
+  const bool directory = (object.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  DWORD size = sizeof(ACL) + (deny ? sizeof(ACCESS_DENIED_ACE) - sizeof(DWORD) + GetLengthSid(sid) : 0);
+  for (DWORD index = 0; index < object.dacl->AceCount; ++index) {
+    void* raw = nullptr;
+    if (!GetAce(object.dacl, index, &raw)) return Edit::failed;
+    size += static_cast<ACE_HEADER*>(raw)->AceSize;
+  }
+  std::vector<unsigned char> buffer(size);
+  auto* updated = reinterpret_cast<PACL>(buffer.data());
+  const DWORD revision = object.dacl->AclRevision > ACL_REVISION ? object.dacl->AclRevision : ACL_REVISION;
+  if (!InitializeAcl(updated, size, revision)) return Edit::failed;
+  if (deny && !AddAccessDeniedAceEx(updated, revision,
+                directory ? static_cast<DWORD>(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) : 0, FILE_ALL_ACCESS, sid)) {
+    return Edit::failed;
+  }
+  for (DWORD index = 0; index < object.dacl->AceCount; ++index) {
+    void* raw = nullptr;
+    if (!GetAce(object.dacl, index, &raw)) return Edit::failed;
+    const auto* header = static_cast<ACE_HEADER*>(raw);
+    if ((header->AceFlags & INHERITED_ACE) != 0 || names_sid(header, sid)) continue;
+    if (!AddAce(updated, revision, MAXDWORD, raw, header->AceSize)) return Edit::failed;
+  }
+  const SECURITY_INFORMATION information = DACL_SECURITY_INFORMATION |
+    (object.is_protected ? PROTECTED_DACL_SECURITY_INFORMATION : UNPROTECTED_DACL_SECURITY_INFORMATION);
+  return SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT, information, nullptr, nullptr,
+           updated, nullptr) == ERROR_SUCCESS
+    ? Edit::applied
+    : Edit::failed;
+}
+
+// Adds the container's inheritable allow entry on one folder or file, unless
+// ALL APPLICATION PACKAGES already holds that access there.
+Edit grant_acl(const std::wstring& path, PSID sid, DWORD mask) {
+  Object object;
+  const Edit opened = open_object(path, object);
+  if (opened != Edit::applied) return opened;
+  if (packages_already_hold(object.dacl, mask)) return Edit::unnecessary;
   EXPLICIT_ACCESS_W access{};
   access.grfAccessPermissions = mask;
-  access.grfAccessMode = mode;
+  access.grfAccessMode = GRANT_ACCESS;
   access.grfInheritance =
-    (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
+    (object.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? SUB_CONTAINERS_AND_OBJECTS_INHERIT : NO_INHERITANCE;
   access.Trustee.TrusteeForm = TRUSTEE_IS_SID;
   access.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
   access.Trustee.ptstrName = static_cast<LPWSTR>(sid);
   PACL updated = nullptr;
-  DWORD status = SetEntriesInAclW(1, &access, dacl, &updated);
+  DWORD status = SetEntriesInAclW(1, &access, object.dacl, &updated);
   if (status == ERROR_SUCCESS) {
     status = SetNamedSecurityInfoW(const_cast<LPWSTR>(path.c_str()), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION,
       nullptr, nullptr, updated, nullptr);
   }
   if (updated != nullptr) LocalFree(updated);
-  LocalFree(descriptor);
   return status == ERROR_SUCCESS ? Edit::applied : Edit::failed;
 }
 
@@ -256,13 +321,13 @@ public:
   }
 
   bool grant(const Grant& grant) {
-    const Edit edit = edit_acl(grant.path, sid_, GRANT_ACCESS, grant.mask);
+    const Edit edit = grant_acl(grant.path, sid_, grant.mask);
     if (edit == Edit::applied) edited_.push_back(grant.path);
     return edit == Edit::applied || edit == Edit::unnecessary;
   }
 
   bool deny(const std::wstring& path) {
-    const Edit edit = edit_acl(path, sid_, DENY_ACCESS, FILE_ALL_ACCESS);
+    const Edit edit = rewrite_explicit(path, sid_, true);
     if (edit == Edit::applied) edited_.push_back(path);
     // Nothing exists there yet, so nothing is reachable through a grant.
     return edit == Edit::applied || edit == Edit::missing;
@@ -282,7 +347,7 @@ public:
   bool release() {
     bool clean = true;
     for (auto it = edited_.rbegin(); it != edited_.rend(); ++it) {
-      const Edit edit = edit_acl(*it, sid_, REVOKE_ACCESS, 0);
+      const Edit edit = rewrite_explicit(*it, sid_, false);
       if (edit != Edit::applied && edit != Edit::missing) {
         report(L"could not remove a grant");
         clean = false;
