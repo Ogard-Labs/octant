@@ -2335,6 +2335,15 @@ export function createCodeOperationRuntime(
         if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
+        // The compaction resumes this native session on a connection of its
+        // own. A session the host kept past its last turn (background tasks
+        // still running) is stopped first, tasks and all: two processes must
+        // never write the same native history, and the next turn must resume
+        // what the compaction left rather than a handle from before it.
+        const key = String(stored.id);
+        if (startingTurns.has(key) || turns.holdsTurn(key)) return undefined;
+        await options.outlivingSessions?.stopThread(codeSessionKey(stored.id));
+        if (startingTurns.has(key) || turns.holdsTurn(key)) return undefined;
         const thread = options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
         return {
           acquire: {
@@ -2441,6 +2450,20 @@ export function createCodeOperationRuntime(
             const occupied = conversationRefusal(target.thread);
             if (occupied !== undefined)
               return { kind: "code-native-session-refused", message: occupied.message };
+            // The session was claimed for the thread as it stood before the
+            // provider was asked. A thread rebound meanwhile (a relink that
+            // moved its checkout, another provider or folder) would journal a
+            // session for a checkout it no longer has, which neither a send
+            // nor another adoption could then take up.
+            const current = options.persistence.readCodeThread(target.thread.id);
+            if (
+              current === undefined ||
+              adoptionBinding(current) !== adoptionBinding(target.thread)
+            )
+              return {
+                kind: "code-native-session-refused",
+                message: "This thread changed while it took up the session. Try again.",
+              };
             // The session began outside Octant, so whatever it read there is
             // unseen here: the thread carries outside content from its start.
             const marked = options.recordExternalContentIngestion?.({
@@ -3160,6 +3183,8 @@ interface ActiveTurn {
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
+  /** A kept session's terms, from the Project as it stood when `extraFolders` was read. */
+  readonly sessionTerms?: string;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -4037,6 +4062,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : []),
       ]),
     ].filter((folder) => folder !== providerRoot);
+    // The terms a kept session is held to come from the Project as it stood
+    // when the turn took its folders, in the same step: a folder removed
+    // while the turn starts is still in the session, and terms read later
+    // would match the narrower Project and keep that session past its turn.
+    const sessionTerms = codeSessionTerms(
+      input.thread,
+      this.#options.readProject?.(input.thread.projectId),
+    );
     // Read before the final admission check, which must not yield before the
     // turn is owned. A server Project's folder is on another machine, so its
     // design system is the runtime's to read there.
@@ -4118,6 +4151,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
       extraFolders,
+      ...(sessionTerms === undefined ? {} : { sessionTerms }),
       driver,
       firstTurn:
         !priorTurn &&
@@ -6309,10 +6343,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                         acquireInput.permissionPersistence,
                       ]),
                       active.driver.acquire(acquireInput),
-                      codeSessionTerms(
-                        active.thread,
-                        this.#options.readProject?.(active.thread.projectId),
-                      ),
+                      active.sessionTerms,
                     )
               ).pipe(
                 Effect.tap((connection) =>
@@ -7208,6 +7239,24 @@ function levelChangeTarget(
   return {
     to: back === undefined || back === "full-access" || back === "plan" ? "approval-gated" : back,
   };
+}
+
+/**
+ * What an adopted session is bound to on a Code thread: the session is
+ * journaled for exactly this provider, model, Project binding, checkout and
+ * folder, so an adoption that finishes after any of them changed is refused.
+ */
+function adoptionBinding(thread: CodeThread): string {
+  return JSON.stringify([
+    thread.lifecycle,
+    String(thread.projectId),
+    String(thread.bindingRevisionId),
+    String(thread.checkoutId),
+    String(thread.providerInstanceId),
+    String(thread.modelId),
+    thread.workingFolderId === undefined ? null : String(thread.workingFolderId),
+    thread.workingDirectory ?? null,
+  ]);
 }
 
 /** The key a Code thread's kept provider session is held under. */

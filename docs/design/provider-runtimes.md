@@ -834,7 +834,12 @@ after the background work limit with no turn in the thread (a host setting:
 2 hours by default, Off for no bound), when the host cannot open the
 runtime's turn (the thread was archived, or stayed busy for 20 tries), when
 the turn the host opened has not taken the session up within 60 seconds,
-when a turn ends without settling its session, and at shutdown. A
+when a turn ends without settling its session, before a requested compaction
+resumes the same native session on a connection of its own (so two processes
+never write one history, and the next turn resumes what the compaction left),
+and at shutdown. A session is held to the Project as it stood when its turn
+took its folders, read in the same step, so a folder removed while the turn
+starts makes the session's terms differ and it is not kept. A
 runtime-started turn holds at most 1,024 events before it is opened; the
 event past that stops the session at once and the host's attach is
 refused. Rationale: settling the person's
@@ -1000,7 +1005,11 @@ could not be marked) gives the claim back through the driver's `release`,
 which removes the record only while it still names this adoption's Octant
 session; the session is offered and adoptable again. The adoption's two
 events are journaled as one unit, so a claim given back never leaves half an
-adoption behind. A session still open in a terminal is not
+adoption behind. Just before it journals, the adoption reads the thread again
+and refuses (giving the claim back) when its provider, model, Project binding,
+checkout or folder changed while the provider was asked: a session journaled
+for a checkout the thread no longer has could be taken up by neither a send
+nor another adoption. A session still open in a terminal is not
 detected; continuing it in both places writes two branches of one
 conversation. A Work thread cannot be started from a session yet.
 

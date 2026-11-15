@@ -168,6 +168,7 @@ import {
 import {
   beginUnconfirmedStepSettlement,
   type CodeActiveTurns,
+  codeSessionTerms,
   createCodeOperationRuntime,
   threadWithActiveTurnPosture,
 } from "./codeOperationRuntime";
@@ -2121,6 +2122,49 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("stops the thread's kept session and its background tasks before a compaction resumes the same session", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const order: Array<string> = [];
+    const stopThread = vi.fn(async () => {
+      order.push("stopped");
+      return true;
+    });
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      outlivingSessions: {
+        acquire: (_key, _acquiredFor, open) => open as never,
+        stopThread,
+      },
+    });
+    const sessions = fixture.runtime.compactionSessions;
+    if (sessions === undefined) throw new Error("The runtime offers compaction sessions");
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(33),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+      const opened = await sessions.open(String(threadId), windowId);
+      order.push("opened");
+      expect(opened).toBeDefined();
+      // Two processes never write the same native history: the kept one is
+      // stopped before the compaction's own resumes it.
+      expect(stopThread).toHaveBeenCalledWith(`code:${String(threadId)}`);
+      expect(order).toEqual(["stopped", "opened"]);
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("opens, for a compaction, the session the thread's next turn would resume and no more", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3296,6 +3340,78 @@ describe("CodeOperationRuntime", () => {
         (block) => block.kind === "instructions" && block.text.includes("extra folders"),
       );
       expect(named?.text).toContain("- /Users/example/Notes");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("holds a kept session to the folders the turn took, so a folder removed while it starts is never retained", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const provider = providerConnection(queue);
+    const revision = "90000000-0000-4000-8000-000000000071";
+    const project = (extraFolders: ReadonlyArray<string>) =>
+      ({
+        id: thread().projectId,
+        type: "code",
+        name: "App",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1",
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+        binding: { canonicalRoot: "/Users/example/App" },
+        bindingHistory: [
+          {
+            revisionId: revision,
+            revision: 1,
+            currentBinding: { canonicalRoot: "/Users/example/App" },
+            actor,
+            changedAt: now,
+          },
+        ],
+        extraFolders: extraFolders.map((canonicalRoot) => ({
+          canonicalRoot,
+          addedBy: actor,
+          addedAt: now,
+        })),
+      }) as never;
+    let folders: ReadonlyArray<string> = ["/Users/example/Notes"];
+    const taken = project(["/Users/example/Notes"]);
+    const kept: Array<string | undefined> = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(provider),
+      readProjectExtraFolders: () => folders,
+      readProject: () => project(folders),
+      // Runs after the turn took its folders and before its session is
+      // acquired: the person removes the extra folder meanwhile.
+      designSystemContext: async () => {
+        folders = [];
+        return undefined;
+      },
+      outlivingSessions: {
+        acquire: (_key, _acquiredFor, open, terms) => {
+          kept.push(terms);
+          // The test keeps nothing; the turn opens its connection as usual.
+          return open as never;
+        },
+        stopThread: async () => false,
+      },
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(76),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+      // The session holds the removed folder, so its terms name it: the
+      // Project's terms now differ and the session is not kept past its turn.
+      expect(kept).toEqual([codeSessionTerms(thread(), taken)]);
+      expect(kept[0]).not.toEqual(codeSessionTerms(thread(), project([])));
     } finally {
       fixture.close();
     }
@@ -5878,6 +5994,52 @@ describe("CodeOperationRuntime", () => {
       expect(await sessions.adopt(windowId, threadId, outside)).toMatchObject({
         kind: "code-native-session-refused",
       });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses an adoption whose thread was rebound to another checkout while it ran, and gives the claim back", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    let finish: (() => void) | undefined;
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.async<ProviderResumeCursor>((resume) => {
+        finish = () => resume(Effect.succeed({ driverKind: "codex", value: `resumed-${outside}` }));
+      }),
+    );
+    const release = vi.fn((_input: { readonly sessionId: ProviderSessionId }) => Effect.void);
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+    };
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: vi.fn(() => ({
+        kind: "recorded" as const,
+        taint: { externalContentIngested: true, ingestedSources: [] },
+      })),
+    });
+    try {
+      const adoption = fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside);
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      // The Project was relinked meanwhile and the thread rebound to a new checkout.
+      fixture.setThread({
+        ...thread(),
+        checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000072"),
+      });
+      finish?.();
+      expect(await adoption).toEqual({
+        kind: "code-native-session-refused",
+        message: "This thread changed while it took up the session. Try again.",
+      });
+      expect(release).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: adopt.mock.calls[0]?.[0].sessionId }),
+      );
+      // Nothing was journaled, so the thread can still be adopted again.
+      expect(await fixture.runtime.nativeSessions!.list(windowId, threadId)).not.toHaveProperty(
+        "adopted",
+      );
     } finally {
       fixture.close();
     }
@@ -11382,6 +11544,7 @@ function runtimeFixture(options: {
   readProjectExtraFolders?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["readProjectExtraFolders"];
+  readProject?: Parameters<typeof createCodeOperationRuntime>[0]["readProject"];
   compactionRunning?: (threadId: CodeThreadId) => boolean;
   sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
@@ -11845,6 +12008,7 @@ function runtimeFixture(options: {
     ...(options.readProjectExtraFolders === undefined
       ? {}
       : { readProjectExtraFolders: options.readProjectExtraFolders }),
+    ...(options.readProject === undefined ? {} : { readProject: options.readProject }),
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
