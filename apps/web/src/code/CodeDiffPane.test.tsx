@@ -167,7 +167,7 @@ describe("CodeDiffPane", () => {
       "1313 export { answer };",
     ]);
     expect(screen.getByRole("region", { name: "README.md" })).toBeVisible();
-    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
   });
 
   it("keeps the selected captured path and editor identity across reordered versions, and explicitly refuses to retarget a missing path", async () => {
@@ -215,7 +215,7 @@ describe("CodeDiffPane", () => {
       />,
     );
     await chooseSideBySide();
-    await userEvent.setup().click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "added:README.md+1−0" }));
     await waitFor(() => expect(fixture.options?.modelUriBase).toContain("README.md"));
     const loads = fixture.loadRuntime.mock.calls.length;
     mounted.rerender(
@@ -227,7 +227,7 @@ describe("CodeDiffPane", () => {
         ignoreWhitespace={{ value: true, onChange: vi.fn() }}
       />,
     );
-    expect(screen.getByRole("button", { name: "README.mdadded+1−0" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "added:README.md+1−0" })).toHaveAttribute(
       "aria-current",
       "true",
     );
@@ -267,7 +267,7 @@ describe("CodeDiffPane", () => {
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
     await screen.findByRole("region", { name: "src/index.ts" });
-    expect(screen.queryByRole("checkbox", { name: "Ignore whitespace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ignore whitespace" })).not.toBeInTheDocument();
 
     view.rerender(
       <CodeDiffPane
@@ -277,7 +277,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    await userEvent.setup().click(screen.getByRole("checkbox", { name: "Ignore whitespace" }));
+    await userEvent.setup().click(screen.getByRole("button", { name: "Ignore whitespace" }));
 
     expect(onChange).toHaveBeenCalledWith(true);
   });
@@ -313,8 +313,8 @@ describe("CodeDiffPane", () => {
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     const entries = within(files).getAllByRole("button");
     expect(entries.map((entry) => entry.textContent)).toEqual([
-      "src/index.tsmodified+1−1",
-      "README.mdadded+1−0",
+      "Mmodified: src/index.ts+1−1",
+      "Aadded: README.md+1−0",
     ]);
     expect(entries[0]).toHaveAttribute("aria-current", "true");
   });
@@ -572,7 +572,7 @@ describe("CodeDiffPane", () => {
     );
     await chooseSideBySide();
     expect(await screen.findByRole("button", { name: "Discard changes" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    await user.click(screen.getByRole("button", { name: "added:README.md+1−0" }));
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
   });
 
@@ -672,7 +672,7 @@ describe("CodeDiffPane", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
     other.unmount();
 
     render(

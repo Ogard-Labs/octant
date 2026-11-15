@@ -3191,3 +3191,152 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     box-shadow: none;
   }
 }
+
+/* Review: one toolbar row, one status row, then the changed files beside the
+   diffs. The switch (when this pane draws its own row) stands left and the
+   diff's controls right; the status row carries the counts and the quiet
+   checks and findings marks. */
+.git-history__toolbar-actions,
+.code-diff-pane__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.git-history__toolbar-actions {
+  margin-inline-start: auto;
+}
+
+.code-diff-pane__toolbar {
+  height: 36px;
+  flex: none;
+  justify-content: flex-end;
+  padding: 0 var(--oct-space-2);
+  background: var(--octant-sidebar-fill);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+  border-bottom: 0;
+}
+
+.code-diff-pane__status {
+  display: flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
+}
+
+.code-diff-pane__trail {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-3);
+}
+
+.review-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+.code-diff-pane__file-status {
+  flex: none;
+  width: 12px;
+  font-family: var(--oct-font-mono);
+  text-align: center;
+}
+
+.code-diff-pane__file-status[data-change="created"] {
+  color: var(--oct-success-fg);
+}
+
+.code-diff-pane__file-status[data-change="deleted"] {
+  color: var(--oct-danger-fg);
+}
+
+.code-diff-pane__file-status[data-change="modified"],
+.code-diff-pane__file-status[data-change="renamed"] {
+  color: var(--oct-warn-fg);
+}
+
+.code-diff-pane__file-folder {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-muted);
+  text-overflow: ellipsis;
+}
+
+.code-diff-pane__file-name {
+  flex: none;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-review-pane__header {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-review-pane__header h2 {
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+/* Diffs run edge to edge, each file under its sticky header. */
+.unified-diff {
+  gap: 0;
+  padding: 0 0 var(--oct-space-6);
+}
+
+.unified-diff__file {
+  border: 0;
+  border-bottom: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+  border-radius: 0;
+  background: transparent;
+}
+
+.unified-diff__file-gap {
+  height: 0;
+}
+
+.unified-diff__file-header {
+  min-height: 28px;
+  background: var(--octant-sidebar-fill);
+}
+
+/* The changed files: a left column when the pane is wide, a short list above
+   the diffs when it is narrow. */
+.code-diff-pane__body {
+  flex-direction: column;
+}
+
+.code-diff-pane__files {
+  width: auto;
+  max-height: 112px;
+  border-right: 0;
+  border-bottom: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+}
+
+@container workspace (min-width: 640px) {
+  .code-diff-pane__body {
+    flex-direction: row;
+  }
+
+  .code-diff-pane__files {
+    width: 220px;
+    max-height: none;
+    border-right: 1px solid var(--octant-pane-line, var(--octant-border-soft));
+    border-bottom: 0;
+  }
+}

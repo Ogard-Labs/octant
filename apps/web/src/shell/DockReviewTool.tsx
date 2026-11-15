@@ -1,5 +1,10 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
-import { CodeLocalReview, type CodeReviewLineSelection } from "../code/CodeLocalReview";
+import {
+  CodeLocalReview,
+  ReviewStatusChips,
+  type CodeLocalReviewStatus,
+  type CodeReviewLineSelection,
+} from "../code/CodeLocalReview";
 import { CodeTurnReviewTool } from "../code/CodeTurnReviewTool";
 import {
   CodeLineNotes,
@@ -157,6 +162,8 @@ function BoundReview(props: {
   const [noteAnchor, setNoteAnchor] = useState<CodeLineNoteAnchor>();
   const [projection, setProjection] = useState<CodeDiffProjection>({ state: "loading" });
   const [stale, setStale] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [status, setStatus] = useState<CodeLocalReviewStatus>();
   const [ignoreWhitespace, setIgnoreWhitespace] = useCodeDiffIgnoreWhitespace();
   const scope = useMemo(
     () => ({ checkoutId: props.checkoutId, threadId: props.threadId }),
@@ -203,7 +210,6 @@ function BoundReview(props: {
 
   return (
     <>
-      <p>Checkout changes only. Edits in extra Project folders are not included.</p>
       {props.requestedCodeReviewFile === undefined ? null : (
         <p role="note">
           Opened {props.requestedCodeReviewFile.path} from a completed turn in this checkout. This
@@ -230,6 +236,12 @@ function BoundReview(props: {
         createOperationId={() => nextUuid() as never}
         defaultLayout={props.defaultDiffLayout ?? "unified"}
         diff={projection}
+        info="Checkout changes only. Edits in extra Project folders are not included. Review is local only: GitHub review mutation is unavailable."
+        onRefresh={() => {
+          setRefreshTick((value) => value + 1);
+          void observe();
+        }}
+        statusTrail={status === undefined ? null : <ReviewStatusChips status={status} />}
         ignoreWhitespace={{
           value: ignoreWhitespace,
           onChange: setIgnoreWhitespace,
@@ -265,6 +277,8 @@ function BoundReview(props: {
         {...(line === undefined ? {} : { line })}
         {...(props.createUuid === undefined ? {} : { createUuid: props.createUuid })}
         onRefreshComparison={() => void observe()}
+        onStatus={setStatus}
+        refreshTick={refreshTick}
       />
     </>
   );

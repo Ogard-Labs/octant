@@ -244,19 +244,13 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
 
   return (
     <section aria-label="Local review" className="code-delivery-pane code-review-pane">
-      <header className="code-delivery-pane__toolbar">
-        <div>
-          <span>Review</span>
-          <h1>Local findings</h1>
-        </div>
-        <p>Local only · GitHub review mutation unavailable</p>
-      </header>
-      {findings.length === 0 ? (
-        <p role="status">
-          No local findings.
-          {props.target === undefined ? " Select an exact file and line to add one." : ""}
-        </p>
-      ) : (
+      {findings.length === 0 ? null : (
+        <header className="code-review-pane__header">
+          <h2>Findings</h2>
+          <span>{findings.length}</span>
+        </header>
+      )}
+      {findings.length === 0 ? null : (
         <ul className="code-review-pane__findings">
           {findings.map((finding) => (
             <li key={finding.id}>

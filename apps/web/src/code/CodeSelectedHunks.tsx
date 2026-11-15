@@ -29,6 +29,8 @@ export interface CodeSelectedHunksProps {
   readonly createOperationId: () => CodeOperationId;
   readonly createGitOperationId: () => CodeGitOperationId;
   readonly requestApproval?: (command: Command) => Promise<CodeApprovalId | undefined>;
+  /** Opens the disclosure at first render: it was chosen from a menu. */
+  readonly startOpen?: boolean;
 }
 
 const UNAVAILABLE: Readonly<Record<CodeGitHunkUnavailableReason, string>> = {
@@ -234,7 +236,11 @@ export function CodeSelectedHunks(props: CodeSelectedHunksProps) {
   };
   const files = shown === undefined ? [] : parseUnifiedDiff(shown.text);
   return (
-    <OctantCollapsible className="code-diff-pane__hunk-selection" summary="Select Git hunks">
+    <OctantCollapsible
+      className="code-diff-pane__hunk-selection"
+      open={props.startOpen}
+      summary="Select Git hunks"
+    >
       <p>
         Compare the index and working tree separately. Selection uses the exact unified patch,
         including whitespace.

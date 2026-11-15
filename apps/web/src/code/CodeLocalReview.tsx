@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
+import { FlaskConical, MessageSquare } from "../ui/icons";
 import { CodeReviewPane } from "./CodeReviewPane";
 
 export interface CodeReviewLineSelection {
@@ -59,6 +60,37 @@ interface CodeLocalReviewProps {
   readonly line?: CodeReviewLineSelection;
   readonly createUuid?: () => string;
   readonly onRefreshComparison?: () => void;
+  /** Reports what the status row shows: the recorded checks and the finding count. */
+  readonly onStatus?: (status: CodeLocalReviewStatus) => void;
+  /** The toolbar's refresh: a new value re-reads findings and checks. */
+  readonly refreshTick?: number;
+}
+
+export interface CodeLocalReviewStatus {
+  readonly checks: string;
+  readonly checksNote: string | undefined;
+  readonly findings: number | undefined;
+}
+
+/** Checks and findings as quiet meta text with icons, not paragraphs. */
+export function ReviewStatusChips(props: { readonly status: CodeLocalReviewStatus }) {
+  const { checks, checksNote, findings } = props.status;
+  return (
+    <>
+      <span className="review-status-chip" title={checksNote}>
+        <FlaskConical aria-hidden="true" size={12} />
+        {checks}
+      </span>
+      {findings === undefined ? null : (
+        <span className="review-status-chip">
+          <MessageSquare aria-hidden="true" size={12} />
+          {findings === 0
+            ? "No findings"
+            : `${findings} ${findings === 1 ? "finding" : "findings"}`}
+        </span>
+      )}
+    </>
+  );
 }
 
 export function CodeLocalReview(props: CodeLocalReviewProps) {
@@ -153,7 +185,21 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
         })
         .catch(() => undefined);
     return () => controller.abort();
-  }, [identity, props.client, props.createUuid, refresh]);
+  }, [identity, props.client, props.createUuid, refresh, props.refreshTick]);
+
+  const onStatus = props.onStatus;
+  const checksText =
+    checks?.result === undefined
+      ? "No tests run"
+      : `Tests ${checks.result.state}${checks.result.state !== "completed" ? "" : ` · ${checks.result.verdict}`}`;
+  const checksNote =
+    checks?.result === undefined
+      ? "No recorded test result is available for this task."
+      : "Latest recorded checks. This result is not bound to the displayed comparison; recheck Tests after the correction turn.";
+  const findingCount = loading ? undefined : assessments.length;
+  useEffect(() => {
+    onStatus?.({ checks: checksText, checksNote, findings: findingCount });
+  }, [onStatus, checksText, checksNote, findingCount]);
 
   const line = props.line;
   useEffect(() => {
@@ -205,26 +251,20 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
   };
   return (
     <section aria-label="Review findings and correction draft" className="code-local-review">
-      <OctantButton
-        type="button"
-        size="sm"
-        variant="secondary"
-        onClick={() => {
-          setRefresh((value) => value + 1);
-          props.onRefreshComparison?.();
-        }}
-      >
-        {targetNotice === undefined ? "Refresh findings and checks" : "Try again"}
-      </OctantButton>
-      <p role="status">
-        {checks?.result === undefined
-          ? "No recorded test result is available for this task."
-          : `Latest recorded checks: ${checks.result.state}${checks.result.state !== "completed" ? "" : ` · ${checks.result.verdict}`}. This result is not bound to the displayed comparison; recheck Tests after the correction turn.`}
-      </p>
-      {loading ? <p role="status">Loading local findings…</p> : null}
       {targetNotice === undefined ? null : (
         <OctantAlert layout="row" tone="neutral">
           {targetNotice}
+          <OctantButton
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setRefresh((value) => value + 1);
+              props.onRefreshComparison?.();
+            }}
+          >
+            Try again
+          </OctantButton>
         </OctantAlert>
       )}
       <CodeReviewPane

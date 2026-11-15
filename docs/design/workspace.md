@@ -1087,7 +1087,7 @@ under rules.
 
 ## Tool lifecycles
 
-In current Code Review, **Select Git hunks** opens separate **Index → Working
+In current Code Review, **Select Git hunks** (an action in the toolbar's ⋯ menu) opens separate **Index → Working
 tree** and **HEAD → Index** comparisons. The selected unified hunk shows its
 file and both line ranges before Stage, Unstage or Reverse. Selection always
 uses exact whitespace, independently of the ordinary diff's display preference.
@@ -3190,6 +3190,26 @@ Historical file inspection is read-only. Existing unified diffs and Monaco own
 diff presentation; file disclosures mount only their open preview. Unified and
 Side by side are a compact Settings row on Code, used only until this window
 stores a layout for that thread.
+
+### Review layout
+
+Review is a column of three rows and the diffs. One 36px toolbar row under the
+tab bar holds the view switch (Working tree, Local commits, History) at its left;
+at its right, for the working tree, Unified and Side by side as a compact icon
+segmented control, an Ignore whitespace icon toggle, a refresh icon button that
+re-reads the comparison, findings and checks, and a ⋯ menu that holds Select Git
+hunks. One 28px status row follows: "N files changed · +a −d" at the left and, at
+the right, the recorded checks ("No tests run") and the finding count ("No
+findings") as quiet meta text with icons, then an info icon whose tooltip carries
+the scope sentences (checkout changes only; extra Project folders are not
+included; local only, GitHub review mutation unavailable). No paragraph states
+an empty result: a "Findings" header with its count appears only when findings
+exist. The changed files are a list of rows (status letter M, A, D or R in the
+diff tokens, the folder muted and the name strong, the counts at the right) that
+takes the diff to that file: a 220px left column when the pane is at least 640px
+wide, a short scrolling list above the diffs when narrower. Diffs run edge to
+edge, each file under a sticky 28px header, with hunks in the existing diff
+colours and line numbers in meta ink.
 
 ### What's new card and announcement
 
