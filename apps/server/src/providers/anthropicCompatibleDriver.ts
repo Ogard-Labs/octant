@@ -1,3 +1,4 @@
+import { anthropicOwnSearchOrigin } from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
@@ -312,11 +313,22 @@ function sessionOver(
             ...(request.system === undefined ? {} : { system: request.system }),
             tools: request.tools,
             toolAnswers: [],
+            // Only Anthropic's own API runs a search whose terms Octant knows;
+            // anywhere else the request leaves the tool out.
+            ...(request.providerWebSearch !== undefined &&
+            anthropicOwnSearchOrigin(options.configuration) !== undefined
+              ? { webSearch: true }
+              : {}),
             signal: stream.signal,
             onEvent: (event: AnthropicTurnEvent) => {
               if (event.kind === "usage") {
                 const { sequence: _sequence, ...usage } = event;
                 stream.onEvent(usage);
+                return;
+              }
+              if (event.kind === "web-search") {
+                const { sequence: _sequence, kind: _kind, ...search } = event;
+                stream.onEvent({ kind: "provider-web-search", ...search });
                 return;
               }
               stream.onEvent({ kind: event.kind, text: event.text });
@@ -366,7 +378,7 @@ function recordObservedTurn(
     ...(options.configuration.authentication !== "none" ? { credentialStatus: "stored" } : {}),
     models,
     capabilities: {
-      ...initialCapabilities,
+      ...capabilitiesFor(options),
       nativeAttachments: attachedImagesSupport(models),
       streaming: "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
@@ -519,7 +531,7 @@ function recordProbe(
     // override, outlive the probe a Chat turn runs first.
     models: carryModelContextWindowFacts(result.models, prior?.models),
     capabilities: {
-      ...initialCapabilities,
+      ...capabilitiesFor(options),
       nativeAttachments: attachedImagesSupport(result.models),
     },
     ...(result.failure === undefined ? {} : { message: result.failure.message }),
@@ -540,6 +552,17 @@ function anthropicOAuthInput(options: AnthropicCompatibleDriverOptions, clock: (
     now: () => Date.parse(clock()),
     baseUrl: options.configuration.baseUrl,
   };
+}
+
+/**
+ * What this endpoint can do before a turn proves more. Its provider's own web
+ * search is reported only on Anthropic's own API, the one origin where Octant
+ * knows whose search runs the query.
+ */
+function capabilitiesFor(options: AnthropicCompatibleDriverOptions): ProviderCapabilities {
+  return anthropicOwnSearchOrigin(options.configuration) === undefined
+    ? initialCapabilities
+    : { ...initialCapabilities, nativeWebResearch: "supported" };
 }
 
 function manualModels(modelIds: readonly ProviderModelId[]) {

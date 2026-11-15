@@ -2197,7 +2197,9 @@ export class CodeService {
           command.thread.coordinatorBounds !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
-          command.thread.coordinatorWakeOff !== undefined
+          command.thread.coordinatorWakeOff !== undefined ||
+          // Only the host's own move writes this reason, which the transcript shows as Octant's.
+          command.thread.providerHandoff?.continuedOnFallback !== undefined
         ) {
           throw this.#failure(
             "unauthorized",
@@ -2899,6 +2901,16 @@ export class CodeService {
                                     nextModelId: command.modelId,
                                     changedAt: updatedAt,
                                     ...(releasedStopId === undefined ? {} : { releasedStopId }),
+                                    // Only the host's own continued-on-fallback move carries it.
+                                    ...(current.coordinatorChoice !== undefined &&
+                                    executionContext?.coordinatorChoice?.move ===
+                                      "continued-on-fallback" &&
+                                    executionContext.coordinatorChoice.reason !== undefined
+                                      ? {
+                                          continuedOnFallback:
+                                            executionContext.coordinatorChoice.reason,
+                                        }
+                                      : {}),
                                   },
                                 }),
                             version: command.expectedVersion + 1,

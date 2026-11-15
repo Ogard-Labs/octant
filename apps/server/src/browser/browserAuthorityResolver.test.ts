@@ -247,6 +247,103 @@ describe("ServerBrowserAuthorityResolver", () => {
     expect(resolver.canAccessWindow(ROUTINE_HOST_SCOPE_ID, threadId as any, "code")).toBe(false);
   });
 
+  it("gives each pane's thread its own Project's Browser scope in a window showing several Projects", () => {
+    const paneProjectId = "10000000-0000-4000-8000-000000000002";
+    const hiddenProjectId = "10000000-0000-4000-8000-000000000003";
+    const leadThreadId = "20000000-0000-4000-8000-0000000000a1";
+    const paneThreadId = "20000000-0000-4000-8000-0000000000a2";
+    const hiddenThreadId = "20000000-0000-4000-8000-0000000000a3";
+    const workPane = (nodeId: string, paneId: string, id: string, thread: string) => ({
+      kind: "pane",
+      nodeId,
+      paneId,
+      surface: {
+        kind: "work-thread",
+        id,
+        threadId: thread,
+        mode: "work",
+        title: "Work",
+        hostId: LOCAL_HOST_ID,
+      },
+    });
+    const workspace = {
+      contextByMode: {
+        chat: { host: LOCAL_HOST_ID, mode: "chat", projectId: null, boundRoot: null },
+        work: { host: LOCAL_HOST_ID, mode: "work", projectId, boundRoot: "/project" },
+        code: { host: LOCAL_HOST_ID, mode: "code", projectId: null, boundRoot: null },
+      },
+      layouts: {
+        work: {
+          kind: "split",
+          nodeId: "81000000-0000-4000-8000-000000000001",
+          orientation: "horizontal",
+          ratio: 0.5,
+          first: workPane(
+            "81000000-0000-4000-8000-000000000002",
+            "82000000-0000-4000-8000-000000000001",
+            "83000000-0000-4000-8000-000000000001",
+            leadThreadId,
+          ),
+          second: {
+            ...workPane(
+              "81000000-0000-4000-8000-000000000003",
+              "82000000-0000-4000-8000-000000000002",
+              "83000000-0000-4000-8000-000000000002",
+              paneThreadId,
+            ),
+            context: {
+              host: LOCAL_HOST_ID,
+              mode: "work",
+              projectId: paneProjectId,
+              boundRoot: "/pane-project",
+            },
+          },
+        },
+      },
+    };
+    const projectOf: Record<string, string> = {
+      [leadThreadId]: projectId,
+      [paneThreadId]: paneProjectId,
+      [hiddenThreadId]: hiddenProjectId,
+    };
+    const resolver = new ServerBrowserAuthorityResolver({
+      hostId,
+      workspaceHostId: LOCAL_HOST_ID,
+      persistence: {
+        readProject: (id: string) => ({ ...baseProject, id, type: "work" }) as any,
+        readCodeThread: () => undefined,
+        readChatThread: () => undefined,
+        readProviderInstance: () => provider as any,
+        readWindowWorkspace: (candidate: string) =>
+          candidate === windowId ? ({ workspace } as any) : undefined,
+      } as any,
+      workThreads: {
+        read: (id: string) =>
+          ({
+            id,
+            projectId: projectOf[id],
+            title: "Thread",
+            lifecycle: "active",
+            providerInstanceId: providerId,
+            modelId: "model",
+            bindingRevisionId: revisionId,
+            version: 1,
+            createdAt: "2026-07-27T20:00:00.000Z",
+            updatedAt: "2026-07-27T20:00:00.000Z",
+          }) as any,
+      } as any,
+    });
+
+    expect(resolver.resolve(leadThreadId as any, "work")?.projectId).toBe(projectId);
+    expect(resolver.resolve(paneThreadId as any, "work")?.projectId).toBe(paneProjectId);
+    expect(resolver.canAccessWindow(windowId as any, leadThreadId as any, "work")).toBe(true);
+    expect(resolver.canAccessWindow(windowId as any, paneThreadId as any, "work")).toBe(true);
+    expect(
+      resolver.canAccessWindow(windowId as any, hiddenThreadId as any, "work"),
+      "a Project the window does not show stays out of reach",
+    ).toBe(false);
+  });
+
   it("refuses a Work Browser scope when its binding revision is missing or stale", () => {
     const resolver = new ServerBrowserAuthorityResolver({
       hostId,

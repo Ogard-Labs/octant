@@ -35,7 +35,6 @@ import {
   type ThreadTaskProgress,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
-  MAX_TURN_RUNTIME_EVENTS,
   restateThreadTaskList,
   upsertThreadTaskProgress,
   type ThreadToolStep,
@@ -50,6 +49,7 @@ import {
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
+  turnRuntimeEventBudget,
 } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -70,11 +70,12 @@ import {
 } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
@@ -92,7 +93,6 @@ import type { ResearchRouteDecision, ResearchRouter } from "./research/researchR
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const DEFAULT_MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // How long one app-managed tool call may run before the turn fails. It is the
 // call's own deadline, apart from the stalled-turn limit, which is paused
 // while the call runs and may be turned off.
@@ -360,7 +360,7 @@ export type { AppManagedToolSet } from "../providers/appManagedToolSet";
 export class ChatTurnRunner {
   readonly #capacityScheduler: ProviderCapacityScheduler;
   readonly #contextHarness: ContextHarnessService;
-  readonly #maxEvents: number;
+  readonly #maxEvents: number | undefined;
   readonly #stalledTurnLimitMs: () => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #appManagedToolDeadlineMs: number;
@@ -374,7 +374,7 @@ export class ChatTurnRunner {
     this.#capacityScheduler = options.capacityScheduler;
     this.#spendCeiling = options.spendCeiling;
     this.#contextHarness = options.contextHarness;
-    this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxEvents = options.maxEvents;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
     this.#providerToolCallPauseLimitMs =
@@ -426,7 +426,12 @@ export class ChatTurnRunner {
     const ambiguousRecovery = input.ambiguousRecovery ?? "interrupted";
     const capacityScheduler = this.#capacityScheduler;
     const contextHarness = this.#contextHarness;
-    const maxEvents = this.#maxEvents;
+    // The event budget follows the person's tool-step limit; Chat has no Full
+    // access, so it is always a number there.
+    const maxEvents =
+      this.#maxEvents ??
+      turnRuntimeEventBudget(input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN) ??
+      Number.POSITIVE_INFINITY;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
     const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
@@ -483,8 +488,8 @@ export class ChatTurnRunner {
           startedAt: turnStartedAt,
           endedAt: clock(),
         });
-      const answeredToolRequestIds = new Set<string>();
-      const answeredApprovalRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
+      const answeredApprovalRequests = new AnsweredRequests();
       const selectedResearchBackend: "searxng" | "provider-native" =
         input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
@@ -497,7 +502,7 @@ export class ChatTurnRunner {
           : Effect.promise(() =>
               input.onTurnCompleted!({
                 text: responseText,
-                toolCalls: answeredToolRequestIds.size,
+                toolCalls: answeredToolRequests.count,
                 turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
               }).catch(() => undefined),
             );
@@ -1265,8 +1270,7 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "approval-request") {
-                  if (answeredApprovalRequestIds.has(event.requestId)) return;
-                  answeredApprovalRequestIds.add(event.requestId);
+                  if (!answeredApprovalRequests.answer(event.requestId)) return;
                   // Chat has no filesystem, shell, or network authority. Decline
                   // Codex-native approvals so the turn can finish instead of
                   // aborting the pending tool as a user interrupt.
@@ -1280,8 +1284,7 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "tool-request") {
-                  if (answeredToolRequestIds.has(event.requestId)) return;
-                  answeredToolRequestIds.add(event.requestId);
+                  if (!answeredToolRequests.answer(event.requestId)) return;
                   const requestSignal = connection.toolRequestSignal?.({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
@@ -1659,7 +1662,7 @@ export class ChatTurnRunner {
                   if (
                     !input.signal?.aborted &&
                     terminalOutcome !== "cancelled" &&
-                    answeredApprovalRequestIds.size > 0 &&
+                    answeredApprovalRequests.count > 0 &&
                     sawVisibleResponse &&
                     currentAttempt.responseRefs.length > 0
                   ) {
@@ -1741,6 +1744,7 @@ export class ChatTurnRunner {
               context: [...context],
               attachments: [...input.attachments],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...providerWebSearchAtSend(input.appManagedTools, input.attempt.providerSessionId),
             })
             .pipe(Effect.catchAll(persistProviderFailure));
         }),

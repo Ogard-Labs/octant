@@ -37,7 +37,6 @@ import { RoleSuggestionPreview } from "./RoleSuggestionPreview";
 import {
   ADVISOR_ROLE,
   MODEL_ROLES,
-  ROLE_FLAGS_NOTE,
   rolePresentation,
   slotFromSuggestion,
   slotWithCandidates,
@@ -420,7 +419,6 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </OctantButton>
               </div>
             ) : null}
-            <p className="oct-meta native-harness-roles__flags">{ROLE_FLAGS_NOTE}</p>
             {MODEL_ROLES.map((role) =>
               role.id === "default" ? (
                 <div

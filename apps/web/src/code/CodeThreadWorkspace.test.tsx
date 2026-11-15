@@ -1140,6 +1140,62 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
+  it("says where and why the host moved a worker on to its fallback, even with no turn after the move", () => {
+    const base = controller();
+    const reason = "Opus 5.5 (Work) at usage limit; continued on Astra (Personal)";
+    render(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...base,
+            conversation: [
+              {
+                id: "ask",
+                role: "user",
+                text: "Fix the test",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                at: "2026-11-15T12:00:00.000Z",
+              },
+              {
+                id: "stopped",
+                role: "assistant",
+                text: "Looking at it",
+                status: "waiting",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                // Its turn settled after the move; the marker still follows it.
+                at: "2026-11-15T12:03:00.000Z",
+              },
+            ],
+            activeView: {
+              ...base.activeView!,
+              thread: {
+                ...base.activeView!.thread,
+                coordinatorThreadId: "20000000-0000-4000-8000-0000000000c1",
+                coordinatorChoice: { role: "default", rank: { fallback: 1 }, reason },
+                providerHandoff: {
+                  previousProviderInstanceId: providerId,
+                  previousModelId: modelId,
+                  nextProviderInstanceId: providerId,
+                  nextModelId: modelId,
+                  changedAt: "2026-11-15T12:02:00.000Z",
+                  continuedOnFallback: reason,
+                },
+              },
+            },
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    const marker = screen.getByLabelText("Continued on the fallback");
+    expect(marker).toHaveTextContent(`Octant moved this thread: ${reason}`);
+    // After the stopped turn's reply, not between its prompt and reply.
+    expect(
+      screen.getByText("Looking at it").compareDocumentPosition(marker) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
     const user = userEvent.setup();
     const stopId = "30000000-0000-4000-8000-0000000000e1";
@@ -1942,7 +1998,13 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "does this still hold?");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(resolve).toHaveBeenCalledWith(expect.anything(), [mentionedThreadId]);
+    // The preflight names this composer's own thread, so it judges the reach the send will.
+    expect(resolve).toHaveBeenCalledWith(
+      expect.anything(),
+      [mentionedThreadId],
+      undefined,
+      threadId,
+    );
     // The chip travels as an id. The message the host journals — and the
     // conversation and every later turn read back — is the user's own words,
     // so nothing the mention contributed can be replayed.

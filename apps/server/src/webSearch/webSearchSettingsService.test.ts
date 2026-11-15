@@ -10,6 +10,8 @@ import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { ResearchRouter } from "../chat/research/researchRouter";
+import { decideHarnessProviderSearch } from "@octant/domain";
 import {
   MIGRATED_SEARXNG_ENTRY_ID,
   WebSearchSettingsService,
@@ -72,6 +74,60 @@ const own: WebSearchSettings = {
     },
   ],
 };
+
+describe("a provider's own search under an EU only policy", () => {
+  // The policy governs only Octant's own backends (maintainer decision,
+  // 2026-11-15), so it changes which backend may answer, never whether a
+  // provider's own search runs.
+  async function euOnly() {
+    const { service } = openHarness({ value: undefined });
+    await service.set({ settings: own }, "local-window");
+    expect(service.read().settings.policy).toBe("eu-only");
+    return service;
+  }
+
+  it("keeps Chat's Automatic route on the provider's own search first, with Octant web search behind it", async () => {
+    const service = await euOnly();
+    const router = new ResearchRouter({ webSearch: { search: vi.fn() } });
+    const input = {
+      researchEnabled: true,
+      routing: "automatic" as const,
+      webSearchReady: service.readyWithChatAddress(undefined),
+      appManagedTools: "supported" as const,
+    };
+    expect(input.webSearchReady).toBe(true);
+    expect(router.resolve({ ...input, nativeResearch: "supported" })).toMatchObject({
+      kind: "ready",
+      backend: "provider-native",
+    });
+    expect(router.resolve({ ...input, nativeResearch: "unsupported" })).toMatchObject({
+      kind: "ready",
+      backend: "searxng",
+    });
+  });
+
+  it("still offers the harness its provider's own search, and still withholds it from a tainted thread below Full access", async () => {
+    const service = await euOnly();
+    const turn = {
+      research: true,
+      routing: "automatic" as const,
+      origin: "anthropic-api" as const,
+      webSearchReady: service.eligible().length > 0,
+    };
+    expect(decideHarnessProviderSearch({ ...turn, tainted: false, fullAccess: false })).toEqual({
+      withdrawAfterFirstStep: true,
+    });
+    // The tainted thread searches through web-search, whose eligible EU
+    // backend the tool-call policy can refuse a query to.
+    expect(
+      decideHarnessProviderSearch({ ...turn, tainted: true, fullAccess: false }),
+    ).toBeUndefined();
+    expect(turn.webSearchReady).toBe(true);
+    expect(decideHarnessProviderSearch({ ...turn, tainted: true, fullAccess: true })).toEqual({
+      withdrawAfterFirstStep: false,
+    });
+  });
+});
 
 describe("web search settings", async () => {
   it("leaves a Codex account's own web search on after an EU only policy is saved", async () => {

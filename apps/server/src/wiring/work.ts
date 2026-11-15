@@ -48,6 +48,8 @@ import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueue
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
+import { createThreadWakeupRouteHandler } from "../wakeups/threadWakeupRoutes";
+import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
@@ -257,6 +259,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -343,6 +346,7 @@ export function wireWork(deps: WorkDependencies) {
     threadOutsideContentMarks,
     windowAuthorityStore,
     windowHoldsProject,
+    threadWakeups,
     workArtifactProjection,
     workAttachments,
     workProjectStatusFiles,
@@ -496,6 +500,8 @@ export function wireWork(deps: WorkDependencies) {
       );
     };
     const workTurnService = new WorkTurnService({
+      // A Work session hands its runtime's wake-ups to the host's schedule.
+      wakeupsForThread: (threadId) => threadWakeups.service?.forSession("work", threadId),
       toolCallRecorders: threadToolCallRecorders({
         connection: persistence.connection,
         // The host setting, read at each write.
@@ -1714,6 +1720,56 @@ export function wireWork(deps: WorkDependencies) {
         .onCommittedAppend(append)
         .catch(() => console.error("The message queue could not process a thread change."));
     });
+    // A wake-up's turn starts the way a message wake's does: the host starts
+    // it as itself and admission rechecks the thread, its Project and its
+    // authority, at the thread's own level. A thread with a turn running is
+    // busy, and the wake-up waits for it.
+    const workThreadWakeupPort: ThreadWakeupModePort = {
+      threadOpen: (threadId) => {
+        try {
+          return workThreadProjection.read(decodeWorkThreadId(threadId))?.lifecycle === "active";
+        } catch {
+          return false;
+        }
+      },
+      startTurn: async (threadId, prompt) => {
+        if (
+          !enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work")
+        ) {
+          return { status: "refused", message: "Work is turned off on this host." };
+        }
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined || thread.bindingRevisionId === undefined) {
+          return { status: "refused", message: "The Work thread is unavailable." };
+        }
+        if (workTurnService.isTurnActive(thread.id)) return { status: "busy" };
+        const requestId = randomUUID();
+        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(requestId),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(randomUUID()),
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { status: "started", turnId: requestId }
+          : { status: "refused", message: "The turn was not admitted." };
+      },
+    };
     // A message wakes a Work thread whose switch is on, as it wakes a Code
     // thread, counted in the store Code's wakes use so a restart keeps the
     // hourly and round bounds.
@@ -1793,6 +1849,25 @@ export function wireWork(deps: WorkDependencies) {
       service: threadMessageQueue,
       windowAuthorityStore,
     });
+    // A wake-up is read and cancelled where its thread can be opened: a
+    // window holding the Work Project, or reaching the Code Project.
+    const threadWakeupRoutes = createThreadWakeupRouteHandler({
+      service: () => threadWakeups.service,
+      windowAuthorityStore,
+      canOpenThread: (windowId, mode, threadId) => {
+        if (isPairedDeviceScope(windowId)) return false;
+        try {
+          if (mode === "work") {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+          }
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+        } catch {
+          return false;
+        }
+      },
+    });
     return {
       fileMentionRoutes,
       fileMentionService,
@@ -1804,6 +1879,8 @@ export function wireWork(deps: WorkDependencies) {
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,
+      threadWakeupRoutes,
+      workThreadWakeupPort,
       workArtifactProjection,
       workThreadService,
       observeWorkThreadRuntime,

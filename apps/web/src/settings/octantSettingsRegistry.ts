@@ -1408,6 +1408,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "tool steps calls kept per turn full access no limit off unlimited spend ceiling work",
         },
         {
+          id: settingId("runtime-turns-per-turn"),
+          label: "Turns a runtime starts by itself",
+          scope: "host",
+          keywords:
+            "runtime turns background command watch monitor wake held turn count limit stop session",
+        },
+        {
           id: settingId("browser-transfer-file-limit"),
           label: "Largest file",
           scope: "host",

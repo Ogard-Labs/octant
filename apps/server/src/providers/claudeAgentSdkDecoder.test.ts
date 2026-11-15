@@ -312,6 +312,29 @@ describe("Runtime compaction", () => {
     );
   });
 
+  it("reads a mid-session command list change as the runtime's whole new list, keeping what a menu can send", () => {
+    expect(
+      decodeMessage(
+        {
+          type: "system",
+          subtype: "commands_changed",
+          uuid: "u-1",
+          session_id: "session-1",
+          commands: [
+            { name: "review", description: "Review a pull request", argumentHint: "<pr>" },
+            { name: "not a name", description: "Left out", argumentHint: "" },
+          ],
+        },
+        openInput,
+        { kind: "active", sessionId: "session-1" },
+      ),
+    ).toEqual({
+      kind: "commands-changed",
+      sessionId: "session-1",
+      commands: [{ name: "review", description: "Review a pull request", argumentHint: "<pr>" }],
+    });
+  });
+
   it("refuses a system message it does not know without quoting its subtype", () => {
     expect(
       refusal({

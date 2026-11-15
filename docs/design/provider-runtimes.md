@@ -52,24 +52,42 @@ current thread or Project spend ceiling.
 
 ## Key providers
 
-Claude Code, Codex, Mistral Vibe, and OpenCode run as themselves inside
-Octant ([Architecture: key providers run as themselves](../architecture.md#providers)).
-The switch-offs in the sections below are today's build. Each key provider's
-target wire behaviour, gated by the thread's
-[guardrail level](../architecture.md#security-and-authority) (off at Guarded
-and Reviewed until the person turns it on, on at Full access):
+Claude Code, Codex, Mistral Vibe, OpenCode, and every other ACP agent run as
+themselves inside Octant ([Architecture: key providers run as themselves](../architecture.md#providers);
+the other ACP agents are in [ACP agents run as themselves](#acp-agents-run-as-themselves)).
+The person's own setup is on by default, so the switch-offs below apply only
+where the person turned the setup off for an account or a thread. Each key
+provider's wire behaviour, gated by the thread's
+[guardrail level](../architecture.md#security-and-authority) (on by default at
+every level; the person turns it off per account or per thread):
 
-| Provider     | Switched off today                                                                                                                                  | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                                                                             |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                           |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                           |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire    |
-| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration and, in a trusted Project outside Plan, the Project's own (below); Reviewed through Octant Shield at Auto |
+| Provider     | With the setup off                                                                                                                                  | With the setup on                                                                                                                                                                                        | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`, `VIBE_DISABLED_TOOLS='["web_search","web_fetch"]'` | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire                                             |
+| OpenCode     | Skills and project config off, `skill` denied; `websearch` and `webfetch` denied at every level; Octant's denies outrank saved grants; `once` only  | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, the MCP servers and permission rules in the person's own configuration, and in a trusted Project outside Plan `OPENCODE_DISABLE_PROJECT_CONFIG` unset; outside folders at Full access; Reviewed through Octant Shield at Auto |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
 `WebSearch`, `WebFetch`, and `Skill` tools, with every hook off by flag in Chat
-and Plan and `strictMcpConfig: false` only in a trusted Project. Codex starts
+and Plan. With its tool servers on (every level but Plan) it starts with
+`strictMcpConfig: false` in every Project, so the account's own MCP servers,
+its claude.ai connectors, and its plugins' servers start
+(maintainer decision, 2026-11-14). A Project's `.mcp.json` stays held until
+the person trusts the Project: Claude Code 2.1.211 reads `.mcp.json` only
+while the `project` setting source is on, its home servers only while `user`
+is, and its per-folder servers only while `local` is (read from the bundled
+binary, 2026-11-14). The `enabledMcpjsonServers`, `disabledMcpjsonServers`,
+and `enableAllProjectMcpServers` settings are not the hold: a launch with no
+terminal approves every pending Project server once the `project` source is
+on, so leaving that source off is what keeps them out. The plugins the
+person installed and enabled in home settings load whenever the launch reads
+them: the SDK's `plugins` option, which Octant leaves empty, only adds
+session plugin folders, and Claude Code loads every plugin its merged
+settings enable. A plugin's hooks follow the hooks switch (`disableAllHooks`
+holds them in Chat and Plan), and its MCP servers follow the tool-server
+switch. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
@@ -110,43 +128,75 @@ the Accept edits wall), and `auto-approve` (maintainer decision,
 out a mode Octant selects gets a refused session start, not a different
 mode.
 
-OpenCode in a trusted Project outside Plan reads the Project's
-`opencode.jsonc`, `opencode.json`, `.opencode/opencode.jsonc`, and
-`.opencode/opencode.json` the way it reads the person's own configuration:
-their permission rules (a catch-all and the rules Octant owns dropped) follow
-the person's under the level's denies, and their MCP servers join the
-launch's private configuration (maintainer decision, 2026-11-14).
-`OPENCODE_DISABLE_PROJECT_CONFIG` stays set, so a Project plugin, agent, or
-command never runs, in Plan or anywhere else. Rationale: OpenCode's own
-source puts no layer Octant controls above a Project's own rules. In v1.18.21
-(`packages/opencode/src/config/config.ts:401-475`) the order is global,
-`OPENCODE_CONFIG`, the Project's `opencode.json(c)`, `.opencode` folders, then
-`OPENCODE_CONFIG_CONTENT`, merged deeply, and each agent's own rules are
-appended after the top-level ones (`agent/agent.ts:293`). In v2.0.27
-(`packages/core/src/config.ts:230-237`) `OPENCODE_CONFIG_CONTENT` also loads
-last, but every document's top-level `permissions` are pushed onto each agent
-first and each document's per-agent `permissions` after them
-(`packages/core/src/config/plugin/agent.ts:84-123`), and a rule decides by
-last match (`packages/core/src/permission.ts:87-91`). So a Project agent's
-`*: allow`, or a Project agent made the default, would follow any rule Octant
-could write, and handing the raw files over would let a Project reopen what
-the level denies.
+OpenCode in a trusted Project outside Plan loads the Project's own
+configuration exactly as it does on its own: the launch leaves
+`OPENCODE_DISABLE_PROJECT_CONFIG` unset, so OpenCode reads the Project's
+`opencode.json(c)` and its `.opencode` agents, commands, plugins, and tools
+(maintainer decision, 2026-11-14). In Plan, in Chat, and in a Project not
+trusted for OpenCode the variable stays set and none of it loads, so Plan
+stays read-only. Rationale: OpenCode loads a Project's files after the
+launch's private configuration (v1.18.21 `config/config.ts:401-475`; v2.0.27
+`packages/core/src/config.ts:230-237` and `config/plugin/agent.ts:84-123`),
+and a rule decides by last match, so a Project agent's `*: allow` or a Project
+agent made the default can override Octant's level rules in that Project. The
+maintainer accepted that: trusting a Project for OpenCode is trusting its own
+rules, as OpenCode's own users do, and Plan, where the variable stays set, is
+the hard line. The earlier build read only the files' rules and MCP servers
+into the private configuration under the level's denies and kept plugins,
+agents, and commands off; it is removed. Because a Project's plugins and MCP
+servers then share the process, such a launch is never attested as isolated,
+and Octant's app-managed tools are offered beside them below Full access, as
+at Full access, instead of being refused.
+
+Claude always reads the person's global `CLAUDE.md` and the Project's, in
+every Project and in Work, even before the Project is trusted (maintainer
+decision, 2026-11-14). Claude Code loads them only through the `user` and
+`project` setting sources, and the `project` source also loads the Project's
+settings and hooks, so it still waits for trust. Where a source is off,
+Octant reads the files itself (`claudeSessionInstructions` in
+`apps/server/src/providers/claudeDriver.ts`), as text with no authority,
+and appends them to Claude Code's own system prompt. Every Claude launch
+sends `systemPrompt: { type: "preset", preset: "claude_code" }`, with
+Octant's additions only in `append`: agent-sdk 0.3.211 reads a missing
+`systemPrompt` as the custom prompt `""`, which the runtime put in place of
+its default prompt (output styles, commit and pull-request guidance,
+environment details), so until 2026-11-14 Claude ran without its own prompt.
+The appended text is fixed for the session, so it never moves a turn's
+cached prefix. The account's file is
+`CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
+the Project's are the files Claude Code's loader reads at its root
+(`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
+and the files they import with `@path`, expanded as below. Ancestors above
+the Project root are outside the Project and are not read, and Claude Code
+loads a nested folder's file only once it reads inside it, so neither is
+added. Where the source is on, Claude Code loads the files itself and Octant
+adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
+not UTF-8 text, or resolving through a symlink outside its folder, or
+through an import outside the account's and the Project's folders, is skipped
+and the reason logged. The host reads these files outside every
+gate, so below Full access a file or import the secret guard protects (the
+check a `Read` of it meets) is skipped as `protected` before it is opened,
+and at every level so is the account's own sign-in (`.credentials.json`,
+`.claude.json` and its backups, a secure-storage folder of its own); at Full
+access the secret guard does not apply, as for Claude's own tools. Chat (no folder) and single-use sessions
+read none.
 
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
 ([Architecture: providers](../architecture.md#providers)). An account the
-person turned off still carries the runtime's own web search and fetch in
-Work and Code outside Plan (`webTools` alone on), asking below Full access and
-marking the thread. That alone does not count as running as itself, so
-OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps
-`VIBE_INCLUDE_PROJECT_CONTEXT="false"`.
+person turned off carries none of it below Full access, and never the
+runtime's own web search and fetch: `webTools` resolves off in every mode and
+at every level, Full access, a trusted Project, and the thread's On included
+(maintainer decision, 2026-11-15). Each driver honors it with the web-tools
+switch in the table above.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every
-level. The provider's own memory is off unless the person turns on its
-setting for that provider account, which is off by default (maintainer
-request, 2026-11-12; built for Claude Code and Codex in Work and Code, with
-Plan kept off and Chat not built yet). With it on, Claude Code launches
+level. The provider's own memory is on by default in Work and Code outside
+Plan, as in the provider's own app, and the person turns it off per
+provider account (maintainer decision, 2026-11-14; the account stores only
+the off, as `ownMemory: false`, and an older stored `true` reads as on).
+Plan and Chat keep it off. With it on, Claude Code launches
 without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
 without the `features.memories=false` override, on a process of its own;
 OpenCode and Mistral Vibe have no such memory and no setting
@@ -490,9 +540,10 @@ publish, the mapper attaches both to the call's `tool-success` as
 `published`, and the call is reported as outside
 content (`hosted-tool`), because claude.ai's answer reaches the model. The
 same probe showed that
-`strictMcpConfig: true`, which every Octant query sets, keeps the account's
-claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
-option is absent) out of the session. The decoder tolerates the narrower list
+`strictMcpConfig: true`, which a query sets while the account's tool servers
+are off, keeps the account's claude.ai connectors (listed by 2.1.304 with
+`settingSources: []` when the option is absent) out of the session; with the
+tool servers on they start as the account's own servers. The decoder tolerates the narrower list
 (the runtime may drop a requested tool, never add one the launch does not
 allow), so a launch that lacks a requested tool still runs.
 
@@ -505,19 +556,17 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                  | Why                                                                                                                                                                                                                     |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`           | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)                                                                                 |
-| `EnterWorktree`, `ExitWorktree`           | The thread is bound to one checkout                                                                                                                                                                                     |
-| `Workflow`                                | A workflow's agents report under the `Workflow` call rather than an `Agent` call, so the child-run display cannot show them, and the decoder refuses `local_workflow` task frames                                       |
-| `CronCreate`, `ScheduleWakeup`            | Each wakes the model at a later time. A session lasts one turn, so a wake-up kept in memory never fires and the call's success would be untrue; a durable one is written to the Project's Claude files and fires unseen |
-| `REPL`                                    | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                                                                                      |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill` | Only while the person's own setup has that feature off                                                                                                                                                                  |
-| `Artifact`                                | Unless the session offers Claude artifacts                                                                                                                                                                              |
+| Withheld                                                 | Why                                                                                                                                     |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below) |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                  |
+| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                           |
+| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)            |
+| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                              |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
-inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
-to the Project and the secret guard, and `Bash`, `Monitor`, `TaskOutput`,
+inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
+against the Project's folders and the secret guard below Full access (a path outside those folders asks; see below), and `Bash`, `Monitor`, `TaskOutput`,
 and `TaskStop` take the shell's approval rules; a `Monitor` command, like a
 `Bash` one, is named in its prompt and marks the thread when it reaches a
 server. Session-internal tools that read
@@ -590,12 +639,150 @@ Plan stays read-only throughout. Octant's thread plan (the person's
 structured proposal) has no path from a provider, so the plan stays reply
 text (not built yet: a provider-proposed thread plan).
 
+`EnterWorktree`, `ExitWorktree`, and `REPL` left the withheld list
+(maintainer decision, 2026-11-14) and take the rule for a tool the gate has
+no rule of its own for, which is the shell's: Guarded asks, Reviewed's
+reviewer decides, Full access runs without asking. Plan withholds all three.
+
+- `REPL` runs code in Claude's own process, outside the command sandbox and
+  the secret guard. Its start carries a journaled `tool-progress` note that
+  marks the call unsandboxed.
+- A worktree switch moves the session's working directory. Without `path`,
+  Claude Code 2.1.211 creates the worktree under `.claude/worktrees/` of the
+  repository that holds the working directory. The gate accepts a call from
+  that directory when it lies inside the Project's folders, or inside a
+  worktree outside them that the session was let into: once a switch into a
+  worktree outside the Project's folders is allowed (the person or the
+  reviewer below Full access, unasked at Full access), the session holds it,
+  and calls there meet the same rules as the Project's, the secret guard
+  included. A worktree a configured hook creates elsewhere is not known
+  before the call, so calls from it are refused. The command sandbox's
+  folders are fixed at launch, so below Full access a command cannot write in
+  an outside worktree.
+- The thread stays bound to its checkout. Octant's file views, diffs, and
+  change review stay on the original checkout: the switch's start carries a
+  journaled `tool-progress` notice that says so. A worktree inside the Project
+  shows its files under the worktree's folder there; an edit in a worktree
+  outside it is journaled as its tool step with no file change or diff.
+
+At Full access the file gate allows any path, outside the Project's folders
+and the secret guard's list included, as Claude Code does on its own
+(maintainer decision, 2026-11-14); an edit outside the checkout is journaled
+as its tool step with no file change or diff. Below it, a file tool call
+(`Read`, `Edit`, `Write`, `NotebookEdit`, `Glob`, `Grep`, or any tool that
+names a path) whose target is outside the Project's folders asks through the
+gate at Guarded and Accept edits and goes to the reviewer at Reviewed, as
+Claude Code asks on its own (maintainer decision, 2026-11-14): a read there
+never runs unasked and Accept edits never waives an edit there, and an
+approved edit there is journaled as its tool step with no file change. Every
+secret-path refusal stays below Full access, so a protected file outside the
+Project is refused, not asked. Plan refuses an outside path, since Plan cannot
+approve anything; a Full access thread that kept its sandbox keeps the
+Project's folders; and an Artifact publish stays held to the Project. A shell
+command's folder is still checked against the Project's folders, and the
+command sandbox keeps its own folders, so below Full access a sandboxed shell
+command cannot reach an outside folder. Redaction of logs, the journal, and
+exports applies at every level.
+
+Below Full access Claude's command sandbox lets a command out the way Claude
+Code does on its own (maintainer decision, 2026-11-14): the launch sets
+`sandbox.allowUnsandboxedCommands: true` (the bundled SDK 0.3.211 and Claude
+Code 2.1.211 name it so; when false the runtime ignores the flag), and a
+`Bash` call with `dangerouslyDisableSandbox: true` runs outside it. Every
+such command asks through the gate at Guarded and Accept edits and goes to
+the reviewer at Reviewed, who sees the flag among the judged fields; a
+remembered answer never covers one, so each asks again. Its start is
+journaled with an "Unsandboxed" notice. Plan refuses it, since Plan's
+commands never leave its sandbox: the flag is set only at Guarded, Accept
+edits and Reviewed, a Plan launch carries no Claude sandbox at all (its
+commands run inside Octant's own profile, where no flag reaches), and the
+SDK port refuses a Plan or Full access launch whose sandbox would let a
+command out, so the hook's refusal is not the only guard. Ordinary commands stay sandboxed, the
+secret-path refusals still apply to the file tools, and at Full access
+nothing changes: no command is sandboxed there, and a thread that kept its
+sandbox at Full access keeps `allowUnsandboxedCommands: false`.
+
+Below Full access outside Plan, a call the gate would ask about and that
+passed every Octant refusal (the secret guard and folders the session does
+not hold) is answered with no decision, so Claude Code's own
+permission rules run first: the person's `permissions.allow`, `ask`, and
+`deny` decide it, and only a call they leave to ask reaches `canUseTool`,
+where Octant raises its approval or Reviewed's reviewer decides (maintainer
+decision, 2026-11-14). In a Project the person trusted for Claude Code, the
+allow rules committed in its `.claude/settings.json` count as the person's own
+rules, as they do in Claude Code once its folder trust is accepted: trusting
+the Project is the person adopting them. An untrusted Project's settings
+never load, so its rules allow nothing. A question (`AskUserQuestion`), an Artifact publish,
+and a wake-up keep Octant's own ask, because each needs an answer only Octant
+gives, and so does a `Workflow` start, whose script runs as JavaScript in the
+runtime process outside the command sandbox. So do a file tool naming a path outside the folders the session holds,
+which asks as Claude Code does on its own and goes to Reviewed's reviewer, and
+a switch into a worktree outside them, which the session holds only once
+`canUseTool` sees the switch allowed. Plan keeps Octant's ask for everything. A call the person's rules
+allow never meets `canUseTool`, so its grant is released when its result
+arrives. Rationale: the bundled runtime skips its allow-rule check when a
+hook forces "ask", so a call the person had allowed in their own settings
+used to become an Octant approval anyway. The command sandbox keeps
+`autoAllowBashIfSandboxed: false`, unlike Claude Code's default: running a
+sandboxed command unasked would end Guarded's approval for each command and
+Reviewed's review of it, which are built features; a person who wants a
+command to run unasked writes an allow rule for it. Below Full access the
+sandbox sets `allowUnsandboxedCommands: true`, so a command the sandbox
+stopped (a push that needs `~/.ssh`, a `gh` call that needs its config) may
+be retried outside it with `dangerouslyDisableSandbox`; the gate always
+answers that retry with Octant's own ask, never the person's rules, and its
+approval reads "Bash outside the sandbox". Full access with its sandbox keeps
+the retry off. Each sandboxed launch carries the `user.name` and
+`user.email` git resolves in the checkout (`git config --includes --get`, so
+every scope and any `include` or `includeIf` file counts) as `GIT_AUTHOR_*`
+and `GIT_COMMITTER_*`, since the sandbox cannot read `~/.gitconfig` ([Architecture: Git and pull requests](../architecture.md#modes-chat-work-and-code)).
+
+A call's working directory follows the session, as it does in Claude Code:
+after `cd apps/web` the hook names that folder, and the gate accepts any
+working directory inside the folders the session holds (the Project root,
+its extra folders, everything beneath them, and a worktree the session
+was let into), judging a shell command or
+a search with no folder of its own there. A working directory outside them
+is refused (maintainer decision, 2026-11-14). Rationale: the port used to
+refuse every hook whose working directory was not the Project root, so one
+`cd` into a subfolder refused every later call of the turn.
+
+Where Octant reads a `CLAUDE.md` itself (a Project the runtime may not read
+because it is not trusted), it expands the file's `@path` imports as Claude
+Code does (maintainer decision, 2026-11-14): a relative import resolves from
+the importing file's folder and `@~/` from the home folder, an import in a
+code span or fenced block stays text, a file is loaded once so a cycle ends,
+and imports stop five hops from the first file, past 32 files, or past
+256 KiB, the cut said as truncated. Only a file inside the Project's folders
+or the account's config folders is read, judged at the path it resolves to,
+so a symbolic link out of them is refused. The instruction-file reader above
+expands every file it reads this way, each import meeting the same size,
+text and secret-guard checks as the file that names it before it is opened.
+
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
-grant are never forgotten, and the caps on pending approvals (4) and
-pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
-again. Rationale: the earlier caps of 64 calls a turn and 256 a session
-failed long turns that Claude Code runs to the end in its own app.
+grant are never forgotten. At most four approvals are put to the person at
+once, one question set at a time, and sixteen pre-tool grants are held; a
+call past any of these waits in line for a free slot instead of failing the
+turn (maintainer decision, 2026-11-14), and a call still waiting when the
+session ends is refused with the rest. A grant frees when its call reaches
+`canUseTool`, its result arrives, or it expires. The line is bounded by the
+256 remembered ids. A repeat of a forgotten id passes the whole gate again.
+Rationale: the earlier caps of 64 calls a turn and 256 a session failed long
+turns that Claude Code runs to the end in its own app, and failing at the
+fifth approval or the seventeenth waiting call let parallel subagents end a
+turn.
+
+#### Image input
+
+Claude reports `nativeAttachments` as `supported` when its catalog has a model
+that takes images, which every Claude model does (maintainer decision,
+2026-11-14: it was `unsupported`). A turn's image attachments go to the
+runtime beside the message text as base64 `image` content blocks in the
+streamed user message; JPEG, PNG, GIF and WebP are the types the Messages API
+takes, and a turn with any other image type is refused before it is sent.
+Work, Code and Chat admit attachments by this capability as they do for
+Codex and OpenCode.
 
 #### Background commands and runtime-started turns
 
@@ -631,16 +818,111 @@ tool steps, and task rows into the person's turn without a separate marker
 The hold is bounded. The stalled-turn limit counts its silence as it counts
 any other; the person's stop ends it, and on an idle runtime the driver
 reports the turn interrupted and stops the session, which ends every
-background task in it; at the 17th turn the runtime starts by itself, the
-person's turn completes and the session is stopped. A new turn is refused
-while one is held. A `Monitor` call that asks for a WebSocket (opened by the
+background task in it. Below Full access, past the person's count of turns
+the runtime may start by itself (Settings › Permissions › Tool steps, **Turns
+a runtime starts by itself**, `runtimeTurnsPerTurn`, 1 to 4,096, default 256;
+a fixed 16 until the maintainer decision of 2026-11-14), the person's turn
+completes and the session is stopped; at Full access there is no such count.
+A held turn takes messages (maintainer decision, 2026-11-14): a message the
+person sends while a turn is held, through the driver's `send` or `steer`,
+is delivered into it, the runtime answers it in a turn folded in as
+`runtime-turn-started` with `trigger: "person-message"` (never counted), and
+the held completion waits for that answer. A message sent while a turn the
+runtime started is still open marks nothing, since that turn was already
+opened and counted as background work, so a later background start is never
+labelled as the person's. A steered message goes in as text, the turn's
+context inline as on a runtime without the prompt hook; one that carries
+images is refused with a reason (send them once the turn ends) rather than
+sent without them. `steer` answers `unsupported`
+when no turn is held, and the thread's message queue keeps the message for
+the next turn as it does for any running turn. A `Monitor` call that asks for a WebSocket (opened by the
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.
 Rationale: holding the person's turn keeps one journaled turn per send and
 reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
 host-side runner for turns that start on an idle thread would add a second
-turn lifecycle the thread model does not have.
+turn lifecycle the thread model does not have. Decided and not built yet
+(maintainer decision, 2026-11-14): the person's turn completes when the
+model's reply is done while background tasks keep running and show as tasks
+in the thread, and a task's end opens a new runtime-started turn rather than
+reopening the old one; stopping the thread still ends every background task.
+It needs the session to outlive the person's turn and that host-side runner,
+so the hold above stays until both exist.
+
+#### Workflows
+
+`Workflow` runs outside Plan in a session whose person's setup has subagents
+on (maintainer decision, 2026-11-14). The call returns at once and the
+workflow runs in the runtime as a `local_workflow` background task, so the
+held turn above holds the person's turn until it ends, and the runtime's turn
+for its result is folded in the same way. The decoder reads its
+`task_started` (`workflow_name`; the script in `prompt` is never kept) and
+the `workflow_progress` list each `task_progress` restates, reading only each
+`workflow_agent` entry's index, label, state (`start`, `progress`, `done`,
+`error`), and last tool. The mapper shows the workflow as a child run whose
+id is its `Workflow` call's, and each agent as a child of it
+(`parentChildAgentId`), through the same child-run display a subagent
+`Agent` starts; only an agent whose state or last tool moved is shown again.
+Each agent's own tool calls reach the gate as a subagent's do (the runtime's
+permission callback names the agent), at the thread's level. Starting a
+workflow asks below Full access, unlike `Agent`: its script runs as
+JavaScript in the runtime process (a Node `vm` context, Claude Code 2.1.211),
+so the person sees the script before it runs. A `remote` workflow, which a
+cloud session would run on a clone of the Project, is refused before the
+gate, and a `remote_agent` task stays an unsupported frame. Rationale: a
+workflow is a batch of subagents, so the subagent switch, display, and gate
+cover it unchanged, and the held turn covers its background lifetime.
+
+#### Fork and rewind
+
+A Code fork or rewind continues a copy of Claude's own session rather than a
+text handoff where it can (maintainer principle, 2026-11-14). Each completed
+turn reports the transcript id of its last assistant message (the
+`SDKAssistantMessage.uuid` the Agent SDK documents for `resumeSessionAt`),
+which the host journals as the turn's native anchor. The driver's
+`forkSession` calls the SDK's own `forkSession(sessionId, { dir,
+upToMessageId })` under the account's directory, which copies the
+transcript through that message with fresh ids and leaves the source alone,
+records the copy's resume identity for the new Octant session, and returns
+its cursor; the turn then resumes it as any session. Claude keeps a session
+under its folder and resume looks there, so a copy is made only for the
+source's own folder, mode and sign-in: a fork onto its own worktree, a turn
+with no anchor, or a failed copy goes back with the text handoff
+([Architecture: native session anchors](../architecture.md#native-session-anchors)).
+`rewindFiles` is not used; files go back through Octant's checkpoints.
+
+#### Wake-ups the model schedules
+
+`ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a
+five-field cron expression in local time, once or recurring), `CronList`,
+and `CronDelete` run in Work and Code outside Plan (maintainer decision,
+2026-11-14), answered by Octant and never run by the runtime. A session
+lasts one person's turn, so a wake-up the runtime keeps in memory would die
+with it, and a `durable` one is written to the Project's
+`.claude/scheduled_tasks.json` and fires in whatever later session opens
+there. The host therefore hands each session a wake-up schedule for its
+thread (`ProviderSessionStart.wakeups`), and the driver answers each call
+from it: a wake-up passes the gate as any built-in tool does, asking below
+Full access, and then the driver records it with the host and returns the
+runtime's result fields (`scheduledFor`, `clampedDelaySeconds`, `wasClamped`;
+or `id`, `humanSchedule`, `recurring`) in the refusal's text, because the
+runtime's permission callback and `PreToolUse` hook can only allow or refuse
+a call. The runtime runs none of these calls, so its scheduler never holds a
+wake-up and no file is written. The mapper shows such a call as done, not
+failed. Listing, deleting, and `ScheduleWakeup`'s `stop` act only on this
+thread's own wake-ups and answer without asking. Rationale: importing a
+`scheduled_tasks.json` the runtime wrote would leave a window in which a
+later session could fire it before Octant read it, and a session-only
+wake-up would still sit in the runtime's scheduler of a held turn; answering
+the call leaves the runtime nothing to fire.
+
+The host's side, a `thread-wakeup` aggregate of its own, owns everything
+after that ([Architecture: wake-ups](../architecture.md#modes-chat-work-and-code)):
+each wake-up is journaled, listed above the thread's composer with its next
+fire time and Cancel, and starts a turn in its thread at its time. Chat runs
+in Plan for Claude, so a Chat thread never holds these tools, and neither
+does Plan or a single-use session.
 
 ## Codex
 
@@ -705,7 +987,14 @@ configuration, where OpenCode appends it after every agent's built-in rules
 posture denies all. File reads (`read`, `glob`, `grep`, `list`) are allowed
 at every level on both versions, Plan included, so OpenCode reads inside the
 Project and its extra folders without asking, as Octant's Claude Code file
-gate does; `external_directory` still refuses every other folder. Under the
+gate does. `external_directory` asks for every other folder below Full
+access, on 1.x, 2.x, and the ACP launch's configuration alike, is allowed at
+Full access, as OpenCode allows it on its own, and stays denied in Plan, which
+cannot approve anything (maintainer decision, 2026-11-14); the protected-file
+refusals below still apply. Below Full access the launch's OS sandbox still
+holds writes to the Project's folders, so an approved edit outside them fails
+there. The outside-folder rules come after the person's own rules and the
+namespaced-tool deny, whose `*_*` also matches `external_directory`. Under the
 catch-all `ask` they had asked at Guarded and never ran in Plan, which
 cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
 so nothing reopens them: OpenCode's own `.env` refusal (its default agent's
@@ -738,8 +1027,15 @@ its tools. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
-every mode there; on Linux the probe fails closed and the runtime is listed
-without turns. 2.0.22 names its turn events without the `session.next.`
+every mode there. On Linux (maintainer decision, 2026-11-14) 2.x runs turns
+in Work and Code outside Plan, at Ask first, Auto, Accept edits and Full
+access, where the launch already allows a shell; a Chat or Plan launch is
+refused before it starts with a sentence naming why, and the probe attests
+the Code jail at Ask first and reports `turnModes` with Chat and Plan
+unsupported (`host-confinement`), which the provider's Settings page shows
+as where it runs turns. Rationale: Linux confinement can only deny
+fork outright, so it cannot give Chat and Plan the one `git` exec the
+stand-in needs, while Work and Code outside Plan launch with a shell anyway. 2.0.22 names its turn events without the `session.next.`
 prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
 `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
 tool call by `id`, and names the tool only on `session.tool.input.started`;
@@ -770,8 +1066,9 @@ provider credentials live there), and applies them as allow after Octant's
 rules. Octant's denies still win, so Plan's denials hold (Work's shell
 and subagents follow the level as Code's do), and Octant itself never writes such a grant because
 it answers approvals `once`. With the setup on, the person's OpenCode rules
-apply over Octant's level rules, with Plan, the outside-directory refusal,
-and a mode's withheld tools still Octant's denies (built). Octant reads the
+apply over Octant's level rules, with Plan and a mode's withheld tools still
+Octant's denies and the outside-directory ask below Full access still
+Octant's (built). Octant reads the
 `permission` rules (and the 2.x `permissions` list) from the person's
 OpenCode configuration when a session starts, in the order they wrote them,
 and places them ahead of the level's first deny. It drops a bare catch-all
@@ -863,6 +1160,40 @@ be trusted unseen. The summary and token figures were read only as event
 shapes, never from a model run, so no before-and-after figure is reported.
 A session carried on to another of the instance's models needs no further
 work: every prompt names the thread's model (`modelSwitch`).
+
+OpenCode's own slash commands are listed and run from 2.0.22, the first
+release whose server was read for them (read again at 2.2.0). `GET
+/api/command` (with `location[directory]` set to the Project root) answers
+`{location, data}`, each entry `{name, description?}`: the built-in `init` and
+`review`, commands from the launch's configuration, and each MCP prompt as
+`server:prompt`. The probe lists them into the observation's `commands`, and a
+Work or Code session replaces that list when it starts or resumes, as Claude
+Code's and an ACP agent's are ([Architecture: the composer's `@` and
+`/`](../architecture.md#person-memory)). The answer is untrusted: a body over
+256 KiB lists none, and an entry whose name Octant cannot send as `/name` is
+dropped. The observation is the instance's, so it holds the list of
+whichever Project's session started last; a turn whose prompt opens with
+`/name` is routed by its own Project's list, read again before anything is
+queued, so a command another Project lists, or one removed since, is
+refused rather than run or sent to the model as text. A turn whose prompt
+opens with a name listed there goes to `POST
+/api/session/{id}/command` with `{name, text, files?}`, the text being what
+follows the name, after the model switch every prompt makes; the turn's Octant
+context goes first as a prompt with `resume: false`, which OpenCode admits
+without starting a run, so the command's own text stays only its arguments.
+The route answers 204 once the command's input is admitted, and the run
+reports through the same events as a prompt. A command route that fails
+after the context was admitted leaves that context queued in the session,
+where the next run would read it stale beside the next turn's own; the turn
+fails as `stale-resume` and the driver never resumes that session again (in
+this host process), so the thread starts on a new session. The host refuses such a turn in
+Plan and in Chat, and the driver refuses it again. A command may run a shell
+before the model sees it: a configured command's template expands
+`` !`…` `` through OpenCode's shell, which asks no approval, inside the
+launch's own confinement; only Work and Code outside Plan run one, as
+OpenCode's own client does. 1.x lists none: its `POST /session/{id}/command`
+answers only once the whole run has ended (1.18.21), so no turn can start
+from it, and it has no asynchronous form.
 
 Every OpenCode prompt names its model, so a resumed session runs on the
 thread's model, the one its cursor's binding records. The session record is
@@ -979,6 +1310,70 @@ breaks between any two. The Octant Harness sends one request per agent
 message, so the first text of a later request in a turn starts a new
 paragraph, under the same line-break exception; the history the model reads
 keeps each message as sent. Pi passes an agent's text on as sent.
+
+### ACP agents run as themselves
+
+Every ACP agent is a key provider (maintainer decision, 2026-11-14): its
+account and thread switches work as the other key providers' do, and a
+Project trusted for it loads that Project's own files in Work and Code
+outside Plan. Each profile's `nativeSetup` releases what its launch
+otherwise holds back, and its `nativeSetupSupport` reports only those
+features:
+
+- **A trusted Project.** The profile's `forbiddenRootEntries` become
+  readable, so the agent loads the Project's skills, settings, MCP servers,
+  hooks, plugins, and agent files as it does on its own, under its own folder
+  trust where it keeps one. Each agent's entries are listed in
+  `PROJECT_CODE_ENTRIES` (`packages/domain/src/projectCodeTrustPolicy.ts`),
+  so the one trust prompt names them; a test holds the two lists together.
+  Gemini CLI and Qwen Code start in a trusted Project instead of refusing it.
+  Grok Build's `trusted_folders.toml` becomes readable, so its own trust list
+  decides. In Plan, in Chat, and in an untrusted Project every entry stays
+  held, and the two refusals stay.
+- **The person's own home.** Kimi Code reads its home `AGENTS.md` with any of
+  the setup, `skills` with skills, `mcp.json` and `plugins` with tool servers,
+  and `hooks` with hooks (never in Chat or Plan). Kilo unsets
+  `KILO_DISABLE_EXTERNAL_SKILLS` with skills. fx reads the Project's
+  `AGENTS.md`, instruction text, with any of the setup.
+- **Not lifted.** Kilo's and Devin's managed configuration stays, because it
+  carries the level's permission and the agent or mode Octant selects, which
+  the person's own configuration would replace; so their home configuration
+  and Devin's own subagents stay off, and Kilo's other Project configuration
+  stays off because no Kilo release was read for the files it would load.
+  What an agent reads from its own profile folder by itself (Goose's, Gemini
+  CLI's, GitHub Copilot's, Cline's, Qwen Code's, GLM Agent's, and Grok
+  Build's) loads as before; the switch cannot hold it back, so it is not
+  reported as a setup feature.
+
+Each agent's own subagents run in Work and Code outside Plan, at every level
+there, wherever the person's setup carries them (maintainer decision,
+2026-11-14), as Mistral Vibe's do; Plan and Chat run none (`acpSubagentsRun`).
+Octant releases the switch it holds: Grok Build's `GROK_SUBAGENTS` guard, and
+Devin's `subagents_enabled` in its managed configuration; these two report the
+`subagents` feature. The others keep no switch Octant sets, so their own
+subagents run as they always did and are not reported as a setup feature. A
+permission request that names a call Octant never saw is a subagent's: in a
+session whose subagents run it is shown through the ordinary approval path as
+"A <agent> subagent asks to run a tool. <agent> doesn't say which." with Allow
+and Deny under the thread's level, instead of failing the turn; in Plan and
+Chat it still fails the turn. No agent but Mistral Vibe names a child session,
+so their subagents are not shown from the call that started them and
+`nativeChildAgents` stays unavailable for every ACP agent. Instead, the first
+such request for a call Octant never saw journals a child run keyed by that
+call, before its approval card: it says "<agent> is running a subagent.
+Octant cannot see its tool calls or when it ends, only the approvals it asks
+for.", as a Mistral Vibe custom-agent run says what Octant cannot see, and it
+marks the thread as having read outside content under `hosted-tool`, since
+the subagent may have done so unseen (maintainer decision, 2026-11-14). A
+later request naming the same call adds only its card. The run stays shown
+as running, because nothing reports its end.
+
+Kimi Code's own slash commands run in Work and Code outside Plan, as in its
+own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
+command inventory, so a release with a new command fails closed. Plan and
+Chat refuse a prompt starting with `/`, since a command such as
+`update-config` writes. The earlier refusal everywhere was Octant's default,
+not a protocol limit: ACP carries the command as prompt text.
 
 ### What an ACP agent cannot do
 

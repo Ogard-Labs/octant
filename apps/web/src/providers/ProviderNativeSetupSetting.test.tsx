@@ -17,21 +17,22 @@ function capabilities(nativeSetup?: ProviderCapabilities["nativeSetup"]) {
 }
 
 describe("A provider's own memory", () => {
-  it("starts off, says where it stays off and what stays off with it, and turns on with one switch", async () => {
+  it("starts on, says where it stays off and what stays off with it, and turns off with one switch", async () => {
     const onChange = vi.fn(async () => true);
     const view = (instance: React.ComponentProps<typeof ProviderOwnMemorySetting>["instance"]) => (
       <ProviderOwnMemorySetting disabled={false} instance={instance} onChange={onChange} />
     );
     const { rerender } = render(view(codex));
     const toggle = screen.getByRole("switch", { name: "Use Codex work’s own memory" });
-    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeChecked();
+    expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(/stays off in Plan and in Chat/);
     expect(toggle).toHaveAccessibleDescription(/telemetry and self-update stay off either way/);
     await userEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith(true);
+    expect(onChange).toHaveBeenCalledWith(false);
 
-    rerender(view({ ...codex, ownMemory: true }));
-    expect(screen.getByRole("switch", { name: "Use Codex work’s own memory" })).toBeChecked();
+    rerender(view({ ...codex, ownMemory: false }));
+    expect(screen.getByRole("switch", { name: "Use Codex work’s own memory" })).not.toBeChecked();
   });
 });
 
@@ -44,6 +45,9 @@ describe("Run a key provider as itself", () => {
     expect(toggle).toHaveAccessibleDescription(/its own\s+subagents, web search and fetch, skills/);
     expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(/Plan stays read-only/);
+    expect(toggle).toHaveAccessibleDescription(
+      /Turned off, web search and fetch stay\s+off in every mode/,
+    );
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
   });

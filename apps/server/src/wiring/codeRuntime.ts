@@ -1,7 +1,12 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { appToolThreadLevel, browserToolTransport, usageLimitFromReading } from "@octant/domain";
+import {
+  appToolThreadLevel,
+  browserToolTransport,
+  threadToolStepLimit,
+  usageLimitFromReading,
+} from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -18,11 +23,13 @@ import {
   decodeProviderSessionId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
+  type CodeThreadId,
   decodeContextSubjectRef,
   decodeImageGenerationScopeId,
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
+  type CodeOperationId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -33,6 +40,7 @@ import {
   beginUnconfirmedStepSettlement,
   type CodeOperationRuntime,
   type CodeOperationRuntimeOptions,
+  type CodeStoppedTurn,
   createCodeOperationRuntime,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -80,6 +88,7 @@ import {
   codeSiblingThreadState,
 } from "../siblingThreads/codeSiblingThreadSource";
 import { CoordinatorService } from "../coordinator/coordinatorService";
+import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
@@ -419,6 +428,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerRuntimeRegistry"
     | "selectCodeConversation"
     | "codeSessionConversation"
+    | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -428,6 +438,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const designSystemFiles = new DesignSystemFiles();
   const imageDescriber = deps.imageDescriber;
   const {
+    threadWakeups,
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
@@ -523,6 +534,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     octantInstructions,
   } = deps;
   return Effect.gen(function* () {
+    // The coordinator service is wired after the Code runtime that reports
+    // stopped turns to it; a stop before then has no worker to move.
+    const continueWorkerOnFallback: {
+      current?: (
+        threadId: CodeThreadId,
+        availability: "usage-limit" | "down" | undefined,
+        stopped: CodeStoppedTurn,
+      ) => Promise<unknown>;
+    } = {};
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
     let pullRequestWatchService: PullRequestWatchPort | undefined;
@@ -774,6 +794,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime = createCodeOperationRuntime({
         stalledTurnLimitMs: () =>
           stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        toolStepLimit: (fullAccess) =>
+          threadToolStepLimit({
+            fullAccess,
+            settings: persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          }),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -1074,9 +1099,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
         },
-        onUsageLimitStop: async (threadId) => {
+        onUsageLimitStop: async (threadId, stopped) => {
           if (codeService instanceof CodeService)
             await codeService.handOffAfterUsageLimit(threadId);
+          // A coordinator's worker may carry on with its role's next model;
+          // the person's own hand-off above goes first and then rules it out.
+          await continueWorkerOnFallback.current?.(threadId, "usage-limit", stopped);
+        },
+        onProviderStop: async (threadId, availability, stopped) => {
+          await continueWorkerOnFallback.current?.(threadId, availability, stopped);
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
@@ -1091,6 +1122,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        providerCommands: (instanceId) =>
+          providerRuntimeRegistry.observedState(instanceId)?.commands,
         supportsSessionRollback: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .sessionRollback === "supported",
@@ -1462,6 +1495,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             throughOperationId,
             ...(afterOperationId === undefined ? {} : { afterOperationId }),
           }),
+        nativeTurnAnchor: (threadId, operationId) => {
+          let decoded: CodeOperationId;
+          try {
+            decoded = decodeCodeOperationId(operationId);
+          } catch {
+            return undefined;
+          }
+          return codeBoardEventStore.nativeTurnAnchor(threadId, decoded);
+        },
         forkProviderSession: (input) =>
           seedCodeForkHarnessSession(
             {
@@ -1587,6 +1629,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        // A Code session hands its runtime's wake-ups to the host's schedule.
+        resolveThreadWakeups: (thread) =>
+          threadWakeups.service?.forSession("code", String(thread.id)),
         resolveProviderNativeSetup: (thread) =>
           sessionNativeSetup(persistence, {
             providerInstanceId: thread.providerInstanceId,
@@ -2008,6 +2053,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       coordinatorService.onCommittedEvents(append.events),
     );
     coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
+    continueWorkerOnFallback.current = (threadId, availability, stopped) =>
+      coordinatorService.continueOnFallback(String(threadId), availability, stopped);
     coordinatorService.startSweeping();
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -2015,6 +2062,59 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         coordinatorService.stop();
       }),
     );
+    // A wake-up's turn starts the way a message wake's does: an
+    // agent-initiated host turn under the routine host scope, at the
+    // thread's own posture, through the ordinary turn admission. A thread
+    // working or waiting on the person is busy, and the wake-up waits for it.
+    const codeThreadWakeupPort: ThreadWakeupModePort = {
+      threadOpen: (threadId) => {
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread !== undefined && thread.lifecycle !== "archived";
+        } catch {
+          return false;
+        }
+      },
+      startTurn: async (threadId, prompt) => {
+        const id = decodeCodeThreadId(threadId);
+        const thread = persistence.readCodeThread(id);
+        if (
+          thread === undefined ||
+          baseRouteCodeService.stageEvidence === undefined ||
+          baseRouteCodeService.executeOperation === undefined
+        ) {
+          return { status: "refused", message: "Code turns are unavailable on this host." };
+        }
+        const state = codeSiblingThreadState(thread, {
+          runtimeWorks: (candidate) => persistence.readCodeRuntimeWorks(candidate),
+          turnAwaitsPerson: (candidate) =>
+            codeOperationRuntime?.turnAwaitsPerson?.(String(candidate)) === true ||
+            threadAwaitsHarnessApproval(String(candidate)),
+          decisionPending: (candidate) => codeTurnDecisions.forThread(candidate) !== undefined,
+        }).state;
+        if (state !== "idle") return { status: "busy" };
+        const staged = await baseRouteCodeService.stageEvidence(ROUTINE_HOST_SCOPE_ID, id, prompt);
+        const operationId = randomUUID();
+        const result = await baseRouteCodeService.executeOperation(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-provider-turn",
+          operationId: decodeCodeOperationId(operationId),
+          threadId: id,
+          checkoutId: thread.checkoutId,
+          sessionId: decodeProviderSessionId(randomUUID()),
+          prompt: staged,
+        });
+        return result.kind === "provider-turn-state" &&
+          (result.state === "running" || result.state === "waiting" || result.state === "completed")
+          ? { status: "started", turnId: operationId }
+          : {
+              status: "refused",
+              message:
+                result.kind === "provider-turn-state" && result.failure !== undefined
+                  ? result.failure.message
+                  : "The turn was not admitted.",
+            };
+      },
+    };
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
     // the owning thread. Read-only toward GitHub; only an explicit completion
@@ -2293,6 +2393,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
+      codeThreadWakeupPort,
       routeCodeService,
       terminalProcessPort,
     };

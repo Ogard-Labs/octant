@@ -2465,16 +2465,16 @@ describe("ProviderService", () => {
         kind: "set-provider-own-memory",
         instanceId,
         expectedVersion: 1,
-        enabled: true,
+        enabled: false,
       }),
-    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: true } });
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: false } });
     expect(fixture.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         events: [expect.objectContaining({ eventName: "provider.instance-own-memory-changed@1" })],
       }),
     );
     expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
-      ownMemory: true,
+      ownMemory: false,
     });
     expect(fixture.persistence.readProviderInstance(instanceId)).not.toHaveProperty("nativeSetup");
     expect(invalidate).not.toHaveBeenCalled();

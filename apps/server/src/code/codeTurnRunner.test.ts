@@ -1003,6 +1003,54 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
   });
 
+  it("lets a Full access turn with the tool-step limit off run past any event count, and stops one below it at the person's limit", async () => {
+    const flood = () =>
+      fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.fromIterable([
+            ...Array.from({ length: 70 }, (_, index) =>
+              event({
+                kind: "task-progress",
+                taskId: "task-1",
+                status: "in-progress",
+                summary: `step ${index}`,
+              }),
+            ),
+            event({ kind: "completed" }),
+          ]),
+        ),
+      });
+    // One step kept below Full access is 64 events; off at Full access is no stop.
+    const runner = new CodeTurnRunner({
+      toolStepLimit: (fullAccess) => (fullAccess ? undefined : 1),
+    });
+    const runAt = async (executionPolicy: "full-access" | "approval-gated") => {
+      const outcomes: CodeTurnOutcome[] = [];
+      const connection = flood();
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run(
+            input({
+              thread: thread({ executionPolicy }),
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+      return { exit, outcomes, connection };
+    };
+
+    const open = await runAt("full-access");
+    expect(open.exit._tag).toBe("Success");
+    expect(open.outcomes).not.toContain("failed");
+
+    const limited = await runAt("approval-gated");
+    expect(limited.exit._tag).toBe("Failure");
+    expect(limited.outcomes.at(-1)).toBe("failed");
+    expect(limited.connection.interrupt).toHaveBeenCalledWith(sessionId);
+  });
+
   it("stops a flooding turn at its streamed-output budget with a truncation marker after what was journaled", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
@@ -1953,6 +2001,7 @@ describe("CodeTurnRunner", () => {
         {
           category: "waiting",
           message: "The provider's usage allowance is exhausted.",
+          availability: "usage-limit",
           retryAfterMs: 300_000,
           usageLimit: { kind: "exhausted", resetsAt: "2026-08-11T17:00:00.000Z" },
         },

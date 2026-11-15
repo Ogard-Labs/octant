@@ -625,6 +625,23 @@ resending it. Queue controls remain keyboard accessible and wrap at narrow
 widths. A running-turn steering control is separate and appears only where the
 runtime supports it.
 
+## Scheduled wake-ups
+
+A Work or Code thread whose agent scheduled a wake-up shows one row per
+waiting wake-up above the message queue, in the composer: an alarm-clock
+icon, **Wakes** and the next fire time (weekday and local time), the
+wake-up's prompt on one line (its full text on hover), and **Cancel**. A
+wake-up that came due while Octant was not running reads **Missed** with its
+time and "Octant was not running", in primary text, with **Run now** beside
+Cancel; nothing runs it until the person chooses. With no waiting wake-up the
+rows take no space. At a narrow width the prompt drops below the time so the
+buttons never cover it. A refused change (the wake-up already fired or was
+cancelled, or the thread is busy for Run now) shows the host's sentence under
+the rows. The rows refresh on the thread's follow-up notices and on a slow
+visible-page interval. The turn a wake-up starts opens with the host heading
+`Wake-up you scheduled earlier in this thread:` above its prompt. The rules
+are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
+
 ## Credential requests
 
 A one-use credential request appears inline at the end of the Code conversation.
@@ -698,7 +715,9 @@ window with no Project controller shows the words and Not now without Trust,
 and the host refuses the command from anyone but its own person. The card never
 shows for a trusted Project, a Project folder without that provider's Project
 code, or a provider whose trust loads none (any provider that is not a key
-provider, and Codex). The host's answer and the entries it reads are
+provider, and Codex). Every ACP agent is a key provider, so the card names
+Gemini CLI, Goose, Kimi Code, and the others for the Project files their
+launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
 in [Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels

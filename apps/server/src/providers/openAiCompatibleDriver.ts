@@ -1,3 +1,4 @@
+import { openAiOwnSearchOrigin } from "@octant/domain";
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
 import { attachedImagesSupport, sendsEveryAttachment } from "./promptImages";
 import {
@@ -489,6 +490,11 @@ async function sendCompatibleRequest(
       stream.onEvent(usage);
       return;
     }
+    if (event.kind === "web-search") {
+      const { sequence: _sequence, kind: _kind, ...search } = event;
+      stream.onEvent({ kind: "provider-web-search", ...search });
+      return;
+    }
     stream.onEvent({ kind: event.kind, text: event.text });
   };
   const shared = {
@@ -541,6 +547,13 @@ async function sendCompatibleRequest(
           value: await runProviderEffect(
             sendResponsesTurn({
               ...shared,
+              // Only OpenAI's own API on Responses runs a search whose terms
+              // Octant knows; anywhere else the request leaves the tool out.
+              ...(request.providerWebSearch !== undefined &&
+              options.profile === undefined &&
+              openAiOwnSearchOrigin(options.configuration) !== undefined
+                ? { webSearch: true }
+                : {}),
               // One stable key per harness session, so every step of the
               // conversation is routed to the same prompt cache.
               promptCacheKey: String(request.sessionId),
@@ -594,7 +607,7 @@ function recordObservedTurn(
     ...(authStrategyOf(options) !== "none" ? { credentialStatus: "stored" } : {}),
     models,
     capabilities: {
-      ...initialCapabilities,
+      ...capabilitiesFor(options),
       nativeAttachments: attachedImagesSupport(models),
       streaming: result.protocol === "chat-completions" ? result.streaming : "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
@@ -730,7 +743,7 @@ function recordProbe(
     // person's override, outlive the probe a Chat turn runs first.
     models: carryModelContextWindowFacts(result.models, prior?.models),
     capabilities: {
-      ...initialCapabilities,
+      ...capabilitiesFor(options),
       nativeAttachments: attachedImagesSupport(result.models),
     },
     ...(result.failure === undefined ? {} : { message: result.failure.message }),
@@ -850,6 +863,17 @@ function protocolFailure(
     outputStarted: metadata?.outputStarted ?? false,
     ...(metadata?.httpStatus === undefined ? {} : { httpStatus: metadata.httpStatus }),
   };
+}
+
+/**
+ * What this endpoint can do before a turn proves more. Its provider's own web
+ * search is reported only on OpenAI's own API on Responses, the one origin
+ * where Octant knows whose search runs the query.
+ */
+function capabilitiesFor(options: OpenAiCompatibleDriverOptions): ProviderCapabilities {
+  return options.profile !== undefined || openAiOwnSearchOrigin(options.configuration) === undefined
+    ? initialCapabilities
+    : { ...initialCapabilities, nativeWebResearch: "supported" };
 }
 
 function manualModels(modelIds: readonly ProviderModelId[]) {

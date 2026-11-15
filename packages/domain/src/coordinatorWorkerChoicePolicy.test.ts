@@ -2,6 +2,7 @@ import type { NativeHarnessSlot, NativeHarnessSlotCandidate } from "@octant/cont
 import { describe, expect, it } from "vitest";
 import {
   chooseWorkerModel,
+  nextWorkerFallback,
   workerModelHandles,
   workerRolesConfigured,
   type WorkerCandidateFacts,
@@ -76,6 +77,140 @@ function picked(choice: ReturnType<typeof chooseWorkerModel>) {
   if (choice.kind === "refused") throw new Error(`refused: ${choice.message}`);
   return choice;
 }
+
+describe("nextWorkerFallback", () => {
+  const four = roles([
+    slot("default", [sonnet, astra, glm]),
+    slot("deep", [opus, astra]),
+    slot("quick", [haiku]),
+  ]);
+
+  function moved(result: ReturnType<typeof nextWorkerFallback>) {
+    if (result.kind !== "continue") throw new Error(`stays: ${result.reason}`);
+    return result;
+  }
+
+  it("moves a worker on its main model to the role's next model", () => {
+    const next = moved(
+      nextWorkerFallback(four, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "main" },
+      }),
+    );
+    expect(next.candidate).toBe(astra);
+    expect(next.rank).toEqual({ fallback: 1 });
+  });
+
+  it("walks on from a fallback and passes over models that cannot take the work", () => {
+    const next = moved(
+      nextWorkerFallback(four, facts({ glm: { toolsVerified: false } }), {
+        current: astra,
+        choice: { role: "default", rank: { fallback: 1 } },
+      }),
+    );
+    // Builder's list is used up, so it borrows Hard problems, skipping astra it already ran on.
+    expect(next.candidate).toBe(opus);
+    expect(next.rank).toEqual({ borrowed: "deep" });
+    expect(next.passedOver.map((verdict) => verdict.candidate)).toEqual([glm]);
+  });
+
+  it("keeps the start's filters: images, and a review's other provider", () => {
+    const imageless = moved(
+      nextWorkerFallback(four, facts({ astra: { readsImages: false } }), {
+        current: sonnet,
+        choice: { role: "default", rank: "main", needsImages: true },
+      }),
+    );
+    expect(imageless.candidate).toBe(glm);
+    const review = roles([slot("slow", [opus, sonnet, astra]), slot("default", [sonnet])]);
+    const independent = moved(
+      nextWorkerFallback(review, facts({}), {
+        current: opus,
+        choice: { role: "slow", rank: "main", reviewedProviderKind: "anthropic" },
+      }),
+    );
+    expect(independent.candidate).toBe(astra);
+  });
+
+  it("stays when every model left is unavailable, so the worker pauses as before", () => {
+    const result = nextWorkerFallback(
+      four,
+      facts({
+        astra: { notReady: "provider-down" },
+        glm: { usageLimit: {} },
+        opus: { allowed: false },
+      }),
+      { current: sonnet, choice: { role: "default", rank: "main" } },
+    );
+    expect(result).toMatchObject({ kind: "stays", reason: "none-left" });
+  });
+
+  it("stays at the end of the walk and never goes back to an earlier model", () => {
+    const result = nextWorkerFallback(four, facts(), {
+      current: astra,
+      choice: { role: "default", rank: { borrowed: "deep" } },
+    });
+    expect(result).toMatchObject({ kind: "stays", reason: "none-left" });
+  });
+
+  it("never moves a worker whose model a person picked, or whose role has the box off", () => {
+    expect(
+      nextWorkerFallback(four, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "person" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "taken-over" });
+    const off = roles([
+      { ...slot("default", [sonnet, astra]), continueOnFallback: false } as NativeHarnessSlot,
+    ]);
+    expect(
+      nextWorkerFallback(off, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "box-off" });
+  });
+
+  it("stays rather than move onto a model of a role that asks a person first", () => {
+    const asks = roles([slot("default", [sonnet]), slot("deep", [opus], { askBeforeUsing: true })]);
+    // Builder's list is used up and the list it borrows asks first.
+    expect(
+      nextWorkerFallback(asks, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "asks-first" });
+    // A worker a person approved in an ask-first role keeps that one model.
+    const approved = roles([slot("deep", [opus, astra], { askBeforeUsing: true })]);
+    expect(
+      nextWorkerFallback(approved, facts(), {
+        current: opus,
+        choice: { role: "deep", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "asks-first" });
+  });
+
+  it("reads the box from the Project's choice for the role before Settings", () => {
+    const projectOff = roles(
+      [slot("default", [sonnet, astra])],
+      [{ ...slot("default", [sonnet, astra]), continueOnFallback: false } as NativeHarnessSlot],
+    );
+    expect(
+      nextWorkerFallback(projectOff, facts(), {
+        current: sonnet,
+        choice: { role: "default", rank: "main" },
+      }),
+    ).toMatchObject({ kind: "stays", reason: "box-off" });
+  });
+
+  it("never returns a model outside the roles, and stays for a model the roles no longer list", () => {
+    const result = nextWorkerFallback(four, facts(), {
+      current: model("elsewhere", "x"),
+      choice: { role: "default", rank: "main" },
+    });
+    expect(result).toMatchObject({ kind: "stays", reason: "not-in-roles" });
+  });
+});
 
 describe("chooseWorkerModel", () => {
   it("maps size to Quick edit, Builder and Hard problems, and a review to Reviewer", () => {
@@ -446,7 +581,11 @@ describe("providerAvailabilityFromFailure", () => {
 
 describe("usageLimitFromReading", () => {
   const now = Date.parse("2026-11-15T12:00:00.000Z");
-  function reading(windows: ReadonlyArray<Record<string, unknown>>, status = "available") {
+  function reading(
+    windows: ReadonlyArray<Record<string, unknown>>,
+    status = "available",
+    observedAt = "2026-11-15T12:00:00.000Z",
+  ) {
     const limits = {
       rateLimitWindows: windows,
       quota: "available",
@@ -455,8 +594,14 @@ describe("usageLimitFromReading", () => {
     };
     return (
       status === "available"
-        ? { status, providerInstanceId: "p", limits }
-        : { status, providerInstanceId: "p", staleLimits: limits }
+        ? { status, providerInstanceId: "p", observedAt, limits }
+        : {
+            status,
+            providerInstanceId: "p",
+            observedAt,
+            lastSuccessfulAt: observedAt,
+            staleLimits: limits,
+          }
     ) as never;
   }
 
@@ -484,6 +629,7 @@ describe("usageLimitFromReading", () => {
     const quota = {
       status: "available",
       providerInstanceId: "p",
+      observedAt: "2026-11-15T12:00:00.000Z",
       limits: {
         quota: "exhausted",
         requests: { status: "unavailable" },
@@ -494,6 +640,7 @@ describe("usageLimitFromReading", () => {
     const bucket = {
       status: "available",
       providerInstanceId: "p",
+      observedAt: "2026-11-15T12:00:00.000Z",
       limits: {
         quota: "available",
         requests: {
@@ -507,6 +654,52 @@ describe("usageLimitFromReading", () => {
     } as never;
     expect(usageLimitFromReading(bucket, now)).toEqual({ until: "2026-11-15T12:05:00.000Z" });
     expect(usageLimitFromReading(bucket, Date.parse("2026-11-15T12:06:00.000Z"))).toBeUndefined();
+  });
+
+  it("keeps a reached limit with no reset named for at most 5 minutes from the reading's own time", () => {
+    const exhausted = reading(
+      [{ window: "w", status: "exhausted" }],
+      "available",
+      "2026-11-15T12:00:00.000Z",
+    );
+    expect(usageLimitFromReading(exhausted, Date.parse("2026-11-15T12:04:59.000Z"))).toEqual({});
+    expect(
+      usageLimitFromReading(exhausted, Date.parse("2026-11-15T12:05:00.000Z")),
+    ).toBeUndefined();
+    // A reset the reading names still holds past the 5 minutes.
+    const named = reading(
+      [
+        { window: "w", status: "exhausted" },
+        { window: "weekly", status: "exhausted", resetsAt: "2026-11-15T14:00:00.000Z" },
+      ],
+      "available",
+      "2026-11-15T12:00:00.000Z",
+    );
+    expect(usageLimitFromReading(named, Date.parse("2026-11-15T12:30:00.000Z"))).toEqual({
+      until: "2026-11-15T14:00:00.000Z",
+    });
+  });
+
+  it("times a failed refresh's kept limits from the reading they came from, not the failed refresh", () => {
+    const limits = {
+      rateLimitWindows: [{ window: "w", status: "exhausted" }],
+      quota: "available",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+    };
+    const failed = (lastSuccessfulAt?: string) =>
+      ({
+        status: "failed",
+        providerInstanceId: "p",
+        observedAt: "2026-11-15T12:59:00.000Z",
+        failure: { category: "unavailable", message: "refresh failed" },
+        staleLimits: limits,
+        ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),
+      }) as never;
+    const at = Date.parse("2026-11-15T13:00:00.000Z");
+    expect(usageLimitFromReading(failed("2026-11-15T12:00:00.000Z"), at)).toBeUndefined();
+    expect(usageLimitFromReading(failed("2026-11-15T12:58:00.000Z"), at)).toEqual({});
+    expect(usageLimitFromReading(failed(), at)).toBeUndefined();
   });
 
   it("never counts a reading below its limit, or one whose reset has passed", () => {

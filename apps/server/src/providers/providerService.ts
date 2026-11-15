@@ -1218,7 +1218,7 @@ export class ProviderService implements ProviderServiceApi {
           } else if (command.kind === "set-provider-native-setup") {
             if (!isKeyProviderDriverKind(current.driverKind)) {
               throw this.#unsupported(
-                "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+                "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
               );
             }
             instance = setProviderNativeSetup(current, { enabled: command.enabled, updatedAt });

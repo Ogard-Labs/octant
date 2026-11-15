@@ -86,7 +86,11 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { harnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
+import {
+  isNativeHarnessDriverKind,
+  providerOwnSearchOrigin,
+  workThreadAccessOf,
+} from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -150,6 +154,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "configuredDriverOptions"
     | "effectiveSkills"
     | "nativeHarnessLeadFallback"
+    | "nativeHarnessProviderSearchGrants"
     | "nativeHarnessTranscripts"
     | "providerDataDirectory"
     | "providerUsageLimitsService"
@@ -203,6 +208,7 @@ export function wireHarness(deps: HarnessDependencies) {
     shieldHolder,
     spendCeiling,
     nativeHarnessLeadFallback,
+    nativeHarnessProviderSearchGrants,
     nativeHarnessQuestions,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
@@ -1179,6 +1185,15 @@ export function wireHarness(deps: HarnessDependencies) {
     hostId: deriveToolHostId(providerDataDirectory),
     readThreadTaint: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    providerSearchGrants: nativeHarnessProviderSearchGrants,
+    providerWebSearchFacts: (providerInstanceId) => {
+      const instance = persistence.readProviderInstance(providerInstanceId);
+      if (instance === undefined) return undefined;
+      return {
+        origin: providerOwnSearchOrigin(instance),
+        webSearchReady: webSearchSettings.eligible().length > 0,
+      };
+    },
     recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
     uuid: randomUUID,
     clock: () => new Date().toISOString(),

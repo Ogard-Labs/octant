@@ -50,6 +50,7 @@ import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
   createChatThreadMentionDirectory,
+  chatMentionWithinReach,
   codeMentionWithinReach,
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
@@ -794,15 +795,50 @@ export function wireChat(deps: ChatDependencies) {
       }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
-      // A Code transcript reaches a composer only from the Project a window
-      // showing that composer alone would reach: a Code composer's own
-      // Project, any other composer's Code lead. Another pane's Project never
-      // becomes mentionable by sitting beside it (maintainer decision,
-      // 2026-11-14). A paired device holds no workspace and keeps its reach.
+      // A Chat or Code transcript reaches a composer only from the Project a
+      // window showing that composer alone would reach: the composer's own
+      // Project of that mode, any other composer's lead. Another pane's
+      // Project never becomes mentionable by sitting beside it (maintainer
+      // decision, 2026-11-14). Work threads open in every window, so their
+      // reach is unchanged. A paired device holds no workspace and keeps its
+      // reach.
       admitsMention: ({ windowId, readerThreadId, thread }) => {
-        if (thread.mode !== "code") return true;
+        if (thread.mode === "work") return true;
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         if (workspace === undefined) return true;
+        if (thread.mode === "chat") {
+          let target;
+          let reader;
+          try {
+            target = persistence.readChatThread(decodeChatThreadId(String(thread.threadId)));
+            // A Side Chat holds no Project of its own; it reads with the reach
+            // of the thread it sits beside.
+            const sidecar =
+              readerThreadId === undefined
+                ? undefined
+                : sideChatSidecars.findBySidecarThread(decodeChatThreadId(readerThreadId));
+            const readerChatId =
+              sidecar === undefined
+                ? readerThreadId
+                : sidecar.sourceMode === "chat"
+                  ? String(sidecar.sourceThreadId)
+                  : undefined;
+            reader =
+              readerChatId === undefined
+                ? undefined
+                : persistence.readChatThread(decodeChatThreadId(readerChatId));
+          } catch {
+            return false;
+          }
+          return (
+            target !== undefined &&
+            chatMentionWithinReach({
+              workspace,
+              readerChatProjectId: reader === undefined ? undefined : (reader.projectId ?? null),
+              mentionedProjectId: target.projectId ?? null,
+            })
+          );
+        }
         let target;
         let reader;
         try {

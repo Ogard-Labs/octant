@@ -744,3 +744,254 @@ function lastMessage(body: Record<string, unknown>): unknown {
   const messages: unknown[] = Array.isArray(body.messages) ? body.messages : [];
   return messages.at(-1);
 }
+
+describe("Anthropic's own web search in one response", () => {
+  const start = {
+    type: "message_start",
+    message: {
+      id: "msg",
+      type: "message",
+      role: "assistant",
+      content: [],
+      model: "fixture-model",
+      stop_reason: null,
+      usage: { input_tokens: 2, output_tokens: 0 },
+    },
+  };
+  const search = (index: number, id: string) => [
+    {
+      type: "content_block_start",
+      index,
+      content_block: { type: "server_tool_use", id, name: "web_search", input: {} },
+    },
+    {
+      type: "content_block_delta",
+      index,
+      delta: { type: "input_json_delta", partial_json: '{"query":"octant release"}' },
+    },
+    { type: "content_block_stop", index },
+    {
+      type: "content_block_start",
+      index: index + 1,
+      content_block: {
+        type: "web_search_tool_result",
+        tool_use_id: id,
+        content: [
+          {
+            type: "web_search_result",
+            url: "https://example.com/octant",
+            title: "Octant",
+            encrypted_content: "opaque",
+          },
+        ],
+      },
+    },
+    { type: "content_block_stop", index: index + 1 },
+  ];
+  const end = [
+    { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 5 } },
+    { type: "message_stop" },
+  ];
+
+  it("asks for the basic web search capped at one search, never the dynamic filtering version", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "hi",
+      history: [],
+      webSearch: true,
+    });
+    expect(body.tools).toEqual([{ type: "web_search_20250305", name: "web_search", max_uses: 1 }]);
+    expect(JSON.stringify(body)).not.toContain("web_search_2026");
+  });
+
+  it("reports the search as soon as its results arrive, then the text the reply cited", async () => {
+    const events: unknown[] = [];
+    await Effect.runPromise(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(
+          fixture(
+            sse([
+              start,
+              ...search(0, "srv_1"),
+              { type: "content_block_start", index: 2, content_block: { type: "text", text: "" } },
+              {
+                type: "content_block_delta",
+                index: 2,
+                delta: {
+                  type: "citations_delta",
+                  citation: {
+                    type: "web_search_result_location",
+                    url: "https://example.com/octant",
+                    title: "Octant",
+                    cited_text: "Octant shipped.",
+                    encrypted_index: "x",
+                  },
+                },
+              },
+              {
+                type: "content_block_delta",
+                index: 2,
+                delta: { type: "text_delta", text: "It shipped." },
+              },
+              { type: "content_block_stop", index: 2 },
+              ...end,
+            ]),
+          ),
+        ),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "what shipped?",
+        webSearch: true,
+        onEvent: (event) => events.push(event),
+      }),
+    );
+    const searches = events.filter((event) => (event as { kind: string }).kind === "web-search");
+    const reported = {
+      kind: "web-search",
+      sequence: expect.any(Number),
+      searchId: "srv_1",
+      query: "octant release",
+      sources: [{ url: "https://example.com/octant", title: "Octant" }],
+    };
+    expect(searches).toEqual([
+      { ...reported, citedText: [] },
+      { ...reported, citedText: ["Octant shipped."] },
+    ]);
+    // The search is reported before any of the reply that read it.
+    expect(events.indexOf(searches[0])).toBeLessThan(
+      events.findIndex((event) => (event as { kind: string }).kind === "text-delta"),
+    );
+  });
+
+  it.each([
+    ["fails", [{ type: "error", error: { type: "api_error", message: "boom" } }]],
+    ["is cut off", []],
+  ])("still reports a search whose results arrived when the response %s", async (_, tail) => {
+    const events: unknown[] = [];
+    const exit = await Effect.runPromiseExit(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(fixture(sse([start, ...search(0, "srv_1"), ...tail]))),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "what shipped?",
+        webSearch: true,
+        onEvent: (event) => events.push(event),
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "web-search",
+        searchId: "srv_1",
+        sources: [{ url: "https://example.com/octant", title: "Octant" }],
+      }),
+    );
+  });
+
+  const closing = (stopReason: string) => [
+    { type: "content_block_stop", index: 2 },
+    { type: "message_delta", delta: { stop_reason: stopReason }, usage: { output_tokens: 5 } },
+    { type: "message_stop" },
+  ];
+  it.each([
+    ["completes", closing("end_turn"), false],
+    ["stops at its output limit", closing("max_tokens"), false],
+    ["refuses", closing("refusal"), false],
+    ["reports an error", [{ type: "error", error: { type: "api_error", message: "boom" } }], false],
+    ["is stopped", [{ type: "ping" }], true],
+    ["ends without a terminal event", [], false],
+    [
+      "cannot be read",
+      [{ type: "content_block_delta", index: 99, delta: { type: "text_delta", text: "x" } }],
+      false,
+    ],
+  ])(
+    "reports the text the reply cited exactly once when the response %s",
+    async (_ending, tail, stop) => {
+      const events: Array<{ readonly kind: string; readonly citedText?: ReadonlyArray<string> }> =
+        [];
+      const controller = new AbortController();
+      await Effect.runPromise(
+        Effect.either(
+          sendAnthropicMessagesTurn({
+            endpoint: makeEndpoint(
+              fixture(
+                sse([
+                  start,
+                  ...search(0, "srv_1"),
+                  {
+                    type: "content_block_start",
+                    index: 2,
+                    content_block: { type: "text", text: "" },
+                  },
+                  {
+                    type: "content_block_delta",
+                    index: 2,
+                    delta: {
+                      type: "citations_delta",
+                      citation: {
+                        type: "web_search_result_location",
+                        url: "https://example.com/octant",
+                        title: "Octant",
+                        cited_text: "Octant shipped.",
+                        encrypted_index: "x",
+                      },
+                    },
+                  },
+                  {
+                    type: "content_block_delta",
+                    index: 2,
+                    delta: { type: "text_delta", text: "It shipped." },
+                  },
+                  ...tail,
+                ]),
+              ),
+            ),
+            modelId: "fixture-model",
+            history: [],
+            prompt: "what shipped?",
+            webSearch: true,
+            signal: controller.signal,
+            onEvent: (event) => {
+              events.push(event);
+              // Stopped once the reply that cited the page is streaming.
+              if (stop && event.kind === "text-delta") controller.abort();
+            },
+          }),
+        ),
+      );
+      expect(
+        events.flatMap((event) => (event.kind === "web-search" ? [event.citedText] : [])),
+      ).toEqual([[], ["Octant shipped."]]);
+    },
+  );
+
+  it("refuses a second built-in search in the same response as unsupported", async () => {
+    const exit = await Effect.runPromiseExit(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(
+          fixture(sse([start, ...search(0, "srv_1"), ...search(2, "srv_2"), ...end])),
+        ),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "search twice",
+        webSearch: true,
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(JSON.stringify(exit)).toContain('"category":"unsupported"');
+  });
+
+  it("still refuses a built-in search the request did not offer", async () => {
+    const exit = await Effect.runPromiseExit(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(fixture(sse([start, ...search(0, "srv_1"), ...end]))),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "no search here",
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(JSON.stringify(exit)).toContain('"category":"unsupported"');
+  });
+});

@@ -110,6 +110,7 @@
     "./provider-runtime-integration": "./src/providerRuntimeIntegration.ts",
     "./research-policy": "./src/researchPolicy.ts",
     "./web-search-policy": "./src/webSearchPolicy.ts",
+    "./provider-web-search-policy": "./src/providerWebSearchPolicy.ts",
     "./reply-detail-policy": "./src/replyDetailPolicy.ts",
     "./shell-policy": "./src/shellPolicy.ts",
     "./sidebar-thread-status-policy": "./src/sidebarThreadStatusPolicy.ts",
@@ -142,7 +143,8 @@
     "./live-turn-policy": "./src/liveTurnPolicy.ts",
     "./turn-metrics-display": "./src/turnMetricsDisplay.ts",
     "./local-usage-pricing": "./src/localUsagePricing.ts",
-    "./command-credential-policy": "./src/commandCredentialPolicy.ts"
+    "./command-credential-policy": "./src/commandCredentialPolicy.ts",
+    "./thread-wakeup-policy": "./src/threadWakeupPolicy.ts"
   },
   "scripts": {
     "fmt": "oxfmt",

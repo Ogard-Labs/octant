@@ -1372,8 +1372,15 @@ export interface CodeOperationServiceOptions {
     threadId: CodeThreadId,
     options?: { readonly includeRewound?: boolean },
   ) => ReadonlyArray<CodeConversationTurn> | undefined;
-  /** Whether the thread's provider reports it can cut its own session back. */
-  readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
+  /**
+   * Whether a rewind keeping turns through `lastKeptTurn` continues a copy of
+   * the provider's own session rather than a text handoff, as the rewind's
+   * preview promises it.
+   */
+  readonly supportsSessionRollback?: (
+    thread: CodeThread,
+    lastKeptTurn: CodeOperationId | undefined,
+  ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
    * Resolves the `#thread` mentions a Code turn names.
@@ -5600,6 +5607,12 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
+    // A server thread's session is never copied on this host.
+    const native =
+      checkout.kind !== "remote-root" &&
+      (await Promise.resolve(
+        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+      ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
     if (point.kind !== "checkpoint") files = point;
@@ -5623,11 +5636,7 @@ export class CodeOperationService {
       fromOperationId: command.fromOperationId,
       removedTurns: turns.removed.length,
       files,
-      // A server thread's session is never copied on this host.
-      rollback:
-        checkout.kind !== "remote-root" && this.#options.supportsSessionRollback?.(thread) === true
-          ? "native"
-          : "handoff",
+      rollback: native ? "native" : "handoff",
     });
   }
 

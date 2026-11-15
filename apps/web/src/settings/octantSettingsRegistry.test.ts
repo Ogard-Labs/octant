@@ -136,6 +136,7 @@ describe("octantSettingsRegistry", () => {
       "tool-call-records",
       "tool-steps-per-turn",
       "tool-steps-per-turn-full-access",
+      "runtime-turns-per-turn",
       "browser-transfer-file-limit",
       "browser-held-download-limit",
       "browser-upload-file-count-limit",

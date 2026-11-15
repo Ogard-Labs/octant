@@ -24,6 +24,38 @@ export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "k
 }
 
 /**
+ * The most answered request ids a turn remembers to refuse a repeat. A turn
+ * with no event budget (a tool-step limit that is off) has no end to its
+ * requests, so the oldest answered ids are forgotten past this: an answered
+ * request is settled, and a repeat of one that old is answered again rather
+ * than letting the set grow for as long as the turn runs.
+ */
+export const MAX_REMEMBERED_ANSWERED_REQUESTS = 4_096;
+
+/** The requests a turn has answered, remembered within a bound, and how many there were. */
+export class AnsweredRequests {
+  readonly #ids = new Set<string>();
+  #count = 0;
+
+  /** Records the answer; `false` when this request was already answered. */
+  answer(requestId: string): boolean {
+    if (this.#ids.has(requestId)) return false;
+    this.#ids.add(requestId);
+    this.#count += 1;
+    for (const oldest of this.#ids) {
+      if (this.#ids.size <= MAX_REMEMBERED_ANSWERED_REQUESTS) break;
+      this.#ids.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Every request answered, including those no longer remembered. */
+  get count(): number {
+    return this.#count;
+  }
+}
+
+/**
  * The most streamed text and reasoning one turn may journal. The deltas are
  * exempt from the event budget above, and Chat and Code journal every one, so
  * without this a provider that never stops streaming grows the journal until

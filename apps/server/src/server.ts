@@ -248,6 +248,7 @@ export function startOctantServer(
       workThreadProjection,
       workTurnProjection,
       workTurnsCutOffByRestart,
+      threadWakeups,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -555,6 +556,7 @@ export function startOctantServer(
       resolveChildWorktree,
       managedWorktreeSourcePreview,
       nativeHarnessLeadFallback,
+      nativeHarnessProviderSearchGrants,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,
@@ -666,6 +668,7 @@ export function startOctantServer(
       externalContentIngestionStore,
       goalService,
       nativeHarnessLeadFallback,
+      nativeHarnessProviderSearchGrants,
       nativeHarnessTranscripts,
       options,
       persistence,
@@ -870,10 +873,12 @@ export function startOctantServer(
       contributeServerCodeTools,
       coordinatorService,
       coordinatorWakes,
+      codeThreadWakeupPort,
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       imageDescriber,
+      threadWakeups,
       hostResourceBudget,
       providerAvailabilityMarks,
       providerUsageLimitsService,
@@ -1124,6 +1129,8 @@ export function startOctantServer(
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,
+      threadWakeupRoutes,
+      workThreadWakeupPort,
       observeWorkThreadRuntime,
       onWorkTurnCancelled,
       workThreadService,
@@ -1132,6 +1139,7 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       imageDescriber,
+      threadWakeups,
       codeProjectAccess,
       isPairedDeviceScope,
       isRestrictedDeviceScope,
@@ -1226,6 +1234,9 @@ export function startOctantServer(
       shieldServerStore,
     });
     const { restartRecovery } = yield* wireContinuation({
+      threadWakeups,
+      workThreadWakeupPort,
+      codeThreadWakeupPort,
       coordinatorService,
       coordinatorWakes,
       agentRunOrchestration,
@@ -1877,6 +1888,7 @@ export function startOctantServer(
       threadMentionRoutes,
       threadNotesRoutes,
       threadMessageQueueRoutes,
+      threadWakeupRoutes,
       usageDashboardRoutes,
       usageRoutes,
       validationEvidenceRoutes,
