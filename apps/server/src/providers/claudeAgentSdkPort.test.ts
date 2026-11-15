@@ -3039,6 +3039,93 @@ describe("Claude Agent SDK port", () => {
   });
 });
 
+describe("Claude's full built-in tool set", () => {
+  const withheldTools = ["EnterWorktree", "Monitor"];
+
+  test("launches with Claude Code's own tool preset less the withheld tools and holds a built-in tool Octant never named", async () => {
+    const harness = makeHarness([
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "FutureTool"] },
+    ]);
+    const opened = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, withheldTools });
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+    expect(opened._tag === "Some" ? opened.value.kind : undefined).toBe("initialized");
+    expect(harness.invocation?.options).toMatchObject({
+      tools: { type: "preset", preset: "claude_code" },
+      disallowedTools: withheldTools,
+      allowedTools: ["Grep", "Glob"],
+    });
+  });
+
+  test("refuses a runtime that holds a withheld tool", async () => {
+    const harness = makeHarness([
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "Monitor"] },
+    ]);
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, withheldTools });
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(failed).toEqual({
+      category: "protocol",
+      message: "Claude initialized an unexpected runtime surface.",
+    });
+  });
+
+  test("passes a built-in tool Octant never named to its gate and refuses a withheld one first", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({
+            ...openInput,
+            withheldTools,
+            canUseTool,
+            preToolUse,
+          });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) throw new Error("Expected the injected hook.");
+          const signal = new AbortController().signal;
+          const call = (toolName: string, toolUseId: string) =>
+            Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd: "/repo",
+                  tool_name: toolName,
+                  tool_input: {},
+                  tool_use_id: toolUseId,
+                },
+                toolUseId,
+                { signal },
+              ),
+            );
+          expect(yield* call("FutureTool", "future")).toEqual({
+            hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
+          });
+          expect(yield* call("Monitor", "monitor")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "deny" },
+          });
+          expect(preToolUse).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+});
+
 describe("Claude running as itself", () => {
   const ownSetup = {
     subagents: true,

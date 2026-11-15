@@ -922,17 +922,18 @@ export function permissionMode(
 // the initialized tool set even when it was requested. A session that loads
 // a trusted Project's code also holds the tools of the MCP servers the person
 // and the Project set up, which Octant cannot name in advance; each call to
-// one still passes Octant's gate.
+// one still passes Octant's gate. A session with the full built-in set holds
+// every built-in tool but the withheld ones, also not named in advance, and
+// each call to one passes the gate too.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools">,
   toolName: string,
 ): boolean {
   if (input.tools.includes(toolName)) return true;
-  return (
-    input.nativeSetup?.projectCode === true &&
-    toolName.startsWith("mcp__") &&
-    !toolName.startsWith("mcp__octant__")
-  );
+  if (toolName.startsWith("mcp__")) {
+    return input.nativeSetup?.projectCode === true && !toolName.startsWith("mcp__octant__");
+  }
+  return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
 }
 
 /** Whether a server the session reports is one this session may hold. */
