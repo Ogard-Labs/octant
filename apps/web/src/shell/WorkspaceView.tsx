@@ -60,6 +60,7 @@ import type {
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { KeyProviderDriverKinds } from "@octant/contracts/providers";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -528,6 +529,8 @@ export interface WorkspaceViewProps {
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
   readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly projectClient?: ProjectClient;
+  /** Each Project's instructions, shown beside its memory. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
   readonly previewClient?: PreviewClient;
@@ -2365,6 +2368,9 @@ function renderNonCodeTab(
     return (
       <ProjectOverview
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+        {...(props.octantInstructionsClient === undefined
+          ? {}
+          : { octantInstructionsClient: props.octantInstructionsClient })}
         memoryProjects={props.projects}
         {...(props.nativeHarnessClient === undefined
           ? {}

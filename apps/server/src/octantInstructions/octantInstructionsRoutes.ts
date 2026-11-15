@@ -33,16 +33,17 @@ function json(body: unknown, status: number, origin: string | null): Response {
 }
 
 export interface OctantInstructionsRouteDependencies {
-  readonly store: Pick<OctantInstructionsStore, "view" | "change">;
+  readonly store: Pick<OctantInstructionsStore, "view" | "projectView" | "change">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
 
 /**
- * Settings › General: Your instructions. Only the host's own person changes
- * them, from a window on this host or a device that person paired. Any other
- * authenticated client reads them read-only, except an agent grant's session:
- * agents read the texts only as the context blocks a turn receives.
+ * Your instructions (Settings › General) and each Project's (its settings).
+ * Only the host's own person changes them, from a window on this host or a
+ * device that person paired. Any other authenticated client reads them
+ * read-only, except an agent grant's session: agents read the texts only as
+ * the context blocks a turn receives.
  */
 export function createOctantInstructionsRouteHandler(
   dependencies: OctantInstructionsRouteDependencies,
@@ -84,7 +85,6 @@ export function createOctantInstructionsRouteHandler(
       return json(dependencies.store.view(actsAsPerson), 200, origin);
     }
     if (url.pathname === OCTANT_INSTRUCTIONS_COMMAND_PATH && request.method === "POST") {
-      if (!actsAsPerson) return json(refusedOctantInstructions("not-the-person"), 403, origin);
       let command: OctantInstructionsCommand;
       try {
         const text = await request.text();
@@ -93,18 +93,25 @@ export function createOctantInstructionsRouteHandler(
       } catch {
         return json(refusedOctantInstructions("malformed"), 400, origin);
       }
+      if (command.kind !== "read-project-instructions" && !actsAsPerson) {
+        return json(refusedOctantInstructions("not-the-person"), 403, origin);
+      }
       const result = decodeOctantInstructionsResult(
-        dependencies.store.change(command, {
-          actor: eventActorForPrincipal(principal),
-          actsAsHostPerson: actsAsPerson,
-        }),
+        command.kind === "read-project-instructions"
+          ? dependencies.store.projectView(String(command.projectId), actsAsPerson)
+          : dependencies.store.change(command, {
+              actor: eventActorForPrincipal(principal),
+              actsAsHostPerson: actsAsPerson,
+            }),
       );
       const status =
-        result.kind === "octant-instructions"
+        result.kind !== "octant-instructions-refused"
           ? 200
           : result.reason === "not-the-person"
             ? 403
-            : 409;
+            : result.reason === "project-not-found"
+              ? 404
+              : 409;
       return json(result, status, origin);
     }
     return json({ error: "Instruction route is not found." }, 404, origin);
