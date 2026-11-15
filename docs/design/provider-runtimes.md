@@ -707,7 +707,11 @@ not hold) is answered with no decision, so Claude Code's own
 permission rules run first: the person's `permissions.allow`, `ask`, and
 `deny` decide it, and only a call they leave to ask reaches `canUseTool`,
 where Octant raises its approval or Reviewed's reviewer decides (maintainer
-decision, 2026-11-14). A question (`AskUserQuestion`), an Artifact publish,
+decision, 2026-11-14). In a Project the person trusted for Claude Code, the
+allow rules committed in its `.claude/settings.json` count as the person's own
+rules, as they do in Claude Code once its folder trust is accepted: trusting
+the Project is the person adopting them. An untrusted Project's settings
+never load, so its rules allow nothing. A question (`AskUserQuestion`), an Artifact publish,
 and a wake-up keep Octant's own ask, because each needs an answer only Octant
 gives, and so does a `Workflow` start, whose script runs as JavaScript in the
 runtime process outside the command sandbox. So do a file tool naming a path outside the folders the session holds,
