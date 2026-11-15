@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 1            | 1                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 10      | 6            | 0                   |
@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **260**   | **157** | **99**       | **4**               |
+| **All areas**                                                                         | **261**   | **157** | **100**      | **4**               |
 
 ## Principles and hard lines
 
@@ -596,6 +596,20 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - Automatic research routing prefers the provider's own search when the provider has one and falls back to SearXNG, so a fresh install can search with no endpoint configured (maintainer request, 2026-11-14).
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
+
+### Web search backends and data policy
+
+Octant's own `web-search` searches an ordered list of backends the person sets up, filtered by one host data policy (Any, ZDR only, EU only, EU and ZDR), and a provider's own search, in the native harness and in a vendor runtime, follows the same policy, so a person under a zero data retention agreement or an EU data boundary can search (maintainer request, 2026-11-14).
+
+- The tool's name, schema and result shape do not change, and the definition never names a backend; the answering backend is journaled, not returned to the model.
+- A backend is eligible only when the person states ZDR or EU processing for it and its vendor offers that; with no eligible backend the tool is not offered.
+- A query moves to the next backend only when one did not answer, inside a 20-second budget; an empty result does not move on.
+- The policy changes only from a local window or a device the host's own person paired, and is journaled; an organization-set policy is outside the release boundary.
+- The native harness offers a provider's own search only on Anthropic's and OpenAI's own APIs, capped at one search per request, withheld from a tainted thread below Full access, and marking the thread as outside content.
+- Outside Any, the policy turns a vendor runtime's `webTools` off and shows it locked; it adds no second switch beside Chat's research route, whose `searxng` value becomes `octant`.
+- A stored SearXNG address migrates to the first entry under Any; all four delivery slices, provider search in the harness included, are one delivery.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Web search backends and data policy](web-search-backends.md).
 
 ## Canvas authority
 
@@ -1495,7 +1509,7 @@ A person writes instructions for Octant itself, beside each provider's own instr
 - Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
 - They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
+Status: Partly built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 

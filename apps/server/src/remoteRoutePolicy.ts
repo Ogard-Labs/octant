@@ -135,6 +135,9 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/person-memory/commands",
   // The person's own to-do list: every change.
   "/api/todos/commands",
+  // Your instructions for Octant; the route refuses a change from any
+  // principal that does not act as the host's person.
+  "/api/octant-instructions/commands",
   "/api/benchmarks/suites/save",
   "/api/benchmarks/suites/delete",
   "/api/benchmarks/runs/start",
@@ -1036,7 +1039,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // approval and question their scope can answer and putting one off, the
   // fleet read, provider limits and an asked-for refresh, and the protected
   // files list and its changes. None has a catalogued action.
-  ...[PENDING_REQUESTS_PATH, "/api/fleet-activity", "/api/provider-usage-limits"].map((path) => ({
+  ...[
+    PENDING_REQUESTS_PATH,
+    "/api/fleet-activity",
+    "/api/provider-usage-limits",
+    "/api/octant-instructions",
+  ].map((path) => ({
     kind: "exact" as const,
     path,
     methods: ["GET"] as const,

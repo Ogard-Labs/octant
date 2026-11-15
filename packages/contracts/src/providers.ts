@@ -1687,6 +1687,12 @@ export const ProviderContextBlock = Schema.Struct({
     "skill-instructions",
     "user-message",
     "assistant-message",
+    // The instructions the person wrote for Octant itself (Settings › General).
+    // Standing and keyed, so an edit reaches a session that holds the earlier
+    // copy once, as a revision. Kept apart from Octant's own instructions so a
+    // runtime with a higher-authority channel never lifts the person's text
+    // into it: the text grants nothing.
+    "person-instructions",
     // What Octant remembers about the person from earlier threads, framed as
     // data. Standing, so a session keeps it after the first turn.
     "person-memory",

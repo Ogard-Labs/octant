@@ -307,6 +307,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "onWindowRevoked"
     | "simulatorInputGrants"
     | "personMemoryAccess"
+    | "octantInstructions"
   > &
   Pick<
     AgentRunsWiring,
@@ -507,6 +508,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     threadOutsideContentMarks,
     workRequestRuntime,
     personMemoryAccess,
+    octantInstructions,
   } = deps;
   return Effect.gen(function* () {
     // A host started with its own runtime uses it; otherwise it is built below.
@@ -752,6 +754,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         conversationInputTransfer,
         shield: hostShield,
+        octantInstructionBlocks: () => octantInstructions.contextBlocks(),
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
             mode: "code",

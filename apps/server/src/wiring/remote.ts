@@ -247,7 +247,11 @@ export type RemoteDependencies = {
   Pick<HarnessWiring, "beginGoogleCliChange"> &
   Pick<
     AuthorityWiring,
-    "browserCaptureStore" | "browserCaptures" | "personMemory" | "windowAuthorityStore"
+    | "browserCaptureStore"
+    | "browserCaptures"
+    | "personMemory"
+    | "octantInstructions"
+    | "windowAuthorityStore"
   > &
   Pick<
     AgentRunsWiring,
@@ -360,6 +364,7 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     personMemory,
+    octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
@@ -2529,6 +2534,7 @@ export function wireRemote(deps: RemoteDependencies) {
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       personMemoryEntries: () => personMemory.view().entries,
+      instructions: () => ({ yours: octantInstructions.view(true).instructions }),
       listCanvases: () =>
         [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
           canvasId: entry.canvasId,

@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -446,6 +447,13 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: WorkThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
@@ -617,6 +625,7 @@ export class WorkTurnService {
   readonly #serverProjects: ServerWorkTurns | undefined;
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
+  readonly #octantInstructionBlocks: WorkTurnServiceDependencies["octantInstructionBlocks"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
   readonly #spendReservations = new Map<
     string,
@@ -682,6 +691,7 @@ export class WorkTurnService {
     this.#serverProjects = dependencies.serverProjects;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#personMemoryBlock = dependencies.personMemoryBlock;
+    this.#octantInstructionBlocks = dependencies.octantInstructionBlocks;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
     this.#onUsageLimitStop = dependencies.onUsageLimitStop;
@@ -1533,6 +1543,9 @@ export class WorkTurnService {
               posture: "required",
               block,
             }),
+          ),
+          ...octantInstructionsContributions(
+            thread === undefined ? [] : (this.#octantInstructionBlocks?.({ thread }) ?? []),
           ),
           ...personMemoryContributions(
             thread === undefined
@@ -3565,6 +3578,20 @@ function projectMemoryContributions(
     category: "project-memory",
     posture: "compressible",
     block: { kind: "project-memory", text: entry.content },
+  }));
+}
+
+/** The person's instructions for Octant, placed after Octant's own and before person memory. */
+function octantInstructionsContributions(
+  blocks: ReadonlyArray<OctantInstructionsBlock>,
+): ReadonlyArray<WorkTurnContextContribution> {
+  return blocks.map((block) => ({
+    text: block.text,
+    sourceKind: "instruction",
+    referenceId: block.key,
+    category: block.kind,
+    posture: "required",
+    block,
   }));
 }
 
