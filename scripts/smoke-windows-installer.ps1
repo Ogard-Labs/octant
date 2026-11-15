@@ -128,6 +128,19 @@ try {
   # A file the person put in the install folder is not the installer's to remove.
   $octantNote = Join-Path $octantInstall 'kept-by-person.txt'
   Set-Content -LiteralPath $octantNote -Value 'not installed by Octant'
+  # Nor is anything in the data folders. Stable keeps its window storage in
+  # its host data folder, so only the local one exists after a run; the
+  # roaming one is created here so the uninstaller meets both.
+  $octantProfile = Join-Path $octantLocal "$octantProduct\hosts\octant"
+  if (-not (Test-Path -LiteralPath $octantProfile)) { throw 'The host profile is missing before uninstalling' }
+  $octantProfileFiles = @(Get-ChildItem -LiteralPath $octantProfile -Recurse -Force -File).Count
+  $octantSentinels = @()
+  foreach ($folder in $octantDataFolders) {
+    if (-not (Test-Path -LiteralPath $folder)) { [void](New-Item -ItemType Directory -Path $folder) }
+    $sentinel = Join-Path $folder 'kept-by-person.txt'
+    Set-Content -LiteralPath $sentinel -Value 'data the uninstaller must keep'
+    $octantSentinels += $sentinel
+  }
 
   Start-Process -FilePath $octantUninstaller -ArgumentList @('/S') -Wait
   # The uninstaller copies itself out of the folder and runs from there.
@@ -149,8 +162,11 @@ try {
   if ($left.Count -ne 1 -or $left[0].FullName -ne $octantNote) {
     throw ('The uninstall left installed files: ' + (($left | ForEach-Object FullName) -join ', '))
   }
-  foreach ($folder in $octantDataFolders) {
-    if (-not (Test-Path -LiteralPath $folder)) { throw "The uninstall removed the person's data at $folder" }
+  foreach ($sentinel in $octantSentinels) {
+    if (-not (Test-Path -LiteralPath $sentinel)) { throw "The uninstall removed the person's data at $sentinel" }
+  }
+  if (-not (Test-Path -LiteralPath $octantProfile) -or @(Get-ChildItem -LiteralPath $octantProfile -Recurse -Force -File).Count -ne $octantProfileFiles) {
+    throw 'The uninstall changed the host profile'
   }
   Write-Evidence @{ uninstalledCleanly = $true; personFileKept = $true; dataKept = $true }
 } finally {
