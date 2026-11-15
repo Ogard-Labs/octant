@@ -1710,6 +1710,7 @@ A plugin may contribute a theme as data only, validated by `@octant/theme` befor
 
 - A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
 - The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+- The server checks colour overrides against the selected theme, including an effective plugin theme, and against the default when that plugin is off.
 - A contributed theme is listed only while its plugin is installed, trusted and enabled. Switching the plugin off removes its themes; a stored choice of one draws the default theme and is kept for when the plugin returns.
 
 Status: Built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
