@@ -1416,7 +1416,9 @@ describe("WorkThreadWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "2 tool calls" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "2 tool calls: 1 read, 1 search" }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: "Search, unfinished" })).toBeInTheDocument();
     expect(screen.getByText("Done.")).toBeVisible();
   });

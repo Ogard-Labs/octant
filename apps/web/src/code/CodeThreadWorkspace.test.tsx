@@ -3321,12 +3321,12 @@ describe("CodeThreadWorkspace", () => {
     );
 
     // Settled turns fold the toolchain behind one quiet line.
-    expect(screen.getByRole("button", { name: "1 tool call" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "1 tool call: 1 command" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Bash, done" })).not.toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "1 tool call" }));
+    await user.click(screen.getByRole("button", { name: "1 tool call: 1 command" }));
     expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("bun run verify")).toBeVisible();

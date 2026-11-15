@@ -31,6 +31,8 @@ export type TurnActivityRow =
       readonly outsideContent?: ToolOutsideContentMark;
       /** The routine the call created, shown as a receipt card under the turn. */
       readonly routine?: ThreadRoutineReceipt;
+      /** How long the call ran, when the host recorded its start and end. */
+      readonly durationMs?: number;
     }
   | {
       readonly kind: "task";

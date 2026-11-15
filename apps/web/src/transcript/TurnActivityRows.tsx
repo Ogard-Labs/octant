@@ -33,7 +33,16 @@ import {
   type ToggleEvent,
 } from "react";
 import { thinkingPreviewLine, useReplyDisclosures } from "./replyDetail";
-import { thinkingDurationLabel, toolDisplayName, toolKind, type ToolKind } from "./toolKinds";
+import {
+  callDurationLabel,
+  countToolKinds,
+  thinkingDurationLabel,
+  toolCallsAccessibleName,
+  toolDisplayName,
+  toolKind,
+  toolPreview,
+  type ToolKind,
+} from "./toolKinds";
 import { OctantButton } from "../ui/base/OctantButton";
 import { PublishedPageCard } from "./PublishedPageCard";
 import { RoutineReceiptCard } from "./RoutineReceiptCard";
@@ -147,6 +156,9 @@ const KIND_ICONS: Readonly<Record<ToolKind, IconComponent>> = {
   other: Wrench,
 };
 
+/** The kinds a collapsed group names before it says "+n" for the rest. */
+const GROUP_KINDS_SHOWN = 4;
+
 function rowKindIcon(row: DisclosureRow): IconComponent {
   return row.kind === "tool" ? KIND_ICONS[toolKind(row.toolName)] : Bot;
 }
@@ -253,6 +265,9 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const pinnedIds = new Set(pinnedRows.map(rowKey));
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
+  const toolNames = activity.rows.flatMap((row) => (row.kind === "tool" ? [row.toolName] : []));
+  const kindCounts = countToolKinds(toolNames);
+  const groupName = toolNames.length > 0 ? toolCallsAccessibleName(toolNames) : summary;
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
   // A published page is what the turn delivered, so it stays in view below the
   // rows even when the settled toolchain folds away.
@@ -360,13 +375,33 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
           >
             <summary
               aria-expanded={isOpen(TOOL_CALLS_ID)}
-              aria-label={summary}
+              aria-label={groupName}
               onKeyDown={onSummaryKeyDown(TOOL_CALLS_ID)}
               role="button"
             >
               <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
               <Wrench aria-hidden="true" className="turn-activity__kind-icon" size={14} />
-              <span className="turn-activity__name">{summary}</span>
+              {kindCounts.length === 0 ? (
+                <span className="turn-activity__name">{summary}</span>
+              ) : (
+                <span aria-hidden="true" className="turn-activity__name turn-activity__kinds">
+                  {kindCounts.slice(0, GROUP_KINDS_SHOWN).map(({ kind, count }) => {
+                    const Icon = KIND_ICONS[kind];
+                    return (
+                      <span className="turn-activity__kind-count" key={kind}>
+                        <Icon className="turn-activity__kind-icon" size={14} />
+                        {count}
+                      </span>
+                    );
+                  })}
+                  {kindCounts.length > GROUP_KINDS_SHOWN ? (
+                    <span className="turn-activity__kind-count">
+                      +{kindCounts.length - GROUP_KINDS_SHOWN}
+                    </span>
+                  ) : null}
+                </span>
+              )}
+              <span className="turn-activity__status" />
             </summary>
             <div className="turn-activity__toolchain">{foldableRows.map(renderDisclosure)}</div>
           </details>
@@ -493,6 +528,8 @@ function ActivityDisclosure(props: {
   const { row } = props;
   const StateIcon = outcomeIcon(row, props.settled);
   const KindIcon = rowKindIcon(row);
+  const preview =
+    row.kind === "tool" ? toolPreview(toolKind(row.toolName), row.summary) : undefined;
   const { onLoadRecords, open } = props;
   const state = row.state;
   useEffect(() => {
@@ -515,8 +552,20 @@ function ActivityDisclosure(props: {
         <ChevronRight aria-hidden="true" className="turn-activity__chevron" size={14} />
         <KindIcon aria-hidden="true" className="turn-activity__kind-icon" size={14} />
         <span className="turn-activity__name">{collapsedName(row)}</span>
+        {row.kind !== "tool" ? null : (
+          // The words are drawn from the attribute, so the row's text stays its
+          // name and the detail below stays the one place the summary is read.
+          <span
+            aria-hidden="true"
+            className="turn-activity__preview turn-activity__preview--call"
+            {...(preview === undefined ? {} : { "data-preview": preview, title: preview })}
+          />
+        )}
         {row.kind === "tool" && row.outsideContent !== undefined ? (
           <OutsideContentTag mark={row.outsideContent} />
+        ) : null}
+        {row.kind === "tool" && row.durationMs !== undefined ? (
+          <span className="turn-activity__duration">{callDurationLabel(row.durationMs)}</span>
         ) : null}
         {/* One reserved slot, so a row that finishes changes its mark and
             nothing beside it moves. The word is for assistive technology. */}

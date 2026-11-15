@@ -372,7 +372,7 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    const fold = screen.getByRole("button", { name: "3 tool calls" });
+    const fold = screen.getByRole("button", { name: "3 tool calls: 2 web requests, 1 read" });
     expect(screen.getByRole("button", { name: "Read, unfinished" })).toBeInTheDocument();
     expect(screen.getByText("Web search")).not.toBeVisible();
     await userEvent.click(fold);

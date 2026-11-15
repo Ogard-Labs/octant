@@ -131,6 +131,17 @@ are kebab-case ("provider-tool"), read as words ("Provider tool"), and an
 when the turn recorded how long reasoning ran ("Thought briefly" under a
 second) and "Thinking" otherwise.
 
+The folded "tool calls" group says what ran in marks, not only a count: an icon
+and a number per kind, most frequent first ("terminal 4, file 5, pencil 2"), at
+most four kinds and then "+n" for the rest. Its accessible name carries the
+total and the words ("11 tool calls: 5 reads, 4 commands, 2 edits"). Opened,
+each call is one row of fixed height: the kind icon, the name, a one-line
+preview in the meta ink (a command's first line, a file's name, a search's
+query) clipped with an ellipsis, the call's duration when the host recorded one,
+and the status slot. The preview is drawn, not read: the detail under the row
+stays the one place the summary's words are, and clicking the row opens it as
+before. A call that finishes changes its mark only.
+
 A Code turn's checkout capture notes (the latest capture and its time, what the
 changes are measured from, a note that no paths were captured, and that a final
 comparison is missing) are one quiet, closed line below the reply: a camera
