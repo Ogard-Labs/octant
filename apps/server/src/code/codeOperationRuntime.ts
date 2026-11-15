@@ -3,7 +3,12 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
-import { providerCommandRefusal, validateQuestionnaireAnswer } from "@octant/domain";
+import {
+  projectExtraFolderRoots,
+  providerCommandRefusal,
+  validateQuestionnaireAnswer,
+} from "@octant/domain";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
@@ -96,6 +101,7 @@ import {
   type ProviderProbeResult,
   type WindowId,
   type ProviderExecutionPolicy,
+  type Project,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -411,6 +417,12 @@ export interface CodeOperationRuntimeOptions {
    * a folder added or removed applies from the next turn. Absent reads none.
    */
   readonly readProjectExtraFolders?: (projectId: CodeThread["projectId"]) => ReadonlyArray<string>;
+  /**
+   * The thread's Project, read when a kept session is taken so the session
+   * is held to the folder authority the Project grants (see
+   * {@link codeSessionTerms}).
+   */
+  readonly readProject?: (projectId: CodeThread["projectId"]) => Project | undefined;
   /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
@@ -2419,55 +2431,79 @@ export function createCodeOperationRuntime(
           );
           if (adopted._tag === "Left")
             return { kind: "code-native-session-refused", message: adopted.left.message };
-          // The thread must still be empty when the adoption commits. Nothing
-          // yields from here to the journal appends, so no turn slips in.
-          const occupied = conversationRefusal(target.thread);
-          if (occupied !== undefined)
-            return { kind: "code-native-session-refused", message: occupied.message };
-          // The session began outside Octant, so whatever it read there is
-          // unseen here: the thread carries outside content from its start.
-          const marked = options.recordExternalContentIngestion?.({
-            threadId: String(target.thread.id),
-            provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
-            contentReference: `adopted-session-${createHash("sha256")
-              .update(`${String(target.thread.providerInstanceId)}\0${nativeSessionId}`)
-              .digest("hex")}`,
-            correlationId: options.uuid(),
-            authorized: true,
-          });
-          if (
-            marked === undefined ||
-            (marked.kind !== "recorded" && marked.kind !== "already-recorded")
-          )
-            return {
-              kind: "code-native-session-refused",
-              message: "The thread could not be marked as carrying outside content.",
-            };
-          const operationId = decodeCodeOperationId(options.uuid());
-          events.append({
-            threadId: target.thread.id,
-            operationId,
-            expectedCursor: 0,
-            event: {
-              kind: "native-session-adopted",
-              nativeSessionId,
-              providerInstanceId: target.thread.providerInstanceId,
-            },
-          });
-          events.append({
-            threadId: target.thread.id,
-            operationId,
-            expectedCursor: 1,
-            event: {
-              kind: "provider-session-ready",
-              sessionId,
-              providerInstanceId: target.thread.providerInstanceId,
-              modelId: target.thread.modelId,
-              checkoutId: target.thread.checkoutId,
-              resumeCursor: adopted.right,
-            },
-          });
-          return { kind: "code-native-session-adopted", threadId, nativeSessionId };
+          // The provider claimed the session for this thread before the thread
+          // could record it. An adoption that is not recorded gives the claim
+          // back, or the session could never be offered or adopted again.
+          let committed = false;
+          try {
+            // The thread must still be empty when the adoption commits. Nothing
+            // yields from here to the journal appends, so no turn slips in.
+            const occupied = conversationRefusal(target.thread);
+            if (occupied !== undefined)
+              return { kind: "code-native-session-refused", message: occupied.message };
+            // The session began outside Octant, so whatever it read there is
+            // unseen here: the thread carries outside content from its start.
+            const marked = options.recordExternalContentIngestion?.({
+              threadId: String(target.thread.id),
+              provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+              contentReference: `adopted-session-${createHash("sha256")
+                .update(`${String(target.thread.providerInstanceId)}\0${nativeSessionId}`)
+                .digest("hex")}`,
+              correlationId: options.uuid(),
+              authorized: true,
+            });
+            if (
+              marked === undefined ||
+              (marked.kind !== "recorded" && marked.kind !== "already-recorded")
+            )
+              return {
+                kind: "code-native-session-refused",
+                message: "The thread could not be marked as carrying outside content.",
+              };
+            const operationId = decodeCodeOperationId(options.uuid());
+            const thread = target.thread;
+            const cursor = adopted.right;
+            // One journal unit: an adoption is recorded whole or not at all, so
+            // a claim given back never leaves half an adoption behind.
+            options.persistence.journal.transaction(() => {
+              events.append({
+                threadId: thread.id,
+                operationId,
+                expectedCursor: 0,
+                event: {
+                  kind: "native-session-adopted",
+                  nativeSessionId,
+                  providerInstanceId: thread.providerInstanceId,
+                },
+              });
+              events.append({
+                threadId: thread.id,
+                operationId,
+                expectedCursor: 1,
+                event: {
+                  kind: "provider-session-ready",
+                  sessionId,
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                  checkoutId: thread.checkoutId,
+                  resumeCursor: cursor,
+                },
+              });
+            });
+            committed = true;
+            return { kind: "code-native-session-adopted", threadId, nativeSessionId };
+          } finally {
+            if (!committed)
+              await Effect.runPromise(
+                (
+                  target.nativeSessions.release?.({
+                    instanceId: target.thread.providerInstanceId,
+                    nativeSessionId,
+                    sessionId,
+                  }) ?? Effect.void
+                ).pipe(Effect.catchAll(() => Effect.void)),
+              );
+          }
         } finally {
           adoptingThreads.delete(key);
         }
@@ -6273,7 +6309,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                         acquireInput.permissionPersistence,
                       ]),
                       active.driver.acquire(acquireInput),
-                      codeSessionTerms(active.thread),
+                      codeSessionTerms(
+                        active.thread,
+                        this.#options.readProject?.(active.thread.projectId),
+                      ),
                     )
               ).pipe(
                 Effect.tap((connection) =>
@@ -7182,13 +7221,33 @@ export function codeSessionKey(threadId: CodeThreadId): string {
  * folder, and that it is active. A session kept past its turn on other terms
  * is stopped, so a person lowering the level, switching the model, moving
  * the checkout, or archiving, moving or deleting the thread never leaves it
- * acting as before.
+ * acting as before. The folder authority the thread's Project grants (its
+ * current binding and root, the thread's approved working folder, the extra
+ * folders) is part of the terms too: a relink, an archive or a removed extra
+ * folder touches no thread, and a session left running would keep reaching a
+ * folder the Project no longer grants. A thread whose Project is not a local
+ * active Code Project can run no turn here.
  */
-export function codeSessionTerms(thread: CodeThread): string | undefined {
+export function codeSessionTerms(
+  thread: CodeThread,
+  project: Project | undefined,
+): string | undefined {
   // `waiting` and `interrupted` are a turn's state after a restart; the
   // thread still runs turns.
   if (thread.lifecycle === "archived") return undefined;
+  if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
   return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+    [...projectExtraFolderRoots(project)].sort(),
     thread.executionPolicy,
     thread.autoApprove === true,
     thread.fullAccessSandbox === true,

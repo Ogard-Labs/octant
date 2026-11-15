@@ -137,6 +137,7 @@ import {
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
 import { createCodeSessionRouteHandler } from "../code/codeSessionRoutes";
 import { codeSessionKey, codeSessionTerms } from "../code/codeOperationRuntime";
+import { stopKeptSessionsOfChangedCodeThreads } from "../code/codeKeptSessions";
 
 export function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -571,7 +572,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         if (!key.startsWith("code:")) return undefined;
         try {
           const thread = persistence.readCodeThread(decodeCodeThreadId(key.slice("code:".length)));
-          return thread === undefined ? undefined : codeSessionTerms(thread);
+          return thread === undefined
+            ? undefined
+            : codeSessionTerms(thread, persistence.readProject(thread.projectId));
         } catch {
           return undefined;
         }
@@ -579,34 +582,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
     });
-    // Every change to a Code thread passes through the journal (a level or
-    // model change, a checkout rebind, an archive, a move, a deletion), so a
-    // kept session started on terms the thread no longer has is stopped here
-    // rather than from each command's path.
+    // Every change to a Code thread or its Project passes through the journal
+    // (a level or model change, a checkout rebind, an archive, a move, a
+    // deletion; the Project's relink, archive or extra folders), so a kept
+    // session started on terms the thread no longer has is stopped here
+    // rather than from each command's path. Both projections are applied
+    // inside the append, so they already hold the change.
     const unsubscribeKeptSessionTerms = persistence.journal.subscribeCommitted((append) => {
-      const threadIds = new Set<string>();
-      for (const event of append.events) {
-        if (event.aggregateType === "code-thread") threadIds.add(event.aggregateId);
-        else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
-          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
-          if (purged.mode === "code" && typeof purged.threadId === "string") {
-            threadIds.add(purged.threadId);
-          }
-        }
-      }
-      for (const threadId of threadIds) {
-        let key: string;
-        try {
-          key = codeSessionKey(decodeCodeThreadId(threadId));
-        } catch {
-          continue;
-        }
-        void outlivingCodeSessions
-          .stopThreadIfChanged(key)
-          .catch((error: unknown) =>
-            console.error("[live tasks] A changed thread's session did not stop.", error),
-          );
-      }
+      void stopKeptSessionsOfChangedCodeThreads(append, {
+        keeper: outlivingCodeSessions,
+        readThread: (threadId) => persistence.readCodeThread(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+      }).catch((error: unknown) =>
+        console.error("[live tasks] A changed thread's session did not stop.", error),
+      );
     });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
@@ -1158,6 +1147,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 },
                 input,
               ),
+        readProject: (projectId) => persistence.readProject(projectId),
         readProjectExtraFolders: (projectId) => {
           const project = persistence.readProject(projectId);
           return project === undefined || project.type === "chat"

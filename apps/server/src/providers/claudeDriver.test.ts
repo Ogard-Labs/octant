@@ -6904,6 +6904,39 @@ describe("Claude sessions started outside Octant", () => {
       "80000000-0000-4000-8000-000000000801",
     );
   });
+
+  it("offers a session again once an adoption the host could not record is released, and never releases another thread's", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    // Another Octant session's release leaves this claim where it is.
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({
+        instanceId,
+        nativeSessionId: outside,
+        sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000803"),
+      }),
+    );
+    expect(f.resumeIdentities.get(outside)?.octantSessionId).toBe(sessionId);
+
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({ instanceId, nativeSessionId: outside, sessionId }),
+    );
+    expect(f.resumeIdentities.get(outside)).toBeUndefined();
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
+  });
 });
 
 describe("Claude exact resume", () => {

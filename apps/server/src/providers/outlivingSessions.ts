@@ -196,12 +196,30 @@ export class OutlivingSessions {
    * start one on other terms (another level, model, checkout) or can run no
    * turn (archived, moved, deleted). A turn holding the session settles it
    * when it ends. Answers whether one was stopped.
+   *
+   * `committed` carries the thread's terms as the change that was just
+   * journaled states them. A caller whose own read of the thread is applied
+   * only after the journal tells its listeners passes them, so the check
+   * never reads the thread as it was before.
    */
-  async stopThreadIfChanged(key: string): Promise<boolean> {
+  async stopThreadIfChanged(
+    key: string,
+    committed?: { readonly terms: string | undefined },
+  ): Promise<boolean> {
     const kept = this.#kept.get(key);
-    if (kept === undefined || kept.leased || this.#termsCurrent(kept)) return false;
+    if (kept === undefined || kept.leased) return false;
+    const current =
+      committed === undefined
+        ? this.#termsCurrent(kept)
+        : committed.terms !== undefined && committed.terms === kept.terms;
+    if (current) return false;
     await this.#dispose(kept);
     return true;
+  }
+
+  /** The keys of the threads whose session is kept now. */
+  keptKeys(): ReadonlyArray<string> {
+    return [...this.#kept.keys()];
   }
 
   /** Stops every kept session; nothing is kept after it. */

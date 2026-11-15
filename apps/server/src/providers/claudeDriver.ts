@@ -2409,6 +2409,33 @@ function makeClaudeNativeSessions(
             ? (error as ProviderFailure)
             : failure("unavailable", "The Claude session could not be taken up."),
       }),
+    // Taken in turn with adoptions of the same session, so a release never
+    // removes a record a later adoption wrote.
+    release: (input) =>
+      input.instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.tryPromise({
+            try: () =>
+              adoptingOneAtATime(
+                `${String(options.instanceId)}\u0000${input.nativeSessionId}`,
+                async () => {
+                  const held = await options.resumeIdentityPort.lookup(
+                    { providerInstanceId: options.instanceId, sdkSessionId: input.nativeSessionId },
+                    controller(),
+                  );
+                  if (
+                    held === undefined ||
+                    String(held.octantSessionId) !== String(input.sessionId)
+                  )
+                    return;
+                  await options.resumeIdentityPort.remove(
+                    { providerInstanceId: options.instanceId, sdkSessionId: input.nativeSessionId },
+                    controller(),
+                  );
+                },
+              ),
+            catch: () => failure("unavailable", "The Claude session could not be released."),
+          }),
   };
   async function adoptOnce(
     input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],

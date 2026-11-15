@@ -5883,6 +5883,40 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("gives the session's claim back when the adoption cannot be recorded, so it can be adopted again", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const outside = decodeCodeNativeSessionId("outside-session-1");
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: `resumed-${outside}` }),
+    );
+    const release = vi.fn((_input: { readonly sessionId: ProviderSessionId }) => Effect.void);
+    const provider: ProviderDriver = {
+      ...providerDriver(providerConnection(queue)),
+      nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+    };
+    // The thread cannot be marked as carrying outside content, so nothing is journaled.
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: vi.fn(() => ({
+        kind: "refused" as const,
+        reason: "malformed" as const,
+      })),
+    });
+    try {
+      expect(await fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside)).toEqual({
+        kind: "code-native-session-refused",
+        message: "The thread could not be marked as carrying outside content.",
+      });
+      expect(release).toHaveBeenCalledWith({
+        instanceId: expect.anything(),
+        nativeSessionId: outside,
+        sessionId: adopt.mock.calls[0]?.[0].sessionId,
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses to start a thread from a session for a window that cannot open its Project", async () => {
     const adopt = vi.fn(() =>
       Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),

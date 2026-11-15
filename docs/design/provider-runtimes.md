@@ -824,8 +824,12 @@ starts for that task's end, which reaches the host first), when the person
 stops the thread (Stop on the live tasks, or a Stop with no turn running),
 when the person changes the thread so it would start a session on other
 terms (its level or how asks are answered, its provider or model, its
-checkout or folder) or archives, moves, or deletes it, read from the
-journal, so a session never goes on acting at the level it launched with,
+checkout or folder) or archives, moves, or deletes it, or when the thread's
+Project is relinked, archived, or loses an extra folder or the thread's
+working folder, read from the journal (a Project change touches no thread, so
+every kept session of that Project is judged again against the Project as
+the append committed it), so a session never goes on acting at the level it
+launched with or reaching a folder its Project no longer grants,
 after the background work limit with no turn in the thread (a host setting:
 2 hours by default, Off for no bound), when the host cannot open the
 runtime's turn (the thread was archived, or stayed busy for 20 tries), when
@@ -989,7 +993,14 @@ running. While the adoption runs, a message sent to the thread is refused
 with a note to send again when it finishes, and the adoption checks again
 that the thread is empty just before it journals: a turn let in meanwhile
 would journal its own session, and the adopted one written after it would
-be the one the next turn resumes, dropping that conversation. A session still open in a terminal is not
+be the one the next turn resumes, dropping that conversation. The driver
+claims the session (its resume record) before the thread journals the
+adoption, so an adoption the thread then refuses (it changed meanwhile, or
+could not be marked) gives the claim back through the driver's `release`,
+which removes the record only while it still names this adoption's Octant
+session; the session is offered and adoptable again. The adoption's two
+events are journaled as one unit, so a claim given back never leaves half an
+adoption behind. A session still open in a terminal is not
 detected; continuing it in both places writes two branches of one
 conversation. A Work thread cannot be started from a session yet.
 

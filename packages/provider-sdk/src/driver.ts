@@ -373,6 +373,18 @@ export interface ProviderNativeSessions {
     readonly nativeSessionId: string;
     readonly modelId: ProviderModelId;
   }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+  /**
+   * Withdraws an adoption the host could not record (the thread changed
+   * before it committed): removes the record `adopt` wrote for that Octant
+   * session, so the runtime's session is offered and adoptable again. A
+   * session another Octant session now holds is left as it is. Absent, a
+   * driver has nothing to withdraw.
+   */
+  readonly release?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly nativeSessionId: string;
+    readonly sessionId: ProviderSessionId;
+  }) => Effect.Effect<void, ProviderFailure>;
 }
 
 export interface ProviderDriver {
