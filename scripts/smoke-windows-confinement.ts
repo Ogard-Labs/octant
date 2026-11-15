@@ -111,7 +111,12 @@ try {
   // stores: the scan finds nothing beneath a file, and the grant is the file.
   const loneFile = join(outside, "lone.txt");
   writeFileSync(loneFile, "lone-content");
-  const lone = run(cmd, shell(`type ${loneFile}`), { readRoots: [readOnly, loneFile] });
+  // Read with curl, which opens the file by its path. cmd's `type` first lists
+  // the parent folder (measured: "Access is denied." here), and listing a
+  // folder that was never granted is refused, as it should be.
+  const lone = run(curl, ["-s", "-S", `file:///${loneFile.replaceAll("\\", "/")}`], {
+    readRoots: [readOnly, loneFile],
+  });
   check(
     "reads a file granted on its own",
     lone.status === 0 && lone.stdout.includes("lone-content"),
