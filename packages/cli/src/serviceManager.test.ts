@@ -7,7 +7,12 @@ import { resolveHostRuntimePaths } from "@octant/host-runtime";
 import {
   createLaunchdUserServiceManager,
   createSystemdUserServiceManager,
+  createWindowsUserServiceManager,
+  quoteWindowsCommandLine,
   type ServiceCommandRunner,
+  type WindowsHostObservation,
+  type WindowsHostOwnerPort,
+  type WindowsHostSpawnSpec,
 } from "./serviceManager";
 
 const roots: string[] = [];
@@ -334,5 +339,238 @@ describe("per-user service managers", () => {
       ["--user", "--no-ask-password", "disable", "--now", "octant.service"],
       ["--user", "--no-ask-password", "daemon-reload"],
     ]);
+  });
+});
+
+describe("the Windows per-user logon entry", () => {
+  const systemRoot = "C:\\Windows";
+  const reg = "C:\\Windows\\System32\\reg.exe";
+  const taskkill = "C:\\Windows\\System32\\taskkill.exe";
+  const runKey = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+  const logonCommand = [
+    "C:\\Users\\Ada Lovelace\\.bun\\bin\\bun.exe",
+    "C:\\Users\\Ada Lovelace\\octant\\packages\\cli\\src\\bin.ts",
+    "server",
+    "start",
+  ];
+  const host = {
+    command: "C:\\Users\\Ada Lovelace\\.bun\\bin\\bun.exe",
+    args: ["run", "--cwd", "C:\\Users\\Ada Lovelace\\octant\\apps\\server", "src/main.ts"],
+    env: { OCTANT_HOST_SERVICE_MODE: "service" },
+  };
+
+  function fakeOwner(observations: Array<WindowsHostObservation>) {
+    const requestStop = vi.fn(async () => true);
+    return {
+      requestStop,
+      observe: vi.fn(async () => observations.shift() ?? { status: "absent" as const }),
+    };
+  }
+
+  function manager(input: {
+    readonly owner: WindowsHostOwnerPort;
+    readonly run?: ServiceCommandRunner["run"];
+    readonly spawn?: (spec: WindowsHostSpawnSpec) => { readonly running: () => boolean };
+  }) {
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const spawned: WindowsHostSpawnSpec[] = [];
+    const created = createWindowsUserServiceManager({
+      systemRoot,
+      logonCommand,
+      host: () => host,
+      owner: input.owner,
+      logs: async () => ({ entries: [], follow: false }),
+      sleep: async () => undefined,
+      runner: {
+        run: async (command, args) => {
+          calls.push({ command, args });
+          return input.run === undefined ? { stdout: "", stderr: "" } : input.run(command, args);
+        },
+      },
+      spawn: (spec) => {
+        spawned.push(spec);
+        return input.spawn?.(spec) ?? { running: () => true };
+      },
+    });
+    return { created, calls, spawned };
+  }
+
+  it("quotes each argument so Windows hands it back unchanged", () => {
+    expect(
+      quoteWindowsCommandLine([
+        "C:\\Program Files\\Octant\\bun.exe",
+        "C:\\trailing slash\\",
+        "plain",
+        'say "hi"',
+        "",
+      ]),
+    ).toBe(
+      '"C:\\Program Files\\Octant\\bun.exe" "C:\\trailing slash\\\\" "plain" "say \\"hi\\"" ""',
+    );
+  });
+
+  it("records the CLI's own `server start` under the current user's Run key, with no shell", async () => {
+    const { created, calls } = manager({ owner: fakeOwner([]) });
+
+    await created.install();
+
+    expect(calls).toEqual([
+      {
+        command: reg,
+        args: [
+          "add",
+          runKey,
+          "/v",
+          "Octant",
+          "/t",
+          "REG_SZ",
+          "/d",
+          '"C:\\Users\\Ada Lovelace\\.bun\\bin\\bun.exe" "C:\\Users\\Ada Lovelace\\octant\\packages\\cli\\src\\bin.ts" "server" "start"',
+          "/f",
+        ],
+      },
+    ]);
+  });
+
+  it("refuses a logon command that is relative or carries a quote", () => {
+    for (const command of [
+      ["bun.exe", "server", "start"],
+      ["C:\\bun.exe", 'C:\\a"b\\bin.ts', "server", "start"],
+    ]) {
+      expect(() =>
+        createWindowsUserServiceManager({
+          systemRoot,
+          logonCommand: command,
+          host: () => host,
+          owner: fakeOwner([]),
+          logs: async () => ({ entries: [], follow: false }),
+        }),
+      ).toThrow(expect.objectContaining({ code: "unsafe-descriptor" }));
+    }
+  });
+
+  it("reports the Run value and the authenticated owner as installed and active", async () => {
+    const { created } = manager({
+      owner: fakeOwner([{ status: "running", pid: 4242 }]),
+      run: async () => ({
+        stdout: `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    Octant    REG_SZ    "C:\\bun.exe" "server" "start"\r\n\r\n`,
+        stderr: "",
+      }),
+    });
+
+    await expect(created.status()).resolves.toEqual({
+      kind: "run-key",
+      installed: true,
+      enabled: true,
+      active: true,
+      session: "active",
+      lingering: "unknown",
+    });
+  });
+
+  it("reports a missing Run value as not installed rather than a manager failure", async () => {
+    const { created } = manager({
+      owner: fakeOwner([{ status: "absent" }]),
+      run: async () => {
+        throw Object.assign(new Error("ERROR: The system was unable to find the value."), {
+          code: 1,
+        });
+      },
+    });
+
+    await expect(created.status()).resolves.toMatchObject({
+      kind: "run-key",
+      installed: false,
+      enabled: false,
+      active: false,
+    });
+  });
+
+  it("starts the host hidden and detached, and returns once its owner answers", async () => {
+    const owner = fakeOwner([
+      { status: "absent" },
+      { status: "unanswered" },
+      { status: "running", pid: 7 },
+    ]);
+    const { created, spawned } = manager({ owner });
+
+    await created.start();
+
+    expect(spawned).toEqual([host]);
+    expect(owner.observe).toHaveBeenCalledTimes(3);
+  });
+
+  it("starts nothing when an owner already answers", async () => {
+    const { created, spawned } = manager({ owner: fakeOwner([{ status: "running", pid: 7 }]) });
+
+    await created.start();
+
+    expect(spawned).toEqual([]);
+  });
+
+  it("fails a start whose host exits before it claims ownership", async () => {
+    const { created } = manager({
+      owner: fakeOwner([{ status: "absent" }, { status: "absent" }]),
+      spawn: () => ({ running: () => false }),
+    });
+
+    await expect(created.start()).rejects.toMatchObject({ code: "manager-failed" });
+  });
+
+  it("asks the owner to stop and leaves a host that exits on its own untouched", async () => {
+    const owner = fakeOwner([
+      { status: "running", pid: 31 },
+      { status: "running", pid: 31 },
+    ]);
+    const { created, calls } = manager({ owner });
+
+    await created.stop();
+
+    expect(owner.requestStop).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([]);
+  });
+
+  it("ends the whole process tree of an owner that outlives its graceful stop", async () => {
+    const observations: WindowsHostObservation[] = Array.from({ length: 50 }, () => ({
+      status: "running" as const,
+      pid: 31,
+    }));
+    const owner = fakeOwner(observations);
+    const { created, calls } = manager({
+      owner,
+      run: async () => {
+        observations.splice(0);
+        return { stdout: "", stderr: "" };
+      },
+    });
+
+    await created.stop();
+
+    expect(calls).toEqual([{ command: taskkill, args: ["/PID", "31", "/T", "/F"] }]);
+  });
+
+  it("never force-stops a host whose owner it could not authenticate", async () => {
+    const { created, calls } = manager({
+      owner: fakeOwner(Array.from({ length: 80 }, () => ({ status: "unanswered" as const }))),
+    });
+
+    await expect(created.stop()).rejects.toMatchObject({ code: "manager-failed" });
+    expect(calls).toEqual([]);
+  });
+
+  it("stops the host and removes the Run value on uninstall, even when the value is absent", async () => {
+    const owner = fakeOwner([{ status: "absent" }]);
+    const { created, calls } = manager({
+      owner,
+      run: async () => {
+        throw Object.assign(new Error("ERROR: The system was unable to find the value."), {
+          code: 1,
+        });
+      },
+    });
+
+    await created.uninstall();
+
+    expect(calls).toEqual([{ command: reg, args: ["delete", runKey, "/v", "Octant", "/f"] }]);
   });
 });

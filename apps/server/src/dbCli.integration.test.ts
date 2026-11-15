@@ -226,6 +226,7 @@ describe("database CLI runtime composition", () => {
         { name: "agent-access", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "host-memory-limits", lastSequence: 1, lag: 0 },
+        { name: "web-search-settings", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
         { name: "usage-resume", lastSequence: 1, lag: 0 },
         { name: "spend-ceilings", lastSequence: 1, lag: 0 },

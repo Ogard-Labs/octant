@@ -652,6 +652,36 @@ export function useChatController(options: ChatControllerOptions) {
     }
   }, [client, reconcileDrafts]);
 
+  /**
+   * The host decides whether a web search backend is ready from the saved
+   * SearXNG address and its backend list, and the settings result carries only
+   * the settings, so readiness is read back after a save. Before a backend
+   * list is saved, adding or clearing the address changes it; without this the
+   * composer kept the readiness it loaded until a full reload. A failed read
+   * keeps the saved settings and the readiness already shown.
+   */
+  const refreshWebSearchReady = useCallback(
+    async (savedVersion: number) => {
+      let next: ChatBootstrap;
+      try {
+        next = await client.bootstrap();
+      } catch {
+        return;
+      }
+      if (!mounted.current || next.settings.version < savedVersion) return;
+      setBootstrap((current) => {
+        if (current === undefined || next.settings.version < current.settings.version) {
+          return current;
+        }
+        const { webSearchReady: _stale, ...rest } = current;
+        return next.webSearchReady === undefined
+          ? rest
+          : { ...rest, webSearchReady: next.webSearchReady };
+      });
+    },
+    [client],
+  );
+
   const activateThread = useCallback(
     async (threadId: ChatThreadId) => {
       const request = ++threadGeneration.current;
@@ -963,6 +993,7 @@ export function useChatController(options: ChatControllerOptions) {
               : { ...current, settings: result.settings },
           );
           setStatus("ready");
+          void refreshWebSearchReady(result.settings.version);
           return result;
         }
         const currentThreadId = activeThreadIdRef.current;
@@ -1025,7 +1056,14 @@ export function useChatController(options: ChatControllerOptions) {
         return undefined;
       }
     },
-    [activateThread, applyAuthoritativeView, client, loadBootstrap, recordFollowUp],
+    [
+      activateThread,
+      applyAuthoritativeView,
+      client,
+      loadBootstrap,
+      recordFollowUp,
+      refreshWebSearchReady,
+    ],
   );
 
   const updateSettings = useCallback(

@@ -238,7 +238,7 @@ describe("ChatTranscript", () => {
     expect(screen.getByText("Interrupted")).toBeVisible();
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
     expect(screen.getByText("Provider handoff · model-b")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Octant guide · SearXNG" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Octant guide · Octant web search" })).toHaveAttribute(
       "href",
       "https://example.test/guide",
     );

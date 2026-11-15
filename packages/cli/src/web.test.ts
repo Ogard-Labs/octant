@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   resolveWebRoot,
   runWebCommand,
+  windowsBrowserOpenCommand,
   type WebCommandOptions,
   type WebCommandOutput,
 } from "./web";
@@ -14,6 +15,33 @@ import { resolveHostInfoFilePath, type BridgeSecretFileInput } from "./bridgeSec
 it("resolves the Vite root as a filesystem path", () => {
   expect(resolveWebRoot()).not.toMatch(/^file:/);
   expect(resolveWebRoot()).toMatch(/\/apps\/web$/);
+});
+
+describe("the Windows browser opener", () => {
+  it("hands a loopback launch link to the URL protocol handler directly, with no shell", () => {
+    const url = new URL(
+      "http://127.0.0.1:13773/?serverUrl=http%3A%2F%2F127.0.0.1%3A13773%2F&a=^b#launchToken=abc",
+    );
+
+    expect(windowsBrowserOpenCommand(url, "C:\\Windows")).toEqual({
+      status: "ready",
+      command: "C:\\Windows\\System32\\rundll32.exe",
+      args: ["url.dll,FileProtocolHandler", url.toString()],
+    });
+  });
+
+  it("refuses a link that is not plain http(s) to this computer", () => {
+    for (const link of [
+      "file:///C:/Windows/System32/calc.exe",
+      "https://example.com/",
+      "http://user:secret@127.0.0.1:13773/",
+      "javascript:alert(1)",
+    ]) {
+      expect(windowsBrowserOpenCommand(new URL(link), "C:\\Windows")).toEqual({
+        status: "refused",
+      });
+    }
+  });
 });
 
 const bridgeSecret = `${"S".repeat(42)}A`;

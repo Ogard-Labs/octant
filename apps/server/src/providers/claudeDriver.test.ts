@@ -30,6 +30,7 @@ import type {
   ClaudeSessionMetadata,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_PLAN_CAPTURED_MESSAGE,
   claudeExecutionOptions,
   claudeFileToolSecretRefusal,
   claudeSearchesRunUnguarded,
@@ -742,7 +743,7 @@ describe("Claude execution policy", () => {
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
-      tools: ["Read", "Glob", "Grep", "TodoWrite"],
+      tools: ["Read", "Glob", "Grep", "TodoWrite", "ExitPlanMode"],
       fullToolSet: false,
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
@@ -752,6 +753,7 @@ describe("Claude execution policy", () => {
       "Glob",
       "Grep",
       "TodoWrite",
+      "ExitPlanMode",
       "Bash",
     ]);
     for (const [mode, platform] of [
@@ -764,6 +766,7 @@ describe("Claude execution policy", () => {
         "Glob",
         "Grep",
         "TodoWrite",
+        "ExitPlanMode",
       ]);
     }
   });
@@ -1709,7 +1712,7 @@ describe("Claude execution policy", () => {
       planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
     );
     const planOpen = plan.opens[0]!;
-    expect(planOpen.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite"]);
+    expect(planOpen.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite", "ExitPlanMode"]);
     const signal = new AbortController().signal;
     const prePlan = (toolName: string, input: unknown, toolUseId: string) =>
       planOpen.preToolUse({
@@ -1786,6 +1789,50 @@ describe("Claude execution policy", () => {
         signal,
       }),
     ).resolves.toMatchObject({ behavior: "deny" });
+    await gatedConnection.close();
+  });
+
+  it("offers Claude's plan tool in Plan only and refuses every call to it so the session never leaves Plan", async () => {
+    const plan = harness();
+    const planConnection = await acquire(plan.driver);
+    await Effect.runPromise(
+      planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+    );
+    const planOpen = plan.opens[0]!;
+    expect(planOpen.tools).toContain("ExitPlanMode");
+    expect(planOpen.tools).not.toContain("EnterPlanMode");
+    const signal = new AbortController().signal;
+    const handOver = { plan: "1. Add the route.\n2. Test it." };
+    await expect(
+      planOpen.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "ExitPlanMode",
+        input: handOver,
+        toolUseId: "plan-exit",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "deny", message: CLAUDE_PLAN_CAPTURED_MESSAGE });
+    // Nothing granted the call, so the permission prompt Claude Code would
+    // answer by leaving plan mode is refused as well.
+    await expect(
+      planOpen.canUseTool({
+        toolName: "ExitPlanMode",
+        input: handOver,
+        toolUseId: "plan-exit",
+        signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    await planConnection.close();
+
+    const gated = harness();
+    const gatedConnection = await acquire(gated.driver, "work");
+    await Effect.runPromise(
+      gatedConnection.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(gated.opens[0]!.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode"]),
+    );
     await gatedConnection.close();
   });
 

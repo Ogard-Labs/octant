@@ -674,6 +674,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/code/language/read",
     "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
+  [
+    "/api/host-control/web-search",
+    "Web search settings and keys, served by the host since 2026-11-15 ahead of Settings › Web search, which calls them (docs/design/web-search-backends.md, delivery slice 3). Remove once that page reads and saves them.",
+  ],
   ...[
     "/api/hub/join",
     "/api/hub/leave",

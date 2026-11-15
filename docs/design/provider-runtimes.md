@@ -59,12 +59,12 @@ target wire behaviour, gated by the thread's
 [guardrail level](../architecture.md#security-and-authority) (off at Guarded
 and Reviewed until the person turns it on, on at Full access):
 
-| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                         |
-| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                         |
-| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill, Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable                                           |
-| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration; Reviewed through Octant Shield at Auto |
+| Provider     | Switched off today                                                                                    | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                        |
+| Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off            | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                        |
+| Mistral Vibe | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`       | Its own skills and Project context; a trusted Project's tools and MCP servers; its auto-approve mode as Reviewed's default reviewer                                                                      | Reviewed with `auto-approve`, in Code (`harnessAutoReview` supported); with the setup on, the skill (registry skills included), Project context, MCP server, connector, and hook guards unset, and in a trusted Project `VIBE_TOOL_PATHS` unset and the `.vibe` entries readable; `accept-edits` at Accept edits; questions on 3.0.3 through the questionnaire |
+| OpenCode     | Skills and project config off, `skill` denied; Octant's denies outrank saved grants; `once` only      | The person's own permission rules; "always" answers; its `subagent` delegation; its skills; `bash` and `task` in Work as in Code; Reviewed through Octant Shield                                         | With the setup on: `skill` asked rather than denied with the three skill switches unset, a remembered 2.x approval answered `always`, its delegation followed as child runs, and the MCP servers and permission rules in the person's own configuration; Reviewed through Octant Shield at Auto                                                                |
 
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
@@ -73,8 +73,36 @@ and Plan and `strictMcpConfig: false` only in a trusted Project. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
-id and are answered through the parent's session. Mistral Vibe keeps
-`VIBE_ENABLE_SUBAGENTS="false"` except at Full access in Work and Code.
+id and are answered through the parent's session. Mistral Vibe unsets
+`VIBE_ENABLE_SUBAGENTS` in Work and Code outside Plan, so its subagents
+follow the person's setup at every level there (maintainer decision,
+2026-11-14). Read from the 3.0.3 source on 2026-11-14, a subagent's
+approval reaches `session/request_permission` on the parent's session as
+`ToolCallUpdate(tool_call_id=related_entry_id)` alone, with no title, kind,
+or input, and the child's entries never reach the parent's updates. The
+maintainer accepted that: such a request, one naming a tool call Octant
+never saw and carrying no title, is shown through the ordinary approval path
+as "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with
+Allow and Deny, and the thread's level decides it as any other request
+(`unnamedPermissionDescription` on the profile; another agent's such request
+still fails the turn). Wherever the subagents run, `VIBE_AGENT_PATHS`,
+`VIBE_INSTALLED_AGENTS`, and `VIBE_ENABLED_AGENTS` are unset too, so a
+subagent runs as one of the person's own agents at every level outside
+Plan. Such an agent may approve its own tools, as it does in Vibe itself;
+the maintainer accepted that (2026-11-14). Its calls stay in the child's
+history, which Octant never sees, so `unseenChildCalls` on the profile makes
+each child run name the agent it ran as (from the call's `agent`) and say
+that Octant cannot see its tool calls and that the agent may approve them
+itself; a run as any agent but Vibe's read-only built-in `explore` (grep,
+read_file and skill in 3.0.3) also marks the thread as having read outside
+content, under `hosted-tool`, since it may have done so unseen. In Plan and
+Chat the allowlist keeps a session opening and switching only on the modes
+Octant selects: `ask`, `plan`, `accept-edits` (Accept edits in Work and
+Code; it approves Vibe's own writes and edits and asks for the rest, inside
+the Accept edits wall), and `auto-approve` (maintainer decision,
+2026-11-14). With the allowlist unset, a person whose own agent lists leave
+out a mode Octant selects gets a refused session start, not a different
+mode.
 
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
@@ -132,9 +160,14 @@ Native review remains unimplemented. Supplementary file-review
 reads have a candidate integration behind an empty verified-version allowlist:
 no production profile declares the read capability until signed-in 3.0.3
 read and genuine same-task cold-resume evidence pass. Revisit `vibe-app-server` when it negotiates a
-version or is documented. A session-form elicitation candidate is implemented but unavailable in production: its verified-version allowlist is empty until signed-in 3.0.3 question, answer and cancellation evidence passes.
+version or is documented. Vibe's questions reach the shared questionnaire as
+a session-form elicitation on 3.0.3, the one release in its verified-version
+list (maintainer decision, 2026-11-14: Octant adds to a provider and does not
+take its core features away). Another release reports questions
+`unavailable`. The signed-in 3.0.3 question, answer and cancellation check
+stays a maintainer live check.
 
-The candidate advertises only ACP `elicitation.form`, never URL elicitation,
+The adapter advertises only ACP `elicitation.form`, never URL elicitation,
 for an explicitly verified exact 3.0.3 release. Only an active originating
 native session may ask; one form callback is pending at a time. It maps the
 runtime's bounded string/array choice schema to the shared questionnaire,
@@ -446,7 +479,7 @@ names a withheld tool:
 
 | Withheld                                              | Why                                                                                                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list                                                      |
+| `EnterPlanMode`, `ExitPlanMode`                       | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)              |
 | `EnterWorktree`, `ExitWorktree`                       | The thread is bound to one checkout                                                                                                                  |
 | `Monitor`, `Workflow`, `CronCreate`, `ScheduleWakeup` | Each wakes the model later and starts a turn Octant never sent; a result with no turn pending ends the session, and the decoder refuses their frames |
 | `REPL`                                                | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                   |
@@ -475,9 +508,26 @@ decision, 2026-11-14). Because a
 native build may serve searches through its shell, `Grep` and `Glob` are
 also listed in `allowedTools`; the `PreToolUse` hook still answers each call
 first. Plan keeps its explicit list (`Read`, `Glob`, `Grep`, the checklist,
-and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
+`ExitPlanMode`, and `Bash` where its sandbox confines it). Chat keeps the earlier explicit
 list at every level and holds no part of the preset: its filesystem and shell
 stay withheld, so it gains nothing from tools Octant has not named.
+
+### Native plan capture
+
+A Plan session runs in Claude Code's own `plan` permission mode, which ends a
+plan by calling `ExitPlanMode` with the plan's text. Plan holds that tool and
+nothing that changes mode: `EnterPlanMode` stays withheld, and so does
+`ExitPlanMode` outside Plan (maintainer decision, 2026-11-14). When the call's
+transcript block arrives, its `plan` becomes the reply's own paragraph under a
+**Proposed plan** heading, with no tool row. The `PreToolUse` hook then
+refuses the call with "The plan was captured and shown to the person; wait
+for the person", and `canUseTool` refuses it too, since no grant was
+recorded. Claude Code's own answer to an approved `ExitPlanMode` switches the
+session to a mode that edits; refused, the session stays in `plan` and the
+turn ends. The person accepts the plan by moving the thread out of Plan, so
+Plan stays read-only throughout. Octant's thread plan (the person's
+structured proposal) has no path from a provider, so the plan stays reply
+text (not built yet: a provider-proposed thread plan).
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
@@ -518,6 +568,35 @@ profile allows and why. The wire mapping that follows from it:
   so the person is asked for commands and not for patches. Plan and Chat keep
   `never`, so a write fails at the profile rather than at a prompt.
 - Full access keeps `danger-full-access` and an unwrapped process.
+- A Plan session runs in Codex's own Plan mode: every `turn/start` carries the
+  experimental `collaborationMode` with `mode: "plan"` and settings naming the
+  model, `reasoning_effort`, and `developer_instructions: null` (the
+  connection opts into experimental fields at `initialize`; `null` asks for
+  Codex's built-in Plan instructions, and the mode restates the model and
+  effort because it takes precedence over both; read at `rust-v0.169.0`,
+  present since `rust-v0.155.1`). Codex then plans as it does on its own: it proposes its
+  plan in a `<proposed_plan>` block, reported as a plan item, and may ask
+  through its question form, which Codex offers only in Plan mode. The mode
+  only instructs the model, so Plan's read-only profile and its declined
+  approvals are unchanged (maintainer decision, 2026-11-14). Codex keeps a
+  mode for the thread's later turns, so a session outside Plan that resumes a
+  thread whose `thread/resume` reports `collaborationMode.mode: "plan"` sends
+  `mode: "default"`; any other session sends no mode and runs as before.
+- A plan item becomes the reply's own paragraph under a **Proposed plan**
+  heading when it completes; its deltas are not shown, so the plan reads once.
+  The person accepts it by moving the thread out of Plan. Octant's thread plan
+  (the person's structured proposal) has no path from a provider, so the plan
+  stays reply text (not built yet: a provider-proposed thread plan).
+- `item/tool/requestUserInput` reaches the person as the thread's
+  questionnaire, one request per question with its choices, in order; when
+  every question is answered Codex gets one reply mapping each question id to
+  `{ answers: [text] }`. Codex adds a free answer to each question itself,
+  so a typed answer passes through. A set with a question Codex marks
+  `isSecret`, or that asks for a password, passphrase, API key, access token,
+  or private key, is never shown: Codex is answered at once with a refusal
+  telling the model Octant does not collect secrets in chat. A subagent's set
+  (Codex offers the form to the root thread only) is answered empty. The
+  capability is reported `supported`.
 
 The installed OpenCode binary's
 version selects its routes: 1.x keeps the legacy session API and its
@@ -527,7 +606,22 @@ launch writes its session posture — the same rules in 2.x action names
 connection's app-managed tool bridge allowed — into the private
 configuration, where OpenCode appends it after every agent's built-in rules
 (its default agent otherwise allows everything); a launch that names no
-posture denies all. 2.0.22 answers the 1.x `POST /mcp` registration with
+posture denies all. File reads (`read`, `glob`, `grep`, `list`) are allowed
+at every level on both versions, Plan included, so OpenCode reads inside the
+Project and its extra folders without asking, as Octant's Claude Code file
+gate does; `external_directory` still refuses every other folder. Under the
+catch-all `ask` they had asked at Guarded and never ran in Plan, which
+cannot approve anything (maintainer decision, 2026-11-14). Refusals come last
+so nothing reopens them: OpenCode's own `.env` refusal (its default agent's
+rules come before Octant's, so the read allow would otherwise lift it), and,
+for `read` and `list`, each entry of Octant's protected-file list in force
+(`openCodeReadRefusals`), a name pattern refused as its whole folder since
+OpenCode's wildcards cannot say a regular expression. Plan also allows
+OpenCode's other read-only tools without asking: `todowrite`, `todoread`,
+`codesearch`, `lsp`, `webfetch`, and `websearch` (maintainer decision,
+2026-11-14). A web read or code search still marks the thread as outside
+content, as in Work and Code; edits, the shell, delegation, and outside
+folders stay denied, and the person's own deny rules still apply. 2.0.22 answers the 1.x `POST /mcp` registration with
 405 and has no per-launch MCP flag; it registers runtime MCP servers through
 `PUT /api/experimental/mcp/{server}` (removed with `DELETE`), which Octant
 uses for the bridge. A config-file `mcp` entry also works but connects
@@ -604,10 +698,26 @@ child run (starting, running, completed or failed), its permission and
 question requests are handled as the parent's own, so the person answers them
 at the same level and the reply goes to the child's session, and a web read it
 makes marks the thread. Nothing else a child says joins the parent's
-transcript. Questions are
-unsupported: 2.0.22 serves no question routes and asks through forms, which
-are not mapped, so the written posture denies `question` and a form that
-still arrives fails the turn. Resume,
+transcript. Questions reach the person through the same questionnaire 1.x
+questions use (maintainer decision, 2026-11-14: Octant adds capabilities to a
+provider and never takes its core features away). 2.0.22 serves no question
+routes; its `question` tool publishes a `form.created` form marked
+`metadata.kind: "question"` with one field per question, keyed `q0`, `q1`, ...
+(the question as the description, its header as the title, its choices as
+options), and takes the answer at
+`POST /api/session/{id}/form/{form}/reply` as `{ answer: { q0: ... } }`
+(read from the v2.0.22 and v2.0.27 source). A subagent's form is asked the
+same way and answered in the subagent's own session. From 2.0.22 the written posture
+allows `question` at every level, Plan included, since a question changes
+nothing, and the capability is reported `supported`. An earlier 2.x release
+keeps `question` denied, as before, so the model is told no and carries on
+instead of the turn failing on a form Octant cannot map. A question asking for
+several answers (a multiselect field) fails the turn as an unsupported
+format, as on 1.x. A form with a question that asks for a password,
+passphrase, API key, access token, or private key is never shown or
+journaled: each of its fields is answered at once with the refusal Codex
+gets, telling the model Octant does not collect secrets in chat. Any other form (a sign-in, a server's own request)
+still fails the turn rather than hang on an unanswerable form. Resume,
 interruption, and tool activity are reported. A Stop the person asked for
 (`user`) and OpenCode's own `superseded` and `inactivity` interruptions stay
 ordinary interruptions; a `shutdown` interruption, or the OpenCode process
@@ -673,9 +783,52 @@ carry.
 
 Octant launches Pi in RPC mode with `--no-extensions`, which since Pi 0.99
 also turns off its built-in extensions (the MCP client, codemode, and tool
-search), and loads only Octant's own extension by path. A user-level or
-project-level `mcp.json` therefore starts no server and no inherited command
-is registered. App-managed tools are reported only for the releases whose
+search), and loads Octant's own extension by path. A user-level or
+project-level `mcp.json` therefore starts no server.
+
+Pi runs as it does on its own (maintainer decision, 2026-11-14): the
+person's own Pi setup in `~/.pi/agent` loads by default. Pi is not a key
+provider, so no account or thread switch reaches its driver, and the default
+lives in `piOwnSetup` (`piProcess.ts`); a switch would need Pi in the key
+provider list and the contract, which this change leaves alone.
+
+| Launch                         | The person's own Pi setup                                                                       | Tools                                                                                   |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Chat                           | None                                                                                            | None                                                                                    |
+| Plan                           | Skills (`--skill`), prompt templates (`--prompt-template`), context files                       | `read`, `grep`, `find`, `ls`                                                            |
+| Work and Code, any other level | As Plan, plus each top-level extension file or folder in `extensions`, named with `--extension` | Pi's seven built-ins, Octant's app tools, and, from Pi 1.1.0, the extensions' own tools |
+
+Pi's own discovery stays off (`--no-skills`, `--no-prompt-templates`,
+`--no-extensions`) and the person's resources are named by path, because
+discovery would also start Pi's built-in extensions and read a Project's own
+`.pi` resources, which are that Project's code. Context files are Pi's own
+discovery: a Project's `AGENTS.md` or `CLAUDE.md` is instruction text every
+runtime may read, and the person's global `AGENTS.md` is linked into the
+managed home, Pi's agent folder here. The wall opens only the folders and
+files a launch loads, read-only; the person's Pi sessions, settings and
+installed packages stay out, so a package listed in their settings does not
+load. Plan loads no extension, since an extension is code running in Pi's own
+process. The tools an extension registers are offered on a release that
+takes `+name` entries in `--tools` (1.1.0 and later; the release is read
+before the launch is prepared): the launch names additions to Pi's own
+defaults (`+grep,+find,+ls` and Octant's app tools) instead of an allowlist,
+so every registered tool stays registered, as in Pi itself (maintainer
+decision, 2026-11-14). A plain list is an allowlist that unregisters them,
+so an older or unknown release keeps it and offers none. Octant's approval
+bridge asks, by the thread's level, for every tool but `read`, `grep`,
+`find`, `ls` and Octant's own app tools, which the host decides; Full access
+runs them without asking and Plan has none. An extension that registers a
+tool under a built-in read's name replaces that read unasked, as it would
+in Pi; the extension is the person's own code. The person's extensions may talk to Pi's
+interface: a notice, status line, widget, title, or editor text expects no
+answer and is not shown, and any other question of theirs is answered as
+dismissed. An error in one of them leaves the turn running; an error from
+Octant's bridge, or one naming no extension, still fails it.
+
+Pi's prompt carries images: a model whose `input` in Pi's own model list
+names `image` takes image attachments, sent as the prompt's `images`, and the
+driver reports `nativeAttachments` supported when any listed model does. Any
+other attachment, and an image to a text-only model, is refused. App-managed tools are reported only for the releases whose
 tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
 every release from 1.1.0 whose probe attests the tool bridge. A newer Pi
 therefore needs no Octant release; a release below 1.1.0 (other than 0.85.1), or
@@ -772,6 +925,15 @@ only when the agent's `initialize` result advertises `mcpCapabilities.http`
 host is macOS. Otherwise the session reports app-managed tools `unsupported`,
 and a session that is offered tools is refused before `session/new` rather
 than started without them.
+
+An ACP agent takes image attachments only where its own `initialize` result
+advertises `promptCapabilities.image` (maintainer decision, 2026-11-14). The
+probe then reports `nativeAttachments` supported and every listed model as
+taking text and images, since ACP states the capability for the agent and
+not per model; each image goes as an ACP `image` content block after the
+prompt text. Any other attachment, and any attachment to an agent that did
+not advertise images, is refused rather than dropped. Audio and embedded
+resources are not sent.
 
 ### Registry coverage
 
