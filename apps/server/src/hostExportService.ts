@@ -7,6 +7,7 @@ import {
 import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts/events";
 import type { HostId } from "@octant/contracts/host";
 import type { PersonMemoryEntry } from "@octant/contracts/person-memory";
+import type { HostExportInstructions } from "@octant/contracts/host-export";
 import type { ProjectMemoryView } from "@octant/contracts/projects";
 import type { ThreadExportBundle, ThreadExportOutcome } from "@octant/contracts/thread-export";
 import type {
@@ -84,6 +85,8 @@ export interface HostExportServiceOptions {
   readonly personMemory: {
     readonly entries: () => ReadonlyArray<PersonMemoryEntry>;
   };
+  /** The instructions the person wrote for Octant. Absent sends no instructions page. */
+  readonly instructions?: () => HostExportInstructions;
   readonly canvases: {
     readonly list: (input: {
       readonly cursor: string | undefined;
@@ -180,6 +183,13 @@ export class HostExportService {
     const memoryDropped = yield* this.#personMemoryPages(limit);
     if (memoryDropped === undefined) return;
     unrepresentable += memoryDropped;
+    const instructions = this.#options.instructions?.();
+    if (
+      instructions !== undefined &&
+      !(yield* this.#emit({ kind: "instructions", instructions }))
+    ) {
+      return;
+    }
     const canvasDropped = yield* this.#canvasPages(limit);
     if (canvasDropped === undefined) return;
     unrepresentable += canvasDropped;
@@ -407,6 +417,7 @@ export interface HostExportLiveDependencies {
   readonly listProjects: () => ReadonlyArray<HostExportProjectSource>;
   readonly readProjectMemory: (projectId: string) => ProjectMemoryView;
   readonly personMemoryEntries: () => ReadonlyArray<PersonMemoryEntry>;
+  readonly instructions: () => HostExportInstructions;
   readonly listCanvases: () => ReadonlyArray<unknown>;
   readonly readSettings: () => HostExportSettingsSource;
   readonly listProjectIds: () => ReadonlyArray<string>;
@@ -449,6 +460,7 @@ export function createLiveHostExportService(input: HostExportLiveDependencies): 
     },
     projectMemory: { read: (projectId) => input.readProjectMemory(projectId) },
     personMemory: { entries: () => input.personMemoryEntries() },
+    instructions: () => input.instructions(),
     canvases: {
       list: ({ cursor, limit }) =>
         pageHostExportSlice(input.listCanvases(), cursor, limitOf(limit)),

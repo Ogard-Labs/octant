@@ -3,6 +3,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
@@ -782,6 +783,13 @@ export interface ChatServiceOptions {
     readonly windowId: WindowId | undefined;
   }) => string | undefined;
   /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: ChatThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
+  /**
    * The native harness around a turn on a provider it drives: stable
    * instructions in front of the context, and the completed reply observed
    * for follow-ups and the advisor. Absent means turns run without it.
@@ -1166,6 +1174,7 @@ export class ChatService {
   readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
@@ -1248,6 +1257,8 @@ export class ChatService {
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
+    if (options.octantInstructionBlocks !== undefined)
+      this.#octantInstructionBlocks = options.octantInstructionBlocks;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -4976,6 +4987,7 @@ export class ChatService {
         thread,
         windowId: executionContext?.windowId,
       });
+      const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
       const planWith = (sideChatContext: string | undefined) =>
         this.#planContext(
           thread,
@@ -5001,6 +5013,7 @@ export class ChatService {
           offersCanvasTool(tools?.definitions),
           appToolHostLines(tools?.definitions),
           personMemoryText,
+          instructionBlocks,
         );
       let context = planWith(sideChatSourceContext);
       // A plan that leaves earlier conversation out to fit cannot be met by the
@@ -6054,6 +6067,8 @@ export class ChatService {
     toolHostLines: ReadonlyArray<AppToolHostLine> = [],
     /** What Octant remembers about the person, placed before Project memory. */
     personMemoryText?: string,
+    /** The person's instructions for Octant, after Octant's own and before person memory. */
+    instructionBlocks: ReadonlyArray<OctantInstructionsBlock> = [],
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -6419,6 +6434,19 @@ export class ChatService {
             { kind: "instruction", referenceId: `octant-tool-host-line:${index}` },
           ),
           { kind: "instructions", text: line.text, tool: line.tool },
+        ),
+      ),
+      ...instructionBlocks.map((block) =>
+        contextEntry(
+          this.#contextEntry(
+            thread,
+            block.kind,
+            block.text,
+            Math.max(16, Math.ceil(block.text.length / 4)),
+            "required",
+            { kind: "instruction", referenceId: block.key },
+          ),
+          block,
         ),
       ),
       ...(personMemoryText === undefined
@@ -7157,6 +7185,7 @@ export class ChatService {
     category:
       | "octant-policy"
       | "user-instructions"
+      | OctantInstructionsBlock["kind"]
       | "current-request"
       | "conversation"
       | "workspace-context"
