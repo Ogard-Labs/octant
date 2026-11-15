@@ -119,6 +119,8 @@ export const MOBILE_COPY = {
   todosLink: "Link",
   todosNotLinked: "Thread started, not linked",
   todoSource: "From to-do",
+  todoStartProjectsUnread:
+    "This computer's Projects could not be read, so this draft is a Chat. Go back to To-dos and press Start again to try once more.",
   homeRecent: "Recent",
   statusAllShort: "All",
   homeSeeAll: "See all",

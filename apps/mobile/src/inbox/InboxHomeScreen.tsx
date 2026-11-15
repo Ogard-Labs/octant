@@ -126,7 +126,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [codeProjectId, setCodeProjectId] = useState<string | undefined>();
   // Set once the Projects of the computer new threads go to are read, so a
   // Start picks its Project from them rather than from an empty list.
-  const [projectsRead, setProjectsRead] = useState(false);
+  // "failed" when either list could not be read: an empty list is then no
+  // proof the to-do's Project is missing, so a Start says so instead.
+  const [projectsRead, setProjectsRead] = useState<"no" | "read" | "failed">("no");
   // The to-do this draft came from; the host's create command carries nothing about it.
   // It also names the Project the Start chose, so a reload of the Projects (a
   // reconnect hands a new transport) keeps that Project rather than the first.
@@ -205,14 +207,19 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     setCodeProjects([]);
     setWorkProjectId(undefined);
     setCodeProjectId(undefined);
-    setProjectsRead(false);
+    setProjectsRead("no");
     if (placementTransport === undefined) {
       return () => projectRequestGuard.invalidate();
     }
     let cancelled = false;
+    let failed = false;
+    const unread = () => {
+      failed = true;
+      return [];
+    };
     void Promise.all([
-      fetchMobileWorkProjects(placementTransport).catch(() => []),
-      fetchMobileCodeProjects(placementTransport).catch(() => []),
+      fetchMobileWorkProjects(placementTransport).catch(unread),
+      fetchMobileCodeProjects(placementTransport).catch(unread),
     ]).then(([nextWork, nextCode]) => {
       if (cancelled || !projectRequestGuard.isCurrent(request)) return;
       setWorkProjects(nextWork);
@@ -232,7 +239,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
             ? current
             : nextCode[0]?.projectId,
       );
-      setProjectsRead(true);
+      setProjectsRead(failed ? "failed" : "read");
     });
     return () => {
       cancelled = true;
@@ -244,7 +251,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   useEffect(() => {
     // Without a computer for new threads the sheet still opens, as a Chat that
     // says why it cannot send; until the paired list is read, the Start waits.
-    const ready = projectsRead || (placementTransport === undefined && hostsLoaded);
+    const ready = projectsRead !== "no" || (placementTransport === undefined && hostsLoaded);
     if (todoStart === undefined || !ready) return;
     const draft = mobileTodoStartDraft(todoStart, {
       hostId: placementTransport?.hostId ?? "",
@@ -259,7 +266,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       todoId: String(todoStart.id),
       ...(draft.projectId === undefined ? {} : { projectId: draft.projectId }),
     });
-    setComposerError(undefined);
+    setComposerError(projectsRead === "failed" ? MOBILE_COPY.todoStartProjectsUnread : undefined);
     setCodeRetry(undefined);
     setComposerSheetOpen(true);
     onTodoStartOpened?.();
@@ -395,11 +402,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
 
   const createThread = async (mode: MobileCreateMode) => {
     // Read before the create awaits: a Start pressed meanwhile is another draft.
-    const source = todoSource;
+    // The link goes out once the host has made the thread, before its first
+    // turn, so a turn that fails still leaves a linked thread, and the source is
+    // spent then so a resend of the same draft does not link a second thread.
+    let source = todoSource;
     const started = (row: MobileInboxRow) => {
       if (source === undefined) return;
+      const todoId = source.todoId;
+      source = undefined;
       setTodoSource(undefined);
-      void linkTodo(source.todoId, row);
+      void linkTodo(todoId, row);
     };
     if (placementTransport === undefined) {
       setComposerError(MOBILE_COPY.pairBeforeCreate);
@@ -428,9 +440,9 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
           confirmDeliveryTarget: requestDeliveryTarget,
+          onCreated: started,
           ...(codeRetry === undefined ? {} : { retry: codeRetry }),
         });
-        started(row);
         setPrompt("");
         setCodeRetry(undefined);
         setComposerSheetOpen(false);
@@ -454,16 +466,15 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           providerInstanceId: selectedModel.providerInstanceId,
           modelId: selectedModel.modelId,
           bindingRevisionId: selectedWorkProject.bindingRevisionId,
+          onCreated: started,
         });
-        started(row);
         setPrompt("");
         setComposerSheetOpen(false);
         await refresh();
         props.onOpenThread(row);
         return;
       }
-      const row = await createChat(prompt);
-      started(row);
+      const row = await createChat(prompt, started);
       setPrompt("");
       setComposerSheetOpen(false);
       await refresh();

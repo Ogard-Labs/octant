@@ -156,6 +156,46 @@ describe("mobile work create", () => {
       }),
     ).rejects.toMatchObject({ category: "unavailable" });
   });
+
+  it("names the thread it made even when that thread's first turn then fails to start", async () => {
+    const fetch = vi.fn(async ({ method, path }: { method: string; path: string }) => {
+      if (method === "POST" && path === "/api/work/threads/commands") {
+        return Response.json({
+          kind: "thread-created",
+          thread: {
+            id: threadId,
+            projectId,
+            title: "Ship work",
+            lifecycle: "active",
+            providerInstanceId,
+            modelId: "model-a",
+            version: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+      return new Response("unavailable", { status: 503 });
+    });
+    const transport: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+    const created: Array<{ readonly hostId: string; readonly threadId: string }> = [];
+
+    await expect(
+      createMobileWorkFromPrompt({
+        transport,
+        prompt: "Ship work",
+        projectId,
+        providerInstanceId,
+        modelId: "model-a",
+        bindingRevisionId: "30000000-0000-4000-8000-000000000001",
+        onCreated: (row) => created.push({ hostId: row.hostId, threadId: row.threadId }),
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+    expect(created).toEqual([{ hostId, threadId }]);
+  });
 });
 
 function acceptedTurn(payload: {
