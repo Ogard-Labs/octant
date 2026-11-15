@@ -244,13 +244,17 @@ function reportsToolCallContent(state: ClaudeToolState): boolean {
 }
 
 /**
- * The input a record keeps. A file edit or write keeps the path alone: what
- * was written stays out of every event this adapter emits, as it does for the
- * change's diff, and the file itself holds it.
+ * The input a record keeps. A file or notebook edit, or a write, keeps the
+ * path alone: what was written stays out of every event this adapter emits,
+ * as it does for the change's diff, and the file itself holds it.
  */
 function recordedInput(
   content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
 ): string {
+  if (content.toolName === "NotebookEdit") {
+    const notebook = jsonString(content.input, "notebook_path");
+    return notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook });
+  }
   if (content.toolName !== "Edit" && content.toolName !== "Write") {
     return JSON.stringify(content.input);
   }

@@ -709,6 +709,33 @@ describe("mapClaudeMessage", () => {
     expect(whole.some((next) => next.kind === "tool-start")).toBe(false);
   });
 
+  it("records only the notebook's path for a NotebookEdit, never the cell it writes", () => {
+    const ctx = context();
+    const recorded = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-notebook",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-notebook-1",
+            toolName: "NotebookEdit",
+            input: {
+              notebook_path: "/repo/analysis.ipynb",
+              cell_id: "cell-1",
+              new_source: "notebook-cell-must-not-cross",
+            },
+          },
+        ],
+        usage,
+      }),
+    ).filter((next) => next.kind === "tool-call-content");
+    expect(recorded).toMatchObject([
+      { part: "input", text: '{"notebook_path":"/repo/analysis.ipynb"}' },
+    ]);
+  });
+
   it("leaves a tool Octant runs itself to the host's own record", () => {
     const ctx = context();
     const started = eventValues(
