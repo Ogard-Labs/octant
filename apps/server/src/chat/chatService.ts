@@ -5668,8 +5668,13 @@ export class ChatService {
       extension?.definitions.map(({ name }) => name).filter((name) => selectedNames.has(name)) ??
         [],
     );
+    // The provider-search grant is the host's decision for this turn, carried
+    // on the app-managed set as `combineAppManagedToolSets` carries it; an
+    // extension's set never grants it.
+    const providerWebSearch = appManaged?.providerWebSearch;
     return {
       definitions,
+      ...(providerWebSearch === undefined ? {} : { providerWebSearch }),
       close: async () => {
         await Promise.all([appManaged?.close?.(), extension?.close?.()]);
       },

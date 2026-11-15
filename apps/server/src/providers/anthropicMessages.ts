@@ -53,7 +53,16 @@ export type AnthropicTurnEvent =
   | ({
       readonly kind: "usage";
       readonly sequence: number;
-    } & AnthropicUsage);
+    } & AnthropicUsage)
+  | ({ readonly kind: "web-search"; readonly sequence: number } & AnthropicWebSearch);
+
+/** One built-in web search the endpoint ran in its own loop, read from its blocks. */
+export interface AnthropicWebSearch {
+  readonly searchId: string;
+  readonly query?: string;
+  readonly sources: ReadonlyArray<{ readonly title?: string; readonly url: string }>;
+  readonly citedText: ReadonlyArray<string>;
+}
 
 /**
  * `inputTokens` counts all input: the endpoint reports uncached input,
@@ -110,7 +119,21 @@ export interface AnthropicMessagesTurnInput {
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: AnthropicTurnEvent) => void;
   readonly maxTokens?: number;
+  /**
+   * Offer Anthropic's basic web search server tool, capped at one search. The
+   * driver sets it only on Anthropic's own API and only when the host's data
+   * policy allows it. Octant never asks for the version with dynamic
+   * filtering: it runs code on the provider's side and is not covered by ZDR.
+   */
+  readonly webSearch?: boolean;
 }
+
+/** Anthropic's basic web search server tool, which ZDR covers. */
+export const ANTHROPIC_BASIC_WEB_SEARCH_TOOL = {
+  type: "web_search_20250305",
+  name: "web_search",
+  max_uses: 1,
+} as const;
 
 const DEFAULT_MAX_TOKENS = 8192;
 
@@ -142,11 +165,24 @@ interface StreamState {
   readonly contentBlocks: Map<number, TrackedContentBlock>;
   readonly toolCalls: AnthropicToolCall[];
   outputStopReason?: ProviderOutputStopReason;
+  /** Whether this request offered the web search server tool. */
+  readonly webSearchOffered: boolean;
+  /** The one built-in search this response may run, once its query block opened. */
+  webSearch?: {
+    id: string;
+    query?: string;
+    sources: Array<{ title?: string; url: string }>;
+    /** Whether the search's results arrived, so the model has read them. */
+    answered: boolean;
+  };
+  readonly citedText: string[];
+  /** How many cited passages were already reported with the search. */
+  citedReported: number;
 }
 
 interface TrackedContentBlock {
   readonly index: number;
-  readonly type: "text" | "thinking" | "tool_use" | "unknown";
+  readonly type: "text" | "thinking" | "tool_use" | "server_tool_use" | "unknown";
   status: "in_progress" | "completed";
   toolCallId?: string;
   toolName?: string;
@@ -168,6 +204,7 @@ export function buildAnthropicMessagesBody(
     | "toolChoice"
     | "toolAnswers"
     | "maxTokens"
+    | "webSearch"
   >,
 ): Record<string, unknown> {
   const messages: AnthropicWireMessage[] = [];
@@ -238,14 +275,17 @@ export function buildAnthropicMessagesBody(
     messages,
     max_tokens: input.maxTokens ?? DEFAULT_MAX_TOKENS,
     stream: true,
-    ...(input.tools === undefined || input.tools.length === 0
+    ...((input.tools === undefined || input.tools.length === 0) && input.webSearch !== true
       ? {}
       : {
-          tools: input.tools.map((tool) => ({
-            name: tool.name,
-            ...(tool.description === undefined ? {} : { description: tool.description }),
-            input_schema: tool.inputSchema,
-          })),
+          tools: [
+            ...(input.tools ?? []).map((tool) => ({
+              name: tool.name,
+              ...(tool.description === undefined ? {} : { description: tool.description }),
+              input_schema: tool.inputSchema,
+            })),
+            ...(input.webSearch === true ? [ANTHROPIC_BASIC_WEB_SEARCH_TOOL] : []),
+          ],
           ...(input.toolChoice === "required" ? { tool_choice: { type: "any" } } : {}),
         }),
   };
@@ -336,21 +376,35 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
     events: [],
     contentBlocks: new Map(),
     toolCalls: [],
+    webSearchOffered: input.webSearch === true,
+    citedText: [],
+    citedReported: 0,
   };
   assertSequenceStart(state.nextSequence);
 
-  for await (const frame of decodeSse(response.body, {
-    maxFrameBytes: input.endpoint.limits.responseBodyBytes,
-    maxBufferedBytes: input.endpoint.limits.responseBodyBytes,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  })) {
-    if (state.terminal) {
-      throw protocol("The provider stream continued after its terminal event.");
+  try {
+    for await (const frame of decodeSse(response.body, {
+      maxFrameBytes: input.endpoint.limits.responseBodyBytes,
+      maxBufferedBytes: input.endpoint.limits.responseBodyBytes,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    })) {
+      if (state.terminal) {
+        throw protocol("The provider stream continued after its terminal event.");
+      }
+      normalizeEvent(parseJson(frame.data), state, input.onEvent);
     }
-    normalizeEvent(parseJson(frame.data), state, input.onEvent);
-  }
-  if (!state.terminal) {
-    throw protocol("The provider stream ended without a terminal event.");
+    // A stream that closes without `message_stop` ends the loop without an
+    // error, so its refusal is raised here, inside the block whose `finally`
+    // reports what the reply cited before it was cut off.
+    if (!state.terminal) {
+      throw protocol("The provider stream ended without a terminal event.");
+    }
+  } finally {
+    // However the response ended (completed, stopped at its output limit,
+    // refused, failed, stopped, cut off, or unreadable), the text the reply
+    // cited since the search was reported is reported; text already reported
+    // is not repeated.
+    reportWebSearch(state, input.onEvent);
   }
   for (const block of state.contentBlocks.values()) {
     if (block.status !== "completed") {
@@ -372,7 +426,7 @@ function normalizeEvent(
       return;
     case "content_block_start":
       state.accepted = true;
-      validateContentBlockStart(event, state);
+      validateContentBlockStart(event, state, onEvent);
       return;
     case "content_block_delta":
       state.accepted = true;
@@ -389,6 +443,9 @@ function normalizeEvent(
     case "message_stop":
       state.accepted = true;
       state.terminal = true;
+      // Cited text arrives in the reply after the search's results; what the
+      // reply cited is reported once it is whole.
+      reportWebSearch(state, onEvent);
       return;
     case "ping":
       state.accepted = true;
@@ -437,7 +494,40 @@ function validateMessageStart(event: Record<string, unknown>, state: StreamState
   }
 }
 
-function validateContentBlockStart(event: Record<string, unknown>, state: StreamState): void {
+/**
+ * Report the response's built-in search: first as soon as its results arrive,
+ * so the thread is marked as having read outside content even if the
+ * response then fails, and again with the text the reply cited since.
+ */
+function reportWebSearch(
+  state: StreamState,
+  onEvent: AnthropicMessagesTurnInput["onEvent"],
+  first = false,
+): void {
+  const search = state.webSearch;
+  if (search === undefined || !search.answered) return;
+  if (!first && state.citedText.length === state.citedReported) return;
+  const citedText = state.citedText.slice(state.citedReported);
+  state.citedReported = state.citedText.length;
+  emit(
+    {
+      kind: "web-search",
+      sequence: allocateSequence(state),
+      searchId: search.id,
+      ...(search.query === undefined ? {} : { query: search.query }),
+      sources: search.sources,
+      citedText,
+    },
+    state,
+    onEvent,
+  );
+}
+
+function validateContentBlockStart(
+  event: Record<string, unknown>,
+  state: StreamState,
+  onEvent: AnthropicMessagesTurnInput["onEvent"],
+): void {
   if (!isNonNegativeInt(event.index)) {
     throw protocol("The provider stream contained an invalid content block index.");
   }
@@ -450,6 +540,64 @@ function validateContentBlockStart(event: Record<string, unknown>, state: Stream
     throw protocol("The provider stream contained an invalid content block.");
   }
   const type = block.type;
+  if (type === "server_tool_use") {
+    // The only built-in tool Octant offers is one web search, and only when
+    // it asked for it. A second search in the same response, or any other
+    // server tool, fails the step as every built-in tool did before.
+    if (!state.webSearchOffered || block.name !== "web_search" || state.webSearch !== undefined) {
+      throw failure("unsupported", "The provider attempted an unsupported tool call.");
+    }
+    if (typeof block.id !== "string" || block.id.length === 0) {
+      throw protocol("The provider stream contained an invalid server_tool_use block.");
+    }
+    state.outputStarted = true;
+    const query =
+      isRecord(block.input) && typeof block.input.query === "string"
+        ? block.input.query
+        : undefined;
+    state.webSearch = {
+      id: block.id,
+      ...(query === undefined ? {} : { query }),
+      sources: [],
+      answered: false,
+    };
+    state.contentBlocks.set(index, {
+      index,
+      type: "server_tool_use",
+      status: "in_progress",
+      toolCallId: block.id,
+      inputJson: "",
+    });
+    return;
+  }
+  if (type === "web_search_tool_result") {
+    if (state.webSearch === undefined || block.tool_use_id !== state.webSearch.id) {
+      throw protocol("The provider stream contained a search result with no search.");
+    }
+    // A successful search carries a list of results; a failed one carries an
+    // error object, which is still an answer and marks nothing found. Page
+    // text arrives encrypted and is never read.
+    if (Array.isArray(block.content)) {
+      for (const entry of block.content) {
+        if (!isRecord(entry) || typeof entry.url !== "string" || entry.url.length === 0) continue;
+        state.webSearch.sources.push({
+          url: entry.url,
+          ...(typeof entry.title === "string" && entry.title.length > 0
+            ? { title: entry.title }
+            : {}),
+        });
+      }
+    }
+    state.contentBlocks.set(index, {
+      index,
+      type: "unknown",
+      status: "in_progress",
+      inputJson: "",
+    });
+    state.webSearch.answered = true;
+    reportWebSearch(state, onEvent, true);
+    return;
+  }
   if (
     type !== "text" &&
     type !== "thinking" &&
@@ -540,10 +688,25 @@ function normalizeContentBlockDelta(
     return;
   }
   if (delta.type === "input_json_delta") {
-    if (tracked.type !== "tool_use" || typeof delta.partial_json !== "string") {
+    if (
+      (tracked.type !== "tool_use" && tracked.type !== "server_tool_use") ||
+      typeof delta.partial_json !== "string"
+    ) {
       throw protocol("The provider stream contained an invalid tool input delta.");
     }
     tracked.inputJson += delta.partial_json;
+    return;
+  }
+  if (delta.type === "citations_delta") {
+    const citation = delta.citation;
+    if (
+      isRecord(citation) &&
+      citation.type === "web_search_result_location" &&
+      typeof citation.cited_text === "string" &&
+      citation.cited_text.length > 0
+    ) {
+      state.citedText.push(citation.cited_text);
+    }
     return;
   }
   throw protocol("The provider stream contained an unsupported content block delta.");
@@ -559,6 +722,20 @@ function validateContentBlockStop(event: Record<string, unknown>, state: StreamS
     throw protocol("The provider stream referenced an unknown content block.");
   }
   tracked.status = "completed";
+  if (tracked.type === "server_tool_use" && state.webSearch !== undefined) {
+    // The query streams as the block's input when the start did not carry it.
+    if (state.webSearch.query === undefined && tracked.inputJson.trim().length > 0) {
+      try {
+        const parsed: unknown = JSON.parse(tracked.inputJson);
+        if (isRecord(parsed) && typeof parsed.query === "string") {
+          state.webSearch.query = parsed.query;
+        }
+      } catch {
+        // An unreadable query is reported as unknown; the search still marks the thread.
+      }
+    }
+    return;
+  }
   if (tracked.type === "tool_use") {
     // A tool_use that streamed no input is a call with no arguments; the
     // harness reads an empty object for it. Input that did stream and is not

@@ -93,6 +93,19 @@ export type HarnessEndpointStreamEvent =
       readonly maxAttempts: number;
       readonly delayMs: number;
       readonly reason: Extract<ProviderRuntimeEvent, { kind: "retrying" }>["reason"];
+    }
+  /**
+   * One built-in web search the provider ran inside its own loop, reported
+   * after the fact: the query the provider says it sent, the pages it found,
+   * and the text its reply cited from them. Page bodies are never carried, so
+   * the host reads only titles, addresses, and cited text.
+   */
+  | {
+      readonly kind: "provider-web-search";
+      readonly searchId: string;
+      readonly query?: string;
+      readonly sources: ReadonlyArray<{ readonly title?: string; readonly url: string }>;
+      readonly citedText: ReadonlyArray<string>;
     };
 
 /** Everything one model request is made of. */
@@ -109,6 +122,13 @@ export interface HarnessEndpointRequest {
   /** Ends with a user message or with the results of the previous step's calls. */
   readonly history: ReadonlyArray<HarnessEndpointMessage>;
   readonly tools: ReadonlyArray<ProviderToolDefinition>;
+  /**
+   * Offer the provider's own built-in web search on this request, capped at
+   * one search, in its basic form, never a version that runs more of its own
+   * tools. An endpoint whose provider search Octant cannot name ignores it,
+   * and every other built-in tool stays refused.
+   */
+  readonly providerWebSearch?: true;
 }
 
 export interface HarnessEndpointResponse {

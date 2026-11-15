@@ -70,7 +70,7 @@ import {
 } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -1744,6 +1744,7 @@ export class ChatTurnRunner {
               context: [...context],
               attachments: [...input.attachments],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...providerWebSearchAtSend(input.appManagedTools, input.attempt.providerSessionId),
             })
             .pipe(Effect.catchAll(persistProviderFailure));
         }),

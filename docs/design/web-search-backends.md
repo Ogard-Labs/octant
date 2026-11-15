@@ -11,20 +11,26 @@ one definition, and its result shape
 harness refuses on a tainted thread stay in
 [Search queries on a tainted thread](search-query-taint.md).
 
-Status: partly built. Built: the settings contract and its journaled
-`/api/host-control/web-search` route, the eligibility policy, the research
-route's "Octant web search" label, the migration, the credential broker namespace
-`/v1/web-search-credentials/*` with its `/api/host-control/web-search/key`
-route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
-its 20-second budget, the journaled record of where each query went, Settings ›
-Web search, and Claude Code, Codex, OpenCode, and Mistral Vibe each launched
-with its own search off wherever the session's setup has `webTools` off. Not built: a
-generic ACP agent's own web tools, which Octant cannot switch off; a provider's own
-search in the native harness (slice 4), which still refuses any built-in tool
-a provider starts in its stream as `unsupported`, so a harness endpoint
-reports `nativeWebResearch` as `unsupported`. A per-entry processing region is
-not built: no kind in the table takes one through its API, and Linkup's
-EU-pinned host is the entry's address.
+Status: partly built. Built: all four delivery slices: the settings
+contract and its journaled `/api/host-control/web-search` route, the
+eligibility policy, the research route's "Octant web search" label, the migration,
+the credential broker namespace `/v1/web-search-credentials/*` with its
+`/api/host-control/web-search/key` route, the Staan, Mojeek, Linkup, Brave, and
+Exa backends, the fallback with its 20-second budget, the journaled record of
+where each query went, Settings › Web search, Claude Code, Codex, OpenCode, and
+Mistral Vibe each launched with its own search off wherever the session's setup
+has `webTools` off, and a provider's own search in
+the native harness on Anthropic's and OpenAI's own APIs, with the one-search
+cap and its stream enforcement, tainted-thread withholding, outside-content
+marks, and its journal as provider-native research. Not built: a generic ACP agent's own web tools, which Octant cannot
+switch off; each built-in
+search's count and price in the turn's usage and cost (the count is journaled
+as research events; neither stream reports a price); replaying a built-in
+search's result blocks in the turn's later requests; a search status that
+tells a tainted thread with no eligible backend why it has no search (the tool
+is left out, with no status saying so); and a per-entry processing region (no kind takes one through its API; Linkup's EU-pinned host is the
+entry's address). Not yet run: the acceptance's live search on each of the two
+origins, which needs a maintainer's keys.
 
 ## Why
 
@@ -163,8 +169,7 @@ and the provider's tool call id it belongs to, so it reads beside that call;
 the query stays with the thread's own tool call. A vendor's refusal of the query itself
 (an HTTP 4xx other than a refused key or a rate limit) is an answer and does
 not move on; a SearXNG instance's is read the same way, except that it takes
-no key, so its 401 or 403 refuses every query and moves on as a server error.
-Which entry's key was refused is held in memory, so after a
+no key, so its 401 or 403 refuses every query and moves on as a server error. Which entry's key was refused is held in memory, so after a
 restart the next search learns it again.
 
 ## Research route
@@ -245,11 +250,22 @@ a provider that ignores the cap cannot search again on what it just read. Every
 built-in tool other than web search stays refused.
 
 **Tainted threads.** Below Full access, a thread that has read outside content
-is not offered the provider's own search: the next request leaves the built-in
-tool out and offers `web-search` when an eligible backend exists, where the
+is not offered the provider's own search. The offer is decided when the turn
+runner sends the turn, after the turn's context is prepared and any owed
+outside-content mark is settled, not when the turn's tools are composed:
+reading a mentioned thread that is marked, for example, marks the reader in
+between, and a decision taken earlier would offer built-in search beside that
+content. The loop asks for the decision again before each later request of the
+turn, and the endpoint before each retry of a request, so lowering a running
+turn below Full access, or a mark recorded from outside the turn, withdraws
+the provider's own search from the next attempt for the rest of the turn. Within a turn the offer ends at the
+turn's first search or first tool answer: the loop cannot tell which tool
+result was outside content before the host records it, so it withdraws at the
+first one, at the cost of one prompt cache miss in such a turn. A request
+that withholds it leaves the built-in tool out and offers `web-search` when an eligible backend exists, where the
 tool-call policy can refuse a query that looks like it carries data
 ([Search queries on a tainted thread](search-query-taint.md)). With no eligible
-backend, a tainted thread has no search, and the turn's search status says so.
+backend, a tainted thread has no search; a status saying so is not built yet.
 At Full access the provider's own search stays offered and the mark is only
 recorded, as the tainted-query rule does there. Rationale: Octant sees a
 built-in query only after the provider has sent it, so the refusal the
@@ -259,15 +275,47 @@ content, costs one prompt cache miss, which is the price of keeping the rule.
 
 **Outside content.** Every successful built-in search marks the thread as
 having read outside content before the model's next step, whatever the Watcher
-finds, with the provider and the cited URLs as its source. The stream adapters
+finds, with the provider and the cited URLs as its source. The mark is made as
+soon as the search's results arrive in the stream (Anthropic's
+`web_search_tool_result`, OpenAI's finished `web_search_call`), not when the
+response ends, so a response that fails, is cut off, or is stopped after it
+searched still marks the thread; the text the reply cited is read once the
+reply ends, or as far as it got. The stream adapters
 read Anthropic's `server_tool_use` and `web_search_tool_result` blocks and
-OpenAI's `web_search_call` items with their sources and URL citations. Anthropic
+OpenAI's `web_search_call` items with their sources and URL citations; the
+Responses request asks for every source with `include:
+["web_search_call.action.sources"]`, which OpenAI's web search guide documents
+(no OpenAI SDK is installed in this repository to check its types). Anthropic
 returns page text encrypted, so the Watcher reads only the titles, URLs, and
 cited text, and the journal entry says so.
 
+**Which leads.** A Chat, Work, or Code thread's lead is offered it, on this
+host or in a server Project alike. A Side Chat searches only as its source
+allows, and a child agent is never offered it: a child's network reach is its
+run's clamped grant, enforced per call and by its shell's egress rules, which
+cannot see or refuse a query that runs inside the provider, so a child with
+network authority searches through `web-search` only.
+
+**Fallback model.** When the lead's model keeps failing and the turn moves to
+a fallback model, the offer is decided again for the fallback's endpoint, under
+the thread's same research route, taint, and level: a fallback on one of the
+two origins above is offered the provider's own search, even when the lead's
+endpoint was not, and any other fallback is offered `web-search`, for the rest
+of the turn. A search withdrawn earlier in the turn is not offered again.
+Rationale: the compatible endpoints send their built-in search only on their
+own origin, so carrying the lead's offer over would leave a fallback with
+neither search.
+
 **Journal and usage.** The call is journaled as a `web-search` activity with the
 query the provider reports, after the fact, the provider as the backend, and
-the result URLs. Each search's count, and its price where the provider reports
+the result URLs. The Responses stream reports a search twice, when its results
+arrive and again with the pages the reply cited, so the research and its
+citations are journaled once the request that ran it settles: one citation per
+page, under the first title any report gave it. A request that fails or is
+stopped after it searched still journals that search before its failure.
+Rationale: each citation event is kept as a new citation, so one emitted at the
+first report could neither gain a page the reply cited later nor replace an
+address standing in for a missing title. Each search's count, and its price where the provider reports
 or publishes one, joins the turn's usage and cost
 ([Architecture: context and usage accounting](../architecture.md#context-and-usage-accounting)).
 
