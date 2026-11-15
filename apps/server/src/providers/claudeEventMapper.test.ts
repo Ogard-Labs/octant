@@ -1833,36 +1833,115 @@ describe("mapClaudeMessage", () => {
     },
   );
 
-  it("fails closed without exposing an outside-root file path", () => {
-    const outsidePath = "/private/outside-root-secret.ts";
-    const results = mapped(context(), {
+  it("journals a write outside the checkout as a tool step with no file change, leaving its authority to the gate", () => {
+    // Below Full access the gate asks before such a write; the mapper only
+    // records what ran, at every level.
+    const ctx = context();
+    const started = mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
-      messageId: "sdk-message-private",
+      messageId: "sdk-message-outside",
       content: [
         {
           kind: "tool-use",
-          toolUseId: "sdk-write-private",
+          toolUseId: "sdk-write-outside",
           toolName: "Write",
-          input: { file_path: outsidePath, content: "private content" },
+          input: { file_path: "/elsewhere/notes.md", content: "notes" },
         },
       ],
       usage,
     });
-
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
+    expect(started.some((next) => next.kind === "failure")).toBe(false);
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-outside", isError: false }],
+      }),
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
     ]);
-    expect(JSON.stringify(results)).not.toContain(outsidePath);
   });
 
-  it("fails closed when Project authority denies a lexically confined file path", () => {
+  it("marks a streamed command unsandboxed once its whole input arrives, under its one start", () => {
+    const ctx = context();
+    const streamed = eventValues(
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: "sdk-bash-1", toolName: "Bash", input: {} },
+        },
+      }),
+    );
+    const whole = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-bash",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-bash-1",
+            toolName: "Bash",
+            input: { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+          },
+        ],
+        usage,
+      }),
+    );
+    const events = [...streamed, ...whole];
+    expect(events.filter((next) => next.kind === "tool-start")).toHaveLength(1);
+    expect(events.filter((next) => next.kind === "tool-progress")).toEqual([
+      expect.objectContaining({
+        message: expect.stringMatching(/^Unsandboxed: this command runs outside/),
+      }),
+    ]);
+  });
+
+  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code and an escaped command unsandboxed", () => {
+    for (const [toolName, input, notice] of [
+      [
+        "EnterWorktree",
+        { name: "feature" },
+        /worktree \(feature\)\. The thread's file views and diffs stay on its original checkout/,
+      ],
+      ["ExitWorktree", { action: "keep" }, /back to the thread's checkout/],
+      ["REPL", { code: "1 + 1" }, /^Unsandboxed: runs code in Claude's own process/],
+      [
+        "Bash",
+        { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+        /^Unsandboxed: this command runs outside Claude's command sandbox/,
+      ],
+    ] as const) {
+      const started = eventValues(
+        mapped(context(), {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `sdk-message-${toolName}`,
+          content: [{ kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input }],
+          usage,
+        }),
+      );
+      expect(started).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "tool-start", toolName }),
+          expect.objectContaining({
+            kind: "tool-progress",
+            message: expect.stringMatching(notice),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("reports no file change for a lexically confined path Project authority denies", () => {
     const checkedPaths: string[] = [];
     const ctx = context({
       isProjectConfinedPath: (absolutePath) => {
@@ -1870,10 +1949,9 @@ describe("mapClaudeMessage", () => {
         return false;
       },
     });
-    const sequenceBefore = ctx.sequence;
     const deniedPath = "src/symlink/private.ts";
 
-    const results = mapped(ctx, {
+    mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
       messageId: "sdk-message-private",
@@ -1887,20 +1965,24 @@ describe("mapClaudeMessage", () => {
       ],
       usage,
     });
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-private", isError: false }],
+      }),
+    );
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
-    ]);
     expect(checkedPaths).toEqual(["/repo/src/symlink/private.ts"]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.toolStates).toHaveLength(0);
-    expect(JSON.stringify(results)).not.toContain(deniedPath);
+    expect(completed.some((next) => next.kind === "file-change" || next.kind === "diff")).toBe(
+      false,
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
+    ]);
   });
 
   it("fails closed on contradictory tool correlation without emitting partial events", () => {

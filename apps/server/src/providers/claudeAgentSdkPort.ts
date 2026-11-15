@@ -81,7 +81,12 @@ export interface ClaudeSandboxSettings {
   readonly enabled: true;
   readonly failIfUnavailable: true;
   readonly autoAllowBashIfSandboxed: false;
-  readonly allowUnsandboxedCommands: false;
+  /**
+   * True below Full access, so a `Bash` call may leave the sandbox with
+   * `dangerouslyDisableSandbox` once the gate asked about it; false for a Full
+   * access thread that kept its sandbox.
+   */
+  readonly allowUnsandboxedCommands: boolean;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
     /** The Project root, then its extra folders. */
@@ -646,17 +651,25 @@ export interface ClaudeNativeQueryOptions {
  * query reads no settings file, enables no skill, and starts no MCP server
  * but Octant's, which is how every session opened before this rule.
  *
- * The account's home settings are where its skills, plugins, and hooks live
- * (`user`), so turning on skills or hooks reads that file; when hooks are off
- * (Chat and Plan) a flag setting keeps every hook from running, and it
- * outranks the file. Project settings and `.mcp.json` come only with the
- * Project's own code: Claude Code reads a Project's skills only with the
- * `project` source, which also loads that Project's hooks, so Project skills
- * load in a trusted Project and not otherwise. The runtime has no switch that
- * starts the account's MCP servers without also reading a Project's
- * `.mcp.json` (`strictMcpConfig` governs both), so MCP servers start only
- * with the Project's code. Claude's own memory stays off by flag as well as
- * by its environment switch, unless the account keeps its own memory.
+ * The account's home settings are where its skills, plugins, hooks, and MCP
+ * servers live (`user`), so turning on any of them reads that file. The
+ * plugins the person installed and enabled there load with it: the SDK's
+ * `plugins` option only adds session plugin folders, and Claude Code 2.1.211
+ * loads every plugin its merged settings enable (read from the bundled
+ * binary, 2026-11-14). When hooks are off (Chat and Plan) a flag setting keeps
+ * every hook from running, a plugin's included, and it outranks the file.
+ *
+ * Project settings and `.mcp.json` come only with the Project's own code.
+ * Claude Code reads a Project's `.mcp.json` only while the `project` setting
+ * source is on, its home servers only while `user` is, and its per-folder
+ * servers only while `local` is (2.1.211, read from the bundled binary,
+ * 2026-11-14). So `strictMcpConfig: false` with only `user` starts the
+ * account's own servers, its claude.ai connectors, and its plugins' servers,
+ * while a Project's servers stay held until the Project is trusted. The
+ * `enabledMcpjsonServers` settings would not hold them: a launch with no
+ * terminal approves every pending Project server once the `project` source
+ * is on. Claude's own memory stays off by flag as well as by its environment
+ * switch, unless the account keeps its own memory.
  */
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
@@ -665,14 +678,14 @@ export function claudeNativeQueryOptions(
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
   }
-  const readsHome = setup.skills || setup.hooks || setup.projectCode;
+  const readsHome = setup.skills || setup.hooks || setup.toolServers || setup.projectCode;
   const settingSources: ClaudeSettingSource[] = [];
   if (readsHome) settingSources.push("user");
   if (setup.projectCode) settingSources.push("project", "local");
   return {
     settingSources,
     skills: setup.skills ? "all" : [],
-    strictMcpConfig: !setup.projectCode,
+    strictMcpConfig: !(setup.toolServers || setup.projectCode),
     settings: {
       ...(readsHome && !setup.hooks ? { disableAllHooks: true as const } : {}),
       // Home settings could turn auto-memory on behind the account's switch,
@@ -904,6 +917,15 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
   return Array.isArray(value) && value.length === 1 && value[0] === expected;
 }
 
+/**
+ * Whether Claude's sandbox lets a command out of it after the gate asks: only
+ * at Guarded and Reviewed. Plan's read-only rule and a Full access thread
+ * that kept its sandbox are held by the sandbox itself, not only the hook.
+ */
+export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
@@ -932,7 +954,7 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== false ||
+      sandbox.allowUnsandboxedCommands !== claudeSandboxLetsCommandsOut(input.executionPolicy) ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;

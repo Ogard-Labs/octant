@@ -188,7 +188,7 @@ const openInput = {
   sandbox: {
     enabled: true,
     failIfUnavailable: true,
-    allowUnsandboxedCommands: false,
+    allowUnsandboxedCommands: true,
     autoAllowBashIfSandboxed: false,
     filesystem: {
       denyRead: ["/"],
@@ -513,6 +513,8 @@ describe("Claude Agent SDK port", () => {
 
   test("keeps the sandbox when Full access explicitly asks for it", async () => {
     const harness = makeHarness();
+    // A Full access thread that kept its sandbox lets no command out of it.
+    const sandbox = { ...openInput.sandbox, allowUnsandboxedCommands: false };
     await expect(
       Effect.runPromise(
         Effect.scoped(
@@ -520,12 +522,13 @@ describe("Claude Agent SDK port", () => {
             ...openInput,
             executionPolicy: "full-access",
             fullAccessSandbox: true,
+            sandbox,
           }),
         ),
       ),
     ).resolves.toBeDefined();
     expect(harness.invocation?.options).toMatchObject({
-      sandbox: openInput.sandbox,
+      sandbox,
       permissionMode: "bypassPermissions",
     });
   });
@@ -535,6 +538,7 @@ describe("Claude Agent SDK port", () => {
     const roots = [openInput.projectRoot, "/extra-folder"] as const;
     const sandbox = {
       ...openInput.sandbox,
+      allowUnsandboxedCommands: false,
       filesystem: { denyRead: ["/"] as ["/"], allowRead: roots, allowWrite: roots },
     };
     await expect(
@@ -574,6 +578,14 @@ describe("Claude Agent SDK port", () => {
     ],
     ["a sandbox on Plan", { ...openInput, executionPolicy: "plan", sandbox: openInput.sandbox }],
     [
+      "a Plan sandbox that lets no command out",
+      {
+        ...openInput,
+        executionPolicy: "plan",
+        sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false },
+      },
+    ],
+    [
       "a sandbox rooted elsewhere",
       {
         ...openInput,
@@ -584,8 +596,12 @@ describe("Claude Agent SDK port", () => {
       },
     ],
     [
-      "an unsandboxed-command escape",
-      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: true } },
+      "an unsandboxed-command escape in a Full access sandbox",
+      { ...openInput, executionPolicy: "full-access", fullAccessSandbox: true },
+    ],
+    [
+      "a guarded sandbox without the runtime's own escape",
+      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false } },
     ],
     [
       "an unsupported sandbox surface",
@@ -3219,6 +3235,41 @@ describe("Claude running as itself", () => {
       settingSources: ["user", "project", "local"],
       strictMcpConfig: false,
     });
+  });
+
+  test("starts the account's own MCP servers in an untrusted Project and holds the Project's .mcp.json", () => {
+    // Claude Code reads `.mcp.json` only with the `project` source on, so an
+    // untrusted Project's servers stay held while the account's start.
+    expect(claudeNativeQueryOptions({ ...ownSetup, toolServers: true })).toMatchObject({
+      settingSources: ["user"],
+      strictMcpConfig: false,
+    });
+    // With the tool servers off, home settings still load and no server but
+    // Octant's starts, a plugin's included.
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: false }),
+    ).toEqual({ settingSources: [], skills: [], strictMcpConfig: true, settings: {} });
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: true }),
+    ).toEqual({
+      settingSources: ["user"],
+      skills: [],
+      strictMcpConfig: false,
+      settings: { disableAllHooks: true, autoMemoryEnabled: false },
+    });
+  });
+
+  test("loads the person's enabled plugins with home settings and runs none of their hooks with hooks off", () => {
+    // Enabled plugins load through the `user` source; the empty `plugins`
+    // option adds no session plugin folder of Octant's.
+    const chat = claudeNativeQueryOptions({ ...ownSetup, hooks: false });
+    expect(chat.settingSources).toContain("user");
+    expect(chat.settings).toMatchObject({ disableAllHooks: true });
+    // A plugin's MCP servers follow the tool-server switch.
+    expect(chat.strictMcpConfig).toBe(true);
+    const work = claudeNativeQueryOptions({ ...ownSetup, toolServers: true });
+    expect(work.settings).not.toHaveProperty("disableAllHooks");
+    expect(work.strictMcpConfig).toBe(false);
   });
 
   test("keeps Claude's own memory working for an account that turned it on while its home settings load", () => {

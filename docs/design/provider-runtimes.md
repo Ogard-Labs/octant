@@ -69,7 +69,23 @@ and Reviewed until the person turns it on, on at Full access):
 With the setup on, Claude Code starts with `settingSources: ["user"]` (plus
 `project` and `local` in a trusted Project), `skills: "all"`, and the `Agent`,
 `WebSearch`, `WebFetch`, and `Skill` tools, with every hook off by flag in Chat
-and Plan and `strictMcpConfig: false` only in a trusted Project. Codex starts
+and Plan. With its tool servers on (every level but Plan) it starts with
+`strictMcpConfig: false` in every Project, so the account's own MCP servers,
+its claude.ai connectors, and its plugins' servers start
+(maintainer decision, 2026-11-14). A Project's `.mcp.json` stays held until
+the person trusts the Project: Claude Code 2.1.211 reads `.mcp.json` only
+while the `project` setting source is on, its home servers only while `user`
+is, and its per-folder servers only while `local` is (read from the bundled
+binary, 2026-11-14). The `enabledMcpjsonServers`, `disabledMcpjsonServers`,
+and `enableAllProjectMcpServers` settings are not the hold: a launch with no
+terminal approves every pending Project server once the `project` source is
+on, so leaving that source off is what keeps them out. The plugins the
+person installed and enabled in home settings load whenever the launch reads
+them: the SDK's `plugins` option, which Octant leaves empty, only adds
+session plugin folders, and Claude Code loads every plugin its merged
+settings enable. A plugin's hooks follow the hooks switch (`disableAllHooks`
+holds them in Chat and Plan), and its MCP servers follow the tool-server
+switch. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
@@ -143,10 +159,11 @@ OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every
-level. The provider's own memory is off unless the person turns on its
-setting for that provider account, which is off by default (maintainer
-request, 2026-11-12; built for Claude Code and Codex in Work and Code, with
-Plan kept off and Chat not built yet). With it on, Claude Code launches
+level. The provider's own memory is on by default in Work and Code outside
+Plan, as in the provider's own app, and the person turns it off per
+provider account (maintainer decision, 2026-11-14; the account stores only
+the off, as `ownMemory: false`, and an older stored `true` reads as on).
+Plan and Chat keep it off. With it on, Claude Code launches
 without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` and Codex's app-server starts
 without the `features.memories=false` override, on a process of its own;
 OpenCode and Mistral Vibe have no such memory and no setting
@@ -490,9 +507,10 @@ publish, the mapper attaches both to the call's `tool-success` as
 `published`, and the call is reported as outside
 content (`hosted-tool`), because claude.ai's answer reaches the model. The
 same probe showed that
-`strictMcpConfig: true`, which every Octant query sets, keeps the account's
-claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
-option is absent) out of the session. The decoder tolerates the narrower list
+`strictMcpConfig: true`, which a query sets while the account's tool servers
+are off, keeps the account's claude.ai connectors (listed by 2.1.304 with
+`settingSources: []` when the option is absent) out of the session; with the
+tool servers on they start as the account's own servers. The decoder tolerates the narrower list
 (the runtime may drop a requested tool, never add one the launch does not
 allow), so a launch that lacks a requested tool still runs.
 
@@ -508,16 +526,14 @@ names a withheld tool:
 | Withheld                                  | Why                                                                                                                                                                                                                     |
 | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `EnterPlanMode`, `ExitPlanMode`           | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below)                                                                                 |
-| `EnterWorktree`, `ExitWorktree`           | The thread is bound to one checkout                                                                                                                                                                                     |
 | `Workflow`                                | A workflow's agents report under the `Workflow` call rather than an `Agent` call, so the child-run display cannot show them, and the decoder refuses `local_workflow` task frames                                       |
 | `CronCreate`, `ScheduleWakeup`            | Each wakes the model at a later time. A session lasts one turn, so a wake-up kept in memory never fires and the call's success would be untrue; a durable one is written to the Project's Claude files and fires unseen |
-| `REPL`                                    | Runs code in the runtime process, outside the command sandbox and the secret guard                                                                                                                                      |
 | `Agent`, `WebSearch`, `WebFetch`, `Skill` | Only while the person's own setup has that feature off                                                                                                                                                                  |
 | `Artifact`                                | Unless the session offers Claude artifacts                                                                                                                                                                              |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
-inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits held
-to the Project and the secret guard, and `Bash`, `Monitor`, `TaskOutput`,
+inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
+against the Project's folders and the secret guard below Full access (a path outside those folders asks; see below), and `Bash`, `Monitor`, `TaskOutput`,
 and `TaskStop` take the shell's approval rules; a `Monitor` command, like a
 `Bash` one, is named in its prompt and marks the thread when it reaches a
 server. Session-internal tools that read
@@ -589,6 +605,69 @@ turn ends. The person accepts the plan by moving the thread out of Plan, so
 Plan stays read-only throughout. Octant's thread plan (the person's
 structured proposal) has no path from a provider, so the plan stays reply
 text (not built yet: a provider-proposed thread plan).
+
+`EnterWorktree`, `ExitWorktree`, and `REPL` left the withheld list
+(maintainer decision, 2026-11-14) and take the rule for a tool the gate has
+no rule of its own for, which is the shell's: Guarded asks, Reviewed's
+reviewer decides, Full access runs without asking. Plan withholds all three.
+
+- `REPL` runs code in Claude's own process, outside the command sandbox and
+  the secret guard. Its start carries a journaled `tool-progress` note that
+  marks the call unsandboxed.
+- A worktree switch moves the session's working directory. Without `path`,
+  Claude Code 2.1.211 creates the worktree under `.claude/worktrees/` of the
+  repository that holds the working directory. The gate accepts a call from
+  that directory when it lies inside the Project's folders, or inside a
+  worktree outside them that the session was let into: once a switch into a
+  worktree outside the Project's folders is allowed (the person or the
+  reviewer below Full access, unasked at Full access), the session holds it,
+  and calls there meet the same rules as the Project's, the secret guard
+  included. A worktree a configured hook creates elsewhere is not known
+  before the call, so calls from it are refused. The command sandbox's
+  folders are fixed at launch, so below Full access a command cannot write in
+  an outside worktree.
+- The thread stays bound to its checkout. Octant's file views, diffs, and
+  change review stay on the original checkout: the switch's start carries a
+  journaled `tool-progress` notice that says so. A worktree inside the Project
+  shows its files under the worktree's folder there; an edit in a worktree
+  outside it is journaled as its tool step with no file change or diff.
+
+At Full access the file gate allows any path, outside the Project's folders
+and the secret guard's list included, as Claude Code does on its own
+(maintainer decision, 2026-11-14); an edit outside the checkout is journaled
+as its tool step with no file change or diff. Below it, a file tool call
+(`Read`, `Edit`, `Write`, `NotebookEdit`, `Glob`, `Grep`, or any tool that
+names a path) whose target is outside the Project's folders asks through the
+gate at Guarded and Accept edits and goes to the reviewer at Reviewed, as
+Claude Code asks on its own (maintainer decision, 2026-11-14): a read there
+never runs unasked and Accept edits never waives an edit there, and an
+approved edit there is journaled as its tool step with no file change. Every
+secret-path refusal stays below Full access, so a protected file outside the
+Project is refused, not asked. Plan refuses an outside path, since Plan cannot
+approve anything; a Full access thread that kept its sandbox keeps the
+Project's folders; and an Artifact publish stays held to the Project. A shell
+command's folder is still checked against the Project's folders, and the
+command sandbox keeps its own folders, so below Full access a sandboxed shell
+command cannot reach an outside folder. Redaction of logs, the journal, and
+exports applies at every level.
+
+Below Full access Claude's command sandbox lets a command out the way Claude
+Code does on its own (maintainer decision, 2026-11-14): the launch sets
+`sandbox.allowUnsandboxedCommands: true` (the bundled SDK 0.3.211 and Claude
+Code 2.1.211 name it so; when false the runtime ignores the flag), and a
+`Bash` call with `dangerouslyDisableSandbox: true` runs outside it. Every
+such command asks through the gate at Guarded and Accept edits and goes to
+the reviewer at Reviewed, who sees the flag among the judged fields; a
+remembered answer never covers one, so each asks again. Its start is
+journaled with an "Unsandboxed" notice. Plan refuses it, since Plan's
+commands never leave its sandbox: the flag is set only at Guarded, Accept
+edits and Reviewed, a Plan launch carries no Claude sandbox at all (its
+commands run inside Octant's own profile, where no flag reaches), and the
+SDK port refuses a Plan or Full access launch whose sandbox would let a
+command out, so the hook's refusal is not the only guard. Ordinary commands stay sandboxed, the
+secret-path refusals still apply to the file tools, and at Full access
+nothing changes: no command is sandboxed there, and a thread that kept its
+sandbox at Full access keeps `allowUnsandboxedCommands: false`.
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a

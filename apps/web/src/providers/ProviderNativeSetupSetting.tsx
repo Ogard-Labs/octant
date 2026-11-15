@@ -97,17 +97,17 @@ export interface ProviderOwnMemorySettingProps {
     readonly id: string;
     readonly displayName: string;
     readonly driverKind: OwnMemoryProviderDriverKind;
-    readonly ownMemory?: true;
+    readonly ownMemory?: boolean;
   };
   readonly disabled: boolean;
   readonly onChange: (enabled: boolean) => Promise<boolean>;
 }
 
 /**
- * The person's switch for one Claude Code or Codex account's own memory, off
+ * The person's switch for one Claude Code or Codex account's own memory, on
  * by default and apart from "Run as itself": that switch and Full access never
- * turn memory on. The text says what Octant does not control once it is on,
- * and where it stays off. Only a window on this host may change it (the
+ * turn memory on once the person turned it off. The text says what Octant does
+ * not control while it is on, and where it stays off. Only a window on this host may change it (the
  * server refuses others).
  */
 export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
@@ -117,10 +117,11 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
     <SettingRow
       description={
         <>
-          Lets {name} keep and use its own memory in this account’s Work and Code threads. {name}{" "}
-          decides what it remembers and carries it across Projects; Octant does not show, journal,
-          or clear it. It stays off in Plan and in Chat. Octant’s Project memory and its memory of
-          you work with this off. {name}’s telemetry and self-update stay off either way.
+          Lets {name} keep and use its own memory in this account’s Work and Code threads, as in{" "}
+          {name} itself. On by default. {name} decides what it remembers and carries it across
+          Projects; Octant does not show, journal, or clear it. It stays off in Plan and in Chat.
+          Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
+          self-update stay off either way.
         </>
       }
       label={`Use ${name}’s own memory`}
@@ -128,7 +129,7 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
       settingId={`provider-${props.instance.id}-own-memory`}
     >
       <OctantSwitch
-        checked={props.instance.ownMemory === true}
+        checked={props.instance.ownMemory !== false}
         describedBy={`${settingId}-description`}
         disabled={props.disabled}
         label={`Use ${props.instance.displayName}’s own memory`}

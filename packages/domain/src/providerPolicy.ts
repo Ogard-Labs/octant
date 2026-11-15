@@ -1998,7 +1998,8 @@ export function setProviderOwnMemory(
   const { ownMemory: _previous, ...rest } = current;
   return {
     ...rest,
-    ...(input.enabled ? { ownMemory: true as const } : {}),
+    // On is the default and needs no field; only the person's off is kept.
+    ...(input.enabled ? {} : { ownMemory: false as const }),
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };

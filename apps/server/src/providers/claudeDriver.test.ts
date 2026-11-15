@@ -10,14 +10,14 @@ import {
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
 import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +32,7 @@ import type {
 import {
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   claudeExecutionOptions,
+  claudeSandboxSettings,
   claudeFileToolSecretRefusal,
   claudeSearchesRunUnguarded,
   makeClaudeDriver,
@@ -821,17 +822,13 @@ describe("Claude execution policy", () => {
         await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
         const open = f.opens[0]!;
         expect(open.withheldTools).toEqual(
-          expect.arrayContaining([
-            "EnterPlanMode",
-            "EnterWorktree",
-            "Workflow",
-            "CronCreate",
-            "ScheduleWakeup",
-            "REPL",
-          ]),
+          expect.arrayContaining(["EnterPlanMode", "Workflow", "CronCreate", "ScheduleWakeup"]),
         );
         // A background command or a command watch is held inside its turn.
         expect(open.withheldTools).not.toContain("Monitor");
+        for (const lifted of ["EnterWorktree", "ExitWorktree", "REPL"]) {
+          expect(open.withheldTools).not.toContain(lifted);
+        }
         // With the person's setup off, its features stay withheld too.
         expect(open.withheldTools).toEqual(
           expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill", "Artifact"]),
@@ -882,10 +879,17 @@ describe("Claude execution policy", () => {
             "outside-notebook",
           ),
         ).resolves.toMatchObject({
-          behavior: executionPolicy === "full-access" ? "allow" : "deny",
+          behavior: executionPolicy === "full-access" ? "allow" : "ask",
         });
-        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toMatchObject({
-          behavior: "deny",
+        // A worktree switch and in-process code take the shell's rules.
+        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("ExitWorktree", { action: "keep" }, "exit-worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("REPL", { code: "1 + 1" }, "repl")).resolves.toEqual({
+          behavior: asked,
         });
       } finally {
         await acquired.close();
@@ -899,20 +903,113 @@ describe("Claude execution policy", () => {
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
       const open = plan.opens[0]!;
-      // Plan keeps its own read-only list and nothing beyond it.
+      // Plan keeps its own read-only list and nothing beyond it: no worktree
+      // switch and no in-process code.
       expect(open.withheldTools).toBeUndefined();
-      await expect(
-        open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "FutureTool",
-          input: {},
-          toolUseId: "plan-future",
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ behavior: "deny" });
+      for (const [toolName, input] of [
+        ["FutureTool", {}],
+        ["EnterWorktree", { name: "x" }],
+        ["ExitWorktree", { action: "keep" }],
+        ["REPL", { code: "1 + 1" }],
+      ] as const) {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId: `plan-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
     } finally {
       await acquired.close();
+    }
+  });
+
+  it("follows Claude into a worktree outside the Project only once the switch is allowed", async () => {
+    const worktree = "/tmp/octant-claude-worktrees/feature";
+    for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const tool = (
+          toolName: string,
+          input: Record<string, unknown>,
+          toolUseId: string,
+          cwd = projectRoot,
+        ) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot: cwd,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const readThere = { file_path: `${worktree}/src/a.ts` };
+        // Before any switch, a call from that folder is outside the Project.
+        await expect(tool("Read", readThere, "early", worktree)).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        if (executionPolicy === "approval-gated") {
+          // A worktree outside the Project's folders asks below Full access,
+          // and asking grants nothing yet.
+          await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+            behavior: "ask",
+          });
+          await expect(tool("Read", readThere, "unanswered", worktree)).resolves.toMatchObject({
+            behavior: "deny",
+          });
+          continue;
+        }
+        await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(tool("Read", readThere, "after", worktree)).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(
+          tool("Bash", { command: "git status" }, "shell-after", worktree),
+        ).resolves.toEqual({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("drops the secret refusals at Full access and keeps them at every posture below it", async () => {
+    const protectedFile = join(homedir(), ".aws", "credentials");
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const answer = await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: protectedFile },
+          toolUseId: `secret-${executionPolicy}`,
+          signal: new AbortController().signal,
+        });
+        if (executionPolicy === "full-access") {
+          // Full access reads any file, outside the Project and protected ones too.
+          expect(answer).toEqual({ behavior: "allow" });
+        } else {
+          expect(answer).toMatchObject({ behavior: "deny" });
+          expect(answer.behavior === "deny" ? answer.message : "").toContain(
+            "Cloud command-line credentials",
+          );
+        }
+      } finally {
+        await acquired.close();
+      }
     }
   });
 
@@ -1033,6 +1130,22 @@ describe("Claude execution policy", () => {
     },
   );
 
+  it("lets a command out of Claude's sandbox only at Guarded and Reviewed, never in Plan or a Full access sandbox", () => {
+    expect(claudeSandboxSettings("approval-gated", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(claudeSandboxSettings("auto-accept-edits", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(
+      claudeSandboxSettings("full-access", projectRoot, [], undefined, true)
+        ?.allowUnsandboxedCommands,
+    ).toBe(false);
+    // Plan's commands run inside Octant's own profile, with no escape of Claude's to allow.
+    expect(claudeSandboxSettings("plan", projectRoot)).toBeUndefined();
+    expect(claudeSandboxSettings("plan", projectRoot, [], undefined, true)).toBeUndefined();
+  });
+
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
     for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {
       const f = harness();
@@ -1044,7 +1157,7 @@ describe("Claude execution policy", () => {
           ? {
               enabled: true,
               failIfUnavailable: true,
-              allowUnsandboxedCommands: false,
+              allowUnsandboxedCommands: true,
               autoAllowBashIfSandboxed: false,
               filesystem: {
                 denyRead: ["/"],
@@ -1161,8 +1274,9 @@ describe("Claude execution policy", () => {
       await expect(read(`${extraFolder}/today.md`, "extra")).resolves.toEqual({
         behavior: "allow",
       });
-      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toMatchObject({
-        behavior: "deny",
+      // A folder beside it is outside the Project's folders, so it asks.
+      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toEqual({
+        behavior: "ask",
       });
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -1837,7 +1951,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-outside",
         signal,
       }),
-    ).resolves.toMatchObject({ behavior: "deny" });
+    ).resolves.toEqual({ behavior: "ask" });
     await gatedConnection.close();
   });
 
@@ -1977,6 +2091,164 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
+  it("asks before a file outside the Project below Full access, runs it at Full access, and refuses it in Plan", async () => {
+    const outside = { file_path: "/tmp/octant-claude-outside/notes.md" };
+    const protectedOutside = { file_path: join(homedir(), ".ssh", "id_ed25519") };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+      "plan",
+    ] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const pre = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const read = await pre("Read", outside, "outside-read");
+        if (executionPolicy === "full-access") {
+          expect(read).toEqual({ behavior: "allow" });
+          continue;
+        }
+        if (executionPolicy === "plan") {
+          expect(read).toMatchObject({ behavior: "deny" });
+          continue;
+        }
+        expect(read).toEqual({ behavior: "ask" });
+        const approvalEvent = Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+          ),
+        );
+        // A protected file outside the Project is still refused, not asked.
+        await expect(pre("Read", protectedOutside, "outside-secret")).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        // A shell command's folder stays the command sandbox's to hold.
+        await expect(
+          pre("Bash", { command: "ls", cwd: "/tmp/octant-claude-outside" }, "outside-shell"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        // The read raises a card rather than running unasked, as a read inside
+        // the Project would, at Accept edits too.
+        const callback = open.canUseTool({
+          toolName: "Read",
+          input: outside,
+          toolUseId: "outside-read",
+          signal,
+        });
+        const first = await Promise.race([
+          approvalEvent.then((event) => ({ kind: "approval" as const, event })),
+          callback.then(() => ({ kind: "decision" as const })),
+        ]);
+        expect(first.kind).toBe("approval");
+        const raised = first.kind === "approval" ? Option.getOrUndefined(first.event) : undefined;
+        if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("asks about every command that leaves Claude's sandbox below Full access and refuses one in Plan", async () => {
+    const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "auto-accept-edits" }),
+      );
+      const open = f.opens[0]!;
+      // Ordinary commands stay in the sandbox; the runtime may let one out.
+      expect(open.sandbox).toMatchObject({
+        enabled: true,
+        allowUnsandboxedCommands: true,
+        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+      });
+      const signal = new AbortController().signal;
+      const approvals: Array<{ readonly requestId: string }> = [];
+      const watched = Effect.runFork(
+        Stream.runForEach(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+          (event) =>
+            Effect.sync(() => {
+              if (event.kind === "approval-request") approvals.push(event);
+            }),
+        ),
+      );
+      const run = async (toolUseId: string) => {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Bash",
+            input: escaped,
+            toolUseId,
+            signal,
+          }),
+        ).resolves.toEqual({ behavior: "ask" });
+        const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
+        await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
+        const raised = approvals.shift();
+        if (raised === undefined) throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      };
+      await run("escape-1");
+      // A remembered answer never carries over to a command that leaves the sandbox.
+      await run("escape-2");
+      await Effect.runPromise(Fiber.interrupt(watched));
+    } finally {
+      await acquired.close();
+    }
+    const plan = harness();
+    const planConnection = await acquire(plan.driver, "code");
+    try {
+      await Effect.runPromise(
+        planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      await expect(
+        plan.opens[0]!.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: escaped,
+          toolUseId: "plan-escape",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      await planConnection.close();
+    }
+  });
+
   it.each([
     ["approval-gated", false],
     ["approval-gated", true],
@@ -2086,7 +2358,7 @@ describe("Claude execution policy", () => {
     expect(open.sandbox).toMatchObject({
       enabled: true,
       failIfUnavailable: true,
-      allowUnsandboxedCommands: false,
+      allowUnsandboxedCommands: true,
       autoAllowBashIfSandboxed: false,
     });
     await Effect.runPromise(
@@ -3957,9 +4229,8 @@ describe("Claude artifact delivery", () => {
       expect(open.tools).toEqual(
         expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill"]),
       );
-      // The account's own MCP servers cannot start without a Project's, so
-      // the driver leaves them off rather than claim them.
-      expect(open.nativeSetup).toEqual({ ...ownSetup, toolServers: false });
+      // The account's own MCP servers start in an untrusted Project too.
+      expect(open.nativeSetup).toEqual(ownSetup);
       // Only the guard that kept Claude Code's own subagents off goes.
       expect(open.authEnvironment).not.toHaveProperty("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS");
       const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _subagentsOff, ...channelGuards } =
@@ -3989,9 +4260,9 @@ describe("Claude artifact delivery", () => {
           behavior: "ask",
         },
       );
-      // An MCP server's tool is not held without the trusted Project's code.
-      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toMatchObject({
-        behavior: "deny",
+      // The account's own MCP server's tool asks at Guarded.
+      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toEqual({
+        behavior: "ask",
       });
     } finally {
       await acquired.close();

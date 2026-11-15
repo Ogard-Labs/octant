@@ -92,12 +92,21 @@ const DECODED_MESSAGE_KINDS = new Set([
   "ignored",
 ]);
 
-interface ClaudeFileChange {
-  readonly path: string;
-  readonly change: "modified";
-  readonly diff: string;
-  readonly successSummary: string;
-}
+/**
+ * What an Edit or Write call changes. `outside` is a file outside the
+ * thread's checkout, which the gate lets through only at Full access or in a
+ * worktree the session was let into: it is journaled as the tool step it is,
+ * with no file change or diff the checkout's views would show as theirs.
+ */
+type ClaudeFileChange =
+  | {
+      readonly kind: "checkout";
+      readonly path: string;
+      readonly change: "modified";
+      readonly diff: string;
+      readonly successSummary: string;
+    }
+  | { readonly kind: "outside"; readonly successSummary: string };
 
 export interface ClaudeToolState {
   readonly toolCallId: string;
@@ -108,6 +117,8 @@ export interface ClaudeToolState {
   fileChange?: ClaudeFileChange;
   /** A task tool call's input, applied with its result once that arrives. */
   taskInput?: { readonly [key: string]: ClaudeJsonValue };
+  /** The start's journaled notice, once one went out. */
+  noticed?: true;
 }
 
 export interface ClaudeRequestCorrelation {
@@ -474,6 +485,42 @@ function jsonString(
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * The note journaled on the start of a tool whose effect the thread's views
+ * do not follow, so the record says so where the call is.
+ *
+ * - `REPL` runs code in Claude's own process: outside the command sandbox
+ *   that holds every shell command below Full access, and outside the secret
+ *   guard's file checks.
+ * - A `Bash` call with `dangerouslyDisableSandbox` leaves that sandbox, which
+ *   the gate asked about first.
+ * - `EnterWorktree` and `ExitWorktree` move the session's working directory.
+ *   A thread is bound to one checkout, and its file views and diffs stay on
+ *   it; a worktree inside the Project still shows its files under the
+ *   worktree's own folder there.
+ */
+function toolStartNotice(
+  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
+): string | undefined {
+  switch (content.toolName) {
+    case "REPL":
+      return "Unsandboxed: runs code in Claude's own process, outside the command sandbox and the secret guard.";
+    case "Bash":
+      return content.input.dangerouslyDisableSandbox === true
+        ? "Unsandboxed: this command runs outside Claude's command sandbox."
+        : undefined;
+    case "EnterWorktree": {
+      const named = jsonString(content.input, "path") ?? jsonString(content.input, "name");
+      const target = named === undefined ? undefined : normalized(named, SUMMARY_MAX_CHARACTERS);
+      return `This call moves Claude's session into a worktree${target === undefined ? "" : ` (${target})`}. The thread's file views and diffs stay on its original checkout.`;
+    }
+    case "ExitWorktree":
+      return "This call moves Claude's session back to the thread's checkout.";
+    default:
+      return undefined;
+  }
+}
+
 function contentShape(value: string): string {
   const lines = value.split("\n").length;
   const characters = Array.from(value).length;
@@ -486,13 +533,20 @@ function fileChange(
 ): ClaudeFileChange | undefined {
   if (content.toolName !== "Edit" && content.toolName !== "Write") return undefined;
   const pathValue = jsonString(content.input, "file_path");
-  const path = pathValue === undefined ? undefined : confinedRelativePath(context, pathValue);
-  if (path === undefined) return undefined;
+  if (pathValue === undefined) return undefined;
+  // A path outside the checkout is the gate's to authorize: it asks there
+  // below Full access, so one approved reaches here. It is journaled as a tool
+  // step with no file change, since the thread's views stay on the checkout.
+  const path = confinedRelativePath(context, pathValue);
   if (content.toolName === "Edit") {
     const previous = jsonString(content.input, "old_string");
     const replacement = jsonString(content.input, "new_string");
     if (previous === undefined || replacement === undefined) return undefined;
+    if (path === undefined) {
+      return { kind: "outside", successSummary: "File edit completed outside the checkout." };
+    }
     return {
+      kind: "checkout",
       path,
       change: "modified",
       diff: truncate(
@@ -504,7 +558,11 @@ function fileChange(
   }
   const replacement = jsonString(content.input, "content");
   if (replacement === undefined) return undefined;
+  if (path === undefined) {
+    return { kind: "outside", successSummary: "File write completed outside the checkout." };
+  }
   return {
+    kind: "checkout",
     path,
     change: "modified",
     diff: truncate(
@@ -620,7 +678,23 @@ function mapToolUse(
       ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
       : [];
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
-  if (!resolved.created) return withoutIgnored(inputContent());
+  if (!resolved.created) {
+    // A streamed start carried no input, so a notice that depends on it (a
+    // command leaving the sandbox) is journaled when the whole input comes,
+    // under the start that already went out.
+    const late =
+      authoritativeInput && resolved.state.noticed !== true ? toolStartNotice(content) : undefined;
+    if (late === undefined) return withoutIgnored(inputContent());
+    resolved.state.noticed = true;
+    return [
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: late,
+      }),
+    ];
+  }
   // A shell command rides on the tool's start only when it reaches a server,
   // so the command can be journaled with its host as Octant Shield's record
   // of it; the start of any other command names the tool and nothing more.
@@ -650,6 +724,19 @@ function mapToolUse(
         ...(task === undefined ? {} : { task }),
         status: "starting",
         summary: "Claude started a subagent.",
+      }),
+    ];
+  }
+  const notice = toolStartNotice(content);
+  if (notice !== undefined) {
+    resolved.state.noticed = true;
+    return [
+      start,
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: notice,
       }),
     ];
   }
@@ -966,6 +1053,16 @@ function mapToolResults(
           kind: "tool-failure",
           toolCallId: state.toolCallId,
           message: "Tool failed.",
+        }),
+      );
+      continue;
+    }
+    if (state.fileChange?.kind === "outside") {
+      results.push(
+        event(context, {
+          kind: "tool-success",
+          toolCallId: state.toolCallId,
+          summary: state.fileChange.successSummary,
         }),
       );
       continue;

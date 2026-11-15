@@ -1013,15 +1013,18 @@ export const OWN_MEMORY_PROVIDER_DRIVER_KINDS = [
 export type OwnMemoryProviderDriverKind = (typeof OWN_MEMORY_PROVIDER_DRIVER_KINDS)[number];
 
 /**
- * A Claude Code or Codex account the person let keep the provider's own
- * memory: the runtime reads and writes it by its own rules, across Projects
- * and outside Octant's journal, in the account's Work and Code sessions
- * outside Plan. Absent is off. Only `set-provider-own-memory`, sent from a
- * window on this host, changes it; "Run as itself" and Full access never do.
+ * Whether a Claude Code or Codex account keeps the provider's own memory: the
+ * runtime reads and writes it by its own rules, across Projects and outside
+ * Octant's journal, in the account's Work and Code sessions outside Plan.
+ * Absent is on, the default (maintainer decision, 2026-11-14); `false` means
+ * the person turned it off for this account. An earlier default kept it off
+ * until the person turned it on, so a record may still carry `true`, which
+ * reads as on. Only `set-provider-own-memory`, sent from a window on this
+ * host, changes it; "Run as itself" and Full access never do.
  */
 const OwnMemoryProviderInstanceFields = {
   ...KeyProviderInstanceFields,
-  ownMemory: Schema.optional(Schema.Literal(true)),
+  ownMemory: Schema.optional(Schema.Boolean),
 } as const;
 
 export const OpenCodeProviderInstance = Schema.Struct({

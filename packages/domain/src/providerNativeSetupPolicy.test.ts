@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountKeepsOwnMemory,
   providerNativeSetupIsOn,
   providerOwnMemoryLaunches,
   resolveProviderNativeSetup,
@@ -219,7 +220,14 @@ describe("a key provider running as itself", () => {
 });
 
 describe("a provider's own memory", () => {
-  it("launches in Work and Code only when the person turned the account's setting on", () => {
+  it("is on for an account the person never turned off, and off once they did", () => {
+    expect(accountKeepsOwnMemory({})).toBe(true);
+    // An earlier default stored the person's on as `true`.
+    expect(accountKeepsOwnMemory({ ownMemory: true })).toBe(true);
+    expect(accountKeepsOwnMemory({ ownMemory: false })).toBe(false);
+  });
+
+  it("launches in Work and Code unless the person turned the account's setting off", () => {
     for (const mode of ["work", "code"] as const) {
       for (const executionPolicy of [
         "approval-gated",
