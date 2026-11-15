@@ -144,7 +144,9 @@ describe("chooseWorkerModel", () => {
     for (const [fact, reason] of blocked) {
       const choice = picked(chooseWorkerModel(standard, facts({ sonnet: fact }), request()));
       expect(choice.candidate).toEqual(astra);
-      expect(choice.passedOver).toEqual([{ candidate: sonnet, role: "default", reasons: [reason] }]);
+      expect(choice.passedOver).toEqual([
+        { candidate: sonnet, role: "default", reasons: [reason] },
+      ]);
     }
   });
 
@@ -182,16 +184,27 @@ describe("chooseWorkerModel", () => {
 
   it("climbs one tier for a retry and never goes down", () => {
     expect(
-      picked(chooseWorkerModel(standard, facts(), request({ size: "quick", retries: { role: "quick" } })))
-        .role,
+      picked(
+        chooseWorkerModel(
+          standard,
+          facts(),
+          request({ size: "quick", retries: { role: "quick" } }),
+        ),
+      ).role,
     ).toBe("default");
     expect(
-      picked(chooseWorkerModel(standard, facts(), request({ size: "quick", retries: { role: "default" } })))
-        .role,
+      picked(
+        chooseWorkerModel(
+          standard,
+          facts(),
+          request({ size: "quick", retries: { role: "default" } }),
+        ),
+      ).role,
     ).toBe("deep");
     expect(
-      picked(chooseWorkerModel(standard, facts(), request({ size: "quick", retries: { role: "deep" } })))
-        .role,
+      picked(
+        chooseWorkerModel(standard, facts(), request({ size: "quick", retries: { role: "deep" } })),
+      ).role,
     ).toBe("deep");
     expect(
       picked(chooseWorkerModel(standard, facts(), request({ size: "quick", retries: {} }))).role,
@@ -212,7 +225,11 @@ describe("chooseWorkerModel", () => {
         request({ size: "quick" }),
       ),
     );
-    expect(choice).toMatchObject({ role: "quick", candidate: sonnet, rank: { borrowed: "default" } });
+    expect(choice).toMatchObject({
+      role: "quick",
+      candidate: sonnet,
+      rank: { borrowed: "default" },
+    });
     expect(choice.passedOver.map((verdict) => verdict.candidate)).toEqual([haiku, glm]);
   });
 
@@ -262,7 +279,11 @@ describe("chooseWorkerModel", () => {
   it("starts an explicit role with its why", () => {
     expect(
       picked(
-        chooseWorkerModel(standard, facts(), request({ role: "hard-problems", why: "cross-package" })),
+        chooseWorkerModel(
+          standard,
+          facts(),
+          request({ role: "hard-problems", why: "cross-package" }),
+        ),
       ),
     ).toMatchObject({ role: "deep", candidate: opus });
   });
@@ -272,7 +293,9 @@ describe("chooseWorkerModel", () => {
     expect(handles.map((entry) => entry.handle)).toEqual(["b1", "b2", "b3", "b4", "b5"]);
     const astraHandle = handles.find((entry) => entry.candidate === astra)?.handle;
     expect(
-      picked(chooseWorkerModel(standard, facts(), request({ model: astraHandle, why: "long context" }))),
+      picked(
+        chooseWorkerModel(standard, facts(), request({ model: astraHandle, why: "long context" })),
+      ),
     ).toMatchObject({ candidate: astra, rank: "chosen" });
     const refused = chooseWorkerModel(
       standard,
@@ -284,9 +307,9 @@ describe("chooseWorkerModel", () => {
       reason: "model-not-eligible",
       perCandidate: [{ candidate: astra, reasons: ["at-usage-limit"] }],
     });
-    expect(
-      chooseWorkerModel(standard, facts(), request({ model: "b99", why: "x" })),
-    ).toMatchObject({ kind: "refused", reason: "model-not-eligible" });
+    expect(chooseWorkerModel(standard, facts(), request({ model: "b99", why: "x" }))).toMatchObject(
+      { kind: "refused", reason: "model-not-eligible" },
+    );
   });
 
   it("turns a start in an ask-first role into a proposal, a retry that climbs into one included", () => {
@@ -297,9 +320,9 @@ describe("chooseWorkerModel", () => {
     ]);
     expect(chooseWorkerModel(asking, facts(), request({ size: "hard" })).kind).toBe("propose");
     expect(chooseWorkerModel(asking, facts(), request()).kind).toBe("start");
-    expect(
-      chooseWorkerModel(asking, facts(), request({ retries: { role: "default" } })).kind,
-    ).toBe("propose");
+    expect(chooseWorkerModel(asking, facts(), request({ retries: { role: "default" } })).kind).toBe(
+      "propose",
+    );
   });
 
   it("never returns a model outside the roles", () => {
@@ -312,7 +335,8 @@ describe("chooseWorkerModel", () => {
       for (const task of tasks) {
         for (const down of [{}, { sonnet: { notReady: "provider-down" as const } }]) {
           const choice = chooseWorkerModel(standard, facts(down), request({ size, task }));
-          if (choice.kind !== "refused") expect(listed.has(String(choice.candidate.modelId))).toBe(true);
+          if (choice.kind !== "refused")
+            expect(listed.has(String(choice.candidate.modelId))).toBe(true);
         }
       }
     }

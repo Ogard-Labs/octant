@@ -7,7 +7,9 @@ import type { SubagentWorkerThread } from "./AgentHierarchyPanel";
  * the role's main model (docs/design/workspace.md, Coordinators): the
  * coordinator's reason for an override, else the host's reason for a fallback.
  */
-export function coordinatorChoiceNote(choice: CoordinatorWorkerChoice | undefined): string | undefined {
+export function coordinatorChoiceNote(
+  choice: CoordinatorWorkerChoice | undefined,
+): string | undefined {
   if (choice === undefined) return undefined;
   if (choice.why !== undefined) return `chosen: ${choice.why}`;
   if (choice.rank === "person") return "chosen by you";

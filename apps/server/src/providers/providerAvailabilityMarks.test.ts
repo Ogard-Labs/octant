@@ -20,7 +20,9 @@ describe("provider availability marks", () => {
   it("marks a provider down for 5 minutes after an availability failure, then tries it again", () => {
     let now = 1_000_000;
     const marks = new ProviderAvailabilityMarks({ now: () => now });
-    marks.record(event("failed", "s1", { failure: { category: "unavailable", message: "refused" } }));
+    marks.record(
+      event("failed", "s1", { failure: { category: "unavailable", message: "refused" } }),
+    );
     expect(marks.read(instance)?.downUntil).toBe(1_000_000 + 5 * 60_000);
     now += 5 * 60_000 - 1;
     expect(marks.read(instance)).toBeDefined();

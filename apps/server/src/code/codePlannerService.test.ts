@@ -353,7 +353,9 @@ describe("a coordinator's proposal chosen from the roles", () => {
       expectedVersion: 1,
       creation: { ...managedCreation(), modelId: "model-2" },
     });
-    expect(world.contexts[0]).toMatchObject({ coordinatorChoice: { role: "deep", rank: "person" } });
+    expect(world.contexts[0]).toMatchObject({
+      coordinatorChoice: { role: "deep", rank: "person" },
+    });
   });
 
   it("chooses again in the Builder role for Use Builder instead and keeps the proposal pending", async () => {

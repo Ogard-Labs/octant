@@ -812,7 +812,9 @@ describe("CoordinatorProposalCards", () => {
       />,
     );
     const card = await screen.findByRole("article", { name: "Proposed worker: Worker 01" });
-    expect(within(card).getByText("Hard problems · Opus 5.5 · a race across two services")).toBeVisible();
+    expect(
+      within(card).getByText("Hard problems · Opus 5.5 · a race across two services"),
+    ).toBeVisible();
     const builder = within(card).getByRole("button", { name: "Use Builder instead" });
     await waitFor(() => expect(builder).toBeEnabled());
     fireEvent.click(builder);

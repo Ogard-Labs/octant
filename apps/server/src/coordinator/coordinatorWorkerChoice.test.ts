@@ -84,7 +84,8 @@ const directories: string[] = [];
 const connections: SqliteConnection[] = [];
 afterEach(() => {
   for (const connection of connections.splice(0)) connection.close();
-  for (const directory of directories.splice(0)) rmSync(directory, { force: true, recursive: true });
+  for (const directory of directories.splice(0))
+    rmSync(directory, { force: true, recursive: true });
 });
 
 function countStore() {
@@ -251,7 +252,11 @@ describe("choosing a worker's model from the roles", () => {
   it("starts the role's main model and journals the choice on the worker, never the prompt", async () => {
     const h = harness(standardRoles);
     const answer = await h.service.start(start({ task: "feature", size: "normal" }));
-    expect(answer.result).toMatchObject({ status: "started", model: "sonnet name", role: "Builder" });
+    expect(answer.result).toMatchObject({
+      status: "started",
+      model: "sonnet name",
+      role: "Builder",
+    });
     expect(created(h)?.command).toMatchObject({ providerInstanceId: ANTHROPIC, modelId: "sonnet" });
     expect(created(h)?.context).toEqual({
       coordinatorThreadId: COORDINATOR,
@@ -277,7 +282,12 @@ describe("choosing a worker's model from the roles", () => {
   it("records the coordinator's why for an override", async () => {
     const h = harness(standardRoles);
     await h.service.start(
-      start({ task: "feature", size: "normal", role: "hard-problems", why: "touches three packages" }),
+      start({
+        task: "feature",
+        size: "normal",
+        role: "hard-problems",
+        why: "touches three packages",
+      }),
     );
     expect(created(h)?.context).toMatchObject({
       coordinatorChoice: { role: "deep", rank: "main", why: "touches three packages" },
@@ -341,7 +351,10 @@ describe("choosing a worker's model from the roles", () => {
 
   it("starts a review on another provider than the reviewed worker", async () => {
     const h = harness(standardRoles);
-    h.threads.set(EARLIER, codeThread(EARLIER, { coordinatorThreadId: COORDINATOR, modelId: "sonnet" }));
+    h.threads.set(
+      EARLIER,
+      codeThread(EARLIER, { coordinatorThreadId: COORDINATOR, modelId: "sonnet" }),
+    );
     await h.service.start(start({ task: "review", size: "normal", reviews: EARLIER }));
     expect(created(h)?.command).toMatchObject({ providerInstanceId: OPENAI });
   });
@@ -357,7 +370,7 @@ describe("choosing a worker's model from the roles", () => {
     expect(change?.context).toMatchObject({
       coordinatorChoice: { role: "default", rank: { fallback: 1 } },
     });
-    expect(String((change?.context as { coordinatorChoice: { reason: string } }).coordinatorChoice.reason)).toContain(
+    expect(JSON.stringify(change?.context)).toContain(
       "first request on sonnet name failed before any work",
     );
     expect(h.hostTurns).toEqual([
@@ -384,8 +397,12 @@ describe("choosing a worker's model from the roles", () => {
     expect(context).toContain(
       "Builder (builder): b1 sonnet name (Anthropic) 200k images:yes ready · fallback b2 astra name (OpenAI) 200k images:yes ready",
     );
-    expect(context).toContain("Quick edit (quick-edit): b3 haiku name (Anthropic) 200k images:yes at limit until 14:00 UTC");
-    expect(context).toContain("Track record (this coordinator, last 20): b1 1 started, 0 Done, 0 closed without Done");
+    expect(context).toContain(
+      "Quick edit (quick-edit): b3 haiku name (Anthropic) 200k images:yes at limit until 14:00 UTC",
+    );
+    expect(context).toContain(
+      "Track record (this coordinator, last 20): b1 1 started, 0 Done, 0 closed without Done",
+    );
     expect(context).not.toContain("A title an agent wrote");
     expect(context).not.toContain(PROMPT);
     expect(h.marked.size).toBe(0);

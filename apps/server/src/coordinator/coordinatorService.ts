@@ -440,7 +440,9 @@ export class CoordinatorService {
         ? {}
         : {
             retries:
-              retried.coordinatorChoice === undefined ? {} : { role: retried.coordinatorChoice.role },
+              retried.coordinatorChoice === undefined
+                ? {}
+                : { role: retried.coordinatorChoice.role },
           }),
       ...(reviewedKind === undefined ? {} : { reviewedProviderKind: reviewedKind }),
       ...(call.risk === undefined ? {} : { risk: call.risk }),
@@ -560,7 +562,9 @@ export class CoordinatorService {
       const fact = facts(candidate);
       const handle = withHandle ? `${handleOf(candidate) ?? "?"} ` : "";
       const context =
-        fact.contextTokens === undefined ? "" : ` ${String(Math.round(fact.contextTokens / 1000))}k`;
+        fact.contextTokens === undefined
+          ? ""
+          : ` ${String(Math.round(fact.contextTokens / 1000))}k`;
       return `${handle}${fact.label} (${fact.providerName})${context} images:${fact.readsImages ? "yes" : "no"} ${statusOf(fact)}`;
     };
     const lines = [
@@ -879,7 +883,8 @@ export class CoordinatorService {
    * and the person.
    */
   async #watchFirstTurns(): Promise<void> {
-    for (const [workerId, watch] of [...this.#firstTurns.entries()]) {
+    // A copy: a restart sets its worker's new watch, which this pass must not visit.
+    for (const [workerId, watch] of Array.from(this.#firstTurns)) {
       const worker = this.#ports.readThread(workerId);
       const latest = this.#ports.latestTurnId(workerId);
       if (

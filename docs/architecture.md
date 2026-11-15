@@ -3600,7 +3600,20 @@ refuses a worker or a fifth coordinator in the Project. The Code navigation and
 bootstrap reads carry `plannerThreadIds`, derived from the designation, so the
 renderer lists the planner among coordinators. The board read leaves the
 planner out like any coordinator, so the planner's own `board` read no longer
-lists its card. The rules are in
+lists its card. A worker's model comes from the person's model roles once
+Builder has a model: the coordinator names the task and size (or a role or a
+role-card handle with a reason), and the host chooses with the pure
+`chooseWorkerModel` policy, passing over models that are signed out, down, at
+a usage limit, disallowed by Project policy or data rules, or without proven
+tools; it falls back down the role's list, borrows the next tier's list when
+all are unavailable, journals the choice on the worker's record, refuses raw
+provider and model ids from the agent, and turns a start in an ask-first role
+into a proposal. With no roles set up, a worker starts on the coordinator's
+own model as before. Availability marks (5 minutes after an availability
+failure, or until a usage limit's reset) are host memory fed by the shared
+runtime-event tap, and a worker whose first request failed before any work
+starts again on the next model; a running worker keeps its model
+(maintainer decision, 2026-11-15). The rules are in
 [Coordinator threads](design/coordinator-threads.md).
 
 **The Project planner thread proposes work for a person to review.** A Code Project may

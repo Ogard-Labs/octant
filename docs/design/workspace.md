@@ -410,7 +410,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
-  Settings › Code › Coordinators holds **Starting workers** and **Open workers
+  A proposed worker's card above the coordinator's composer reads "<role> ·
+  <model> · <why>" when the roles chose its model, and offers **Use Builder
+  instead** beside Review and approve and Decline when the role is not
+  Builder. Settings › Code › Coordinators holds **Starting workers** and **Open workers
   per coordinator**, and a Code Project's overview holds its own **Starting
   workers** choice (Use Settings, Start without asking, Propose for approval)
   after the Project planner section.
@@ -418,7 +421,12 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   its own subagents: one row per worker in the window's thread list, with the
   provider's mark, the title, the thread's state in words (Working, Needs
   attention, Done, Idle), and how many subagents it handed off and how many of
-  them are working. A row opens the worker. In Graph, each worker's subagents
+  them are working. A worker whose model the roles chose also shows the
+  model's name and, when it is not the role's main model, "fallback: <the
+  host's reason>", or "chosen: <the coordinator's why>" for an override, or
+  "chosen by you" after a person changed it
+  ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
   controls are the worker's. The List and Graph switch is offered when the

@@ -5,7 +5,11 @@ import type {
   ProviderModel,
   ProviderObservedState,
 } from "@octant/contracts";
-import { isNativeHarnessDriverKind, providerCanServeModel, type WorkerCandidateFacts } from "@octant/domain";
+import {
+  isNativeHarnessDriverKind,
+  providerCanServeModel,
+  type WorkerCandidateFacts,
+} from "@octant/domain";
 import type { ProviderAvailabilityMark } from "../providers/providerAvailabilityMarks";
 
 /** One role model as the host sees it, for the choice and for the role card. */
@@ -63,7 +67,11 @@ export function coordinatorCandidateFacts(
               : "provider-down"
             : // An endpoint the harness runs may serve while degraded; an
               // agent runtime must be ready.
-              (harness ? providerCanServeModel(observed, reported.id) : observed.readiness === "ready")
+              (
+                  harness
+                    ? providerCanServeModel(observed, reported.id)
+                    : observed.readiness === "ready"
+                )
               ? undefined
               : "provider-down";
   return {
