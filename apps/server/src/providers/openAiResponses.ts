@@ -194,7 +194,15 @@ interface NormalizationState {
   /** Whether this request offered the web search tool. */
   webSearchOffered: boolean;
   /** The one built-in search this response may run. */
-  webSearch?: { id: string; query?: string; sources: Array<{ title?: string; url: string }> };
+  webSearch?: {
+    id: string;
+    query?: string;
+    sources: Array<{ title?: string; url: string }>;
+    /** Whether the search item finished, so the model has read what it found. */
+    answered: boolean;
+    /** What was last reported, so a later report carries only what is new. */
+    reported?: string;
+  };
 }
 
 interface TrackedOutputItem {
@@ -379,6 +387,9 @@ async function runResponsesTurn(
       throw protocol("The provider stream ended without a terminal response.");
     }
   } catch (error) {
+    // A response that failed, was cut off, or was stopped after its search
+    // finished still read what the search found.
+    reportWebSearch(state, input.onEvent);
     attempt.accepted = state.accepted;
     attempt.outputStarted = state.outputStarted;
     throw error;
@@ -478,21 +489,9 @@ function normalizeEvent(
       state.accepted = true;
       validateResponseState(event.response, "completed", state);
       validateTerminalItems(event.response, state);
-      if (state.webSearch !== undefined) {
-        const search = state.webSearch;
-        emit(
-          {
-            kind: "web-search",
-            sequence: allocateSequence(state),
-            searchId: search.id,
-            ...(search.query === undefined ? {} : { query: search.query }),
-            sources: search.sources,
-            citedText: [],
-          },
-          state,
-          onEvent,
-        );
-      }
+      // URL citations in the reply can name pages, or titles, the search item
+      // did not list; they are reported once the reply is whole.
+      reportWebSearch(state, onEvent);
       if (isRecord(event.response) && typeof event.response.model === "string") {
         const served = event.response.model.trim();
         if (served.length > 0 && served.length <= 256) state.servedModelId = served;
@@ -690,7 +689,7 @@ function validateOutputItem(
     return;
   }
   if (item.type === "web_search_call") {
-    validateWebSearchItem(event, item, state);
+    validateWebSearchItem(event, item, state, onEvent);
     return;
   }
   if (isToolItemType(item.type)) {
@@ -1388,18 +1387,46 @@ function validateWebSearchItem(
   event: Record<string, unknown> & { readonly type: string },
   item: Record<string, unknown>,
   state: NormalizationState,
+  onEvent: ResponsesTurnInput["onEvent"],
 ): void {
   if (!state.webSearchOffered || !isNonEmptyString(item.id)) {
     throw failure("unsupported", "The provider attempted an unsupported tool call.");
   }
   if (state.webSearch === undefined) {
-    state.webSearch = { id: item.id, sources: [] };
+    state.webSearch = { id: item.id, sources: [], answered: false };
   } else if (state.webSearch.id !== item.id) {
     throw failure("unsupported", "The provider attempted an unsupported tool call.");
   }
   state.accepted = true;
   state.outputStarted = true;
-  if (event.type === "response.output_item.done") readWebSearchAction(state.webSearch, item.action);
+  if (event.type === "response.output_item.done") {
+    readWebSearchAction(state.webSearch, item.action);
+    // Reported as soon as the search is done, so the thread is marked as
+    // having read outside content even if the response then fails.
+    state.webSearch.answered = true;
+    reportWebSearch(state, onEvent);
+  }
+}
+
+/** Report the response's finished search, or what it learned since it was last reported. */
+function reportWebSearch(state: NormalizationState, onEvent: ResponsesTurnInput["onEvent"]): void {
+  const search = state.webSearch;
+  if (search === undefined || !search.answered) return;
+  const snapshot = JSON.stringify([search.query, search.sources]);
+  if (search.reported === snapshot) return;
+  search.reported = snapshot;
+  emit(
+    {
+      kind: "web-search",
+      sequence: allocateSequence(state),
+      searchId: search.id,
+      ...(search.query === undefined ? {} : { query: search.query }),
+      sources: search.sources.map((source) => ({ ...source })),
+      citedText: [],
+    },
+    state,
+    onEvent,
+  );
 }
 
 /** The query and sources a finished search item reports, as far as they are readable. */

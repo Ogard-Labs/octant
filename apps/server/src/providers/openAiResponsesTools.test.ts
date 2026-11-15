@@ -552,7 +552,7 @@ describe("OpenAI's own web search in one response", () => {
       : {}),
   });
 
-  it("asks for the web search tool capped at one built-in call and reports the search with its sources", async () => {
+  it("asks for the web search tool capped at one built-in call and reports the search when it is done, then the titles the reply cited", async () => {
     const observed: ProtocolTurnEvent[] = [];
     const fetch = vi.fn(async () =>
       sse(
@@ -584,15 +584,42 @@ describe("OpenAI's own web search in one response", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.tools).toEqual([{ type: "web_search" }]);
     expect(body.max_tool_calls).toBe(1);
+    const reported = {
+      kind: "web-search",
+      sequence: expect.any(Number),
+      searchId: "ws_1",
+      query: "octant release",
+      citedText: [],
+    };
     expect(observed.filter((event) => event.kind === "web-search")).toEqual([
-      {
-        kind: "web-search",
-        sequence: expect.any(Number),
+      { ...reported, sources: [{ url: "https://example.com/octant" }] },
+      { ...reported, sources: [{ url: "https://example.com/octant", title: "Octant" }] },
+    ]);
+  });
+
+  it("still reports a finished search when the response then fails", async () => {
+    const observed: ProtocolTurnEvent[] = [];
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        functionCallDone(3, searchItem("ws_1", "completed")),
+        { type: "error", sequence_number: 4, code: "server_error", message: "boom" },
+      ),
+    );
+    const failure = await failureOf(
+      sendResponsesTurn({
+        ...input(fetch),
+        webSearch: true,
+        onEvent: (event) => observed.push(event),
+      }),
+    );
+    expect(failure.category).not.toBe("unsupported");
+    expect(observed.filter((event) => event.kind === "web-search")).toEqual([
+      expect.objectContaining({
         searchId: "ws_1",
-        query: "octant release",
-        sources: [{ url: "https://example.com/octant", title: "Octant" }],
-        citedText: [],
-      },
+        sources: [{ url: "https://example.com/octant" }],
+      }),
     ]);
   });
 

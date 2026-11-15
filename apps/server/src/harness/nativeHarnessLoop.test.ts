@@ -3403,6 +3403,51 @@ describe("the provider's own web search in a harness turn", () => {
     });
   });
 
+  it("marks outside content once for a search reported early and again with its citations, even when the request then fails", async () => {
+    const transport: NativeHarnessTransport = {
+      open: async () => ({
+        fits: () => true,
+        send: async (_request, stream) => {
+          const search = {
+            kind: "provider-web-search" as const,
+            searchId: "srv_1",
+            query: "octant release",
+            sources: [{ url: "https://example.com/octant", title: "Octant" }],
+          };
+          stream.onEvent({ ...search, citedText: [] });
+          stream.onEvent({ ...search, citedText: ["Octant shipped."] });
+          throw new Error("The stream broke after the search.");
+        },
+        release: () => undefined,
+      }),
+    };
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools });
+          const all = yield* Effect.fork(
+            Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+          );
+          yield* connection.send({
+            sessionId,
+            prompt: "What shipped?",
+            attachments: [],
+            tools,
+            providerWebSearch: { basicOnly: true, withdrawAfterFirstStep: true },
+          });
+          return Array.from(yield* Fiber.join(all));
+        }),
+      ),
+    );
+    expect(events.filter((event) => event.kind === "outside-content-read")).toHaveLength(1);
+    expect(events.filter((event) => event.kind === "research-started")).toHaveLength(1);
+    expect(
+      events.flatMap((event) => (event.kind === "outside-content-result" ? [event.text] : [])),
+    ).toEqual(["Octant https://example.com/octant", "Octant shipped."]);
+    expect(events.at(-1)?.kind).not.toBe("turn-completed");
+  });
+
   it("keeps offering it after a tool answer at Full access", async () => {
     const scripted = scriptedTransport([
       { text: "", toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }] },

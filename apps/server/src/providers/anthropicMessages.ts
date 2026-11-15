@@ -168,8 +168,16 @@ interface StreamState {
   /** Whether this request offered the web search server tool. */
   readonly webSearchOffered: boolean;
   /** The one built-in search this response may run, once its query block opened. */
-  webSearch?: { id: string; query?: string; sources: Array<{ title?: string; url: string }> };
+  webSearch?: {
+    id: string;
+    query?: string;
+    sources: Array<{ title?: string; url: string }>;
+    /** Whether the search's results arrived, so the model has read them. */
+    answered: boolean;
+  };
   readonly citedText: string[];
+  /** How many cited passages were already reported with the search. */
+  citedReported: number;
 }
 
 interface TrackedContentBlock {
@@ -370,18 +378,26 @@ async function runMessagesTurn(input: AnthropicMessagesTurnInput): Promise<Anthr
     toolCalls: [],
     webSearchOffered: input.webSearch === true,
     citedText: [],
+    citedReported: 0,
   };
   assertSequenceStart(state.nextSequence);
 
-  for await (const frame of decodeSse(response.body, {
-    maxFrameBytes: input.endpoint.limits.responseBodyBytes,
-    maxBufferedBytes: input.endpoint.limits.responseBodyBytes,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  })) {
-    if (state.terminal) {
-      throw protocol("The provider stream continued after its terminal event.");
+  try {
+    for await (const frame of decodeSse(response.body, {
+      maxFrameBytes: input.endpoint.limits.responseBodyBytes,
+      maxBufferedBytes: input.endpoint.limits.responseBodyBytes,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    })) {
+      if (state.terminal) {
+        throw protocol("The provider stream continued after its terminal event.");
+      }
+      normalizeEvent(parseJson(frame.data), state, input.onEvent);
     }
-    normalizeEvent(parseJson(frame.data), state, input.onEvent);
+  } catch (error) {
+    // A response that failed, was cut off, or was stopped after its search
+    // answered still read what the search found: report what was cited.
+    reportWebSearch(state, input.onEvent);
+    throw error;
   }
   if (!state.terminal) {
     throw protocol("The provider stream ended without a terminal event.");
@@ -406,7 +422,7 @@ function normalizeEvent(
       return;
     case "content_block_start":
       state.accepted = true;
-      validateContentBlockStart(event, state);
+      validateContentBlockStart(event, state, onEvent);
       return;
     case "content_block_delta":
       state.accepted = true;
@@ -423,24 +439,9 @@ function normalizeEvent(
     case "message_stop":
       state.accepted = true;
       state.terminal = true;
-      // Cited text arrives in the reply after the search's results, so the
-      // search is reported once the response is whole: before the model's
-      // next step, which is the next request.
-      if (state.webSearch !== undefined) {
-        const search = state.webSearch;
-        emit(
-          {
-            kind: "web-search",
-            sequence: allocateSequence(state),
-            searchId: search.id,
-            ...(search.query === undefined ? {} : { query: search.query }),
-            sources: search.sources,
-            citedText: state.citedText,
-          },
-          state,
-          onEvent,
-        );
-      }
+      // Cited text arrives in the reply after the search's results; what the
+      // reply cited is reported once it is whole.
+      reportWebSearch(state, onEvent);
       return;
     case "ping":
       state.accepted = true;
@@ -489,7 +490,40 @@ function validateMessageStart(event: Record<string, unknown>, state: StreamState
   }
 }
 
-function validateContentBlockStart(event: Record<string, unknown>, state: StreamState): void {
+/**
+ * Report the response's built-in search: first as soon as its results arrive,
+ * so the thread is marked as having read outside content even if the
+ * response then fails, and again with the text the reply cited since.
+ */
+function reportWebSearch(
+  state: StreamState,
+  onEvent: AnthropicMessagesTurnInput["onEvent"],
+  first = false,
+): void {
+  const search = state.webSearch;
+  if (search === undefined || !search.answered) return;
+  if (!first && state.citedText.length === state.citedReported) return;
+  const citedText = state.citedText.slice(state.citedReported);
+  state.citedReported = state.citedText.length;
+  emit(
+    {
+      kind: "web-search",
+      sequence: allocateSequence(state),
+      searchId: search.id,
+      ...(search.query === undefined ? {} : { query: search.query }),
+      sources: search.sources,
+      citedText,
+    },
+    state,
+    onEvent,
+  );
+}
+
+function validateContentBlockStart(
+  event: Record<string, unknown>,
+  state: StreamState,
+  onEvent: AnthropicMessagesTurnInput["onEvent"],
+): void {
   if (!isNonNegativeInt(event.index)) {
     throw protocol("The provider stream contained an invalid content block index.");
   }
@@ -517,7 +551,12 @@ function validateContentBlockStart(event: Record<string, unknown>, state: Stream
       isRecord(block.input) && typeof block.input.query === "string"
         ? block.input.query
         : undefined;
-    state.webSearch = { id: block.id, ...(query === undefined ? {} : { query }), sources: [] };
+    state.webSearch = {
+      id: block.id,
+      ...(query === undefined ? {} : { query }),
+      sources: [],
+      answered: false,
+    };
     state.contentBlocks.set(index, {
       index,
       type: "server_tool_use",
@@ -551,6 +590,8 @@ function validateContentBlockStart(event: Record<string, unknown>, state: Stream
       status: "in_progress",
       inputJson: "",
     });
+    state.webSearch.answered = true;
+    reportWebSearch(state, onEvent, true);
     return;
   }
   if (

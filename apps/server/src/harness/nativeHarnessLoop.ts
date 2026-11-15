@@ -230,6 +230,12 @@ interface SessionState {
    * may hold outside content a built-in query could carry out unseen.
    */
   providerWebSearchWithdrawn: boolean;
+  /**
+   * What each built-in search already brought in, by its id. The endpoint
+   * reports a search as soon as its results arrive and again with what the
+   * reply cited, so the second report adds only what is new.
+   */
+  readonly providerSearchesSeen: Map<string, Set<string>>;
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
@@ -348,6 +354,29 @@ export function createNativeHarnessConnection(
       }
       const toolCallId = `provider-web-search-${search.searchId}`.slice(0, 120);
       const query = search.query?.trim().slice(0, 1_024);
+      const seen = state.providerSearchesSeen.get(search.searchId);
+      if (seen !== undefined) {
+        // A later report of a search already marked and journaled: the
+        // Watcher reads what it adds, and each new page is cited.
+        const added = [
+          ...search.sources.map((source) =>
+            source.title === undefined ? source.url : `${source.title} ${source.url}`,
+          ),
+          ...search.citedText,
+        ].filter((line) => !seen.has(line));
+        for (const line of added) seen.add(line);
+        const text = added.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+        if (text.trim().length > 0) {
+          emit(state, {
+            kind: "outside-content-result",
+            toolCallId,
+            toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+            source: "web-search",
+            text,
+          });
+        }
+        return;
+      }
       emit(state, {
         kind: "outside-content-read",
         toolCallId,
@@ -355,14 +384,14 @@ export function createNativeHarnessConnection(
         source: "web-search",
         ...(query === undefined || query.length === 0 ? {} : { target: query }),
       });
-      const watched = [
+      const lines = [
         ...search.sources.map((source) =>
           source.title === undefined ? source.url : `${source.title} ${source.url}`,
         ),
         ...search.citedText,
-      ]
-        .join("\n")
-        .slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+      ];
+      state.providerSearchesSeen.set(search.searchId, new Set(lines));
+      const watched = lines.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
       if (watched.trim().length > 0) {
         emit(state, {
           kind: "outside-content-result",
@@ -468,6 +497,7 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       providerWebSearch: undefined,
       providerWebSearchWithdrawn: false,
+      providerSearchesSeen: new Map(),
       pending: undefined,
       answered: new Set(),
       todoTaskIds: new Map(),

@@ -804,7 +804,7 @@ describe("Anthropic's own web search in one response", () => {
     expect(JSON.stringify(body)).not.toContain("web_search_2026");
   });
 
-  it("reports the search with its query, the pages found and the text the reply cited", async () => {
+  it("reports the search as soon as its results arrive, then the text the reply cited", async () => {
     const events: unknown[] = [];
     await Effect.runPromise(
       sendAnthropicMessagesTurn({
@@ -845,16 +845,47 @@ describe("Anthropic's own web search in one response", () => {
         onEvent: (event) => events.push(event),
       }),
     );
-    expect(events.filter((event) => (event as { kind: string }).kind === "web-search")).toEqual([
-      {
-        kind: "web-search",
-        sequence: expect.any(Number),
-        searchId: "srv_1",
-        query: "octant release",
-        sources: [{ url: "https://example.com/octant", title: "Octant" }],
-        citedText: ["Octant shipped."],
-      },
+    const searches = events.filter((event) => (event as { kind: string }).kind === "web-search");
+    const reported = {
+      kind: "web-search",
+      sequence: expect.any(Number),
+      searchId: "srv_1",
+      query: "octant release",
+      sources: [{ url: "https://example.com/octant", title: "Octant" }],
+    };
+    expect(searches).toEqual([
+      { ...reported, citedText: [] },
+      { ...reported, citedText: ["Octant shipped."] },
     ]);
+    // The search is reported before any of the reply that read it.
+    expect(events.indexOf(searches[0])).toBeLessThan(
+      events.findIndex((event) => (event as { kind: string }).kind === "text-delta"),
+    );
+  });
+
+  it.each([
+    ["fails", [{ type: "error", error: { type: "api_error", message: "boom" } }]],
+    ["is cut off", []],
+  ])("still reports a search whose results arrived when the response %s", async (_, tail) => {
+    const events: unknown[] = [];
+    const exit = await Effect.runPromiseExit(
+      sendAnthropicMessagesTurn({
+        endpoint: makeEndpoint(fixture(sse([start, ...search(0, "srv_1"), ...tail]))),
+        modelId: "fixture-model",
+        history: [],
+        prompt: "what shipped?",
+        webSearch: true,
+        onEvent: (event) => events.push(event),
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        kind: "web-search",
+        searchId: "srv_1",
+        sources: [{ url: "https://example.com/octant", title: "Octant" }],
+      }),
+    );
   });
 
   it("refuses a second built-in search in the same response as unsupported", async () => {

@@ -266,7 +266,12 @@ content, costs one prompt cache miss, which is the price of keeping the rule.
 
 **Outside content.** Every successful built-in search marks the thread as
 having read outside content before the model's next step, whatever the Watcher
-finds, with the provider and the cited URLs as its source. The stream adapters
+finds, with the provider and the cited URLs as its source. The mark is made as
+soon as the search's results arrive in the stream (Anthropic's
+`web_search_tool_result`, OpenAI's finished `web_search_call`), not when the
+response ends, so a response that fails, is cut off, or is stopped after it
+searched still marks the thread; the text the reply cited is read once the
+reply ends, or as far as it got. The stream adapters
 read Anthropic's `server_tool_use` and `web_search_tool_result` blocks and
 OpenAI's `web_search_call` items with their sources and URL citations. Anthropic
 returns page text encrypted, so the Watcher reads only the titles, URLs, and
