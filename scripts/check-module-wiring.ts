@@ -667,10 +667,6 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/cloud-machines",
-    "Machines in the person's own cloud account, served by the host since 2026-11-14 ahead of any target plugin or screen that calls it (docs/design/server-projects.md, slice 2). Remove once the Server Projects screen creates and controls cloud machines.",
-  ],
-  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],

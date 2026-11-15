@@ -136,7 +136,10 @@ landed in the journal. The newest window also carries `limits`, the newest
 report per usage window among the thread's newest limit reports for the
 provider the thread is on now, and `restoreUndo`, the way back from the newest
 restore that ran (a rejected restore is passed over); earlier windows carry
-neither. The read never scans the thread from its start: it reads the newest
+neither. A turn's `failure` says why it failed, or, on a turn
+waiting at a provider usage limit, the limit and its reset, taken from the
+provider turn's journaled stop, so a client reading only the conversation (the
+phone) can offer the usage resume the host would accept. The read never scans the thread from its start: it reads the newest
 turn starts below the anchor from the thread-kind index, each page turn's own
 frames through its operation, and each older turn's last usage report; that
 last read walks every usage report the thread holds through the thread-kind

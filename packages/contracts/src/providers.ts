@@ -42,6 +42,13 @@ export const ThreadProviderHandoff = Schema.Struct({
   nextProviderInstanceId: ProviderInstanceId,
   nextModelId: ProviderModelId,
   changedAt: UtcTimestamp,
+  /**
+   * The turn this change released: the thread's latest turn had stopped on
+   * its account's usage limit, and moving off that account means the stop no
+   * longer holds the thread. The turn keeps its limit in history; the queue,
+   * the host's admission and the composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 
@@ -971,15 +978,18 @@ const ProviderInstanceFields = {
 } as const;
 
 /**
- * A key provider account the person let run as itself: its own subagents,
- * web tools, skills, and home configuration load in its threads at Guarded
- * and Reviewed, as they do at Full access. Absent is off. Only
- * `set-provider-native-setup`, sent from a window on this host, changes it; a
- * configuration change or a new account never carries it.
+ * Whether a key provider account runs as itself: its own subagents, web
+ * tools, skills, and home configuration load in its threads at every level,
+ * as they do in the provider's own app. Absent is on, the default; `false`
+ * means the person turned it off for this account. An earlier default kept it
+ * off until the person turned it on, so a record may still carry `true`,
+ * which reads as on. Only `set-provider-native-setup`, sent from a window on
+ * this host, changes it; a configuration change or a new account never
+ * carries it.
  */
 const KeyProviderInstanceFields = {
   ...ProviderInstanceFields,
-  nativeSetup: Schema.optional(Schema.Literal(true)),
+  nativeSetup: Schema.optional(Schema.Boolean),
 } as const;
 
 /**

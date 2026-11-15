@@ -18,7 +18,7 @@ export interface MoveToAccountDialogProps {
 }
 
 /**
- * Moves a Chat to another account of the same provider. The move is the
+ * Moves a thread to another account of the same provider. The move is the
  * person's: the next message starts a new session on that account with the
  * conversation handed over as text, and the copy says what stays behind.
  */

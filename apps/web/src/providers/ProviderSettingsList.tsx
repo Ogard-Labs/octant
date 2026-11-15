@@ -2243,8 +2243,8 @@ function keyProviderAccount(
     id: String(instance.id),
     displayName: instance.displayName,
     driverKind,
-    ...("nativeSetup" in instance && instance.nativeSetup === true
-      ? { nativeSetup: true as const }
+    ...("nativeSetup" in instance && instance.nativeSetup !== undefined
+      ? { nativeSetup: instance.nativeSetup }
       : {}),
   };
 }

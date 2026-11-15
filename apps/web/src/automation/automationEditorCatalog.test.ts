@@ -385,6 +385,62 @@ describe("automationEditorCatalog", () => {
     expect(catalog.projects).toHaveLength(0);
   });
 
+  it("binds a Code Project on a server to the checkout its host derives, and skips one the host did not derive", () => {
+    const derived = {
+      bindingRevisionId: AUTOMATION_UI_TEST_IDS.bindingRevision,
+      repositoryId: AUTOMATION_UI_TEST_IDS.repository,
+      checkoutId: AUTOMATION_UI_TEST_IDS.checkout,
+    } as never;
+    const catalog = buildAutomationEditorCatalog({
+      hostId: "local",
+      hostLabel: "This Mac",
+      actorId: AUTOMATION_UI_TEST_IDS.actor,
+      projects: [],
+      profiles: [],
+      providerChoicesByMode: { work: [], code: [] },
+      serverProjects: {
+        code: [
+          {
+            projectId: AUTOMATION_UI_TEST_IDS.otherProject as never,
+            name: "App on devbox",
+            location: "devbox:/srv/app",
+            codeBinding: derived,
+          },
+          {
+            projectId: AUTOMATION_UI_TEST_IDS.project as never,
+            name: "From an older host",
+            location: "devbox:/srv/old",
+          },
+        ],
+        work: [],
+      },
+    });
+    expect(catalog.projects).toEqual([
+      {
+        projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+        name: "App on devbox",
+        mode: "code",
+        projectVersion: 1,
+        serverLocation: "devbox:/srv/app",
+        binding: {
+          kind: "code",
+          hostId: "local",
+          projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+          projectVersion: 1,
+          bindingRevisionId: AUTOMATION_UI_TEST_IDS.bindingRevision,
+          repositoryId: AUTOMATION_UI_TEST_IDS.repository,
+          checkoutId: AUTOMATION_UI_TEST_IDS.checkout,
+          worktreeReceiptId: durableCodeWorktreeReceiptId({
+            projectId: AUTOMATION_UI_TEST_IDS.otherProject,
+            bindingRevisionId: AUTOMATION_UI_TEST_IDS.bindingRevision,
+            repositoryId: AUTOMATION_UI_TEST_IDS.repository,
+            checkoutId: AUTOMATION_UI_TEST_IDS.checkout,
+          }),
+        },
+      },
+    ]);
+  });
+
   it("maps approval-gated profiles into execution and authority receipts and excludes full-access", () => {
     const catalog = buildAutomationEditorCatalog({
       hostId: "local",

@@ -37,8 +37,10 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
  * What a window may ask a paired computer for, as exact method and path pairs
  * (the query is free): the host hello, pairing, and the session and
  * device-service routes the client runtime calls; the one dev-server grant
- * route; and the two product calls the main window makes of a paired
- * computer, its resources and its running servers. Anything else, including
+ * route; and the product calls the main window makes of a paired computer:
+ * its resources, its running servers, and the person's to-do list when that
+ * computer keeps it (the to-do routes refuse any device but the person's
+ * own). Anything else, including
  * the relay under `/api/server-proxy/<grant>/`, which the desktop's own
  * forwarder drives, is refused.
  */
@@ -60,6 +62,8 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "POST", path: "/api/server-proxy/grants" },
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
+  { method: "GET", path: "/api/todos" },
+  { method: "POST", path: "/api/todos/commands" },
 ];
 
 /** The routes a pairing uses; only these may be held to a pin that is staged and not yet recorded. */

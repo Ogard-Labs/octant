@@ -9,6 +9,7 @@
  */
 
 import { Schema } from "effect";
+import { CodeCheckoutId, CodeRepositoryId } from "./code";
 import { AggregateId, AggregateVersion, UtcTimestamp } from "./events";
 import {
   BindingRevisionId,
@@ -133,15 +134,27 @@ export const ServerProjectCloudMachine = Schema.Struct({
 export type ServerProjectCloudMachine = typeof ServerProjectCloudMachine.Type;
 
 /**
+ * The binding a Code Project on a server derives from its id, server, and
+ * folder: the Project's own folder checkout, which a routine there binds.
+ */
+export const ServerProjectCodeBinding = Schema.Struct({
+  bindingRevisionId: BindingRevisionId,
+  repositoryId: CodeRepositoryId,
+  checkoutId: CodeCheckoutId,
+}).annotations(strict);
+export type ServerProjectCodeBinding = typeof ServerProjectCodeBinding.Type;
+
+/**
  * A server Project as the catalog shows it. A Work Project also names the
- * binding its threads are created against, which the host derives from the
- * Project, and a Project on a machine Octant created in the person's cloud
- * account names that machine and its last reported state; nothing about
- * either is journaled on the Project.
+ * binding its threads are created against, and a Code Project its own folder
+ * checkout, both of which the host derives from the Project; a Project on a
+ * machine Octant created in the person's cloud account names that machine and
+ * its last reported state. Nothing about any of them is journaled on the Project.
  */
 export const ServerProjectEntry = Schema.Struct({
   ...ServerProject.fields,
   workBindingRevisionId: Schema.optional(BindingRevisionId),
+  codeBinding: Schema.optional(ServerProjectCodeBinding),
   cloudMachine: Schema.optional(ServerProjectCloudMachine),
 }).annotations(strict);
 export type ServerProjectEntry = typeof ServerProjectEntry.Type;

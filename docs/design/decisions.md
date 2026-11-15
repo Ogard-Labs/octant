@@ -43,8 +43,8 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Routines and timed turns](#routines-and-timed-turns)                                 | 4         | 2       | 2            | 0                   |
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
-| [Providers](#providers)                                                               | 7         | 4       | 3            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
+| [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **259**   | **156** | **100**      | **3**               |
+| **All areas**                                                                         | **260**   | **157** | **99**       | **4**               |
 
 ## Principles and hard lines
 
@@ -338,12 +338,14 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](.
 
 The key providers run inside Octant as they run on their own, with their native subagents, web tools, skills, home configuration, and a trusted Project's hooks, MCP servers and plugins, plus Octant's journal and views.
 
-- Where a native feature reaches beyond Octant's view, the level decides its default: off until the person turns it on at Guarded and Reviewed, on at Full access, in Work and Code alike.
+- The person's own setup is on by default at every level, as in the provider's own app: Octant adds capabilities and does not take core features away (maintainer decision, 2026-11-14, replacing the default that kept it off at Guarded and Reviewed until the person turned it on). Each call still meets the thread's level: Guarded asks, Reviewed's reviewer decides, Full access runs without asking.
+- With the default on, the person's home hooks run at Guarded and Reviewed as they do in the provider's own app, outside Octant's approval cards (Chat and Plan still run none); OpenCode applies the person's own saved permission rules, Octant's denies still winning; and Chat loads the person's MCP servers, skills and subagents, keeping no folder and no shell (maintainer decisions, 2026-11-14).
+- The person may turn it off for an account (stored as `nativeSetup: false`) or a thread. Before this default, turning an account off left no stored value, so on upgrade every account reads as running as itself, including accounts the person had turned off; they turn it off again if they want (maintainer decision, 2026-11-14). An older build cannot decode `nativeSetup: false`, so downgrade is not supported. An account turned off still keeps the runtime's own web search and fetch in Work and Code outside Plan; with only these on a session is not running as itself, so OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps its Project-context guard.
 - Plan stays read-only and Chat's filesystem and shell stay withheld at every level.
 - Turning a native feature on never turns on a provider's own memory, telemetry or self-update. The provider's own memory has a setting of its own per key provider account, off by default; telemetry and self-update stay off (maintainer request, 2026-11-12). Built for Claude Code (its auto-memory) and Codex (its memories), in Work and Code sessions outside Plan: a person at a local window or a paired device sets it (maintainer decision, 2026-11-12; not built yet: today a paired device is refused), the change is journaled, and Run as itself, a trusted Project and Full access never turn it on. OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant sets, so their accounts carry no setting. Not built yet: Chat, where it stays off at every setting.
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
-- A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
+- A person turns it off for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
 - A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
@@ -591,6 +593,7 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - A harness Chat thread gets it once, from the harness; the turn adds no second copy.
 - A missing, empty or over-long query is invalid and searches nothing; no other text stands in for it.
 - A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
+- Automatic research routing prefers the provider's own search when the provider has one and falls back to SearXNG, so a fresh install can search with no endpoint configured (maintainer request, 2026-11-14).
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
 
@@ -1014,7 +1017,7 @@ Octant operates no deployment infrastructure and offers no ship target of its ow
 - Delivery is dormant: the ship service exists, but the host wires no target source, build observer or per-act approval bound to target, revision and build.
 - Delivery stays absent from the interface until all three exist; a standing grant never replaces the per-act approval.
 - A target may also be a machine Octant creates in the person's own cloud account through a credential reference in the credential broker; it appears as a Server Project, and the person suspends and resumes it (maintainer decision, 2026-11-14). An Octant-operated hosted service stays out of scope.
-- A cloud machine target is a plugin contribution offered only once installed, trusted and enabled; every create, bind, refresh, suspend, resume and destroy is a person's act at a local window, journaled; destroy needs one host-issued confirmation for that machine, and a machine is recorded destroyed only when its provider reports it gone. Built: the seam, the host lifecycle and its journal; not built: a target plugin, host-key pinning, a per-machine key, wake-on-open, cost display and the interface ([Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)).
+- A cloud machine target is a plugin contribution offered only once installed, trusted and enabled; every create, bind, refresh, suspend, resume and destroy is a person's act at a local window, journaled; destroy needs one host-issued confirmation for that machine, and a machine is recorded destroyed only when its provider reports it gone. The host pins the host keys the provider reported at creation for that server, a suspended machine's Project refuses turns and calls by name until the person resumes it, and the provider's own hourly cost is shown only when it reports one. Built: the seam (host keys and reported cost included), the host lifecycle and its journal, host-key pinning, the suspended refusal, and the Settings › Permissions › Servers screen; not built: a target plugin, a per-machine key and wake-on-open ([Server Projects: Machines in the person's cloud account](server-projects.md#machines-in-the-persons-cloud-account)).
 
 Status: Partly built. Since: —; cloud machines 2026-11-14. Detail: [Architecture: Modes: Chat, Work, and Code](../architecture.md#modes-chat-work-and-code).
 
@@ -1042,7 +1045,7 @@ A routine is a host-owned, Project-bound definition that starts an ordinary Work
 - A turn in Plan may propose, as it may offer a side task, and a thread in Plan does not refuse the confirm; a turn the host runs (a routine's run, a usage-limit resume) is still refused. The routine takes none of the thread's posture: it asks first, never runs in Plan, and the card's confirm is unchanged.
 - Built: a Work or Code thread's agent may list and read its Project's routines of the same mode with their recent runs, and ask the person to pause or archive a routine that is its thread's own (proposed or created from the thread, or whose run started it). The request waits as a card like a proposal and only the person's confirmation, as their own principal at the version the agent saw, changes it. Plan and every host-run turn, the routine's own run included, are refused: nobody is there to confirm. Resume, edit, run now and cancel stay the person's.
 - Built: the turn the dispatcher started for a run, named by the run identity the dispatcher passes in host-only start options, may report the run's result once (succeeded, nothing-to-do, needs-attention or failed, with a summary of at most 1 KB). It is journaled on the run, shown in Automation Center beside the run's status, and never changes the run's lifecycle or reaches a push notification.
-- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools; file triggers are refused there. Not built yet: choosing a server Project in Automation Center's editor ([Server Projects: Routines](server-projects.md#routines)).
+- Built: a Work or Code routine may target a Project on a registered server (maintainer decision, 2026-11-14). This host's scheduler runs it and its turn runs there as a person-started turn would, over the Project's connection under the same levels and approvals. Revalidation reads the server catalog and refuses, naming why, a removed Project, a server that left the registry, or a changed mode or derived binding; a server that cannot be reached fails the run before any thread exists and runs nothing anywhere. A server Project's turns are offered the routine tools, and Automation Center's editor offers the person's server Projects (the host's own person only; a restricted device sees none) with Octant Harness models only, saving through the same create and edit route; file triggers are hidden there in the editor and refused at save and at every occurrence ([Server Projects: Routines](server-projects.md#routines)).
 - The scheduler is an in-process timer; nothing runs in a cloud, and a self-hosted wake service on a person's hub can wake a spoke for a routine (built; run only between hosts on loopback with a fake socket).
 - A Work run observes the exact retained first-turn request and captured receipt/thread/Project/host/binding/provider/model. Proven terminal status is journaled before the active slot is reused; missing/mismatched evidence stays active, edits do not replace the run snapshot, and replay or notification failure never redelivers the provider call. First-turn completion does not prove child/process quiescence.
 - A Chat routine keeps Chat's authority: it binds an active Chat Project, grants no folder, shell, Git or subagents, has no level and no follow-up target, and each run sends one turn into a new Chat thread. No agent proposes one.
@@ -1306,16 +1309,17 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff. There is no silent or automatic failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff, now or through their per-thread usage-limit opt-in. There is no silent, unchosen or open-ended failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.
 - Two instances of the same driver cannot share one effective state directory.
 - Plan-usage readings come only from the provider's own process, are kept per account, and a failed refresh keeps the last snapshot with its age.
 - Octant never calls a vendor usage endpoint itself for the first-class providers and never reads their token or credential files.
-- Move to account: the person moves a thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on. Built for Chat; Work and Code threads move through the model picker. Not built yet: an opt-in "on a usage limit, hand off to this account".
+- Move to account: the person moves a Chat, Work or Code thread to another account of its provider, keeping its model; the next turn carries the [disclosed handoff](#handoffs-between-providers-forks-and-branches) and its marker names the new account. The host refuses the move from anyone but the person (a window or a device they paired), while a turn runs, and while the thread's model pool is on.
+- On usage limit, hand off to: a per-thread opt-in the person sets to one named account (journaled; refused from anyone but the person and while a model pool is on). When a turn stops on a provider-reported usage limit, the host moves the thread to that account by the same provider change and records both accounts and the reason on the thread, at most once per stopped turn. If that account is missing, off, cannot take the model, or is the one that just hit its limit, the host stops and records why. Without the opt-in nothing moves.
 
-Status: Partly built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
+Status: Built. Since: 2026-11-14. Detail: [Architecture: Providers](../architecture.md#providers).
 
 ### Provider credentials and sign-in
 
@@ -1482,6 +1486,16 @@ A completed event carries a stop reason only when the runtime says why the turn 
 - A turn cut off at the output limit shows a note with Continue, which drafts a follow-up and sends nothing until the person does.
 
 Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons).
+
+### Octant instructions
+
+A person writes instructions for Octant itself, beside each provider's own instruction files: one text for the person, an optional one per Project, and an orchestration text for coordinator threads (maintainer request, 2026-11-14).
+
+- They cover only what Octant knows: which provider or model takes which job, how a coordinator splits and hands back work, and when to use Octant's own features. On how a provider works, its own files (`CLAUDE.md`, `AGENTS.md`) come first.
+- Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
+- They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 
@@ -1710,6 +1724,7 @@ A plugin may contribute a theme as data only, validated by `@octant/theme` befor
 
 - A theme contribution is a document in the semantic theme schema and carries no renderer code, stylesheet, script or asset loader; one that fails validation is refused whole.
 - The one runtime theme authority applies a valid contribution as it applies a built-in preset; installation, trust and enablement stay separate steps.
+- The server checks colour overrides against the selected theme, including an effective plugin theme, and against the default when that plugin is off.
 - A contributed theme is listed only while its plugin is installed, trusted and enabled. Switching the plugin off removes its themes; a stored choice of one draws the default theme and is kept for when the plugin returns.
 
 Status: Built. Since: 2026-11-14. Detail: [Architecture: Plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extraction).
@@ -3483,11 +3498,11 @@ Status: Designed, not built. Since: 2026-11-08. Detail: [Bots](bots.md).
 
 A person keeps their own to-dos in one list that every device and computer they connected shows, tags each to Projects and their own tags, filters them, and starts a thread from one when ready.
 
-- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them. Built: the list on one host. Not built yet: choosing the list host and reaching a list on another host.
+- The list lives on one list host: the hub when the host belongs to one, otherwise the host itself, or a paired computer the person names; only that host journals to-dos and projects them. Built: the list on one host, choosing the list host in Settings › To-dos (journaled on this host, refused once it keeps a to-do), and a window reaching a list on a paired computer, read-only with unsent drafts while it cannot be reached. Not built yet: the hub as the default list host.
 - A local window and the person's paired devices may change the list; agents, routines, delegated runs and peer hosts are refused.
 - Edits to the title or notes are version-checked and refused as changed elsewhere when stale; there is no merge. An unreachable list host shows a stale, read-only list, and quick add keeps an unsent draft the person sends; nothing is queued as offline work.
-- A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends (not built yet).
+- A to-do's Project and thread links carry no authority. Starting opens that Project's ordinary new-thread draft on its own host, whose checks decide; the mode follows the Project; nothing starts until the person sends. Built for this host's Projects and Chat; Start into another host's Project is not built yet.
 - Only the person ticks a to-do off; an agent never changes a to-do.
-- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Not built yet: Start and the thread state on a row, and live updates from other devices.
+- The destination and every name in code and copy are To-dos, never Tasks. Built: the To-dos page on one host, with quick add, filters, editing in place, reordering, the sidebar row and its badge, and New to-do in the command palette and on a shortcut. Start, the thread state on a row, and live updates to the list host's own windows are built too. The phone shows the list with quick add and Tick off. Not built yet: live updates to windows on other computers, and Start from the phone.
 
 Status: Partly built. Since: 2026-11-14. Detail: [To-dos](todos.md).

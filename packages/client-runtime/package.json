@@ -113,6 +113,7 @@
     "./validation-evidence-client": "./src/validationEvidenceClient.ts",
     "./expo-secure-device-key-store": "./src/expoSecureDeviceKeyStore.ts",
     "./mobile-inbox-client": "./src/mobileInboxClient.ts",
+    "./mobile-todo-client": "./src/mobileTodoClient.ts",
     "./mobile-code-operations-client": "./src/mobileCodeOperationsClient.ts",
     "./mobile-push-token-client": "./src/mobilePushTokenClient.ts",
     "./zen-client": "./src/zenClient.ts",

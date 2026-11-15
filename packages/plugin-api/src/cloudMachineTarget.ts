@@ -3,8 +3,10 @@
  *
  * A target creates, describes, suspends, resumes and destroys a machine in the
  * person's own cloud account, and reports the SSH endpoint the host's existing
- * server Project connection uses. Canonical: docs/design/server-projects.md §
- * Machines in the person's cloud account.
+ * server Project connection uses, with the machine's SSH host keys as the
+ * provider reports them, which the host pins for that server. It may report
+ * the provider's own hourly cost; it never estimates one. Canonical:
+ * docs/design/server-projects.md § Machines in the person's cloud account.
  *
  * A target never receives a secret. The host resolves the person's credential
  * reference through its credential broker at each act and hands the target a
@@ -22,10 +24,12 @@ import type {
 export {
   CloudCredentialReference,
   CloudMachineDescription,
+  CloudMachineHourlyCost,
   CloudMachineRecipe,
   CloudMachineSshEndpoint,
   CloudMachineTargetId,
   decodeCloudMachineRecipe,
+  SshHostPublicKey,
 } from "@octant/contracts/cloud-machines";
 export { CloudMachineState } from "@octant/contracts/server-projects";
 
@@ -51,7 +55,12 @@ export type CloudMachineTargetRefusal =
 export type CloudMachineCreateResult =
   | {
       readonly status: "created";
-      /** Resolved once the machine answers on its endpoint. */
+      /**
+       * Resolved once the machine answers on its endpoint. The endpoint's
+       * `hostKeys` should be the keys the provider read from the machine
+       * itself (its console or metadata), never keys gathered by connecting
+       * to it, which would pin whatever answered.
+       */
       readonly machine: CloudMachineDescription & { readonly endpoint: CloudMachineSshEndpoint };
     }
   | {

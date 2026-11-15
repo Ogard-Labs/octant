@@ -234,6 +234,7 @@ export interface ThreadPaneContainerProps {
   /** The workers' level and bounds the person chose in that draft. */
   readonly pendingDraftCoordinatorChoices: import("../shell/DraftThreadWorkspace").CoordinatorDraftChoices;
   readonly pendingDraftPrompt?: string;
+  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
   readonly pendingIssue?: RepositoryIssueRow;
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
   readonly projectClient: ProjectController["client"];
@@ -334,6 +335,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     pendingDraftCoordinator,
     pendingDraftCoordinatorChoices,
     pendingDraftPrompt,
+    draftTodoSource,
     pendingIssue,
     presentedLayout,
     projectClient,
@@ -666,6 +668,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     ? {}
                     : { draftPendingPrompt: pendingDraftPrompt })}
                   onDraftPendingPromptConsumed={() => setPendingDraftPrompt(undefined)}
+                  {...(draftTodoSource === undefined ? {} : { draftTodoSource })}
                   codeController={codeController}
                   codeControllers={codeThreadControllers}
                   extensionClient={extensionClient}

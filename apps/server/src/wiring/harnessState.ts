@@ -17,7 +17,7 @@ import {
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { ShieldServer } from "@octant/contracts/shield-servers";
-import { ServerConnection } from "../serverProjects/serverConnection";
+import { ServerConnection, type ServerAddress } from "../serverProjects/serverConnection";
 import { ServerProjectStore } from "../serverProjects/serverProjectStore";
 import { personSshAgentSocket } from "../shield/shieldServerStore";
 import type { ServerStart } from "./serverShape";
@@ -173,8 +173,17 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
     /** A Project's servers: its own list, else the account list. */
     serversFor?: (projectId: string | undefined) => ReadonlyArray<ShieldServer>;
   } = {};
+  // Machines Octant created in the person's cloud account pin their host
+  // keys and refuse calls while suspended; the cloud machine lifecycle that
+  // knows both is built with the harness and fills these in.
+  const cloudMachineServers: {
+    pinnedHostKeys?: (server: ServerAddress) => ReadonlyArray<string> | undefined;
+    suspendedRefusal?: (server: ServerAddress) => string | undefined;
+  } = {};
   const serverConnection = new ServerConnection({
     agentSocket: () => personSshAgentSocket(process.env.SSH_AUTH_SOCK),
+    pinnedHostKeys: (server) => cloudMachineServers.pinnedHostKeys?.(server),
+    refuses: (server) => cloudMachineServers.suspendedRefusal?.(server),
   });
   const serverProjectStore = new ServerProjectStore({
     journal: persistence.journal,
@@ -188,6 +197,7 @@ export function wireHarnessState(deps: HarnessStateDependencies) {
 
   return {
     agentRunInteractions,
+    cloudMachineServers,
     serverConnection,
     serverProjectStore,
     serverRegistry,

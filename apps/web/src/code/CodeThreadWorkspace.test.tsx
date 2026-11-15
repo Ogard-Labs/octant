@@ -1131,6 +1131,52 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
+  it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
+    const user = userEvent.setup();
+    const stopId = "30000000-0000-4000-8000-0000000000e1";
+    const base = controller();
+    const parked = {
+      ...base,
+      turnStatus: "waiting" as const,
+      turnError: "The provider's usage window is spent.",
+      turnErrorCategory: "failed",
+      latestProviderTurnOperationId: stopId,
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace controller={parked as never} threadId={threadId} />,
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...parked,
+            activeView: {
+              ...base.activeView!,
+              thread: {
+                ...base.activeView!.thread,
+                version: 3,
+                providerHandoff: {
+                  previousProviderInstanceId: providerId,
+                  previousModelId: modelId,
+                  nextProviderInstanceId: providerId,
+                  nextModelId: modelId,
+                  changedAt: "2026-09-30T08:00:03.000Z",
+                  releasedStopId: stopId,
+                },
+              },
+            },
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
   it("leaves the model picker enabled on a turn parked by a refused resume", () => {
     render(
       <CodeThreadWorkspace

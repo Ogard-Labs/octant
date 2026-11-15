@@ -68,7 +68,8 @@ const SERVER_NOT_REGISTERED =
 export function bindServerWorkTurn(
   options: {
     readonly store: Pick<ServerProjectStore, "workProject" | "addressOf" | "serverOf">;
-    readonly connection: Pick<ServerConnection, "run">;
+    /** `refusal` names why no call may go to the server now, such as a suspended machine. */
+    readonly connection: Pick<ServerConnection, "run"> & Partial<Pick<ServerConnection, "refusal">>;
     readonly composition: Pick<NativeHarnessComposition, "forServerWork">;
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & { readonly threadId: string },
@@ -79,9 +80,14 @@ export function bindServerWorkTurn(
   const project = serverWorkProjectOf(options.store, input.thread);
   if (project === undefined) return { status: "refused", message: SERVER_NOT_REGISTERED };
   const projectId = String(project.id);
-  if (options.store.addressOf(projectId).kind !== "address") {
+  const bound = options.store.addressOf(projectId);
+  if (bound.kind !== "address") {
     return { status: "refused", message: SERVER_NOT_REGISTERED };
   }
+  // Refused before the turn launches, so a suspended machine is named as
+  // such instead of every call failing as an unreachable server.
+  const refusal = options.connection.refusal?.(bound.server);
+  if (refusal !== undefined) return { status: "refused", message: refusal };
   // The registry is read on every call, so a server removed mid-turn refuses
   // the next call rather than reaching a host it no longer names.
   const address = () => {

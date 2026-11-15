@@ -36,7 +36,7 @@ import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
-import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
 import type { WorktreePreparationService } from "./worktreePreparationService";
@@ -157,7 +157,8 @@ export interface ServerProjectTerminalTarget {
   /** Derived from the Project, server, and folder, so a rebound Project ends its shells. */
   readonly bindingRevisionId: BindingRevisionId;
   /** The login now, or undefined once its server left the registry. */
-  readonly login: () => ServerTerminalLogin | undefined;
+  /** Or the host's refusal for the server now, such as a suspended machine. */
+  readonly login: () => ServerTerminalLogin | ServerTerminalRefusal | undefined;
 }
 
 interface Owner {
@@ -860,6 +861,7 @@ export class ProjectTerminalService {
         "This Project's server is not registered. Register it again in Settings › Permissions › Servers.",
       );
     }
+    if ("kind" in login) return refused("unavailable", login.message);
     if (work)
       this.#startingServerWork.set(String(command.terminalId), {
         windowId,

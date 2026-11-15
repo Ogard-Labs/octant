@@ -307,6 +307,7 @@ describe("MachineChangeFeed", () => {
         { aggregateType: "thread-side-tasks" },
         { aggregateType: "thread-follow-up-suggestions" },
         { aggregateType: "thread-message-queue" },
+        { aggregateType: "todo" },
       ],
     });
 
@@ -314,7 +315,7 @@ describe("MachineChangeFeed", () => {
       value: {
         kind: "changed",
         sequence: 1,
-        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue"],
+        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue", "todos"],
       },
     });
     controller.abort();
@@ -408,6 +409,7 @@ describe("MachineChangeFeed", () => {
       "tool-approvals",
       "thread-follow-ups",
       "thread-message-queue",
+      "todos",
     ]);
 
     await expect(stream.next()).resolves.toMatchObject({
@@ -426,6 +428,7 @@ describe("MachineChangeFeed", () => {
           "tool-approvals",
           "thread-follow-ups",
           "thread-message-queue",
+          "todos",
         ],
       },
     });

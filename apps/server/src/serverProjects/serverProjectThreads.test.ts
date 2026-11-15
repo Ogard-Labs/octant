@@ -95,6 +95,8 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
     readonly level: () => ProviderExecutionPolicy;
     readonly harness?: boolean;
     readonly alias?: () => string;
+    /** Why the host refuses every call to the server now, as for a suspended machine. */
+    readonly refusal?: string;
   }) {
     const project = projectAt(folder);
     const thread = threadIn(project);
@@ -157,7 +159,10 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
           }),
           serverOf: () => undefined,
         },
-        connection,
+        connection: {
+          run: (server, input) => connection.run(server, input),
+          refusal: () => options.refusal,
+        },
         composition,
         record: (input) => {
           recorded.push({
@@ -246,6 +251,15 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
     expect(turn({ level: () => "full-access", harness: false }).bound).toEqual({
       status: "refused",
       message: SERVER_RUNTIME_NOT_HARNESS,
+    });
+  });
+
+  it("refuses a turn on a suspended machine with its reason before anything runs", () => {
+    const suspended =
+      "This machine is suspended; resume it first in Settings › Permissions › Servers.";
+    expect(turn({ level: () => "full-access", refusal: suspended }).bound).toEqual({
+      status: "refused",
+      message: suspended,
     });
   });
 });

@@ -1022,6 +1022,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
         },
+        onUsageLimitStop: async (threadId) => {
+          if (codeService instanceof CodeService)
+            await codeService.handOffAfterUsageLimit(threadId);
+        },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (

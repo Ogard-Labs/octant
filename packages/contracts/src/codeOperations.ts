@@ -2403,9 +2403,9 @@ export const CodeConversationTurn = Schema.Struct({
   changedFiles: Schema.optional(CodeTurnChangedFiles),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
-   * Why a failed turn failed, as the provider or the host reported it. Absent
-   * on a turn that did not fail, and on one journaled before the host kept
-   * the reason.
+   * Why a failed turn failed, or the usage limit a waiting turn stopped at, as
+   * the provider or the host reported it. Absent on a turn that did neither,
+   * and on one journaled before the host kept the reason.
    */
   failure: Schema.optional(CodeOperationFailure),
   startedAt: UtcTimestamp,

@@ -19,6 +19,7 @@ import {
   type ProjectId,
   type ProjectSummary,
 } from "@octant/contracts/projects";
+import type { ServerCodeProject, ServerWorkProject } from "../projects/serverProjectEntries";
 import type {
   AutomationAuthorityProfileOption,
   AutomationEditorCatalog,
@@ -65,6 +66,52 @@ export interface BuildAutomationEditorCatalogInput {
    * over inventing repository/checkout IDs from ProjectSummary alone.
    */
   readonly preparedCodeCheckouts?: ReadonlyArray<PreparedCodeCheckoutFact>;
+  /**
+   * The Code and Work Projects on the person's registered servers, as the
+   * host's server catalog lists them. Only the host's own person reads that
+   * catalog, so a restricted device passes none and sees none here.
+   */
+  readonly serverProjects?: {
+    readonly code: ReadonlyArray<ServerCodeProject>;
+    readonly work: ReadonlyArray<ServerWorkProject>;
+  };
+  /**
+   * The models a server Project's turn may run on. Its turns run on the
+   * Octant Harness alone, whose tools act on the server, so a routine there is
+   * offered no other runtime.
+   */
+  readonly serverProviderChoicesByMode?: {
+    readonly work: ReadonlyArray<AutomationProviderChoice>;
+    readonly code: ReadonlyArray<AutomationProviderChoice>;
+  };
+}
+
+/**
+ * The models a routine in a server Project may run on: the available choices
+ * of every Octant Harness instance, which the host alone runs there.
+ */
+export function automationServerProviderChoices(
+  groups: ReadonlyArray<{ readonly runtime: string; readonly instance: { readonly id: string } }>,
+  choicesByMode: {
+    readonly work: ReadonlyArray<{ readonly instanceId: string; readonly modelId: string }>;
+    readonly code: ReadonlyArray<{ readonly instanceId: string; readonly modelId: string }>;
+  },
+): { readonly work: AutomationProviderChoice[]; readonly code: AutomationProviderChoice[] } {
+  const harness = new Set(
+    groups
+      .filter((group) => group.runtime === "octant-harness")
+      .map((group) => String(group.instance.id)),
+  );
+  const onHarness = (
+    choices: ReadonlyArray<{ readonly instanceId: string; readonly modelId: string }>,
+  ) =>
+    choices
+      .filter((choice) => harness.has(String(choice.instanceId)))
+      .map((choice) => ({
+        providerInstanceId: String(choice.instanceId),
+        modelId: String(choice.modelId),
+      }));
+  return { work: onHarness(choicesByMode.work), code: onHarness(choicesByMode.code) };
 }
 
 /**
@@ -94,6 +141,13 @@ export function buildAutomationEditorCatalog(
       } catch {
         // Skip Projects whose binding facts cannot be decoded honestly.
       }
+    }
+    for (const project of input.serverProjects?.work ?? []) {
+      projects.push(serverWorkProjectOption(input.hostId, project));
+    }
+    for (const project of input.serverProjects?.code ?? []) {
+      const option = serverCodeProjectOption(input.hostId, project);
+      if (option !== undefined) projects.push(option);
     }
 
     const executionProfiles: AutomationExecutionProfileOption[] = [];
@@ -310,12 +364,75 @@ function codeBindingFromPrepared(
   };
 }
 
+/**
+ * A server Project has no revisions of its own: its binding is the one the
+ * host derives from the Project, server, and folder, at version 1, which is
+ * what a routine confirmed from one of its threads binds and what every
+ * occurrence revalidates against.
+ */
+const SERVER_PROJECT_VERSION = 1 as AutomationProjectOption["projectVersion"];
+
+function serverWorkProjectOption(
+  hostId: string,
+  project: ServerWorkProject,
+): AutomationProjectOption {
+  return {
+    projectId: project.projectId,
+    name: project.name,
+    mode: "work",
+    projectVersion: SERVER_PROJECT_VERSION,
+    serverLocation: project.location,
+    binding: {
+      kind: "work",
+      hostId: hostId as never,
+      projectId: project.projectId,
+      projectVersion: SERVER_PROJECT_VERSION,
+      bindingRevisionId: project.bindingRevisionId,
+      bindingReceiptId: durableWorkBindingReceiptId(
+        String(project.projectId),
+        String(project.bindingRevisionId),
+      ),
+    },
+  };
+}
+
+function serverCodeProjectOption(
+  hostId: string,
+  project: ServerCodeProject,
+): AutomationProjectOption | undefined {
+  // A host that does not report the derived checkout offers nothing to bind.
+  const derived = project.codeBinding;
+  if (derived === undefined) return undefined;
+  return {
+    projectId: project.projectId,
+    name: project.name,
+    mode: "code",
+    projectVersion: SERVER_PROJECT_VERSION,
+    serverLocation: project.location,
+    binding: {
+      kind: "code",
+      hostId: hostId as never,
+      projectId: project.projectId,
+      projectVersion: SERVER_PROJECT_VERSION,
+      bindingRevisionId: derived.bindingRevisionId,
+      repositoryId: derived.repositoryId,
+      checkoutId: derived.checkoutId,
+      worktreeReceiptId: durableCodeWorktreeReceiptId({
+        projectId: String(project.projectId),
+        bindingRevisionId: String(derived.bindingRevisionId),
+        repositoryId: String(derived.repositoryId),
+        checkoutId: String(derived.checkoutId),
+      }),
+    },
+  };
+}
+
 function executionOptionFromProfile(
   input: BuildAutomationEditorCatalogInput,
   profile: AgentProfile,
   project: AutomationProjectOption,
 ): AutomationExecutionProfileOption | undefined {
-  const choice = resolveProviderChoice(input, profile, project.mode);
+  const choice = resolveProviderChoice(input, profile, project);
   if (choice === undefined) return undefined;
   const receipt: AutomationExecutionProfileReceipt = {
     profileId: profile.id as never,
@@ -367,9 +484,13 @@ function authorityFromProfile(profile: AgentProfile, mode: AutomationMode): Agen
 function resolveProviderChoice(
   input: BuildAutomationEditorCatalogInput,
   profile: AgentProfile,
-  mode: AutomationMode,
+  project: AutomationProjectOption,
 ): AutomationProviderChoice | undefined {
-  const choices = input.providerChoicesByMode[mode] ?? [];
+  const mode = project.mode;
+  const choices =
+    project.serverLocation === undefined || mode === "chat"
+      ? (input.providerChoicesByMode[mode] ?? [])
+      : (input.serverProviderChoicesByMode?.[mode] ?? []);
   const constrained = profile.modelConstraints.map(String);
   for (const choice of choices) {
     if (constrained.length === 0 || constrained.includes(String(choice.modelId))) {

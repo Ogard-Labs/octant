@@ -123,6 +123,7 @@ import { SecretStoresClientContext } from "../settings/SecretStoresClientContext
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
 import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
+import { TodoListHostSettings } from "../todos/TodoListHostSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
@@ -1790,6 +1791,12 @@ function ActiveSectionContent({
           )}
         </div>
       );
+    case "todos":
+      return (
+        <div className="settings-section-stack" id="settings-todos">
+          <TodoListHostSettings />
+        </div>
+      );
     case "memory":
       return (
         <div className="settings-section-stack" id="settings-memory">
@@ -2715,7 +2722,7 @@ function SkillsSection({
                               id: String(instance.id),
                               displayName: instance.displayName,
                               driverKind: instance.driverKind,
-                              nativeSetup: instance.nativeSetup === true,
+                              nativeSetup: instance.nativeSetup !== false,
                             },
                           ]
                         : [],

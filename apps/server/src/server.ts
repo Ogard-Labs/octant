@@ -295,6 +295,7 @@ export function startOctantServer(
     });
     const {
       agentRunInteractions,
+      cloudMachineServers,
       serverConnection,
       serverProjectStore,
       serverRegistry,
@@ -500,6 +501,7 @@ export function startOctantServer(
       serverProjectStore,
       bindingReceiptStore,
       githubCapabilityService,
+      githubExtensionSnapshot,
       githubIntegrationIsEffective,
       desktopRecipeKeys,
       offeredDesktopProviders,
@@ -629,6 +631,7 @@ export function startOctantServer(
       toolEffectLedger,
       hostResourceBudget,
       serverConnection,
+      cloudMachineServers,
       personMemory,
       safeNetworkStore,
       projectService,
