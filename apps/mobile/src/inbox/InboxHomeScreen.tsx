@@ -15,7 +15,9 @@ import {
   type MobileWorkProjectOption,
   type MobileInboxRow,
 } from "@octant/client-runtime";
+import { changeMobileTodos } from "@octant/client-runtime/mobile-todo-client";
 import type { CodeDeliveryTarget } from "@octant/contracts";
+import type { Todo } from "@octant/contracts/todos";
 import { MOBILE_COPY, mobileHostHealthLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
@@ -49,6 +51,11 @@ import {
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import type { AgentListView } from "./AgentsListScreen";
 import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
+import {
+  mobileTodoLinkCommand,
+  mobileTodoStartDraft,
+  type MobileStartedThread,
+} from "../todos/todosPresentation";
 
 export interface InboxHomeScreenProps {
   readonly homeMode: MobileHomeView;
@@ -58,6 +65,11 @@ export interface InboxHomeScreenProps {
   readonly onOpenAgents: (view: AgentListView) => void;
   /** The person's to-do list on the connected computer. */
   readonly onOpenTodos?: () => void;
+  /** A Start pressed on To-dos: the sheet opens with it once this computer's Projects are read. */
+  readonly todoStart?: Todo | undefined;
+  readonly onTodoStartOpened?: () => void;
+  /** Whether the list took the link to a thread a Start made. */
+  readonly onTodoLinked?: (todoId: string, thread: MobileStartedThread, linked: boolean) => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
   /** Opens the pairing screen with the QR scanner already open. */
@@ -83,7 +95,15 @@ function modeIcon(
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
-  const { environment, transports, hosts, hostsLoaded, health, refreshHosts } = useMobileSession();
+  const {
+    environment,
+    transport: listTransport,
+    transports,
+    hosts,
+    hostsLoaded,
+    health,
+    refreshHosts,
+  } = useMobileSession();
   const emptyState =
     props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
@@ -104,6 +124,17 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   // the lighter of the two: a folder grants filesystem reach, no folder grants none.
   const [workInFolder, setWorkInFolder] = useState(false);
   const [codeProjectId, setCodeProjectId] = useState<string | undefined>();
+  // Set once the Projects of the computer new threads go to are read, so a
+  // Start picks its Project from them rather than from an empty list.
+  const [projectsRead, setProjectsRead] = useState(false);
+  // The to-do this draft came from; the host's create command carries nothing about it.
+  // It also names the Project the Start chose, so a reload of the Projects (a
+  // reconnect hands a new transport) keeps that Project rather than the first.
+  const [todoSource, setTodoSource] = useState<
+    { readonly todoId: string; readonly projectId?: string } | undefined
+  >();
+  const startedProjectId = useRef<string | undefined>(undefined);
+  startedProjectId.current = todoSource?.projectId;
   const [codeRetry, setCodeRetry] = useState<MobileCodeCreationRetry | undefined>();
   const [deliveryTargetProposal, setDeliveryTargetProposal] = useState<
     MobileCodeDeliveryTargetProposal | undefined
@@ -174,6 +205,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     setCodeProjects([]);
     setWorkProjectId(undefined);
     setCodeProjectId(undefined);
+    setProjectsRead(false);
     if (placementTransport === undefined) {
       return () => projectRequestGuard.invalidate();
     }
@@ -185,22 +217,61 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       if (cancelled || !projectRequestGuard.isCurrent(request)) return;
       setWorkProjects(nextWork);
       setCodeProjects(nextCode);
+      const started = startedProjectId.current;
       setWorkProjectId((current) =>
-        nextWork.some((project) => project.projectId === current)
-          ? current
-          : nextWork[0]?.projectId,
+        nextWork.some((project) => project.projectId === started)
+          ? started
+          : nextWork.some((project) => project.projectId === current)
+            ? current
+            : nextWork[0]?.projectId,
       );
       setCodeProjectId((current) =>
-        nextCode.some((project) => project.projectId === current)
-          ? current
-          : nextCode[0]?.projectId,
+        nextCode.some((project) => project.projectId === started)
+          ? started
+          : nextCode.some((project) => project.projectId === current)
+            ? current
+            : nextCode[0]?.projectId,
       );
+      setProjectsRead(true);
     });
     return () => {
       cancelled = true;
       projectRequestGuard.invalidate();
     };
   }, [placementTransport, projectRequestGuard]);
+
+  const { todoStart, onTodoStartOpened } = props;
+  useEffect(() => {
+    // Without a computer for new threads the sheet still opens, as a Chat that
+    // says why it cannot send; until the paired list is read, the Start waits.
+    const ready = projectsRead || (placementTransport === undefined && hostsLoaded);
+    if (todoStart === undefined || !ready) return;
+    const draft = mobileTodoStartDraft(todoStart, {
+      hostId: placementTransport?.hostId ?? "",
+      workProjects,
+      codeProjects,
+    });
+    setPrompt(draft.prompt);
+    setComposerMode(draft.mode);
+    if (draft.mode === "work") setWorkProjectId(draft.projectId);
+    if (draft.mode === "code") setCodeProjectId(draft.projectId);
+    setTodoSource({
+      todoId: String(todoStart.id),
+      ...(draft.projectId === undefined ? {} : { projectId: draft.projectId }),
+    });
+    setComposerError(undefined);
+    setCodeRetry(undefined);
+    setComposerSheetOpen(true);
+    onTodoStartOpened?.();
+  }, [
+    codeProjects,
+    hostsLoaded,
+    onTodoStartOpened,
+    placementTransport,
+    projectsRead,
+    todoStart,
+    workProjects,
+  ]);
 
   const refresh = useCallback(async () => {
     // A slower, older fetch must not overwrite what a newer one already showed.
@@ -299,7 +370,37 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         : colors.textSecondary;
   };
 
+  // The link is sent once the host answered with the thread, before the person
+  // reads it; a list that refuses or cannot be reached leaves the thread as it is.
+  const linkTodo = async (todoId: string, row: MobileInboxRow) => {
+    const thread: MobileStartedThread = {
+      hostId: row.hostId,
+      threadId: row.threadId,
+      mode: row.mode,
+    };
+    let linked = false;
+    if (listTransport !== undefined) {
+      try {
+        const result = await changeMobileTodos(
+          listTransport,
+          mobileTodoLinkCommand(todoId, thread),
+        );
+        linked = result.status === "loaded";
+      } catch {
+        linked = false;
+      }
+    }
+    props.onTodoLinked?.(todoId, thread, linked);
+  };
+
   const createThread = async (mode: MobileCreateMode) => {
+    // Read before the create awaits: a Start pressed meanwhile is another draft.
+    const source = todoSource;
+    const started = (row: MobileInboxRow) => {
+      if (source === undefined) return;
+      setTodoSource(undefined);
+      void linkTodo(source.todoId, row);
+    };
     if (placementTransport === undefined) {
       setComposerError(MOBILE_COPY.pairBeforeCreate);
       return;
@@ -329,6 +430,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           confirmDeliveryTarget: requestDeliveryTarget,
           ...(codeRetry === undefined ? {} : { retry: codeRetry }),
         });
+        started(row);
         setPrompt("");
         setCodeRetry(undefined);
         setComposerSheetOpen(false);
@@ -353,6 +455,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           modelId: selectedModel.modelId,
           bindingRevisionId: selectedWorkProject.bindingRevisionId,
         });
+        started(row);
         setPrompt("");
         setComposerSheetOpen(false);
         await refresh();
@@ -360,6 +463,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         return;
       }
       const row = await createChat(prompt);
+      started(row);
       setPrompt("");
       setComposerSheetOpen(false);
       await refresh();
@@ -575,6 +679,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
                 icon="create-outline"
                 onPress={() => {
                   setComposerMode("chat");
+                  setTodoSource(undefined);
                   setComposerError(undefined);
                   setCodeRetry(undefined);
                   setComposerSheetOpen(true);
@@ -879,7 +984,12 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           setPrompt(value);
           setCodeRetry(undefined);
         }}
-        onClose={() => setComposerSheetOpen(false)}
+        onClose={() => {
+          // The label lives only in this sheet; a draft sent later from the
+          // inline composer must not carry a source the person cannot see.
+          setTodoSource(undefined);
+          setComposerSheetOpen(false);
+        }}
         onPressModel={() => setModelOpen(true)}
         onSelectMode={(mode) => {
           setComposerMode(mode);
@@ -887,6 +997,12 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           setCodeRetry(undefined);
         }}
         onSubmit={() => void createThread(composerMode)}
+        {...(todoSource === undefined
+          ? {}
+          : {
+              sourceLabel: MOBILE_COPY.todoSource,
+              onRemoveSource: () => setTodoSource(undefined),
+            })}
         onRefreshHost={() => void refreshHosts()}
         placementLabel={placementLabel}
         placementDisabledReason={placementDisabledReason}
