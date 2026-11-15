@@ -1,5 +1,19 @@
+import type { CoordinatorWorkerChoice } from "@octant/contracts";
 import { threadRowActivity, type ChatThreadNavigationItem } from "../shell/navigationModel";
 import type { SubagentWorkerThread } from "./AgentHierarchyPanel";
+
+/**
+ * The line a worker row shows beside its model when the host did not start
+ * the role's main model (docs/design/workspace.md, Coordinators): the
+ * coordinator's reason for an override, else the host's reason for a fallback.
+ */
+export function coordinatorChoiceNote(choice: CoordinatorWorkerChoice | undefined): string | undefined {
+  if (choice === undefined) return undefined;
+  if (choice.why !== undefined) return `chosen: ${choice.why}`;
+  if (choice.rank === "person") return "chosen by you";
+  if (choice.rank === "main" || choice.rank === "chosen") return undefined;
+  return `fallback: ${choice.reason ?? "main unavailable"}`;
+}
 
 /**
  * The workers a coordinator started, from the thread list a window already
@@ -13,6 +27,7 @@ import type { SubagentWorkerThread } from "./AgentHierarchyPanel";
 export function coordinatorWorkersOf(
   threads: ReadonlyArray<ChatThreadNavigationItem>,
   coordinatorThreadId: string | undefined,
+  modelName?: (worker: { readonly providerInstanceId: string; readonly modelId: string }) => string,
 ): ReadonlyArray<SubagentWorkerThread> | undefined {
   if (coordinatorThreadId === undefined) return undefined;
   const coordinator = threads.find((thread) => thread.threadId === coordinatorThreadId);
@@ -21,10 +36,20 @@ export function coordinatorWorkersOf(
     .filter((thread) => thread.coordinatorThreadId === coordinatorThreadId)
     .map((thread): SubagentWorkerThread => {
       const activity = threadRowActivity(thread);
+      const note = coordinatorChoiceNote(thread.coordinatorChoice);
+      const model =
+        thread.modelId === undefined
+          ? undefined
+          : (modelName?.({
+              providerInstanceId: thread.providerInstanceId ?? "",
+              modelId: thread.modelId,
+            }) ?? thread.modelId);
       return {
         threadId: thread.threadId,
         title: thread.title,
         ...(thread.provider === undefined ? {} : { provider: thread.provider }),
+        ...(model === undefined ? {} : { model }),
+        ...(note === undefined ? {} : { choiceNote: note }),
         state:
           activity === "working" || activity === "attention"
             ? activity

@@ -1,4 +1,8 @@
-import type { ThreadBoardPullRequestSummaries, ThreadLiveStep } from "@octant/contracts";
+import type {
+  CoordinatorWorkerChoice,
+  ThreadBoardPullRequestSummaries,
+  ThreadLiveStep,
+} from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { SidebarThreadStatusInput } from "@octant/domain/sidebar-thread-status-policy";
 import type {
@@ -241,6 +245,10 @@ export interface ChatThreadNavigationItem {
   readonly coordinatorThreadId?: string;
   /** The worker's coordinator's title, when that coordinator is still listed. */
   readonly coordinatorTitle?: string;
+  /** Code only: the model the thread runs on. */
+  readonly modelId?: string;
+  /** Code only: how the host chose a worker's model from the roles. */
+  readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /** Code and Work: the Wake when a message arrives switch is on. */
   readonly messageWake?: boolean;
   /** Code only: a person turned off this worker's Wake for coordinator. */
