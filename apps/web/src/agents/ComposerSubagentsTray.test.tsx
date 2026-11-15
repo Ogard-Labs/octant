@@ -91,7 +91,7 @@ describe("SubagentsTray", () => {
       expect.objectContaining({ observationId: observedChildFixture().observationId }),
     );
     expect(screen.getByRole("button", { name: /Stop subagent/ })).toHaveTextContent("Stopping");
-    expect(screen.getByRole("button", { name: /Inspect observed child/ })).toHaveTextContent(
+    expect(screen.getByRole("button", { name: /Opens it in Agents/ })).toHaveTextContent(
       "Working",
     );
   });
