@@ -95,7 +95,7 @@ export function ThemeAppearanceEditor(props: {
   }
   const shownAccent = currentAccentSwatch(draft);
   const shownDensity: ThemeDensity = draft.density ?? "comfortable";
-  const smoothText = draft.fontSmoothing !== "off";
+  const smoothText = draft.fontSmoothing === "auto" || draft.fontSmoothing === "on";
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
     void theme.applyPatch({
       typography: {
@@ -324,7 +324,7 @@ export function ThemeAppearanceEditor(props: {
           />
           {runsOnMac() ? (
             <SettingRow
-              description="Grayscale smoothing draws thinner, calmer text, as a Mac's own apps do."
+              description="Grayscale smoothing draws thinner, lighter text. Off keeps the fuller strokes."
               focused={focusedSetting === "appearance.typography.smoothing"}
               label="Smooth text"
               scope="app"

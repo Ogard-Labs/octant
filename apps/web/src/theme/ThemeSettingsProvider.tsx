@@ -224,7 +224,8 @@ export function ThemeSettingsProvider(props: {
       // Density and smoothing are plain attributes the stylesheets read; the
       // contrast step scales the derived washes only for a Custom preset.
       root.dataset.octantDensity = accessible.density ?? "comfortable";
-      root.dataset.octantFontSmoothing = accessible.fontSmoothing === "off" ? "off" : "on";
+      root.dataset.octantFontSmoothing =
+        accessible.fontSmoothing === "auto" || accessible.fontSmoothing === "on" ? "on" : "off";
       const customId =
         resolved.mode === "light" ? accessible.lightPresetId : accessible.darkPresetId;
       const customSeeds =

@@ -160,8 +160,16 @@ describe("ThemeSettingsProvider", () => {
       </ThemeSettingsProvider>,
     );
     expect(root.dataset.octantDensity).toBe("comfortable");
-    expect(root.dataset.octantFontSmoothing).toBe("on");
+    expect(root.dataset.octantFontSmoothing).toBe("off");
     expect(root.style.getPropertyValue("--oct-contrast-scale")).toBe("");
+    result.rerender(
+      <ThemeSettingsProvider
+        settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", fontSmoothing: "on" }}
+      >
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+    expect(root.dataset.octantFontSmoothing).toBe("on");
     result.unmount();
   });
 

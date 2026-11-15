@@ -99,6 +99,11 @@ describe("theme contracts", () => {
     expect(DEFAULT_THEME_SETTINGS).not.toHaveProperty("translucency");
   });
 
+  it("draws text at the system's fuller strokes by default, and keeps a stored choice", () => {
+    expect(DEFAULT_THEME_SETTINGS.fontSmoothing).toBe("off");
+    expect(decodeThemeSettings({ ...validSettings, fontSmoothing: "on" }).fontSmoothing).toBe("on");
+  });
+
   it("rejects unknown theme mode and density", () => {
     expect(() => decodeThemeSettings({ ...validSettings, mode: "auto" })).toThrow();
     expect(() => decodeThemeSettings({ ...validSettings, density: "dense" })).toThrow();

@@ -53,6 +53,12 @@ describe("native feel", () => {
     expect(rule(surface, ".oct-page-title")).toContain("var(--oct-tracking-sf-26)");
   });
 
+  it("smooths text only when the person turns Smooth text on", () => {
+    const bridge = read("styles/octant-bridge.css");
+    expect(bridge).toContain('html[data-octant-font-smoothing="on"] {');
+    expect(bridge).not.toContain(':not([data-octant-font-smoothing="off"])');
+  });
+
   it("keeps code and the terminal off the body's tracking so their columns stay whole", () => {
     expect(octant).toMatch(
       /:where\(code, pre, kbd, samp, \.xterm, \.monaco-editor\) \{\s*letter-spacing: normal;/,

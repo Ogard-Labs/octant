@@ -28,7 +28,7 @@ describe("terminal color projection", () => {
       // No bright set is published, so the bright variants reuse the hues and
       // bright black is the muted ink.
       brightRed: "#d95778",
-      brightBlack: "#9b9b9b",
+      brightBlack: "#a8a8ad",
       brightWhite: "#f5f5f7",
     });
   });

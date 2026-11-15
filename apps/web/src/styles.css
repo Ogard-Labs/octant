@@ -96,7 +96,7 @@
   --octant-float-line: color-mix(in oklab, var(--octant-float) 88%, var(--octant-text-primary));
   --octant-text-primary: #f5f5f7;
   --octant-text-secondary: #bcbcc2;
-  --octant-text-muted: #9b9b9b;
+  --octant-text-muted: #a8a8ad;
   --octant-text-primary-high-contrast: #ffffff;
   --octant-text-secondary-high-contrast: #c9c8c3;
   --octant-text-muted-high-contrast: #a5a4a0;

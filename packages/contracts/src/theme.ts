@@ -389,7 +389,9 @@ export const ThemeSettings = Schema.Struct({
   customThemeDark: Schema.optional(ThemeCustomSeeds),
   /**
    * Grayscale text smoothing on a Mac: "auto" and "on" smooth, "off" leaves the
-   * system default. Absent reads as "auto". Optional so old rows decode.
+   * system default, which draws fuller strokes. Absent reads as "off", the
+   * default since 2026-11-15; a stored "auto" or "on" keeps smoothing. Optional
+   * so old rows decode.
    */
   fontSmoothing: Schema.optional(ThemeFontSmoothing),
   // Retired: nothing ever read these two. They stay optional so journal
@@ -452,6 +454,7 @@ export const GLASS_TINT_SECONDARY_FLOOR = { light: 72, dark: 77 } as const;
 
 export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
+  fontSmoothing: "off",
   typography: {
     ui: {
       // The platform face (SF Pro on a Mac): it is what makes Octant read as

@@ -292,9 +292,10 @@ html[data-octant-density="compact"] {
 }
 
 /* ─── text smoothing ────────────────────────────────────────────────
-   Grayscale smoothing is the default on a Mac, and the Smooth text switch in
-   Appearance turns it off. The properties do nothing on another platform. */
-html:not([data-octant-font-smoothing="off"]) {
+   The default draws the system's fuller strokes: grayscale smoothing thins
+   light text on a dark ground, which read weak next to its icons. The Smooth
+   text switch in Appearance turns grayscale smoothing on. The properties do nothing on another platform. */
+html[data-octant-font-smoothing="on"] {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

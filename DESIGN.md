@@ -119,7 +119,7 @@ fourth.
 | Strong divider         | `--octant-divider-strong`    | `#8a8a8a` | `#6f6f6d` | Off switch edge, unchecked checkbox, slider track            |
 | Primary text           | `--octant-text-primary`      | `#f5f5f7` | `#141414` | Body and control text; the ink every wash is mixed from      |
 | Secondary text         | `--octant-text-secondary`    | `#bcbcc2` | `#45454a` | Supporting copy, section labels                              |
-| Muted text             | `--octant-text-muted`        | `#9b9b9b` | `#666666` | Meta, hints, counts                                          |
+| Muted text             | `--octant-text-muted`        | `#a8a8ad` | `#666666` | Meta, hints, counts                                          |
 | Accent                 | `--octant-accent`            | `#5b9cf5` | `#1f5fc7` | One primary action or active mark                            |
 | Accent text            | `--octant-accent-text`       | `#5b9cf5` | `#1f5fc7` | Accent as text, held to 4.5:1                                |
 | Accent foreground      | `--octant-accent-foreground` | `#141414` | `#ffffff` | Text on the accent fill                                      |
@@ -128,8 +128,10 @@ fourth.
 
 _Why the muted change._ Meta ink at `#949494` on the opaque dark float
 (`#333333`) is 4.17:1, under the 4.5:1 text floor, and the float is what every
-menu shows under reduced transparency. `#9b9b9b` is the first grey that clears
-4.55:1 there and stays 6:1 or more on the page.
+menu shows under reduced transparency. `#9b9b9b` was the first grey that clears
+4.55:1 there and stays 6:1 or more on the page. Dark meta ink is now `#a8a8ad`
+(maintainer request, 2026-11-15: secondary text read weak), a step brighter, so
+it clears both floors by more.
 
 **Derived surfaces.** These are mixed in the stylesheets, never persisted. The
 resolved values are for the default theme.
@@ -327,12 +329,15 @@ under the fill).
 ### Type
 
 **Face.** Interface text uses the platform face (`system-ui, -apple-system,
-BlinkMacSystemFont, 'Segoe UI', sans-serif`, SF Pro on a Mac) with grayscale
-smoothing (`-webkit-font-smoothing: antialiased`, `-moz-osx-font-smoothing:
-grayscale`) on the root, because thin web faces drawn with smoothing read as a
-web page and the platform face does not. Geist is an Appearance choice, and
-Appearance's Smooth text switch (on by default on a Mac, hidden elsewhere,
-`fontSmoothing` in the theme settings) turns the smoothing off.
+BlinkMacSystemFont, 'Segoe UI', sans-serif`, SF Pro on a Mac) at the system's
+own text rendering, which draws fuller strokes. Grayscale smoothing
+(`-webkit-font-smoothing: antialiased`, `-moz-osx-font-smoothing: grayscale`)
+thins light text on a dark ground and read weak beside the icons (maintainer
+request, 2026-11-15), so it is off by default. Geist is an Appearance choice,
+and Appearance's Smooth text switch (off by default, hidden off a Mac,
+`fontSmoothing` in the theme settings, default `"off"`; a stored `"auto"` or
+`"on"` keeps smoothing) turns it on. Reading text stays regular weight and
+names stay medium.
 Code, paths and identifiers use Geist Mono (`'Geist Mono Variable', 'SF Mono',
 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace`); the terminal
 defaults to 12px at 1.4 with ligatures off, the editor to 13px at 1.5.
@@ -637,7 +642,7 @@ failed, never painted.
 | Glass                 | Off, Subtle, Strong; Tint                                                      | [Translucency](#translucency)                                   |
 | Density               | Comfortable (default), Compact                                                 | Below                                                           |
 | Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 14 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
-| Smooth text           | On (default on a Mac), off; hidden off a Mac                                   | `data-octant-font-smoothing`; grayscale smoothing on the root   |
+| Smooth text           | Off (default), on; hidden off a Mac                                            | `data-octant-font-smoothing`; grayscale smoothing only when on  |
 | Transcript            | Small, Medium, Large; Narrow, Medium, Wide                                     | `--oct-transcript-font-size`; the column measure                |
 | Code, terminal        | Family, size, line height, ligatures                                           | `--octant-editor-*`, `--octant-terminal-*`                      |
 | Background            | A ground, its options, and where it shows                                      | [Home with the drawn ground](#home-with-the-drawn-ground)       |
