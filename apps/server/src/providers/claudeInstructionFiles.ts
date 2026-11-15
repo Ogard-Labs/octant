@@ -20,7 +20,8 @@ export interface ClaudeInstructionSkip {
     | "not-text"
     | "total-exceeded"
     | "unreadable"
-    | "protected";
+    | "protected"
+    | "import-limit";
 }
 
 export interface ClaudeInstructionFiles {
@@ -58,7 +59,8 @@ interface Reading {
  * with its reason, when it is too large, not text, resolves (through a
  * symlink or an import) outside the folders read here, or is one `refuses`
  * names: a file or import the session may not read is skipped before it is
- * opened.
+ * opened. An import left out because the import bound was reached is
+ * skipped the same way.
  */
 export async function readClaudeInstructionFiles(input: {
   readonly configDir?: string;
@@ -259,6 +261,7 @@ function readImports(reading: Reading, real: string, text: string): void {
     reading.bytes += bytes;
     reading.parts.push(`Contents of ${entry.path}:\n\n${entry.text.trimEnd()}`);
   }
+  for (const path of expansion.omitted) reading.skipped.push({ path, reason: "import-limit" });
 }
 
 /** UTF-8 text with no NUL byte; anything else is not an instruction file. */

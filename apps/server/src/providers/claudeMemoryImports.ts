@@ -14,6 +14,13 @@ export interface ClaudeMemoryExpansion {
   readonly entries: ReadonlyArray<ClaudeMemoryEntry>;
   /** Whether an import was left out because a depth, file, or size bound was reached. */
   readonly truncated: boolean;
+  /**
+   * The imports left out because the file or size bound was reached, each
+   * once. Octant sets those bounds, so a reader reports them; the depth bound
+   * is Claude Code's own rule, and an import past it is one Claude Code would
+   * not load either.
+   */
+  readonly omitted: ReadonlyArray<string>;
 }
 
 /**
@@ -59,6 +66,7 @@ export function expandClaudeMemoryImports(input: {
   const loaded = new Set<string>();
   let bytes = 0;
   let truncated = false;
+  const omitted: string[] = [];
   const allowed = (path: string) =>
     input.allowedRoots.some((root) => path === root || path.startsWith(`${root}${sep}`));
 
@@ -79,6 +87,7 @@ export function expandClaudeMemoryImports(input: {
         bytes + size > CLAUDE_MEMORY_IMPORT_LIMITS.maxBytes
       ) {
         truncated = true;
+        if (!omitted.includes(target)) omitted.push(target);
         continue;
       }
       loaded.add(file.realPath);
@@ -91,7 +100,7 @@ export function expandClaudeMemoryImports(input: {
   loaded.add(root?.realPath ?? input.path);
   bytes = Buffer.byteLength(input.text, "utf8");
   visit(input.path, input.text, 0);
-  return { entries, truncated };
+  return { entries, truncated, omitted };
 }
 
 /** The `@path` names a memory file imports, in order, leaving out code. */

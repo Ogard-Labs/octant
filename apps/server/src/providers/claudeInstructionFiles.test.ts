@@ -127,6 +127,27 @@ describe("Claude instruction files", () => {
     }
   });
 
+  it("says which imports were left out once the import bound is reached", async () => {
+    const names = Array.from({ length: 33 }, (_, index) => `rule-${index + 1}.md`);
+    for (const [index, name] of names.entries()) {
+      await writeFile(join(projectRoot, "docs", name), `Rule ${index + 1}: keep it short.`);
+    }
+    await writeFile(
+      join(projectRoot, "CLAUDE.md"),
+      ["Project: use tabs.", ...names.map((name) => `@docs/${name}`)].join("\n"),
+    );
+    const diagnostics: string[] = [];
+
+    const text = await instructionsFor({}, diagnostics);
+
+    expect(text).toContain("Rule 31: keep it short.");
+    expect(text).not.toContain("Rule 32: keep it short.");
+    expect(diagnostics).toEqual([
+      `Claude instruction file ${join(projectRoot, "docs", "rule-32.md")} was not read: import-limit.`,
+      `Claude instruction file ${join(projectRoot, "docs", "rule-33.md")} was not read: import-limit.`,
+    ]);
+  });
+
   it.each(["approval-gated", "plan"] as const)(
     "skips an import the secret guard protects at %s and still loads an ordinary one",
     async (executionPolicy) => {
