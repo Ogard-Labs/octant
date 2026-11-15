@@ -76,6 +76,14 @@ describe("thread wake-up policy", () => {
     });
   });
 
+  it("refuses a recurring wake-up whose later fires come closer than five minutes apart", () => {
+    const now = local(2026, 11, 14, 9, 55);
+    // The first four gaps are ten minutes; 10:40 and 10:41 are one apart.
+    expect(
+      planCronWakeup({ cron: "0,10,20,30,40,41 * * * *", recurring: true, now }),
+    ).toMatchObject({ status: "refused" });
+  });
+
   it("caps how many wake-ups a thread may have waiting", () => {
     expect(admitThreadWakeup({ waitingCount: MAX_PENDING_THREAD_WAKEUPS - 1 })).toEqual({
       status: "admitted",
