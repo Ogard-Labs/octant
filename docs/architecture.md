@@ -7224,9 +7224,15 @@ read, and the host's model routing and data rules, and the public Code-tool
 port in `@octant/plugin-api` carries none of those; giving a plugin an image
 description port would be a seam extension of its own.
 
-Not yet: a description's tokens are not on the usage ledger or under a spend
-ceiling (like the advisor's second opinion), and Work describes before its
-spend admission.
+- **Spend.** Each describe is admitted under the thread's and its Project's
+  spend ceilings before the image is sent (it is spend, not a turn of its
+  own), and over a ceiling it is refused with the ceiling's own reason and
+  nothing sent. What it used is recorded on the usage ledger under the thread
+  whose image it was, with the describing model, as an `image-description`
+  request on its own `image-description-usage` aggregate. A Work turn's
+  images are admitted this way before the turn's own admission. In Chat the
+  words are written in the same journal transaction as the attempt that
+  names them, so a send refused before that leaves no row behind.
 
 ### Context and usage accounting
 

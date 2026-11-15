@@ -605,6 +605,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       return lookToolForThread({
         describer,
         threadId: String(thread.id),
+        threadType: "code-thread",
         projectId: thread.projectId,
         threadModel: modelLabelOf(
           { persistence, providerRuntimeRegistry },
@@ -1135,6 +1136,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               describeImages: ({ thread, images, signal }) =>
                 describeTurnImages(imageDescriber, {
                   signal,
+                  scope: { threadId: String(thread.id), threadType: "code-thread" },
                   projectId: thread.projectId,
                   threadModel: modelLabelOf(
                     { persistence, providerRuntimeRegistry },

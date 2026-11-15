@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type ProviderInstanceId,
   type SeesImagesAvailability,
+  type TurnUsage,
 } from "@octant/contracts";
 import {
   boundImageDescription,
@@ -82,6 +83,29 @@ export interface ImageDescriberSources {
   readonly uuid: () => string;
   readonly now?: () => number;
   readonly complete?: typeof completeOnceOutcome;
+  /**
+   * The spend a describe is: admitted under the thread's and its Project's
+   * ceilings before anything is sent, and recorded on the usage ledger under
+   * the thread whose image it was, with the describing model. Absent, a
+   * describe is neither admitted nor recorded (tests, a host without them).
+   */
+  readonly spend?: ImageDescriptionSpend;
+}
+
+/** Who a describe is spent for. */
+export interface ImageDescriptionScope {
+  readonly threadId: string;
+  readonly threadType: "chat-thread" | "work-thread" | "code-thread";
+}
+
+export interface ImageDescriptionSpend {
+  readonly admit: (input: {
+    readonly scope: ImageDescriptionScope;
+    readonly projectId?: ProjectId | undefined;
+    readonly candidate: NativeHarnessSlotCandidate;
+  }) =>
+    | { readonly status: "refused"; readonly reason: string }
+    | { readonly status: "admitted"; readonly settle: (usage: TurnUsage | undefined) => void };
 }
 
 export type ImageDescriptionOutcome =
@@ -146,6 +170,8 @@ export class ImageDescriber {
   }
 
   async describe(input: {
+    /** The thread whose image it is; its spend and its ceilings. */
+    readonly scope?: ImageDescriptionScope | undefined;
     readonly projectId?: ProjectId | undefined;
     /** The thread's own model, named in a refusal. */
     readonly threadModel: string;
@@ -181,7 +207,19 @@ export class ImageDescriber {
         };
       }
       tried.add(nativeHarnessSlotCandidateKey(route.candidate));
-      const text = await this.#ask(route.candidate, image, input.question, input.signal);
+      // Spend is admitted before the image leaves; over a ceiling nothing is sent.
+      const admission =
+        this.#sources.spend === undefined || input.scope === undefined
+          ? undefined
+          : this.#sources.spend.admit({
+              scope: input.scope,
+              projectId: input.projectId,
+              candidate: route.candidate,
+            });
+      if (admission?.status === "refused") return { kind: "refused", reason: admission.reason };
+      const asked = await this.#ask(route.candidate, image, input.question, input.signal);
+      admission?.settle(asked.usage);
+      const text = asked.text;
       if (text !== undefined) return { kind: "described", text, describedBy: route.describedBy };
       failed.push({ ...route.describedBy, reason: "provider-not-ready" });
     }
@@ -267,9 +305,9 @@ export class ImageDescriber {
     image: ImageToDescribe,
     question: string | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<string | undefined> {
+  ): Promise<{ readonly text?: string; readonly usage?: TurnUsage }> {
     const driver = this.#sources.resolveDriver(candidate.providerInstanceId);
-    if (driver === undefined) return undefined;
+    if (driver === undefined) return {};
     const asking = (this.#sources.complete ?? completeOnceOutcome)({
       driver,
       providerInstanceId: candidate.providerInstanceId,
@@ -303,10 +341,14 @@ export class ImageDescriber {
             });
           }),
         ]));
-    // `withheld` read outside content on the way, so its words are not used.
-    if (outcome.status !== "completed") return undefined;
+    // A withheld answer read outside content on the way, so its words are
+    // not used; it was paid for all the same.
+    const usage =
+      outcome.status === "completed" || outcome.status === "withheld" ? outcome.usage : undefined;
+    const spent = usage === undefined ? {} : { usage };
+    if (outcome.status !== "completed") return spent;
     const text = boundImageDescription(outcome.text);
-    return text.length === 0 ? undefined : text;
+    return text.length === 0 ? spent : { ...spent, text };
   }
 }
 
@@ -345,6 +387,7 @@ export type TurnImagesDescription =
 export async function describeTurnImages(
   describer: Pick<ImageDescriber, "describe">,
   input: {
+    readonly scope?: ImageDescriptionScope | undefined;
     readonly projectId?: ProjectId | undefined;
     readonly threadModel: string;
     readonly images: ReadonlyArray<TurnImage>;
@@ -366,6 +409,7 @@ export async function describeTurnImages(
       };
     }
     const outcome = await describer.describe({
+      scope: input.scope,
       projectId: input.projectId,
       threadModel: input.threadModel,
       image,

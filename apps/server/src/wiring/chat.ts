@@ -531,6 +531,7 @@ export function wireChat(deps: ChatDependencies) {
             describeImages: ({ thread, images, signal }) =>
               describeTurnImages(imageDescriber, {
                 signal,
+                scope: { threadId: String(thread.id), threadType: "chat-thread" },
                 projectId: thread.projectId,
                 threadModel: modelLabelOf(
                   { persistence, providerRuntimeRegistry },
@@ -616,6 +617,7 @@ export function wireChat(deps: ChatDependencies) {
                   : lookToolForThread({
                       describer: imageDescriber,
                       threadId: String(thread.id),
+                      threadType: "chat-thread",
                       projectId: thread.projectId,
                       threadModel: modelLabelOf(
                         { persistence, providerRuntimeRegistry },

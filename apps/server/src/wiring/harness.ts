@@ -53,8 +53,7 @@ import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSe
 import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckCommand";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
-import { createHostImageDescriber, modelLabelOf } from "./imageDescriber";
-import { windowAdmitsProject } from "@octant/domain/shell-policy";
+import { createHostImageDescriber, modelLabelOf, windowSeesProject } from "./imageDescriber";
 import {
   createFollowUp,
   type FollowUpCreationDependencies,
@@ -496,20 +495,20 @@ export function wireHarness(deps: HarnessDependencies) {
     isProjectPolicyTargetAllowed: deps.isProjectPolicyTargetAllowed,
     configuredDriverOptions: () => configuredDriverOptions,
     providerDataDirectory,
+    spendCeiling,
   });
   const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore,
     store: nativeHarnessRoutingStore,
-    windowSeesProject: (windowId, projectId) => {
-      const project = persistence.readProject(projectId);
-      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
-      return (
-        project !== undefined &&
-        project.lifecycle === "active" &&
-        workspace !== undefined &&
-        windowAdmitsProject(workspace, project.type, projectId)
-      );
-    },
+    windowSeesProject: (windowId, projectId) =>
+      windowSeesProject(
+        {
+          readProject: (id) => persistence.readProject(id),
+          readWorkspace: (id) => persistence.readWindowWorkspace(id)?.workspace,
+        },
+        windowId,
+        projectId,
+      ),
     seesImages: (input) =>
       imageDescriber.available({
         projectId: input.projectId,

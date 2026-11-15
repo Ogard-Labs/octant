@@ -5,7 +5,11 @@ import {
   type NativeHarnessSlotCandidate,
   type Project,
 } from "@octant/contracts";
-import { ImageDescriber, type ImageDescriberCandidateFacts } from "./imageDescription";
+import {
+  ImageDescriber,
+  type ImageDescriberCandidateFacts,
+  type ImageDescriberSources,
+} from "./imageDescription";
 import type { OneShotOutcome } from "./nativeHarnessSingleShot";
 
 const hostId = "00000000-0000-4000-8000-0000000000aa";
@@ -32,6 +36,7 @@ const fixture = (input: {
   readonly facts?: (candidate: NativeHarnessSlotCandidate) => Partial<ImageDescriberCandidateFacts>;
   readonly takesImage?: (candidate: NativeHarnessSlotCandidate) => boolean;
   readonly outcomes?: ReadonlyArray<OneShotOutcome>;
+  readonly spend?: ImageDescriberSources["spend"];
 }) => {
   let next = 0;
   const complete = vi.fn(
@@ -55,6 +60,7 @@ const fixture = (input: {
     scratchRoot: "/scratch",
     uuid: () => "00000000-0000-4000-8000-000000000042",
     complete: complete as never,
+    ...(input.spend === undefined ? {} : { spend: input.spend }),
   });
   return { describer, complete };
 };
@@ -166,6 +172,50 @@ describe("Sees images", () => {
         image: { ...image, name: "notes.pdf", mediaType: "application/pdf" },
       }),
     ).resolves.toMatchObject({ kind: "refused" });
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("admits the describe under the thread's ceilings and records what it used", async () => {
+    const settled: unknown[] = [];
+    const admit = vi.fn(() => ({
+      status: "admitted" as const,
+      settle: (usage: unknown) => settled.push(usage),
+    }));
+    const { describer } = fixture({
+      host: vision([haiku]),
+      outcomes: [
+        { status: "completed", text: "A chart.", usage: { inputTokens: 900, outputTokens: 40 } },
+      ],
+      spend: { admit },
+    });
+    await describer.describe({
+      scope: { threadId: "thread-1", threadType: "work-thread" },
+      threadModel: "Luna",
+      image,
+    });
+    expect(admit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { threadId: "thread-1", threadType: "work-thread" },
+        candidate: haiku,
+      }),
+    );
+    expect(settled).toEqual([{ inputTokens: 900, outputTokens: 40 }]);
+  });
+
+  it("sends nothing when the describe is over a spend ceiling, and says so", async () => {
+    const { describer, complete } = fixture({
+      host: vision([haiku]),
+      spend: {
+        admit: () => ({ status: "refused", reason: "This thread reached its token ceiling." }),
+      },
+    });
+    await expect(
+      describer.describe({
+        scope: { threadId: "thread-1", threadType: "chat-thread" },
+        threadModel: "Luna",
+        image,
+      }),
+    ).resolves.toEqual({ kind: "refused", reason: "This thread reached its token ceiling." });
     expect(complete).not.toHaveBeenCalled();
   });
 });

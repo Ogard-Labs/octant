@@ -605,6 +605,11 @@ interface PreparedChatTurn {
   /** The words the model gets for those images, sent with the person's message. */
   readonly describedContext?: ReadonlyArray<string>;
   /**
+   * The words as content rows, written in the same journal transaction as the
+   * attempt that names them, so a send refused before that leaves none behind.
+   */
+  readonly describedContents?: ReadonlyArray<PreparedChatContent>;
+  /**
    * Set when the turn starts a new provider session with the thread's earlier
    * conversation handed over as text. The record is journaled with the turn's
    * attempt; the blocks are already in `context`.
@@ -3131,7 +3136,13 @@ export class ChatService {
               : []),
           ],
         },
-        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
+        {
+          beforeEvents: (connection) => {
+            this.#writePreparedContent(connection, userMessage);
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
       );
       return {
         kind: "accepted" as const,
@@ -3334,7 +3345,13 @@ export class ChatService {
               : []),
           ],
         },
-        { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
+        {
+          beforeEvents: (connection) => {
+            this.#writePreparedContent(connection, userMessage);
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
       );
       return {
         kind: "accepted" as const,
@@ -4016,17 +4033,28 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
-      this.#persistence.journal.append({
-        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-        expectedVersion: command.expectedVersion,
-        events: [
-          this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
-          this.#pending("chat.attempt-updated@1", {
-            kind: "attempt-updated",
-            attempt: nextAttempt,
-          }),
-        ],
-      });
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending("chat.thread-updated@1", {
+              kind: "thread-updated",
+              thread: updatedThread,
+            }),
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: nextAttempt,
+            }),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
+      );
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
@@ -4361,17 +4389,28 @@ export class ChatService {
         version: (command.expectedVersion + 1) as AggregateVersion,
         updatedAt: timestamp,
       };
-      this.#persistence.journal.append({
-        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-        expectedVersion: command.expectedVersion,
-        events: [
-          this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: updatedThread }),
-          this.#pending("chat.attempt-updated@1", {
-            kind: "attempt-updated",
-            attempt: nextAttempt,
-          }),
-        ],
-      });
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+          expectedVersion: command.expectedVersion,
+          events: [
+            this.#pending("chat.thread-updated@1", {
+              kind: "thread-updated",
+              thread: updatedThread,
+            }),
+            this.#pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: nextAttempt,
+            }),
+          ],
+        },
+        {
+          beforeEvents: (connection) => {
+            for (const content of prepared.describedContents ?? [])
+              this.#writePreparedContent(connection, content);
+          },
+        },
+      );
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
@@ -5087,7 +5126,11 @@ export class ChatService {
         ...(inputReceipt === undefined ? {} : { inputReceipt }),
         ...(described === undefined
           ? {}
-          : { describedImages: described.records, describedContext: described.texts }),
+          : {
+              describedImages: described.records,
+              describedContext: described.texts,
+              describedContents: described.contents,
+            }),
         ...(nativeSession === undefined ? {} : { nativeSession }),
         ...(handoff === undefined ? {} : { handoff: handoff.record }),
         context:
@@ -7181,6 +7224,7 @@ export class ChatService {
     | {
         readonly records: NonNullable<ChatAttempt["describedImages"]>;
         readonly texts: ReadonlyArray<string>;
+        readonly contents: ReadonlyArray<PreparedChatContent>;
       }
     | undefined
   > {
@@ -7223,9 +7267,11 @@ export class ChatService {
         description: image.text,
       }),
     );
+    const contents = outcome.images.map((image, index) =>
+      this.#prepareContent(thread.id, "user", texts[index] ?? image.text),
+    );
     const records = outcome.images.map((image, index) => {
-      const content = this.#prepareContent(thread.id, "user", texts[index] ?? image.text);
-      writeChatContent(this.#persistence.connection, content.input);
+      const content = contents[index] ?? this.#prepareContent(thread.id, "user", image.text);
       return {
         attachmentId: decodeChatAttachmentId(image.attachmentId),
         name: image.name,
@@ -7235,7 +7281,7 @@ export class ChatService {
     });
     const [first, ...rest] = records;
     if (first === undefined) return undefined;
-    return { records: [first, ...rest], texts };
+    return { records: [first, ...rest], texts, contents };
   }
 
   #prepareContent(

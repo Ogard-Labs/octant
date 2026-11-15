@@ -11,6 +11,7 @@ import { readConfinedCodeFile } from "../code/codeConfinedFileRead";
 import { liveCodeTestSourcePort } from "../code/codeDirectoryPort";
 import type {
   ImageDescriber,
+  ImageDescriptionScope,
   ImageDescriptionOutcome,
   ImageToDescribe,
 } from "../harness/imageDescription";
@@ -214,6 +215,7 @@ export async function readImageInsideFolder(
 export function lookToolForThread(input: {
   readonly describer: Pick<ImageDescriber, "available" | "describe">;
   readonly threadId: string;
+  readonly threadType: ImageDescriptionScope["threadType"];
   readonly projectId?: ProjectId | undefined;
   readonly threadModel: string;
   readonly readsImages: boolean;
@@ -231,6 +233,7 @@ export function lookToolForThread(input: {
   const tools = createLookTool({
     describe: ({ image, question, signal }) =>
       input.describer.describe({
+        scope: { threadId: input.threadId, threadType: input.threadType },
         projectId: input.projectId,
         threadModel: input.threadModel,
         image,

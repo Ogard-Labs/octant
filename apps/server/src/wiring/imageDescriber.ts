@@ -2,11 +2,18 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import {
   decodeProviderInstanceId,
+  decodeSpendCeilingReservationId,
+  IMAGE_DESCRIPTION_REQUEST_SHAPE,
+  IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
+  type ProjectId,
+  type WindowId,
+  type WindowWorkspace,
   type Project,
   type ProviderInstance,
   type ProviderModel,
 } from "@octant/contracts";
 import { usageLimitFromReading } from "@octant/domain";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
 import { ImageDescriber } from "../harness/imageDescription";
 import type { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
@@ -15,6 +22,8 @@ import type { ProviderAvailabilityMarks } from "../providers/providerAvailabilit
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import type { ProviderUsageLimitsService } from "../providers/providerUsageLimitsService";
 import { supportsConversationInput } from "./conversationInputs";
+import { recordOneShotUsage } from "../shield/shieldUsageLedger";
+import type { SpendCeilingService } from "../spendCeilingService";
 import { makeConfiguredProviderDriver, type ConfiguredProviderDriverOptions } from "./providers";
 
 /**
@@ -37,6 +46,8 @@ export function createHostImageDescriber(deps: {
   ) => boolean;
   readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
   readonly providerDataDirectory: string;
+  /** The ceilings a describe is admitted under; absent, none applies. */
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
 }): ImageDescriber {
   const { persistence, providerRuntimeRegistry } = deps;
   return new ImageDescriber({
@@ -90,8 +101,61 @@ export function createHostImageDescriber(deps: {
     },
     scratchRoot: join(deps.providerDataDirectory, "harness", "work"),
     uuid: randomUUID,
+    spend: {
+      admit: ({ scope, projectId, candidate }) => {
+        const reservationId = decodeSpendCeilingReservationId(randomUUID());
+        const admission = deps.spendCeiling?.admit({
+          reservationId,
+          threadId: scope.threadId,
+          threadType: scope.threadType,
+          ...(projectId === undefined ? {} : { projectId: String(projectId) }),
+          turnUpperBoundTokens: IMAGE_DESCRIPTION_TOKEN_BOUND,
+          // A describe is spend, not a turn of the thread's own.
+          countsAsTurn: false,
+        });
+        if (admission?.status === "refused") {
+          return { status: "refused", reason: admission.refusal.message };
+        }
+        return {
+          status: "admitted",
+          // Recorded under the thread before the reservation goes, so the next
+          // admission sees it as committed spend.
+          settle: (usage) => {
+            try {
+              recordOneShotUsage(
+                {
+                  connection: persistence.connection,
+                  journal: persistence.journal,
+                  clock: () => new Date().toISOString(),
+                  uuid: randomUUID,
+                },
+                {
+                  threadId: scope.threadId,
+                  providerInstanceId: candidate.providerInstanceId,
+                  modelId: candidate.modelId,
+                  usage,
+                  aggregateType: IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
+                  requestShape: IMAGE_DESCRIPTION_REQUEST_SHAPE,
+                },
+              );
+            } catch {
+              // A ledger that refuses the record still releases the reservation.
+            }
+            deps.spendCeiling?.settle({
+              reservationId,
+              ...(usage === undefined
+                ? {}
+                : { observedTokens: usage.inputTokens + usage.outputTokens }),
+            });
+          },
+        };
+      },
+    },
   });
 }
+
+/** What one describe may spend: a picture and a bounded answer. */
+const IMAGE_DESCRIPTION_TOKEN_BOUND = 16_000;
 
 /** A model's name as the person sees it, for a refusal that names it. */
 export function modelLabelOf(
@@ -109,4 +173,27 @@ export function modelLabelOf(
     .readProviderCatalog?.(providerInstanceId)
     ?.models.find((model) => String(model.id) === String(modelId));
   return observed?.displayName ?? catalog?.displayName ?? String(modelId);
+}
+
+/**
+ * Whether a window may see a Project, of any kind, by its own persisted
+ * workspace: the Project is the window's context for that Project's mode, or
+ * a pane it shows. A Chat Project held as the window's Chat context counts.
+ */
+export function windowSeesProject(
+  sources: {
+    readonly readProject: (projectId: ProjectId) => Project | undefined;
+    readonly readWorkspace: (windowId: WindowId) => WindowWorkspace | undefined;
+  },
+  windowId: WindowId,
+  projectId: ProjectId,
+): boolean {
+  const project = sources.readProject(projectId);
+  const workspace = sources.readWorkspace(windowId);
+  return (
+    project !== undefined &&
+    project.lifecycle === "active" &&
+    workspace !== undefined &&
+    windowAdmitsProject(workspace, project.type, projectId)
+  );
 }

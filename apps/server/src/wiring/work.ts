@@ -788,6 +788,7 @@ export function wireWork(deps: WorkDependencies) {
             : lookToolForThread({
                 describer: imageDescriber,
                 threadId: String(input.thread.id),
+                threadType: "work-thread",
                 projectId: input.thread.projectId,
                 threadModel: modelLabelOf(
                   { persistence, providerRuntimeRegistry },
@@ -917,9 +918,17 @@ export function wireWork(deps: WorkDependencies) {
       ...(imageDescriber === undefined
         ? {}
         : {
-            describeImages: ({ projectId, providerInstanceId, modelId, images, signal }) =>
+            describeImages: ({
+              threadId,
+              projectId,
+              providerInstanceId,
+              modelId,
+              images,
+              signal,
+            }) =>
               describeTurnImages(imageDescriber, {
                 signal,
+                scope: { threadId: String(threadId), threadType: "work-thread" },
                 projectId,
                 threadModel: modelLabelOf(
                   { persistence, providerRuntimeRegistry },

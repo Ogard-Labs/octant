@@ -94,6 +94,7 @@ describe("look", () => {
       lookToolForThread({
         describer: describer(available),
         threadId: "thread-1",
+        threadType: "code-thread",
         threadModel: "Luna",
         readsImages,
         uuid: () => "id",

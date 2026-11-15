@@ -45,7 +45,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
-| [Native harness](#native-harness)                                                     | 7         | 4       | 3            | 0                   |
+| [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 15        | 10      | 4            | 1                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **262**   | **156** | **102**      | **4**               |
+| **All areas**                                                                         | **262**   | **157** | **101**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1574,9 +1574,9 @@ The Sees images role describes an image in words for a thread whose model cannot
 - `octant_look` is offered to a Chat, Work, or Code turn only while the thread cannot take an image and Sees images can describe one: an attachment of the thread, or in Work and Code a file inside its folder, confined like any file read, with an optional question. A thread already marked with outside content keeps it, because the question reaches only a model the Project allows (maintainer decision, 2026-11-15). It is registered in the host like Project memory's tool; the public tool port has no image-description port.
 - OpenAI- and Anthropic-style endpoints send an attached image in the user message and claim attachments when one of their models reads images, so they can serve Sees images and take images as a thread's own model (maintainer decision, 2026-11-15); any other attachment type is refused at admission. Amazon Bedrock does not claim attachments.
 - The composer's `GET /api/native-harness/routing/sees-images` refuses a window that may not see the named Project.
-- Not built: a description is not on the usage ledger or under a spend ceiling. Not run against a real provider.
+- Each describe is admitted under the thread's and Project's spend ceilings before the image is sent and refused with the ceiling's reason when over; its usage is recorded under the thread with the describing model as `image-description`. Not run against a real provider.
 
-Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Sees images](../architecture.md#sees-images), [Agent tools](agent-tools.md), and [Model endpoints: Model roles](model-endpoints.md#model-roles).
+Status: Built. Since: 2026-11-15. Detail: [Architecture: Sees images](../architecture.md#sees-images), [Agent tools](agent-tools.md), and [Model endpoints: Model roles](model-endpoints.md#model-roles).
 
 ### Harness sessions, goals and steering
 

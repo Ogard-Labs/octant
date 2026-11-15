@@ -383,6 +383,7 @@ export interface WorkTurnServiceDependencies {
    * them, or refuses with the reason. Absent, such a turn is refused as before.
    */
   readonly describeImages?: (input: {
+    readonly threadId: WorkThreadId;
     readonly projectId: ProjectId;
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
@@ -1231,6 +1232,7 @@ export class WorkTurnService {
       }, 250);
       const described = await this.#describeImages({
         signal: describing.signal,
+        threadId: command.threadId,
         projectId: command.authority.projectId,
         providerInstanceId: command.authority.providerInstanceId,
         modelId: command.authority.modelId,
