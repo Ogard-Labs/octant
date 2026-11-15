@@ -130,6 +130,55 @@ describe("the harness shell at Full access on a Windows host", () => {
     expect(stopTree).toHaveBeenCalledWith(4242);
   });
 
+  it("returns a short command's real result when it ended before its identity could be read", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-windows-harness-"));
+    directories.push(root);
+    const folder = join(root, "scripts", "octant-harness-2");
+    mkdirSync(folder, { recursive: true });
+    const script = join(folder, "command.ps1");
+    writeFileSync(script, "Write-Output done\n");
+    // A pid no process holds: the command has already ended.
+    const child = Object.assign(new EventEmitter(), {
+      pid: 2_147_483_002,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+    });
+    let closed: () => void = () => undefined;
+    const closedOnce = new Promise<void>((resolve) => {
+      closed = resolve;
+    });
+    const stopTree = vi.fn(async () => "stopped" as const);
+    const port = createWindowsFullAccessShellPort({
+      shell: () => "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      scriptDirectory: join(root, "scripts"),
+      receiptDirectory: join(root, "receipts"),
+      stopTree,
+      // The identity is read only after the command has closed, and finds it gone.
+      processIdentity: async () => {
+        await closedOnce;
+        return undefined;
+      },
+      spawn: (() => {
+        queueMicrotask(() => {
+          child.stdout.emit("data", Buffer.from("done\n"));
+          child.emit("exit", 0);
+          child.emit("close", 0);
+          closed();
+        });
+        return child;
+      }) as never,
+    });
+    const result = await port.executeShellScript({
+      script,
+      cwd: root,
+      environment: {},
+      timeoutMs: 60_000,
+    });
+    expect(result).toMatchObject({ termination: "exited", exitCode: 0 });
+    expect(Buffer.from(result.stdout).toString("utf8")).toBe("done\n");
+    expect(stopTree).not.toHaveBeenCalled();
+  });
+
   it.runIf(process.platform === "win32")(
     "finds and stops a long command a crashed host left running, from its receipt, and removes the receipt",
     async () => {

@@ -245,6 +245,10 @@ function run(
     child.stdout?.on("data", capture(stdout));
     child.stderr?.on("data", capture(stderr));
     const pid = child.pid;
+    let exited = false;
+    child.once("exit", () => {
+      exited = true;
+    });
     // The command's receipt, written once it runs and removed once it has
     // ended, so a host that crashes meanwhile stops it at its next start. A
     // command whose receipt cannot be kept is stopped: nothing could find it
@@ -259,7 +263,11 @@ function run(
               return handle;
             })
             .catch(() => {
-              end("unowned");
+              // A short command can end before its identity is read, and the
+              // receipt then fails for a process that is already gone, which
+              // needs none. Only a live process nothing could find after a
+              // crash is stopped and reported unavailable.
+              if (!exited && processAlive(pid)) end("unowned");
               return undefined;
             });
     let stopWait: ReturnType<typeof setTimeout> | undefined;
@@ -301,6 +309,7 @@ function run(
     signal?.addEventListener("abort", abort, { once: true });
     child.once("error", () => finish(unavailable()));
     child.once("close", (code) => {
+      exited = true;
       void receipt
         .then((handle) => handle?.remove())
         .catch(() => {
@@ -309,6 +318,15 @@ function run(
         .finally(() => finish(result(code)));
     });
   });
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 function unavailable(): RepositoryTestProcessResult {

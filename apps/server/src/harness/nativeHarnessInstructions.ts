@@ -1,3 +1,4 @@
+import type { WindowsTerminalShell } from "@octant/contracts";
 import type { OctantMode, ProviderContextBlock } from "@octant/contracts";
 
 /**
@@ -53,22 +54,33 @@ export const NATIVE_HARNESS_INSTRUCTIONS_BLOCK: ProviderContextBlock = {
 
 /**
  * The `bash` tool keeps its name everywhere, but on a Windows host it runs the
- * shell Settings › Code names (Windows PowerShell unless another is chosen),
- * so the model is told before it writes a POSIX command.
+ * shell Settings › Code › Terminal shell names, so the model is told which
+ * one before it writes a POSIX command.
  */
-export const WINDOWS_SHELL_INSTRUCTION =
-  "This host runs Windows. The bash tool runs the command in Windows PowerShell, or in the shell the user chose in Settings, not in a POSIX shell: write PowerShell commands and Windows paths.";
+export function windowsShellInstruction(shell: WindowsTerminalShell | undefined): string {
+  switch (shell ?? "powershell") {
+    case "powershell":
+      return "This host runs Windows. The bash tool runs each command in Windows PowerShell 5.1, not in a POSIX shell: write PowerShell commands and Windows paths.";
+    case "pwsh":
+      return "This host runs Windows. The bash tool runs each command in PowerShell 7, not in a POSIX shell: write PowerShell commands and Windows paths.";
+    case "cmd":
+      return "This host runs Windows. The bash tool runs each command as a Command Prompt batch script under cmd.exe, not in a POSIX shell: write cmd commands and Windows paths.";
+  }
+}
 
 export function nativeHarnessInstructions(
   mode: OctantMode,
-  platform: NodeJS.Platform = process.platform,
+  host: {
+    readonly platform?: NodeJS.Platform;
+    readonly windowsShell?: WindowsTerminalShell | undefined;
+  } = {},
 ): ReadonlyArray<ProviderContextBlock> {
   return [
     NATIVE_HARNESS_INSTRUCTIONS_BLOCK,
     { kind: "instructions", text: ABOUT_OCTANT },
     { kind: "instructions", text: MODE[mode] },
-    ...(platform === "win32" && mode !== "chat"
-      ? [{ kind: "instructions" as const, text: WINDOWS_SHELL_INSTRUCTION }]
+    ...((host.platform ?? process.platform) === "win32" && mode !== "chat"
+      ? [{ kind: "instructions" as const, text: windowsShellInstruction(host.windowsShell) }]
       : []),
   ];
 }

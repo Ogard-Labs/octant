@@ -714,6 +714,7 @@ export function wireHarness(deps: HarnessDependencies) {
     authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
+    windowsShell: () => persistence.readCodeSettings()?.settings.windowsTerminalShell,
     serverContext: (projectId) => shieldServerStore.context(projectId),
     sessions: nativeHarnessSessions,
     router: nativeHarnessRouter,

@@ -18370,8 +18370,12 @@ deliverable and keeps every gate above:
      PowerShell 5.1 a native program's error output the command redirects
      itself (`2>&1`) counts as such an error, which can read a success as a
      failure, never the reverse. A Command Prompt script ends with
-     `exit /b %errorlevel%`. The tool keeps its name, and a Work or Code lead on a Windows host is told
-     the shell is PowerShell. The levels below Full access refuse on Windows
+     `exit /b %errorlevel%`. A command that ends before its identity is
+     read needs no receipt and keeps its result; only a live command whose
+     receipt cannot be kept is stopped and reported unavailable. The tool
+     keeps its name, and a Work or Code lead on a Windows host is told
+     which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
+     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
      before a command is planned.
    - **Not yet on Windows.** These run at Full access on macOS and Linux and
      are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
