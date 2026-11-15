@@ -65,7 +65,7 @@ describe("the shell's edges and gaps", () => {
     // on a half pixel.
     expect(bar).not.toMatch(/border-bottom/);
     expect(bar).toMatch(/box-shadow:\s*inset 0 -1px 0/);
-    expect(rule(dock, ".dock-tile__control > svg")).toContain("var(--oct-icon-sm)");
+    expect(rule(dock, ".dock-tile__control > svg")).toContain("var(--oct-icon-md)");
   });
 
   it("makes each rail button its 36px face, and centres the first face on the title rail", () => {
