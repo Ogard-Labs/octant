@@ -38,9 +38,10 @@ export type AppVersion = typeof AppVersion.Type;
  *
  * `darwin` is the Apple Silicon technical preview. `linux` is the x64
  * portable-image feed, the same document shape as `<ring>/linux-x64.json`.
- * Windows stays out until packaging lands.
+ * `win32` is the x64 per-user installer, signed with Authenticode; a Windows
+ * app reads its feed only once its installer hand-off is wired in.
  */
-export const AppUpdatePlatform = Schema.Literal("darwin", "linux");
+export const AppUpdatePlatform = Schema.Literal("darwin", "linux", "win32");
 export type AppUpdatePlatform = typeof AppUpdatePlatform.Type;
 
 export const AppUpdateArchitecture = Schema.Literal("arm64", "x64");
