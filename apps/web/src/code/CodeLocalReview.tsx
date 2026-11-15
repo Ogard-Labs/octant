@@ -204,7 +204,7 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
       ),
   };
   return (
-    <section aria-label="Review findings and correction draft">
+    <section aria-label="Review findings and correction draft" className="code-local-review">
       <OctantButton
         type="button"
         size="sm"

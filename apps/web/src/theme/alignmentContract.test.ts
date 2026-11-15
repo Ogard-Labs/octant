@@ -14,6 +14,8 @@ const usage = read("usage.css");
 const projectThreads = read("project-threads.css");
 const components = read("components.css");
 const code = read("code.css");
+const inbox = read("inbox.css");
+const todos = read("todos.css");
 const root = readFileSync(resolve(import.meta.dirname, "../styles.css"), "utf8");
 const source = (file: string) => readFileSync(resolve(import.meta.dirname, "..", file), "utf8");
 const toggleGroup = source("ui/shadcn/toggle-group.tsx");
@@ -223,13 +225,13 @@ describe("the shell's edges and gaps", () => {
     expect(rule(octant, ".thread-column")).toContain("var(--oct-thread-column)");
   });
 
-  it("starts a thread's title text 16px after the stage's edge, with the mark and the request chip after it", () => {
+  it("starts a thread's title text 20px after the stage's edge, on the transcript's left edge, with the mark and the request chip after it", () => {
     const header = rule(root, '.workspace-pane__header[data-header-kind="title"]');
     // The title's edge no longer reads the thread column, so it cannot move
     // when a thread opens or the dock narrows the pane.
     expect(header).not.toContain("thread-column");
     expect(header).toMatch(
-      /--pane-title-start:\s*calc\(var\(--oct-space-4\) - var\(--oct-space-1\) - 1px\);/,
+      /--pane-title-start:\s*calc\(var\(--oct-space-5\) - var\(--oct-space-1\) - 1px\);/,
     );
     expect(header).toMatch(/padding-left:\s*var\(--pane-title-start\);/);
     // A header with content tabs keeps the insets it had: the tabs lead it.
@@ -340,5 +342,31 @@ describe("the shell's edges and gaps", () => {
     expect(rule(surface, ".welcome:has(> .home-start) > .welcome__heading")).toMatch(
       /flex:\s*0 0 auto/,
     );
+  });
+  it("stands an Inbox card's rows, group heads and notes on the 16px its label and filters stand on", () => {
+    // The card's body takes 8px and each row 8px more; a row at 12px put its
+    // glyph and text 4px right of the label above it.
+    expect(rule(inbox, ".inbox-card__body")).toMatch(/padding:\s*0 var\(--oct-space-2\)/);
+    expect(rule(inbox, ".inbox-card__head")).toMatch(/padding:\s*0 var\(--oct-space-4\)/);
+    expect(rule(inbox, ".inbox-view__row")).toMatch(/padding:\s*var\(--oct-space-2\);/);
+    expect(rule(inbox, ".inbox-card .inbox-row:has(> :not(.inbox-view__row))")).toMatch(
+      /padding:\s*var\(--oct-space-2\);/,
+    );
+    expect(rule(inbox, ".inbox-group__head")).toMatch(/padding:\s*0 var\(--oct-space-2\)/);
+  });
+
+  it("ends the To-dos card on the edge the Inbox's cards end on, at every window width", () => {
+    const measure = (sheet: string, selector: string) =>
+      [
+        ...sheet.matchAll(new RegExp(`${selector} \\{\\s*--oct-surface-measure:\\s*(\\d+)px`, "g")),
+      ].map((match) => match[1]);
+    expect(measure(todos, "\\.todos-page")).toEqual(measure(inbox, "\\.inbox-page"));
+    expect(measure(inbox, "\\.inbox-page")).toEqual(["980", "1240"]);
+  });
+
+  it("keeps a Review tile's findings blocks 12px apart, as the list keeps its own blocks", () => {
+    expect(
+      rule(dock, ".right-utility-dock__tool .git-history__list--changes .code-local-review"),
+    ).toMatch(/gap:\s*var\(--oct-space-3\)/);
   });
 });

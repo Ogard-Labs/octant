@@ -668,8 +668,9 @@ coat), painted once on the shell. Neither has a fill or line of its own.
   unified title bar with a toolbar; 38px read as cramped in the desktop app). Its controls are 28px
   (`--oct-rail-button-h`) with the control corner, 4px apart, on an 8px inset at
   both ends. The band's title (the Project mark and name, the thread title, the
-  device chip) is left-aligned and vertically centred, starting 16px after the
-  stage's left edge, as a toolbar title does in a Mac app: after the sidebar's
+  device chip) is left-aligned and vertically centred, starting 20px after the
+  stage's left edge (the thread column's own inset, so the title stands over the
+  transcript's left edge and the band's actions end over its right edge): after the sidebar's
   trailing edge when the sidebar is open, after the chrome's leading cluster
   when it is collapsed or only a rail shows. It does not move when a thread
   opens or closes or the dock opens, only when the sidebar is resized or
@@ -1382,6 +1383,23 @@ Surface (measure 880px, or wide)
   Settings groups keep their hairline because their rows have dividers.
 - A page with nothing on it is the empty state alone, centred; search and
   filters appear only once there is something to filter.
+- **Page edges.** A page is laid out on one grid, and its header sits on the
+  content's edges, never beside them:
+  - The page title's text and the first row of content start on the content's
+    left edge (Back's glyph stands on it, the title 30px after).
+  - The header's last action, the search field and the toolbar's last control end
+    on the content's right edge.
+  - A card's label, its rows' glyphs and text, and its notes stand on one inset
+    (16px), and its trailing items (counts, statuses, times, menus) end on the
+    inset's other side, 16px in.
+  - Sibling destinations end their content on the same right edge, so the
+    Inbox and To-dos open to the same width, and a list page whose header holds
+    an icon cluster ends it on the search field's right edge (Issues as Pull
+    requests).
+  - A thread's title band starts the mark 20px in and ends its actions 20px in,
+    the transcript's and the composer's own edges at ordinary widths.
+  - A tile's blocks keep 12px between them, including the blocks a component
+    nests inside one block.
 
 ### Settings page
 

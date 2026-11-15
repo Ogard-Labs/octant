@@ -1366,16 +1366,18 @@ strong {
   padding: 2px 0 2px 4px;
 }
 
-/* A header that shows a title (data-header-kind="title") starts its text 16px
-   after the stage's left edge, like a toolbar title in a Mac app's unified
-   title bar: left-aligned and vertically centred in the band. The edge is the
+/* A header that shows a title (data-header-kind="title") starts its text 20px
+   after the stage's left edge, on the thread column's own inset (the 40px
+   gutter is 20px a side), so the mark stands over the transcript's left edge as
+   the band's actions end over its right edge: left-aligned and vertically
+   centred in the band. The edge is the
    pane's own, so the title does not move when a thread opens or closes or the
    dock opens; only a resize or toggle of the sidebar moves the stage. The
    grip's own 4px padding and 1px border are taken off so the text, not the
-   grip's fill, stands on the 16px. A header that shows content tabs keeps its
+   grip's fill, stands on the 20px. A header that shows content tabs keeps its
    own insets: the tabs lead it, and no title is there to line up. */
 .workspace-pane__header[data-header-kind="title"] {
-  --pane-title-start: calc(var(--oct-space-4) - var(--oct-space-1) - 1px);
+  --pane-title-start: calc(var(--oct-space-5) - var(--oct-space-1) - 1px);
   padding-left: var(--pane-title-start);
 }
 
