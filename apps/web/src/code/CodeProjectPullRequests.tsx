@@ -13,9 +13,7 @@ import type {
 import {
   ArrowLeft,
   Check,
-  GitMerge,
   GitPullRequest,
-  GitPullRequestClosed,
   GitPullRequestDraft,
   Link2,
   ListFilter,
@@ -28,6 +26,7 @@ import {
 } from "../ui/icons";
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import "./pull-request-page.css";
+import { pullRequestRowStateMark } from "./pullRequestState";
 import {
   defaultBoardStorage,
   readStoredValue,
@@ -1228,12 +1227,7 @@ function PullRequestRows(props: {
 }
 
 function stateGlyph(row: CodeProjectPullRequestRow): WorkListState {
-  if (row.state === "merged") return { label: "Merged", tone: "merged", Icon: GitMerge };
-  if (row.state === "closed") {
-    return { label: "Closed", tone: "closed", Icon: GitPullRequestClosed };
-  }
-  if (row.draft) return { label: "Draft", tone: "draft", Icon: GitPullRequestDraft };
-  return { label: "Open", tone: "open", Icon: GitPullRequest };
+  return pullRequestRowStateMark(row);
 }
 
 /** A pull request in the shared row: what needs attention goes at the title's edge. */

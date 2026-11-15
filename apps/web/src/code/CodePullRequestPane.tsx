@@ -21,6 +21,7 @@ import {
   decidesCodeEffectsByApproval,
 } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
+import { PullRequestStatePill } from "./PullRequestStatePill";
 import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import {
   browserProofSaveLabel,
@@ -47,23 +48,6 @@ type ProofState =
   | { readonly kind: "unavailable"; readonly message: string };
 
 type PullRequestResult = Extract<CodeOperationResult, { readonly kind: "pull-request-state" }>;
-
-const PR_STATE_LABELS: Record<CodePullRequestReviewObserved["pullRequestState"], string> = {
-  open: "Open",
-  draft: "Draft",
-  merged: "Merged",
-  closed: "Closed",
-};
-
-const PR_STATE_VARIANTS: Record<
-  CodePullRequestReviewObserved["pullRequestState"],
-  NonNullable<OctantBadgeProps["variant"]>
-> = {
-  open: "secondary",
-  draft: "outline",
-  merged: "success",
-  closed: "destructive",
-};
 
 const CHECK_STATE_LABELS: Record<CodePullRequestReviewObserved["checks"][number]["state"], string> =
   {
@@ -169,9 +153,7 @@ function ReviewWindow(
           <span>Pull request #{review.number}</span>
           <h1>{review.title.length === 0 ? `Pull request #${review.number}` : review.title}</h1>
           <p className="code-pr-review__meta">
-            <OctantBadge variant={PR_STATE_VARIANTS[review.pullRequestState]}>
-              {PR_STATE_LABELS[review.pullRequestState]}
-            </OctantBadge>
+            <PullRequestStatePill state={review.pullRequestState} />
             <span>
               {review.headBranch} → {review.baseRepository}:{review.baseBranch}
             </span>

@@ -1,3 +1,4 @@
+import type { PullRequestStateKind } from "../code/pullRequestState";
 import type { IconComponent } from "../ui/icons";
 import { memo, type ReactNode } from "react";
 import { ArrowUpDown, ChevronDown } from "../ui/icons";
@@ -26,7 +27,7 @@ import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 export interface WorkListState {
   readonly label: string;
-  readonly tone: "open" | "draft" | "merged" | "closed";
+  readonly tone: PullRequestStateKind;
   readonly Icon: IconComponent;
 }
 
@@ -83,6 +84,7 @@ export const WorkListRow = memo(function WorkListRow(props: WorkListRowProps) {
       <span
         aria-label={props.state.label}
         className="work-list__state"
+        data-pr-state={props.state.tone}
         data-state={props.state.tone}
         role="img"
       >

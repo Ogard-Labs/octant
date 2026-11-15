@@ -1192,7 +1192,7 @@ describe("WorkspaceView pane title facts", () => {
       await screen.findByRole("region", { name: "Workspace pane: Faster issue validation" })
     ).querySelector<HTMLElement>(".workspace-pane__header")!;
     const chip = within(header).getByText("#917");
-    expect(chip).toHaveAttribute("data-tone", "open");
+    expect(chip).toHaveAttribute("data-pr-state", "open");
     expect(chip).toHaveAttribute("data-checks", "failing");
     // The Project and the branch ride in the title row as two chips.
     expect(within(header).getByText("Octant")).toBeVisible();

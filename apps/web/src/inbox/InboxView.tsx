@@ -2,14 +2,8 @@ import type { GithubCatalogueReadResponse } from "@octant/contracts";
 import type { PendingRequest, WaitingAsk } from "@octant/contracts/pending-requests";
 import type { GithubAssignedWorkPage } from "@octant/contracts";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
-import {
-  CircleDot,
-  Folder,
-  GitPullRequest,
-  GitPullRequestDraft,
-  ListTodo,
-  RefreshCw,
-} from "../ui/icons";
+import { CircleDot, Folder, ListTodo, RefreshCw } from "../ui/icons";
+import { pullRequestStateMark } from "../code/pullRequestState";
 import { useEffect, useId, useState, type ReactNode } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
@@ -404,9 +398,7 @@ export function InboxView(props: InboxViewProps) {
                       const Icon =
                         item.category === "issue"
                           ? CircleDot
-                          : state.tone === "draft"
-                            ? GitPullRequestDraft
-                            : GitPullRequest;
+                          : pullRequestStateMark(state.tone).Icon;
                       return (
                         <li
                           className="surface-row inbox-row"
@@ -424,6 +416,7 @@ export function InboxView(props: InboxViewProps) {
                             <span
                               aria-label={state.label}
                               className="work-list__state"
+                              data-pr-state={state.tone}
                               data-state={state.tone}
                               role="img"
                             >

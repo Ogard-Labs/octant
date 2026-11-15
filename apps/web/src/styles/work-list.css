@@ -171,18 +171,6 @@ time.work-list__meta-text {
   color: var(--oct-meta);
 }
 
-.work-list__state[data-state="open"] {
-  color: var(--oct-success-fg);
-}
-
-.work-list__state[data-state="merged"] {
-  color: var(--oct-accent-fg);
-}
-
-.work-list__state[data-state="closed"] {
-  color: var(--oct-danger-fg);
-}
-
 .work-list__linked {
   display: inline-flex;
   flex: 0 0 auto;

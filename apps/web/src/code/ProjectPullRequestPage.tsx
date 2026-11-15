@@ -19,10 +19,10 @@ import {
   TriangleAlert,
 } from "../ui/icons";
 import { useState, type ReactNode, type RefObject } from "react";
+import { PullRequestStatePill } from "./PullRequestStatePill";
 import { Markdown } from "../markdown/Markdown";
 import { relativeTimeLabel } from "../lib/relativeTime";
 import { CodeBlock } from "../transcript/CodeBlock";
-import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
   OctantMenuItem,
@@ -44,8 +44,6 @@ import {
 } from "./ProjectPullRequestActions";
 import type { ProjectPullRequestReviewPaneProps } from "./ProjectPullRequestReviewPane";
 import {
-  PR_STATE_LABELS,
-  PR_STATE_VARIANTS,
   PullRequestSwitches,
   StaleTag,
   freshnessCopy,
@@ -429,9 +427,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
         <div className="pr-detail__body" data-tab={tab}>
           <header className="pr-detail__head">
             <p className="pr-detail__kicker">
-              <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
-                {PR_STATE_LABELS[detail.pullRequestState]}
-              </OctantBadge>
+              <PullRequestStatePill state={detail.pullRequestState} />
               <span className="oct-meta">
                 {detail.baseRepository} #{detail.number}
               </span>

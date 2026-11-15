@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { PullRequestStatePill } from "./PullRequestStatePill";
 import { Markdown } from "../markdown/Markdown";
 import { CodeBlock } from "../transcript/CodeBlock";
 import "./project-pull-request-review.css";
@@ -25,8 +26,6 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   CHECK_STATE_LABELS,
   CHECK_STATE_VARIANTS,
-  PR_STATE_LABELS,
-  PR_STATE_VARIANTS,
   PullRequestSwitches,
   StaleTag,
   freshnessCopy,
@@ -177,9 +176,7 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             {detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}
           </h1>
           <p className="code-pr-review__meta">
-            <OctantBadge variant={PR_STATE_VARIANTS[detail.pullRequestState]}>
-              {PR_STATE_LABELS[detail.pullRequestState]}
-            </OctantBadge>
+            <PullRequestStatePill state={detail.pullRequestState} />
             <span className="code-pr-review__meta-item">
               <GitBranch aria-hidden="true" size={14} />
               {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}

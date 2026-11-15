@@ -17,26 +17,6 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 
 /** What the dock's review and the page's reading pane both say about a pull request. */
 
-export const PR_STATE_LABELS: Record<
-  CodeProjectPullRequestDetailObserved["pullRequestState"],
-  string
-> = {
-  open: "Open",
-  draft: "Draft",
-  merged: "Merged",
-  closed: "Closed",
-};
-
-export const PR_STATE_VARIANTS: Record<
-  CodeProjectPullRequestDetailObserved["pullRequestState"],
-  NonNullable<OctantBadgeProps["variant"]>
-> = {
-  open: "secondary",
-  draft: "outline",
-  merged: "success",
-  closed: "destructive",
-};
-
 export const CHECK_STATE_LABELS: Record<
   CodeProjectPullRequestDetailObserved["checks"][number]["state"],
   string

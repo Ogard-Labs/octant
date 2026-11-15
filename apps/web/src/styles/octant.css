@@ -59,6 +59,16 @@
   --oct-warn-fg: light-dark(#6f5300, color-mix(in oklab, var(--oct-warn), white 12%));
   --oct-danger-fg: light-dark(#a8102f, color-mix(in oklab, var(--oct-danger), white 38%));
 
+  /* ── pull requests ──
+     The familiar roles: open green, merged purple, closed red, draft grey,
+     links blue. They point at the semantic and palette roles above, so a
+     theme moves them with its own hues; Mono (below) greys all but closed. */
+  --oct-pr-open: var(--oct-success-fg);
+  --oct-pr-merged: var(--octant-palette-purple, var(--oct-accent-fg));
+  --oct-pr-closed: var(--oct-danger-fg);
+  --oct-pr-draft: var(--oct-meta);
+  --oct-link: var(--octant-palette-blue, var(--oct-accent-fg));
+
   /* ── tints ──
      Light grounds need a stronger mix to register at all. */
   --oct-accent-soft: light-dark(
@@ -837,6 +847,14 @@ html {
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
 }
+/* Mono keeps the glyphs but not the hues: only a closed request, a failure,
+   keeps its role. */
+:root[data-octant-style="mono"] {
+  --oct-pr-open: var(--oct-fg-2);
+  --oct-pr-merged: var(--oct-fg-2);
+  --oct-link: var(--oct-fg);
+}
+
 .num {
   font-family: var(--oct-font-mono);
   font-variant-numeric: tabular-nums;

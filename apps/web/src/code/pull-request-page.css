@@ -520,7 +520,7 @@
 }
 
 .pr-detail__list [data-tone="wait"] {
-  color: var(--oct-warning-fg, var(--oct-muted));
+  color: var(--oct-warn-fg);
 }
 
 .pr-detail__line[data-tone="quiet"] svg,
