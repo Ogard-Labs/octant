@@ -29,7 +29,6 @@ import {
   LOCAL_HOST_ID,
   type AutomationRunReference,
   RUNTIME_STARTED_TURN_PROMPT,
-  THREAD_RETENTION_EVENT_NAMES,
   type OctantMode,
   type ProjectId,
   type WindowId,
@@ -40,6 +39,7 @@ import {
 import { Effect } from "effect";
 import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
 import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
+import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
 import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
@@ -398,31 +398,13 @@ export function wireWork(deps: WorkDependencies) {
     // Every change to a Work thread passes through the journal (its level,
     // provider or model, its folder, a move, an archive, a Done mark, a
     // deletion), so a kept session started on terms the thread no longer has
-    // is stopped here rather than from each command's path.
+    // is stopped here rather than from each command's path, judged from the
+    // committed change rather than the projection it has not reached yet.
     const unsubscribeKeptWorkSessionTerms = persistence.journal.subscribeCommitted((append) => {
-      const threadIds = new Set<string>();
-      for (const event of append.events) {
-        if (event.aggregateType === "work-thread") threadIds.add(event.aggregateId);
-        else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
-          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
-          if (purged.mode === "work" && typeof purged.threadId === "string") {
-            threadIds.add(purged.threadId);
-          }
-        }
-      }
-      for (const threadId of threadIds) {
-        let key: string;
-        try {
-          key = workSessionKey(decodeWorkThreadId(threadId));
-        } catch {
-          continue;
-        }
-        void outlivingWorkSessions
-          .stopThreadIfChanged(key)
-          .catch((error: unknown) =>
-            console.error("[live tasks] A changed thread's session did not stop.", error),
-          );
-      }
+      void stopKeptSessionsOfChangedWorkThreads(append, outlivingWorkSessions).catch(
+        (error: unknown) =>
+          console.error("[live tasks] A changed thread's session did not stop.", error),
+      );
     });
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
