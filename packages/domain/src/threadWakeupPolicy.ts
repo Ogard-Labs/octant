@@ -207,6 +207,12 @@ function planCronFrom(
 ): PlannedWakeup | WakeupRefusal {
   if (!input.recurring) return { status: "planned", fireAt: first };
   const expiresAt = new Date(input.now.getTime() + RECURRING_WAKEUP_LIFETIME_DAYS * DAY_MS);
+  if (first.getTime() > expiresAt.getTime()) {
+    return {
+      status: "refused",
+      reason: `"${cron.expression}" first matches after a recurring wake-up's ${RECURRING_WAKEUP_LIFETIME_DAYS} days.`,
+    };
+  }
   // Every gap within the lifetime is checked: a few early ones can pass while
   // a later pair (`0,10,20,30,40,41 * * * *`) fires a minute apart. Five
   // minutes apart over seven days is at most 2,016 fires.

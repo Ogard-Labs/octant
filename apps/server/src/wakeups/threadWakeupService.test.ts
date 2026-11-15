@@ -243,6 +243,38 @@ describe("thread wake-ups", () => {
     expect(wakeups.list("code", threadId)).toEqual([]);
   });
 
+  it("ends a recurring wake-up that outlived its seven days while its thread was busy, without starting a turn", async () => {
+    const time = fakeTime();
+    const { journal } = openJournal(time.now);
+    let busy = true;
+    const code = port({
+      startTurn: vi.fn(async () =>
+        busy ? { status: "busy" as const } : { status: "started" as const, turnId: "turn-1" },
+      ),
+    });
+    const wakeups = service(time, journal, code);
+    wakeups.start();
+    const scheduled = await wakeups.forSession("code", threadId).schedule({
+      kind: "cron",
+      providerToolName: "CronCreate",
+      cron: "*/30 * * * *",
+      recurring: true,
+      prompt: "Look at the queue.",
+    });
+    const expiresAt = wakeups.list("code", threadId)[0]?.expiresAt;
+    if (scheduled.status !== "scheduled" || expiresAt === undefined) {
+      throw new Error("Expected a scheduled recurring wake-up");
+    }
+    await time.advanceTo(Date.parse(scheduled.wakeup.nextFireAt));
+    expect(code.startTurn).toHaveBeenCalledOnce();
+    busy = false;
+    // The busy retry comes round only after the wake-up's lifetime ended.
+    await time.advanceTo(Date.parse(expiresAt) + 60_000);
+    expect(code.startTurn).toHaveBeenCalledOnce();
+    expect(wakeups.list("code", threadId)).toEqual([]);
+    expect(journaledChanges(journal).at(-1)).toBe("ended");
+  });
+
   it("follows a recurring wake-up to its next match after each fire", async () => {
     const time = fakeTime();
     const { journal } = openJournal(time.now);

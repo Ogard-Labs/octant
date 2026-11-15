@@ -423,6 +423,16 @@ export class ThreadWakeupService {
       this.#end(held, "thread-closed", undefined);
       return "ended";
     }
+    // A busy thread's retries, or a missed one the person runs, can come
+    // round after a recurring wake-up's lifetime; it ends there, before a
+    // turn is admitted, never after one started.
+    if (
+      held.wakeup.expiresAt !== undefined &&
+      this.#options.clock().getTime() > Date.parse(held.wakeup.expiresAt)
+    ) {
+      this.#end(held, "expired", undefined);
+      return "ended";
+    }
     held.firing = true;
     let result: Awaited<ReturnType<ThreadWakeupModePort["startTurn"]>>;
     try {

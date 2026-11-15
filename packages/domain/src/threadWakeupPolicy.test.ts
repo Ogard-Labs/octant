@@ -84,6 +84,17 @@ describe("thread wake-up policy", () => {
     ).toMatchObject({ status: "refused" });
   });
 
+  it("refuses a recurring wake-up that first fires after its seven days", () => {
+    const now = local(2026, 11, 14, 10, 0);
+    // The 1st of December is more than seven days away.
+    expect(planCronWakeup({ cron: "0 9 1 12 *", recurring: true, now })).toMatchObject({
+      status: "refused",
+    });
+    expect(planCronWakeup({ cron: "0 9 1 12 *", recurring: false, now })).toMatchObject({
+      status: "planned",
+    });
+  });
+
   it("caps how many wake-ups a thread may have waiting", () => {
     expect(admitThreadWakeup({ waitingCount: MAX_PENDING_THREAD_WAKEUPS - 1 })).toEqual({
       status: "admitted",
