@@ -477,6 +477,7 @@ describe("Project restart recovery", () => {
       { projection_name: "usage", reason: "unknown-event-name" },
       { projection_name: "usage-resume", reason: "unknown-event-name" },
       { projection_name: "validation-evidence", reason: "unknown-event-name" },
+      { projection_name: "web-search-settings", reason: "unknown-event-name" },
       { projection_name: "zen", reason: "unknown-event-name" },
     ]);
     inspected.close();

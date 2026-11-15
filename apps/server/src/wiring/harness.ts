@@ -34,7 +34,8 @@ import {
 import { Schema } from "effect";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ResearchRouter } from "../chat/research/researchRouter";
-import { SearxngClient } from "../chat/research/searxngClient";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
+import { WebSearchSettingsService } from "../webSearch/webSearchSettingsService";
 import { ThreadWorkService } from "../chat/threadWorkService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
@@ -77,7 +78,7 @@ import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
-import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
+import { harnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
@@ -364,15 +365,17 @@ export function wireHarness(deps: HarnessDependencies) {
     return projectId === undefined ? undefined : String(projectId);
   };
 
+  const webSearchSettings = new WebSearchSettingsService({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    clock: () => new Date().toISOString(),
+    uuid: randomUUID,
+    readChatSearxngBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+  });
   const researchRouter = new ResearchRouter({
-    searxngClient: {
-      search: async (input) => {
-        const settings = persistence.readChatSettings()?.settings;
-        if (settings?.searxngBaseUrl === undefined) {
-          throw new Error("SearXNG is not configured.");
-        }
-        return new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(input);
-      },
+    webSearch: {
+      search: (input) =>
+        searchWebSearchBackends({ backends: webSearchSettings.eligible(), search: input }),
     },
   });
   const threadWork = new ThreadWorkService({
@@ -1105,10 +1108,7 @@ export function wireHarness(deps: HarnessDependencies) {
       const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
       return stored || runningWorkTurnSandbox(threadId) === true;
     },
-    resolveWebSearch: () =>
-      searxngHarnessWebSearch({
-        readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
-      }),
+    resolveWebSearch: () => harnessWebSearch({ readEligible: () => webSearchSettings.eligible() }),
     webFetch: async (input) => {
       try {
         return await fetchPublicUrl(input);
@@ -1196,6 +1196,7 @@ export function wireHarness(deps: HarnessDependencies) {
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,
     researchRouter,
+    webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
     hostShield,

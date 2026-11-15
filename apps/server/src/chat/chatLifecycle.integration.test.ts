@@ -353,7 +353,7 @@ function createFixture(behaviors?: {
           ambiguousReservationTtlMs: 60_000,
         }),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
             query: "x",
             backend: "provider-native",

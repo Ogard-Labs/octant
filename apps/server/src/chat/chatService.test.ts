@@ -712,7 +712,7 @@ function openFixture(options?: {
     return submitCapacity(request);
   };
   const researchRouter = new ResearchRouter({
-    searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+    webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
     ...(options?.providerNativeExecute === undefined
       ? {}
       : { providerNativeExecute: options.providerNativeExecute }),

@@ -38,7 +38,7 @@ export interface HostLifecycleControl {
 
 export interface ServerLifecycleDependencies {
   readonly action: ServerLifecycleAction;
-  readonly policyStore?: ServicePolicyStore;
+  readonly policyStore?: HostServicePolicyStore;
   readonly serviceManager?: UserServiceManager;
   readonly control?: HostLifecycleControl;
   readonly paths?: HostRuntimePaths;
@@ -47,6 +47,9 @@ export interface ServerLifecycleDependencies {
   readonly signal?: AbortSignal;
   readonly stdout?: { write: (chunk: string) => unknown };
 }
+
+/** What the lifecycle command reads and records about automatic startup. */
+export type HostServicePolicyStore = Pick<ServicePolicyStore, "read" | "setEnabled">;
 
 export interface ServerLifecycleReport {
   readonly state: HostServiceStateName;
@@ -94,7 +97,7 @@ export async function runServerLifecycleCommand(
 async function executeServerLifecycleCommand(input: {
   readonly dependencies: ServerLifecycleDependencies;
   readonly policy: HostServicePolicy;
-  readonly policyStore: ServicePolicyStore;
+  readonly policyStore: HostServicePolicyStore;
   readonly serviceManager: UserServiceManager;
   readonly control: HostLifecycleControl;
 }): Promise<ServerLifecycleReport> {
@@ -187,7 +190,8 @@ async function executeServerLifecycleCommand(input: {
   await serviceManager.start();
   const readiness = await waitForReady(control, dependencies.sleep);
   const report = await buildReport({
-    policy,
+    // Read again: on Windows the policy is the logon entry install just wrote.
+    policy: await policyStore.read(),
     serviceManager,
     control,
     requireReadyDiagnostics: true,
@@ -470,7 +474,7 @@ function isMissing(error: unknown): boolean {
   );
 }
 
-function defaultPolicyStore(paths: HostRuntimePaths | undefined): ServicePolicyStore {
+function defaultPolicyStore(paths: HostRuntimePaths | undefined): HostServicePolicyStore {
   if (paths === undefined)
     throw new ServiceManagerError("manager-failed", "Host runtime paths are required.");
   return new ServicePolicyStore({ path: paths.servicePolicyPath });

@@ -77,6 +77,8 @@ export interface ProviderDriverFactoryOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
+  /** The host's protected files and folders in force, as absolute paths. */
+  readonly protectedPaths?: () => ReadonlyArray<string>;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /**
@@ -157,6 +159,9 @@ export function makeProviderDriver(
           process: options.openCodeProcess,
           runtimeRegistry: options.runtimeRegistry,
           permissionPersistence: options.permissionPersistence,
+          ...(options.protectedPaths === undefined
+            ? {}
+            : { protectedPaths: options.protectedPaths }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
         // not from the runtime, so both OpenCode lines report them alike.

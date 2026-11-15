@@ -48,6 +48,16 @@ const InitializeResult = Schema.Struct({
 });
 export type AcpInitializeResult = typeof InitializeResult.Type;
 
+/**
+ * An image the person attached, sent as an ACP `image` content block only to
+ * an agent whose `initialize` advertised `promptCapabilities.image`.
+ */
+export interface AcpPromptImage {
+  readonly mimeType: string;
+  /** Base64 of the image bytes. */
+  readonly data: string;
+}
+
 /** The only MCP transport Octant currently offers to an ACP agent. */
 export interface AcpMcpHttpServer {
   readonly type: "http";
@@ -422,7 +432,11 @@ export interface AcpClient {
     mcpServers?: ReadonlyArray<AcpMcpHttpServer>,
     meta?: Readonly<Record<string, unknown>>,
   ): Promise<AcpNewSessionResult>;
-  prompt(sessionId: string, prompt: string): Promise<AcpPromptResult>;
+  prompt(
+    sessionId: string,
+    prompt: string,
+    images?: ReadonlyArray<AcpPromptImage>,
+  ): Promise<AcpPromptResult>;
   setConfigOption(
     sessionId: string,
     configId: string,
@@ -975,10 +989,20 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { sessionId, cwd, mcpServers, ...(meta === undefined ? {} : { _meta: meta }) },
         decode(ExistingSessionResult),
       ).then((result) => ({ ...result, sessionId })),
-    prompt: (sessionId, prompt) =>
+    prompt: (sessionId, prompt, images = []) =>
       request(
         "session/prompt",
-        { sessionId, prompt: [{ type: "text", text: prompt }] },
+        {
+          sessionId,
+          prompt: [
+            { type: "text", text: prompt },
+            ...images.map((image) => ({
+              type: "image",
+              mimeType: image.mimeType,
+              data: image.data,
+            })),
+          ],
+        },
         decode(PromptResult),
         limits.turnTimeoutMs,
       ),

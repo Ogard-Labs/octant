@@ -109,6 +109,7 @@
     "./provider-policy": "./src/providerPolicy.ts",
     "./provider-runtime-integration": "./src/providerRuntimeIntegration.ts",
     "./research-policy": "./src/researchPolicy.ts",
+    "./web-search-policy": "./src/webSearchPolicy.ts",
     "./reply-detail-policy": "./src/replyDetailPolicy.ts",
     "./shell-policy": "./src/shellPolicy.ts",
     "./sidebar-thread-status-policy": "./src/sidebarThreadStatusPolicy.ts",

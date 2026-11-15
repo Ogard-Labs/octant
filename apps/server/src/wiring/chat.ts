@@ -168,7 +168,11 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "nativeHarnessComposition" | "nativeHarnessHooks" | "researchRouter" | "threadWork"
+    | "nativeHarnessComposition"
+    | "nativeHarnessHooks"
+    | "researchRouter"
+    | "threadWork"
+    | "webSearchSettings"
   > & {
     /** Wired by wireWorkFiles; read only after startup. */
     readonly workFileListingService: () => WorkFileListingService;
@@ -217,6 +221,7 @@ export function wireChat(deps: ChatDependencies) {
     persistence,
     providerRuntimeRegistry,
     researchRouter,
+    webSearchSettings,
     reviewedModelManifest,
     routeCodeService,
     runtimeOutsideContentMarks,
@@ -522,6 +527,7 @@ export function wireChat(deps: ChatDependencies) {
       contextHarness,
       capacityScheduler,
       researchRouter,
+      webSearchReady: (searxngBaseUrl) => webSearchSettings.readyWithChatAddress(searxngBaseUrl),
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,

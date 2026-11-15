@@ -899,7 +899,10 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         resume: "supported",
         interruption: "supported",
         approvals: "supported",
-        userQuestions: profile.userQuestions,
+        // A form-asking agent's questions are unavailable on a release
+        // outside its verified list, as this fixture's is.
+        userQuestions:
+          profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
         usage: "unsupported",
         fileChanges: "unavailable",
@@ -1120,6 +1123,46 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       message: `${profile.displayName} did not report a selectable model.`,
     });
     expect(result.lastSuccessfulProbeAt).toBeDefined();
+  });
+
+  it("sends an attached image only to an agent whose handshake advertises image prompts", async () => {
+    const image = {
+      attachmentId: "image-1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    };
+    const run = async (advertised: boolean) => {
+      const f = fixture(profile);
+      Object.assign(f.connection.initialized.agentCapabilities, {
+        promptCapabilities: { image: advertised },
+      });
+      const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+      const sent = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            return yield* Effect.either(
+              connection.send({ sessionId, prompt: "look", attachments: [image], tools: [] }),
+            );
+          }),
+        ),
+      );
+      return { probed, sent, prompt: f.client.prompt };
+    };
+    const offered = await run(true);
+    expect(offered.probed.capabilities.nativeAttachments).toBe("supported");
+    expect(offered.probed.models[0]?.inputModalities).toEqual(["text", "image"]);
+    expect(offered.sent._tag).toBe("Right");
+    expect(offered.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      { mimeType: "image/png", data: "AQID" },
+    ]);
+    const textOnly = await run(false);
+    expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
+    expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
+    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.prompt).not.toHaveBeenCalled();
   });
 
   it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {
@@ -2418,11 +2461,24 @@ describe("ACP provider driver profile quirks", () => {
     expect(guards).not.toHaveProperty("VIBE_DISABLED_AGENTS");
     expect(enabled).toContain(guards.VIBE_DEFAULT_AGENT);
     for (const mode of ["chat", "work", "code"] as const) {
-      for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+      for (const policy of [
+        "approval-gated",
+        "plan",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
         expect(enabled).toContain(vibe.sessionMode(mode, policy));
       }
     }
-    expect(enabled).not.toContain("accept-edits");
+  });
+
+  it("runs Mistral Vibe in its own accept-edits mode only for a Work or Code thread at Accept edits", () => {
+    expect(vibe.sessionMode("code", "auto-accept-edits")).toBe("accept-edits");
+    expect(vibe.sessionMode("work", "auto-accept-edits")).toBe("accept-edits");
+    expect(vibe.sessionMode("chat", "auto-accept-edits")).toBe("ask");
+    for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+      expect(vibe.sessionMode("code", policy)).not.toBe("accept-edits");
+    }
   });
 
   it("does not select the Kimi auto mode for any execution policy", () => {
@@ -2516,6 +2572,59 @@ describe("ACP provider driver profile quirks", () => {
       );
     },
   );
+
+  it("shows a Mistral Vibe subagent's unnamed request at Guarded with honest text and refuses it on Deny", async () => {
+    const { driver, client } = fixture(vibe, { authentication: "subscription" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const approvals: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request" || event.kind === "failed") {
+                  approvals.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Vibe 3.0.3 names only the subagent's own history entry, which the
+          // parent's updates never announced.
+          client.request({
+            kind: "request",
+            id: "subagent-permission",
+            method: "session/request_permission",
+            params: {
+              sessionId: "agent-session-1",
+              toolCall: { toolCallId: "child-entry-7" },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+          });
+          yield* Effect.sleep("5 millis");
+          expect(approvals).toHaveLength(1);
+          const card = approvals[0];
+          if (card?.kind !== "approval-request") throw new Error("approval missing");
+          expect(card.description).toBe(
+            "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which.",
+          );
+          expect(client.respondPermission).not.toHaveBeenCalled();
+          yield* connection.answerApproval({
+            sessionId,
+            requestId: card.requestId,
+            approved: false,
+          });
+          expect(client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
 
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
     const { driver, client } = fixture(
@@ -2683,18 +2792,11 @@ describe("ACP provider driver profile quirks", () => {
     },
   );
 
+  const { elicitationVersions: _forms, ...vibeWithoutForms } = vibe;
   it.each([
-    { profile: vibe, version: "3.0.3", expected: "unsupported" },
-    {
-      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
-      version: "3.0.4",
-      expected: "unavailable",
-    },
-    {
-      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
-      version: "3.0.3",
-      expected: "supported",
-    },
+    { profile: vibeWithoutForms, version: "3.0.3", expected: "unsupported" },
+    { profile: vibe, version: "3.0.4", expected: "unavailable" },
+    { profile: vibe, version: "3.0.3", expected: "supported" },
   ])(
     "reports questions as $expected for the selected verified version",
     async ({ profile, version, expected }) => {
@@ -2736,7 +2838,7 @@ describe("ACP provider driver profile quirks", () => {
     );
   });
 
-  it("fails closed on user questions for Mistral Vibe and skips them at the agent", async () => {
+  it("fails closed on a permission-shaped question from Mistral Vibe and skips it at the agent", async () => {
     const { driver, client } = fixture(vibe, { authentication: "subscription" });
     await Effect.runPromise(
       Effect.scoped(
@@ -2766,7 +2868,8 @@ describe("ACP provider driver profile quirks", () => {
           const failure = yield* Effect.flip(
             connection.answerUserInput({ sessionId, requestId: "request-1", answer: "A" }),
           );
-          expect(failure.category).toBe("unsupported");
+          // Questions travel as forms on the verified release only; this one is not.
+          expect(failure.category).toBe("unavailable");
           yield* connection.stop(sessionId);
         }),
       ),

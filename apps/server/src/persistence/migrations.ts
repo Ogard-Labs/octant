@@ -2697,6 +2697,19 @@ CREATE INDEX validation_evidence_authority_idx
         ON code_transcript_search_projection(thread_id, start_sequence);
     `,
   },
+  {
+    version: 107,
+    name: "create_web_search_settings_projection",
+    sql: `
+      CREATE TABLE web_search_settings_projection (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        settings_json TEXT NOT NULL CHECK(json_valid(settings_json)),
+        changed_at TEXT NOT NULL,
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {
