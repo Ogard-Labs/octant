@@ -360,6 +360,8 @@ export interface WorkspaceViewProps {
   /** Text a draft starts with, handed over from a Canvas plan task. */
   readonly draftPendingPrompt?: string;
   readonly onDraftPendingPromptConsumed?: () => void;
+  /** The to-do the draft was started from; see DraftThreadWorkspace. */
+  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -1861,6 +1863,7 @@ function renderNonCodeTab(
           {...(props.draftPendingPrompt === undefined
             ? {}
             : { pendingPrompt: props.draftPendingPrompt })}
+          {...(props.draftTodoSource === undefined ? {} : { todoSource: props.draftTodoSource })}
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}

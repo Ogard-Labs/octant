@@ -79,7 +79,7 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, Network, ShieldCheck } from "../ui/icons";
+import { FolderOpen, GitBranch, Network, ShieldCheck, X } from "../ui/icons";
 import {
   useCallback,
   useContext,
@@ -106,7 +106,7 @@ import {
   type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -299,6 +299,11 @@ export interface DraftThreadWorkspaceProps {
    */
   readonly pendingPrompt?: string;
   readonly onPendingPromptConsumed?: () => void;
+  /**
+   * The to-do this draft was started from. Its thread is linked to the to-do
+   * once it exists; removing the label leaves an ordinary draft.
+   */
+  readonly todoSource?: { readonly title: string; readonly onRemove: () => void };
   readonly codeHome?: {
     readonly loadAssignedLinearIssues?: () => Promise<{
       readonly rows: ReadonlyArray<LinearIssueRow>;
@@ -542,6 +547,31 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             })}
       />
     ) : null;
+  const todoSource = props.todoSource;
+  const todoSourceLabel =
+    todoSource === undefined ? null : (
+      <span className="draft-todo-source">
+        <span className="oct-row-detail">From to-do</span>
+        <span className="draft-todo-source__title">{todoSource.title}</span>
+        <OctantIconButton
+          className="draft-todo-source__remove"
+          label="Do not link this thread to the to-do"
+          onClick={todoSource.onRemove}
+          type="button"
+        >
+          <X aria-hidden="true" size={12} />
+        </OctantIconButton>
+      </span>
+    );
+  const sourceSlot =
+    todoSourceLabel === null ? (
+      createFromControl
+    ) : (
+      <>
+        {todoSourceLabel}
+        {createFromControl}
+      </>
+    );
   const issueContext =
     createFromSelection?.kind === "github" ? createFromSelection.request : undefined;
   const linearIssueContext =
@@ -1035,7 +1065,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 },
               },
             })}
-        {...(createFromControl === null ? {} : { createFromControl })}
+        {...(sourceSlot === null ? {} : { createFromControl: sourceSlot })}
         {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
         providerGroups={props.providerGroups}
         {...(props.selectedProviderInstanceId === undefined
@@ -1112,7 +1142,13 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
           folderControl={folderControl}
-          {...(createFromControl === null || onServer ? {} : { createFromControl })}
+          {...(onServer
+            ? todoSourceLabel === null
+              ? {}
+              : { createFromControl: todoSourceLabel }
+            : sourceSlot === null
+              ? {}
+              : { createFromControl: sourceSlot })}
           providerGroups={
             onServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups
           }
@@ -1378,7 +1414,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
                   />
                 }
-                {...(createFromControl === null ? {} : { createFrom: createFromControl })}
+                {...(sourceSlot === null ? {} : { createFrom: sourceSlot })}
               />
             }
             chips={

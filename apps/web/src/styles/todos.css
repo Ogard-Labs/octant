@@ -188,7 +188,10 @@
 
 /* The more menu shows on hover and keyboard focus, and stays while the row is open. */
 .todo-row__actions {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-1);
   opacity: 0;
 }
 
@@ -262,4 +265,48 @@
 .todo-chip__remove {
   width: auto;
   height: auto;
+}
+
+/* The newest thread started from a to-do, under its title, indented past the
+   check so it reads as part of the row. */
+.todo-row__thread {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  padding: 0 var(--oct-space-2) var(--oct-space-1) calc(var(--oct-space-2) * 2 + 16px);
+}
+
+.todo-thread {
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--oct-space-2);
+}
+
+.todo-thread__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.todo-row__unlinked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+/* The to-do a new-thread draft was started from, beside Create from. */
+/* Inset to the composer card's own edge, which sits one step in. */
+.draft-todo-source {
+  display: inline-flex;
+  padding-inline: var(--oct-space-2);
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.draft-todo-source__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
