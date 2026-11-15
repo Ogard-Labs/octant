@@ -21,6 +21,7 @@ import type {
   ClaudeToolRequest,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { isClaudeTaskTool, type ClaudeTaskList } from "./claudeTaskList";
 import { outputStopReason } from "./outputStopReason";
 import { outsideContentTarget } from "./outsideContentRead";
 import { proposedPlanText } from "./proposedPlan";
@@ -105,6 +106,8 @@ export interface ClaudeToolState {
   readonly disabled?: true;
   lifecycle: "active" | "terminal";
   fileChange?: ClaudeFileChange;
+  /** A task tool call's input, applied with its result once that arrives. */
+  taskInput?: { readonly [key: string]: ClaudeJsonValue };
 }
 
 export interface ClaudeRequestCorrelation {
@@ -172,6 +175,11 @@ export interface ClaudeEventContext {
    * when an item is renamed, reordered, or inserted.
    */
   readonly todoTaskIds: Map<number, string>;
+  /**
+   * The session's task list from Claude's task tools. It outlives the turn,
+   * since each call changes one task and the panel shows the whole list.
+   */
+  readonly taskList: ClaudeTaskList;
   readonly toolStates: Map<string, ClaudeToolState>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -525,12 +533,13 @@ function toolState(
   const state: ClaudeToolState = {
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
-    // The checklist shows as the thread's task panel and a handed-over plan
-    // as the reply's text, not as tool rows.
+    // The checklist and the task tools show as the thread's task panel and a
+    // handed-over plan as the reply's text, not as tool rows.
     emitsActivity:
       toolName !== "AskUserQuestion" &&
       toolName !== CLAUDE_CHECKLIST_TOOL &&
-      toolName !== CLAUDE_PLAN_EXIT_TOOL,
+      toolName !== CLAUDE_PLAN_EXIT_TOOL &&
+      !isClaudeTaskTool(toolName),
     ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
@@ -598,6 +607,9 @@ function mapToolUse(
     const results = agentText(context, plan);
     endAgentMessage(context);
     return results;
+  }
+  if (authoritativeInput && isClaudeTaskTool(content.toolName)) {
+    resolved.state.taskInput = content.input;
   }
   // A streamed call's start carried no input; its whole message does. Octant
   // records a tool it runs itself from the request, so only the runtime's own
@@ -748,6 +760,35 @@ function checklistEvents(
   return [...results, event(context, { kind: "task-list", taskIds })];
 }
 
+/**
+ * The session's whole task list, one `task-progress` per task in Claude's
+ * order and a closing `task-list`, as a `TodoWrite` restatement reads. Each
+ * task tool call changes one task, so the panel is restated whole after each.
+ */
+function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMappedMessage> {
+  const results: ClaudeMappedMessage[] = [];
+  const taskIds: string[] = [];
+  for (const task of context.taskList.ordered()) {
+    const summary = normalized(task.subject, SUMMARY_MAX_CHARACTERS);
+    const status = CHECKLIST_STATUSES[task.status];
+    if (summary === undefined || status === undefined) continue;
+    const taskId = context.taskList.panelTaskId(task.id, context.makeTaskId);
+    taskIds.push(taskId);
+    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+  }
+  return [...results, event(context, { kind: "task-list", taskIds })];
+}
+
+/**
+ * The list Claude stored for a resumed session, shown once at the start of
+ * its first turn so the panel holds the whole list before any call changes it.
+ */
+export function claudeStoredTaskListEvents(
+  context: ClaudeEventContext,
+): ReadonlyArray<ClaudeMappedMessage> {
+  return context.taskList.takeSeed() ? taskListEvents(context) : [];
+}
+
 function withoutIgnored(
   results: ReadonlyArray<ClaudeMappedMessage>,
 ): ReadonlyArray<ClaudeMappedMessage> {
@@ -888,6 +929,15 @@ function mapToolResults(
   for (const pair of states) {
     const state = pair.state!;
     state.lifecycle = "terminal";
+    if (isClaudeTaskTool(state.toolName)) {
+      if (
+        !pair.result.isError &&
+        context.taskList.apply(state.toolName, state.taskInput, pair.result.taskOutput)
+      ) {
+        results.push(...taskListEvents(context));
+      }
+      continue;
+    }
     if (!state.emitsActivity) continue;
     if (pair.result.text !== undefined && reportsToolCallContent(state)) {
       results.push(

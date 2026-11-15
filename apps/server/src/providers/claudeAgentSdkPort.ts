@@ -39,6 +39,7 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
 export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
@@ -337,6 +338,11 @@ export type ClaudeDecodedMessage =
           /** Attached by the driver from the file the person approved publishing. */
           readonly snapshot?: ThreadPublishedSnapshot;
         };
+        /**
+         * A task tool's structured result, read only from a message that
+         * settles one call. The mapper keeps it only for a task tool call.
+         */
+        readonly taskOutput?: ClaudeTaskToolOutput;
       }[];
     }
   | {
@@ -1391,12 +1397,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 // of the person's turn.
                 CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
                 MCP_TOOL_TIMEOUT: "660000",
-                // Claude Code 2.1.211 replaces its `TodoWrite` checklist with
-                // `TaskCreate`/`TaskUpdate` unless this is off (observed
-                // 2026-10-20 in the init tool list). The checklist keeps
-                // `TodoWrite`, which restates the whole list in every call,
-                // so the task panel never has to piece it together.
-                CLAUDE_CODE_ENABLE_TASKS: "false",
+                // `CLAUDE_CODE_ENABLE_TASKS` is left to Claude Code: its
+                // default replaces the `TodoWrite` checklist with the task
+                // tools, and Octant adds to a provider rather than taking its
+                // features away (maintainer decision, 2026-11-14). The task
+                // panel follows those tools from their results and rebuilds a
+                // resumed session's list from the one Claude stored.
               },
               model: input.model,
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
