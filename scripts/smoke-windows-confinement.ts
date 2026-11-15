@@ -111,16 +111,18 @@ try {
   // stores: the scan finds nothing beneath a file, and the grant is the file.
   const loneFile = join(outside, "lone.txt");
   writeFileSync(loneFile, "lone-content");
-  // Read with curl, which opens the file by its path. cmd's `type` first lists
-  // the parent folder (measured: "Access is denied." here), and listing a
-  // folder that was never granted is refused, as it should be.
-  const lone = run(curl, ["-s", "-S", `file:///${loneFile.replaceAll("\\", "/")}`], {
-    readRoots: [readOnly, loneFile],
-  });
+  // Read with curl, which opens the file by its path. cmd's `type` reported
+  // "Access is denied." for this grant; it is kept beside curl as evidence of
+  // why, with the file's DACL as the container sees it and the parent's.
+  const loneGrant = { readRoots: [readOnly, loneFile] };
+  const lone = run(curl, ["-s", "-S", `file:///${loneFile.replaceAll("\\", "/")}`], loneGrant);
+  const loneType = run(cmd, shell(`type ${loneFile}`), loneGrant);
+  const loneAcl = run(cmd, shell(`icacls ${loneFile}`), loneGrant);
+  const parentAcl = spawnSync("icacls", [outside], { encoding: "utf8" }).stdout;
   check(
     "reads a file granted on its own",
     lone.status === 0 && lone.stdout.includes("lone-content"),
-    lone,
+    { curl: lone, type: loneType, fileAcl: loneAcl, parentAcl },
   );
 
   const write = run(cmd, shell(`echo written> ${join(granted, "written.txt")}`));
