@@ -777,13 +777,15 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   ) {
     throw protocol();
   }
+  const commands = advertisedSlashCommands(initialized.commands);
   return {
     models: decodeModels(initialized.models),
     account: decodeAccount(initialized.account),
     compactAnnounced: initialized.commands.some(
       (command: unknown) => object(command)?.name === "compact",
     ),
-    commands: advertisedSlashCommands(initialized.commands),
+    // Absent when the runtime announced none, as the initialization says.
+    ...(commands.length === 0 ? {} : { commands }),
   };
 }
 
