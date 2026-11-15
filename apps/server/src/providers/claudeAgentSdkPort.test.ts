@@ -2006,29 +2006,36 @@ describe("Claude Agent SDK port", () => {
     { name: "missing baseline", before: undefined, after: 0.09, expected: undefined },
     { name: "reset total", before: 0.08, after: 0.01, expected: undefined },
     { name: "unchanged total", before: 0.08, after: 0.08, expected: 0 },
-  ])("attributes only the measured increment for a $name", async ({ before, after, expected }) => {
-    const harness = makeHarness([
-      safeRuntimeInitialization,
-      { ...validResult, total_cost_usd: after },
-      { ...validResult, total_cost_usd: after },
-    ]);
-    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
-      session: { total_cost_usd: before },
-    });
-    const messages = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* harness.port.openQuery(openInput);
-          yield* query.send({ text: "Hello" });
-          return yield* Stream.runCollect(query.messages);
-        }),
-      ),
-    );
-    const results = Chunk.toReadonlyArray(messages).filter((message) => message.kind === "result");
-    if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
-    else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
-    expect(results[1]).not.toHaveProperty("costUsd");
-  });
+  ])(
+    "attributes only the measured increment for a $name and a runtime turn after it",
+    async ({ before, after, expected }) => {
+      const harness = makeHarness([
+        safeRuntimeInitialization,
+        { ...validResult, total_cost_usd: after },
+        // A turn the runtime starts by itself, with no prompt of its own.
+        { ...validResult, total_cost_usd: after + 0.005 },
+      ]);
+      harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
+        session: { total_cost_usd: before },
+      });
+      const messages = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* query.send({ text: "Hello" });
+            return yield* Stream.runCollect(query.messages);
+          }),
+        ),
+      );
+      const results = Chunk.toReadonlyArray(messages).filter(
+        (message) => message.kind === "result",
+      );
+      if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
+      else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
+      // Its cost is measured from the result before it.
+      expect(results[1]).toHaveProperty("costUsd", expect.closeTo(0.005, 10));
+    },
+  );
 
   test("stops waiting for cost snapshots after the control fails to answer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

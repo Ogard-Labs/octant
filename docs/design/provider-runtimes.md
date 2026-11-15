@@ -579,7 +579,10 @@ started still runs, or before the runtime says it is idle, the completion is
 held. Each turn the runtime then starts is folded into the person's turn,
 opened by a `runtime-turn-started` event (`trigger: "background-task"`); its
 tool calls pass the same gate at the same level, and its result replaces the
-held completion. The completion goes out once no background task runs and
+held completion. Its tokens and cost are added to what the person's turn used
+before it, so each usage report still covers the whole turn; its cost is
+measured from the session total at the result before it. A state the runtime
+reports before it initializes is kept, so it still counts as reporting. The completion goes out once no background task runs and
 the runtime has gone idle (`session_state_changed`, which the port asks for
 with `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`; a runtime that never reports
 its state is taken as idle after each result, and only a task's end makes it

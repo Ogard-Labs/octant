@@ -1594,9 +1594,15 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               Stream.map((message) => {
                 if (message.kind !== "result") return message;
                 const baseline = costBaseline;
-                costBaseline = undefined;
                 pendingCostInputs = Math.max(0, pendingCostInputs - 1);
                 const total = message.totalCostUsd;
+                // A turn the runtime starts by itself after this result sends
+                // no prompt to take a new baseline at, so this result's total
+                // is its baseline; a prompt still reads a fresh one.
+                costBaseline =
+                  pendingCostInputs === 0 && total !== undefined && Number.isFinite(total)
+                    ? total
+                    : undefined;
                 return baseline !== undefined && total !== undefined && total >= baseline
                   ? { ...message, costUsd: total - baseline }
                   : message;

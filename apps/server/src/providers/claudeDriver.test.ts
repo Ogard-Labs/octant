@@ -6939,6 +6939,27 @@ describe("Claude background work", () => {
     return { acquired, query, seen, collected };
   }
 
+  it("counts what the runtime's own turn used on top of the person's turn it folds into", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    const costing = (costUsd: number): ClaudeDecodedMessage => {
+      const result = completed(sdk);
+      if (result.kind !== "result") throw new Error("expected a result");
+      return { ...result, costUsd };
+    };
+    await query.emit(backgroundStarted);
+    await query.emit(costing(0.02));
+    await query.emit(state("idle"));
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(costing(0.01));
+    await query.emit(state("idle"));
+    await collected;
+
+    const usage = seen.filter((event) => event.kind === "usage");
+    expect(usage.at(-1)).toMatchObject({ inputTokens: 6, outputTokens: 10, costUsd: 0.03 });
+    await acquired.close();
+  });
+
   it("holds the person's turn while a background command runs and folds the runtime's own turn into it", async () => {
     const { acquired, query, seen, collected } = await startTurn();
     await query.emit(backgroundStarted);

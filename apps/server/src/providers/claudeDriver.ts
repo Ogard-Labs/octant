@@ -1028,6 +1028,8 @@ interface SessionState {
   /** Whether this runtime reports when it goes idle (`session_state_changed`). */
   reportsSessionState: boolean;
   heldTurn?: ClaudeHeldTurn | undefined;
+  /** The person's turn's latest usage report as published, for a held turn to build on. */
+  turnUsage?: ClaudeUsageEvent | undefined;
 }
 
 /**
@@ -1056,6 +1058,46 @@ interface ClaudeHeldTurn {
   /** The runtime is running a turn it started itself. */
   runtimeTurnOpen: boolean;
   runtimeTurns: number;
+  /**
+   * What the person's turn used up to the last result, the runtime's earlier
+   * turns included. Each runtime turn counts only its own requests and cost,
+   * so its reports are added to this: a usage report covers the whole turn.
+   */
+  usageBase?: ClaudeUsageEvent | undefined;
+}
+
+type ClaudeUsageEvent = Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>;
+
+/** A runtime turn's own usage report, carried on from what the person's turn used before it. */
+function foldedUsage(base: ClaudeUsageEvent, own: ClaudeUsageEvent): ClaudeUsageEvent {
+  const sum = (first: number | undefined, second: number | undefined) =>
+    first === undefined && second === undefined ? undefined : (first ?? 0) + (second ?? 0);
+  const reasoningTokens = sum(base.reasoningTokens, own.reasoningTokens);
+  const cacheReadInputTokens = sum(base.cacheReadInputTokens, own.cacheReadInputTokens);
+  const cacheWriteInputTokens = sum(base.cacheWriteInputTokens, own.cacheWriteInputTokens);
+  const providerExecutionDurationMs = sum(
+    base.providerExecutionDurationMs,
+    own.providerExecutionDurationMs,
+  );
+  const costUsd = sum(base.costUsd, own.costUsd);
+  const {
+    reasoningTokens: _reasoning,
+    cacheReadInputTokens: _cacheRead,
+    cacheWriteInputTokens: _cacheWrite,
+    providerExecutionDurationMs: _duration,
+    costUsd: _cost,
+    ...rest
+  } = own;
+  return {
+    ...rest,
+    inputTokens: base.inputTokens + own.inputTokens,
+    outputTokens: base.outputTokens + own.outputTokens,
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(providerExecutionDurationMs === undefined ? {} : { providerExecutionDurationMs }),
+    ...(costUsd === undefined ? {} : { costUsd }),
+  };
 }
 
 /** What the runtime sends while running a turn, which opens one when a turn is held. */
@@ -2023,6 +2065,7 @@ function makeConnection(
         idle: !state.reportsSessionState,
         runtimeTurnOpen: false,
         runtimeTurns: state.heldTurn?.runtimeTurns ?? 0,
+        usageBase: state.turnUsage,
       };
       state.context = makeEventContext(state, previous.claudeSessionId, sequence);
       for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
@@ -2030,6 +2073,7 @@ function makeConnection(
     };
     const releaseHeldTurn = (state: SessionState, held: ClaudeHeldTurn) => {
       state.heldTurn = undefined;
+      state.turnUsage = undefined;
       state.startedBackgroundWork = false;
       const context = state.context;
       if (context === undefined) return;
@@ -2179,9 +2223,16 @@ function makeConnection(
           holdTurn(state, mapped.event);
           continue;
         }
-        publish(withHookDelivery(state, mapped.event));
+        let next = mapped.event;
+        if (next.kind === "usage") {
+          const base = state.heldTurn?.usageBase;
+          if (base !== undefined) next = foldedUsage(base, next);
+          state.turnUsage = next;
+        }
+        publish(withHookDelivery(state, next));
         if (isTerminalEvent(mapped.event)) {
           state.heldTurn = undefined;
+          state.turnUsage = undefined;
           state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
