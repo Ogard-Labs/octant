@@ -58,6 +58,7 @@ const PRODUCT_PROBES = [
   { path: "/api/chat/transcript-search?q=release", method: "GET" },
   { path: "/api/work/transcript-search?q=release", method: "GET" },
   { path: "/api/code/transcript-search?q=release", method: "GET" },
+  { path: "/api/search?q=release&scope=all", method: "GET" },
   {
     path: "/api/work/turns/window/00000000-0000-4000-8000-000000000001?limit=30",
     method: "GET",

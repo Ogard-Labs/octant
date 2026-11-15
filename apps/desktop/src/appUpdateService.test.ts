@@ -30,6 +30,11 @@ import {
   updateFeedUrl,
 } from "./appUpdateFeed";
 import { createPinnedUpdateFetch, isPrivateAddress } from "./updateHttpsTransport";
+import type {
+  WindowsInstallerApplyResult,
+  WindowsInstallerPort,
+  WindowsInstallLocation,
+} from "./windowsInstallerUpdate";
 import {
   createAppUpdateService,
   supportsSignedDesktopUpdateChannel,
@@ -1548,6 +1553,134 @@ describe("portable image updates", () => {
       message: "Octant could not relaunch the update, so the previous copy was restored.",
     });
     expect(image.calls).toHaveLength(1);
+  });
+});
+
+describe("Windows installer updates", () => {
+  const windowsRelease = {
+    ...release,
+    platform: "win32",
+    arch: "x64",
+    url: "https://updates.example.test/Octant-0.3.0-win32-x64-setup.exe",
+  } as unknown as AppUpdateRelease;
+
+  function windowsService(
+    options: {
+      readonly installer?: "omitted";
+      readonly location?: WindowsInstallLocation;
+      readonly applied?: WindowsInstallerApplyResult;
+    } = {},
+  ) {
+    const port = updater();
+    const calls: Array<{ readonly bytes: Uint8Array; readonly sha256: string }> = [];
+    const installer: WindowsInstallerPort = {
+      locate: async () =>
+        options.location ?? { kind: "installed", installDirectory: "C:\\Programs\\Octant" },
+      verifyAndRun: async (bytes, sha256) => {
+        calls.push({ bytes, sha256 });
+        return options.applied ?? { kind: "launched" };
+      },
+    };
+    const feedUrl = updateFeedUrl(FEED_BASE_URL, {
+      ring: "stable",
+      platform: "win32",
+      arch: "x64",
+    });
+    const fetchImpl = vi.fn(async (input: string) => {
+      if (input.startsWith(feedUrl)) {
+        return new Response(JSON.stringify(signedFeed(windowsRelease)), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(served(artifactBytes), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const updates = createAppUpdateService({
+      updater: port,
+      ...(options.installer === "omitted" ? {} : { windowsInstaller: installer }),
+      feedBaseUrl: FEED_BASE_URL,
+      app: { version: "0.2.0" as AppVersion, platform: "win32", arch: "x64", product: "octant" },
+      automaticChecks: false,
+      verifier: createFeedVerifier(onEveryRing(publicKeyBase64)),
+      fetchImpl,
+      clock: () => "2026-08-19T10:00:00.000Z",
+    });
+    return { calls, fetchImpl, port, updates };
+  }
+
+  it("keeps refusing Windows when the app was not given the installer hand-off", async () => {
+    const { fetchImpl, updates } = windowsService({ installer: "omitted" });
+
+    expect(await updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("refuses a copy the installer did not place without contacting the feed", async () => {
+    const { fetchImpl, updates } = windowsService({ location: { kind: "not-installed" } });
+
+    expect(await updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "unsupported-install",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("hands the verified bytes to the installer only when the person relaunches with nothing running", async () => {
+    const { calls, port, updates } = windowsService();
+
+    expect(await updates.check()).toMatchObject({ status: "available" });
+    expect(await updates.download()).toMatchObject({ status: "ready" });
+    expect(port.calls.setFeedURL).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+
+    expect(await updates.install({ activeAgentCount: 1, activityUnconfirmed: false })).toEqual({
+      kind: "wait",
+      activeAgentCount: 1,
+      activityUnconfirmed: false,
+    });
+    expect(calls).toHaveLength(0);
+
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
+      kind: "installing",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.sha256).toBe(artifactDigest);
+    expect(port.calls.quitAndInstall).toBe(0);
+  });
+
+  it("discards an installer that is not signed by Octant's publisher", async () => {
+    const { updates } = windowsService({
+      applied: { kind: "untrusted-publisher", reason: "other-publisher" },
+    });
+    await updates.check();
+    await updates.download();
+
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
+      kind: "not-ready",
+    });
+    expect(updates.state()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+      message: "The downloaded installer is not signed by Octant's publisher, so it was discarded.",
+    });
+    expect(updates.state().available).toBeUndefined();
+  });
+
+  it("says the signature check could not run, and installs nothing", async () => {
+    const { updates } = windowsService({ applied: { kind: "check-unavailable" } });
+    await updates.check();
+    await updates.download();
+
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
+      kind: "not-ready",
+    });
+    expect(updates.state()).toMatchObject({
+      status: "failed",
+      message: "Windows could not check the installer's signature, so nothing was installed.",
+    });
   });
 });
 

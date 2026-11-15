@@ -3056,6 +3056,19 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("liveness"),
   }).annotations(strict),
+  /**
+   * The runtime started a turn by itself inside the person's turn: a
+   * background command or watch it ran in this turn finished or reported, and
+   * the runtime woke the model to act on it. The person's turn is held open
+   * while such work runs, so what follows is folded into it and passes the
+   * same gate at the same level. Its origin is the runtime, not the person;
+   * `background-task` is the only trigger a driver reports today.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("runtime-turn-started"),
+    trigger: Schema.Literal("background-task"),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),

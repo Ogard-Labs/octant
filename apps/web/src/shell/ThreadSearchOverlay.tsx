@@ -12,6 +12,7 @@ import { WorkerMark } from "../projects/coordinatorMarks";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { SidebarActivityMode } from "./activityViewModel";
 import {
   buildThreadSearchResults,
@@ -20,6 +21,7 @@ import {
   type ThreadSearchHit,
   type ThreadSearchMatchRange,
   type ThreadSearchProject,
+  type ThreadSearchScope,
   type ThreadSearchUnfiledLabel,
   type ThreadSearchThread,
 } from "./threadSearchViewModel";
@@ -39,8 +41,14 @@ export interface ThreadSearchOverlayProps {
    * printed as an empty Archived group.
    */
   readonly archivedListing?: ThreadSearchListingStatus;
-  /** The current mode's message-body hits from the host transcript-search route. */
+  /** The host's hits (titles, messages, and tool text) in the modes `scope` names. */
   readonly contentHits?: ReadonlyArray<ThreadSearchContentHit>;
+  /**
+   * The modes searched: every mode, or one. With `onScopeChange` the overlay
+   * shows an All / Chat / Work / Code filter; without it, it searches `mode`.
+   */
+  readonly scope?: ThreadSearchScope;
+  readonly onScopeChange?: (scope: ThreadSearchScope) => void;
   readonly contentListing?: ThreadSearchListingStatus;
   readonly contentTruncated?: boolean;
   /** Reports the typed query so the host can list its archived and content matches. */
@@ -60,6 +68,10 @@ const MODE_LABEL: Record<SidebarActivityMode, string> = {
   code: "Code",
 };
 
+const SCOPES: ReadonlyArray<ThreadSearchScope> = ["all", "chat", "work", "code"];
+
+const SCOPE_LABEL: Record<ThreadSearchScope, string> = { all: "All", ...MODE_LABEL };
+
 const LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">, string> = {
   loading: "Threads are still loading, so these results may be incomplete.",
   unavailable: "The host thread list is unavailable, so Search has nothing to match.",
@@ -72,7 +84,7 @@ const ARCHIVED_LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">,
 
 const CONTENT_LISTING_COPY: Record<Exclude<ThreadSearchListingStatus, "ready">, string> = {
   loading: "Message search is still loading, so body matches may be incomplete.",
-  unavailable: "Message search is unavailable, so only thread titles are matched.",
+  unavailable: "Message search is unavailable, so only this mode's thread titles are matched.",
 };
 
 const RESULTS_ID = "thread-search-results";
@@ -82,11 +94,11 @@ function optionId(index: number): string {
 }
 
 /**
- * One current-mode thread Search overlay.
+ * The thread Search overlay, across every mode or in one.
  *
  * Title matches use only the threads the host already listed for this window.
- * In every mode, contentHits from the host transcript-search route add snippet
- * rows that name the turn holding the match. Project, `Recents`, and `Unfiled` are printed as
+ * The host's search adds rows from every mode the scope names, each with its
+ * snippet and the turn holding the match. Project, `Recents`, and `Unfiled` are printed as
  * folder words on a row, never as filters.
  */
 export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
@@ -97,9 +109,12 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
   const listing = props.listing ?? "ready";
   const archivedListing = props.archivedListing ?? "ready";
   const contentListing = props.contentListing ?? "ready";
-  const modeLabel = MODE_LABEL[props.mode];
+  const scope: ThreadSearchScope =
+    props.onScopeChange === undefined ? props.mode : (props.scope ?? "all");
+  const modeLabel = scope === "all" ? "all" : MODE_LABEL[scope];
   const results = buildThreadSearchResults({
     mode: props.mode,
+    scope,
     query,
     threads: props.threads,
     projects: props.projects,
@@ -135,8 +150,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
       : `${hits.length} matching thread${hits.length === 1 ? "" : "s"}.${
           results.truncated ? " Showing the most recent matches." : ""
         }`;
-  const placeholder =
-    props.mode === "chat" ? "Search thread titles and messages" : "Search thread titles";
+  const placeholder = "Search titles, messages, Canvas, and tool output";
 
   function open(hit: ThreadSearchHit | undefined): void {
     if (hit === undefined) return;
@@ -182,7 +196,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     <OctantDialog
       className="thread-search"
       initialFocus={inputRef}
-      label={`Search ${modeLabel} threads`}
+      label={scope === "all" ? "Search threads" : `Search ${modeLabel} threads`}
       onClose={props.onClose}
       open
       popupId="thread-search-dialog"
@@ -193,7 +207,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           {...(active >= 0 ? { "aria-activedescendant": optionId(active) } : {})}
           aria-controls={RESULTS_ID}
           aria-expanded={hits.length > 0}
-          aria-label={`Search ${modeLabel} threads`}
+          aria-label={scope === "all" ? "Search threads" : `Search ${modeLabel} threads`}
           autoComplete="off"
           onChange={(event) => {
             setQuery(event.target.value);
@@ -207,6 +221,25 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           value={query}
         />
       </div>
+      {props.onScopeChange === undefined ? null : (
+        <OctantToggleGroup<ThreadSearchScope>
+          aria-label="Modes to search"
+          className="thread-search__modes"
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next === undefined) return;
+            setActiveIndex(0);
+            props.onScopeChange?.(next);
+          }}
+          value={[scope]}
+        >
+          {SCOPES.map((candidate) => (
+            <OctantToggleGroupItem key={candidate} value={candidate}>
+              {SCOPE_LABEL[candidate]}
+            </OctantToggleGroupItem>
+          ))}
+        </OctantToggleGroup>
+      )}
       {listing === "ready" ? null : (
         <p className="thread-search__listing" data-listing={listing} role="note">
           <TriangleAlert aria-hidden="true" size={14} />
@@ -219,7 +252,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
           <span>{ARCHIVED_LISTING_COPY[archivedListing]}</span>
         </p>
       ) : null}
-      {hasQuery && props.mode === "chat" && contentListing !== "ready" ? (
+      {hasQuery && contentListing !== "ready" ? (
         <p className="thread-search__listing" data-listing={contentListing} role="note">
           <MessageSquare aria-hidden="true" size={14} />
           <span>{CONTENT_LISTING_COPY[contentListing]}</span>
@@ -234,7 +267,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         {statusMessage}
       </p>
       <div
-        aria-label={`${modeLabel} thread results`}
+        aria-label={scope === "all" ? "Thread results" : `${modeLabel} thread results`}
         className="thread-search__results"
         id={RESULTS_ID}
         role="listbox"
@@ -260,11 +293,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                   data-archived={hit.archived}
                   data-content={hit.snippet !== undefined}
                   id={optionId(index)}
-                  key={
-                    hit.turnId === undefined
-                      ? `${hit.mode}:${hit.threadId}`
-                      : `${hit.mode}:${hit.threadId}:${hit.turnId}`
-                  }
+                  key={`${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
                   onClick={() => open(hit)}
                   onMouseMove={() => setActiveIndex(index)}
                   role="option"
@@ -284,6 +313,14 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                       </span>
                     )}
                   </span>
+                  {hit.field === "tool" || hit.field === "canvas" ? (
+                    <span className="thread-search__result-state">
+                      {hit.field === "tool" ? "Tool output" : "Canvas"}
+                    </span>
+                  ) : null}
+                  {scope === "all" ? (
+                    <span className="thread-search__result-state">{MODE_LABEL[hit.mode]}</span>
+                  ) : null}
                   <span className="thread-search__result-label">{hit.folderLabel}</span>
                   {hit.archived ? (
                     <span className="thread-search__result-state">Archived</span>
@@ -335,9 +372,9 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
         </div>
       )}
       <p className="thread-search__scope" role="note">
-        {props.mode === "chat"
-          ? "Searches Chat thread titles, messages, and archived history."
-          : `Searches current and archived ${modeLabel} thread titles.`}
+        {scope === "all"
+          ? "Searches titles, messages, attachment names, Canvas, and tool output in Chat, Work, and Code, archived threads included. Every word must appear; quote a phrase to match it exactly."
+          : `Searches ${modeLabel} titles, messages, attachment names, Canvas, and tool output, archived threads included. Every word must appear; quote a phrase to match it exactly.`}
       </p>
     </OctantDialog>
   );

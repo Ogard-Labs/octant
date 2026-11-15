@@ -114,6 +114,11 @@ import {
   type ProjectedChatSettings,
 } from "./chatProjection";
 import {
+  searchThreads,
+  type ThreadSearchRows,
+  type ThreadSearchVisibleThread,
+} from "./threadSearchProjection";
+import {
   searchCodeTranscript,
   type CodeTranscriptSearchRows,
 } from "./codeTranscriptSearchProjection";
@@ -272,6 +277,12 @@ export interface PersistenceService {
     query: string,
     visibleThreadIds: ReadonlySet<string>,
   ) => CodeTranscriptSearchRows;
+  /** Search across modes, among the threads the caller may see. */
+  readonly searchThreads: (
+    query: string,
+    visible: ReadonlyArray<ThreadSearchVisibleThread>,
+    limit: number,
+  ) => ThreadSearchRows;
   /** The thread a Code Project designated as its planner, if any. */
   readonly readCodePlannerThreadId: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
@@ -689,6 +700,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeThreads: () => readCodeThreads(connection),
       searchCodeTranscript: (query, visibleThreadIds) =>
         searchCodeTranscript(connection, query, visibleThreadIds),
+      searchThreads: (query, visible, limit) => searchThreads(connection, query, visible, limit),
       readCodePlannerThreadId: (projectId) => {
         const designation = readCodePlannerDesignation(connection, projectId);
         return designation?.kind === "designated" ? designation.plannerThreadId : undefined;

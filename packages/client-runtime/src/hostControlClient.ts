@@ -9,6 +9,13 @@ import {
 } from "@octant/contracts/host-control";
 import { HostDataMap } from "@octant/contracts/host-data-map";
 import {
+  SetWebSearchKeyOutcome,
+  type SetWebSearchKeyRequest,
+  SetWebSearchSettingsOutcome,
+  type SetWebSearchSettingsRequest,
+  WebSearchSettingsView,
+} from "@octant/contracts/web-search";
+import {
   PurgeThreadsOutcome,
   type PurgeThreadsRequest,
   SetThreadRetentionOutcome,
@@ -43,6 +50,9 @@ export interface HostControlClient {
   setThreadRetention(request: SetThreadRetentionRequest): Promise<SetThreadRetentionOutcome>;
   purgeThreads(request: PurgeThreadsRequest): Promise<PurgeThreadsOutcome>;
   exportHost(): Promise<HostExportClientResult>;
+  readWebSearch(): Promise<WebSearchSettingsView>;
+  setWebSearch(request: SetWebSearchSettingsRequest): Promise<SetWebSearchSettingsOutcome>;
+  setWebSearchKey(request: SetWebSearchKeyRequest): Promise<SetWebSearchKeyOutcome>;
 }
 
 export class HostControlClientError extends Error {
@@ -150,6 +160,28 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         decodableStatuses: [403],
       });
       return decodeOrThrow(decodeHostAnswer(SetHostMemoryLimitsOutcome), body);
+    },
+    async readWebSearch() {
+      const body = await call({ path: "/api/host-control/web-search", method: "GET" });
+      return decodeOrThrow(decodeHostAnswer(WebSearchSettingsView), body);
+    },
+    async setWebSearch(request) {
+      const body = await call({
+        path: "/api/host-control/web-search",
+        method: "POST",
+        body: request,
+        decodableStatuses: [403],
+      });
+      return decodeOrThrow(decodeHostAnswer(SetWebSearchSettingsOutcome), body);
+    },
+    async setWebSearchKey(request) {
+      const body = await call({
+        path: "/api/host-control/web-search/key",
+        method: "POST",
+        body: request,
+        decodableStatuses: [403],
+      });
+      return decodeOrThrow(decodeHostAnswer(SetWebSearchKeyOutcome), body);
     },
     async readThreadRetention() {
       const body = await call({ path: "/api/host-control/thread-retention", method: "GET" });
