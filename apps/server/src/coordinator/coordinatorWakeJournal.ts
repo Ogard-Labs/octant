@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CoordinatorWorkerState } from "@octant/contracts";
+import { CoordinatorWorkerNotice } from "@octant/contracts";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -37,7 +37,7 @@ export const CoordinatorWakeDecided = Schema.Struct({
   notice: Schema.optional(
     Schema.Struct({
       workerThreadId: Id,
-      state: CoordinatorWorkerState,
+      state: CoordinatorWorkerNotice,
       at: Schema.String.pipe(Schema.maxLength(64)),
     }).annotations(strict),
   ),

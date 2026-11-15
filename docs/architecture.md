@@ -3618,7 +3618,10 @@ into a proposal. With no roles set up, a worker starts on the coordinator's
 own model as before. Availability marks (5 minutes after an availability
 failure, or until a usage limit's reset) are host memory fed by the shared
 runtime-event tap, and a worker whose first request failed before any work
-starts again on the next model; a running worker keeps its model
+starts again on the next model. A running worker whose model stops on a usage
+limit or an outage continues on its role's next model under the role's
+**Continue on the fallback** setting
+([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers))
 (maintainer decision, 2026-11-15). The rules are in
 [Coordinator threads](design/coordinator-threads.md).
 
@@ -6798,17 +6801,31 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   turn as released on the provider change (`releasedStopId`): the turn keeps
   its limit in history, and the message queue, the composer and the thread
   view stop treating it as waiting, so the next message goes to the new
-  account. Without the opt-in a limited thread waits on its
-  account as before, so there is no silent, unchosen or open-ended failover,
-  rotation, or load-balancing between accounts (maintainer decision,
-  2026-11-14). One more host move exists, for a coordinator's worker that has
-  done nothing yet: when its first turn fails for availability before any
-  output or tool call, the host moves it, by the same provider change and
-  journaled as the host, to the next model of its role's list, which is the
-  person's chosen order and so their consent; it stops when every listed model
-  has failed once, and a worker that has done any work is never moved
-  (maintainer decision, 2026-11-15;
-  [Coordinator threads: Choosing the worker's model](design/coordinator-threads.md#choosing-the-workers-model)).
+  account. A thread a person started never moves on its own: without the
+  opt-in a limited thread waits on its account as before, so there is no
+  silent, unchosen or open-ended failover, rotation, or load-balancing between
+  accounts for it (maintainer decision, 2026-11-14). A thread a role runs, a
+  coordinator's worker whose model the roles chose, may move under its
+  role's list, which is the person's chosen order and so their consent
+  (maintainer decision, 2026-11-15). The host moves such a worker by the same
+  provider change, journaled as the host, in two cases. When its first turn
+  fails for availability before any output or tool call, it moves to the next
+  model of its role's list and the opening prompt is sent again; it stops
+  when every listed model has failed once
+  ([Coordinator threads: Choosing the worker's model](design/coordinator-threads.md#choosing-the-workers-model)).
+  When a running worker's model stops on a usage limit or an outage and its
+  role's **Continue on the fallback if the model stops** is on (the default),
+  it moves to the next eligible model after the current one, with the
+  choice recorded as `continued-on-fallback`, and one host turn under the
+  ordinary admission continues the work and names the old and new model and
+  account and why; the worker row and a state notice to the coordinator
+  disclose it. The walk only goes forward, so a worker moves through its list
+  at most once and then pauses as before, and it never reaches a model outside
+  the roles. A coordinator, a worker on a model a person picked or with the
+  person's own usage-limit hand-off, a thread put away, marked Done, snoozed
+  or archived, and a role with the box off are never moved, and a move never
+  goes into or within a role that has **Ask before using**
+  ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
@@ -9863,10 +9880,11 @@ the model at another size.
   slot through `admitAgentRunControlRequest`, the one path that starts a
   subagent. The built-in slots include `quick` and `deep` beside the earlier
   seven, and a slot may carry two person-set flags, `askBeforeUsing` (absent
-  means off) and `continueOnFallback` (absent means on); the resolver does not
-  read them yet (designed, not built: a start in an ask-first role becomes a
-  proposal, and a thread with the role carries on with its next model when its
-  own stops). A Project override is per role: a slot it lists replaces Settings'
+  means off) and `continueOnFallback` (absent means on). The harness resolver
+  reads neither; a coordinator worker's start reads `askBeforeUsing` (an
+  ask-first role turns the start into a proposal), and a running coordinator
+  worker reads `continueOnFallback` (it carries on with the role's next model
+  when its own stops). A Project override is per role: a slot it lists replaces Settings'
   for that role and an unlisted role uses Settings, still only with models
   Settings lists for that role (`not-a-subset`). Only a person's window changes
   either layer (maintainer decision, 2026-11-15). A slot's candidates may name a

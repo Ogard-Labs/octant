@@ -136,10 +136,6 @@ export function hasCandidate(
   return candidates.some((entry) => nativeHarnessSlotCandidateKey(entry) === key);
 }
 
-/** Said once on each page that shows the two flags, not under every role. */
-export const ROLE_FLAGS_NOTE =
-  "Ask before using and Continue on the fallback are saved with each role. Octant does not act on them yet; they take effect when coordinators start using roles.";
-
 /**
  * The role as a suggestion would leave it. The person's flags stay (the saved
  * role is the base). A reasoning level the person set on a model stays with

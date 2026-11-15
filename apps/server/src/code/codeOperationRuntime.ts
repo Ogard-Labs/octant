@@ -467,7 +467,19 @@ export interface CodeOperationRuntimeOptions {
    * the provider itself reported it. Fires once the turn has closed. A
    * rejection is ignored: the stop is journaled and stays.
    */
-  readonly onUsageLimitStop?: (threadId: CodeThreadId) => Promise<void>;
+  readonly onUsageLimitStop?: (threadId: CodeThreadId, stopped: CodeStoppedTurn) => Promise<void>;
+  /**
+   * The thread's provider turn just stopped on a failure that was not a usage
+   * limit the provider reported: `down` when the provider could not take the
+   * work (refused connection, 5xx, overloaded, timeout), else undefined. A
+   * cancelled turn never fires it. Fires once the turn has closed; a
+   * rejection is ignored.
+   */
+  readonly onProviderStop?: (
+    threadId: CodeThreadId,
+    availability: "down" | undefined,
+    stopped: CodeStoppedTurn,
+  ) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -2713,6 +2725,13 @@ type PendingHandoffRecord = HandoffAttached extends infer Record
   : never;
 
 /** The running Code turns, by thread id. */
+/** A provider turn that just stopped: its operation and the model it launched on. */
+export interface CodeStoppedTurn {
+  readonly operationId: string;
+  readonly providerInstanceId: string;
+  readonly modelId: string;
+}
+
 export type CodeActiveTurns = Map<string, ActiveTurn>;
 
 /**
@@ -5649,6 +5668,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     };
     let stoppedOnUsageLimit = false;
+    let stoppedOnFailure: { readonly availability: "down" | undefined } | undefined;
     const folderWatch =
       active.folderCurrent === undefined
         ? undefined
@@ -5907,6 +5927,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                           sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
                   if (failure?.usageLimit !== undefined) stoppedOnUsageLimit = true;
+                  else if (failure !== undefined && outcome !== "interrupted") {
+                    stoppedOnFailure = {
+                      availability: failure.availability === "down" ? "down" : undefined,
+                    };
+                  }
                   this.#persistOutcome(
                     active,
                     outcome,
@@ -5974,8 +5999,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
+        // The turn that stopped, as it launched, so a reader acts on it and
+        // not on whatever turn or model the thread has by then.
+        const stopped: CodeStoppedTurn = {
+          operationId: String(active.operationId),
+          providerInstanceId: String(active.thread.providerInstanceId),
+          modelId: String(active.thread.modelId),
+        };
         if (stoppedOnUsageLimit) {
-          void this.#options.onUsageLimitStop?.(active.thread.id).catch(() => undefined);
+          void this.#options.onUsageLimitStop?.(active.thread.id, stopped).catch(() => undefined);
+        } else if (stoppedOnFailure !== undefined) {
+          void this.#options
+            .onProviderStop?.(active.thread.id, stoppedOnFailure.availability, stopped)
+            .catch(() => undefined);
         }
       });
   }

@@ -1953,6 +1953,7 @@ describe("CodeTurnRunner", () => {
         {
           category: "waiting",
           message: "The provider's usage allowance is exhausted.",
+          availability: "usage-limit",
           retryAfterMs: 300_000,
           usageLimit: { kind: "exhausted", resetsAt: "2026-08-11T17:00:00.000Z" },
         },

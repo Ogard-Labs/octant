@@ -18,6 +18,7 @@ import {
   decodeProviderSessionId,
   decodeCodeRelativePath,
   decodeCodeThreadId,
+  type CodeThreadId,
   decodeContextSubjectRef,
   decodeImageGenerationScopeId,
   decodeThreadWorkingDirectory,
@@ -33,6 +34,7 @@ import {
   beginUnconfirmedStepSettlement,
   type CodeOperationRuntime,
   type CodeOperationRuntimeOptions,
+  type CodeStoppedTurn,
   createCodeOperationRuntime,
 } from "../code/codeOperationRuntime";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -523,6 +525,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     octantInstructions,
   } = deps;
   return Effect.gen(function* () {
+    // The coordinator service is wired after the Code runtime that reports
+    // stopped turns to it; a stop before then has no worker to move.
+    const continueWorkerOnFallback: {
+      current?: (
+        threadId: CodeThreadId,
+        availability: "usage-limit" | "down" | undefined,
+        stopped: CodeStoppedTurn,
+      ) => Promise<unknown>;
+    } = {};
     // A host started with its own runtime uses it; otherwise it is built below.
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
     let pullRequestWatchService: PullRequestWatchPort | undefined;
@@ -1074,9 +1085,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
         },
-        onUsageLimitStop: async (threadId) => {
+        onUsageLimitStop: async (threadId, stopped) => {
           if (codeService instanceof CodeService)
             await codeService.handOffAfterUsageLimit(threadId);
+          // A coordinator's worker may carry on with its role's next model;
+          // the person's own hand-off above goes first and then rules it out.
+          await continueWorkerOnFallback.current?.(threadId, "usage-limit", stopped);
+        },
+        onProviderStop: async (threadId, availability, stopped) => {
+          await continueWorkerOnFallback.current?.(threadId, availability, stopped);
         },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
@@ -2008,6 +2025,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       coordinatorService.onCommittedEvents(append.events),
     );
     coordinatorWorkersHolder.read = (threadId) => coordinatorService.workersOf(threadId);
+    continueWorkerOnFallback.current = (threadId, availability, stopped) =>
+      coordinatorService.continueOnFallback(String(threadId), availability, stopped);
     coordinatorService.startSweeping();
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {

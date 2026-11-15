@@ -960,6 +960,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  // Only a coordinator's worker carries a host move's reason.
+  const continuedOnFallback =
+    view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
+      ? undefined
+      : continuedOnFallbackPlacement(messages, view.thread.providerHandoff);
   const loadedOperationIds = new Set(
     messages.flatMap((message) =>
       message.role === "assistant" && message.operationId !== undefined
@@ -2365,6 +2370,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         turnId={String(message.operationId)}
                       />
                     ) : null}
+                    {continuedOnFallback?.afterId === message.id ? (
+                      <OctantSeparatorWithLabel aria-label="Continued on the fallback">
+                        Octant moved this thread: {continuedOnFallback.reason}
+                      </OctantSeparatorWithLabel>
+                    ) : null}
                   </div>
                 );
               }}
@@ -3384,4 +3394,43 @@ function observedTaskChangedFiles(
 
 function messageHappenedAt(message: CodeConversationMessage): string | undefined {
   return message.at;
+}
+
+/**
+ * Where the transcript says the host moved a coordinator's running worker
+ * on to its role's next model: after the last message journaled before the
+ * move, so it reads between the turn that stopped and the one that
+ * continues, and stands even when that turn was never admitted. Only the
+ * thread's latest move carries its reason.
+ */
+function continuedOnFallbackPlacement(
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly at?: string;
+    readonly operationId?: unknown;
+  }>,
+  handoff: CodeThread["providerHandoff"],
+): { readonly afterId: string; readonly reason: string } | undefined {
+  const reason = handoff?.continuedOnFallback;
+  if (handoff === undefined || reason === undefined) return undefined;
+  const movedAt = Date.parse(String(handoff.changedAt));
+  // A prompt's time is its turn's start, which never moves; a reply's is its
+  // turn's last update, which may come after the move. So the stopped turn
+  // is found by its prompt, and the marker goes after that turn's reply.
+  const promptIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "user" && message.at !== undefined && Date.parse(message.at) <= movedAt,
+  );
+  const prompt = messages[promptIndex];
+  if (prompt === undefined) return undefined;
+  const reply = messages
+    .slice(promptIndex + 1)
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        prompt.operationId !== undefined &&
+        String(message.operationId) === String(prompt.operationId),
+    );
+  return { afterId: (reply ?? prompt).id, reason };
 }

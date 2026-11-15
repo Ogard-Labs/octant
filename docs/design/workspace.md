@@ -490,6 +490,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   host's reason>", or "chosen: <the coordinator's why>" for an override, or
   "chosen by you" after a person changed it
   ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A running worker the host moved on to its role's next model shows
+  "fallback: <old model> (<account>) at usage limit; continued on <new model>
+  (<account>)", or "unavailable" for an outage
+  ([Coordinator threads: Running workers](coordinator-threads.md#running-workers)).
   A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and

@@ -18,7 +18,12 @@ import {
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
-import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import {
+  ledgerUsageCost,
+  observeTurnMetrics,
+  providerAvailabilityFromFailure,
+  startTurnMetrics,
+} from "@octant/domain";
 import {
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   outsideContentRecordedOnly,
@@ -69,9 +74,21 @@ const DEFAULT_MAX_EVENTS = 4_096;
 
 export type CodeTurnOutcome = "completed" | "waiting" | "interrupted" | "failed";
 
+/** What a provider's own failure says about the stop, carried onto the turn's failure. */
+type ProviderStopFacts = Pick<
+  ProviderFailure,
+  "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"
+> & { readonly providerCategory?: ProviderFailure["category"] };
+
 export interface CodeTurnFailure {
   readonly category: Exclude<CodeTurnOutcome, "completed">;
   readonly message: string;
+  /**
+   * The provider could not take the work: its usage limit, or an outage
+   * (refused connection, 5xx, overloaded, timeout). Read by a coordinator
+   * worker's Continue on the fallback; a turn's own refusals never set it.
+   */
+  readonly availability?: "usage-limit" | "down";
   readonly retryAfterMs?: number;
   /** The provider's usage-limit signal, when stopping this turn was one. */
   readonly usageLimit?: ProviderUsageLimit;
@@ -385,7 +402,7 @@ export class CodeTurnRunner {
       const fail = (
         next: Exclude<CodeTurnOutcome, "completed">,
         message: string,
-        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+        limit?: ProviderStopFacts,
         resumeRefused?: true,
       ) =>
         Effect.gen(function* () {
@@ -1203,19 +1220,19 @@ function failForProvider(
   fail: (
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
-    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+    limit?: ProviderStopFacts,
     resumeRefused?: true,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
-  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"> =
-    {
-      ...(failure.toolCatalogHandoffRequired === undefined
-        ? {}
-        : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
-      ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
-      ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
-    };
+  const limit: ProviderStopFacts = {
+    providerCategory: failure.category,
+    ...(failure.toolCatalogHandoffRequired === undefined
+      ? {}
+      : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
+    ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
+    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+  };
   if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
   // A refused resume parks the turn `waiting` with the provider's sentence,
   // but the fact that no answer can ever restart this session must survive
@@ -1251,12 +1268,22 @@ function isCodeTurnFailure(value: unknown): value is CodeTurnFailure {
 function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
-  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+  limit?: ProviderStopFacts,
   resumeRefused?: true,
 ): CodeTurnFailure {
+  const availability =
+    limit?.providerCategory === undefined
+      ? undefined
+      : providerAvailabilityFromFailure({
+          category: limit.providerCategory,
+          ...(limit.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
+        });
   return {
     category,
     message,
+    ...(availability === undefined
+      ? {}
+      : { availability: availability.kind === "down" ? "down" : "usage-limit" }),
     ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
     ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
     ...(resumeRefused === undefined ? {} : { resumeRefused }),
