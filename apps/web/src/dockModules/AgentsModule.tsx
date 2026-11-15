@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { PaneBar } from "../shell/PaneBar";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
@@ -39,6 +40,7 @@ export default function AgentsModule(props: Props) {
   }
   return (
     <>
+      <PaneBar title="Agents" />
       {props.nativeHarnessClient === undefined ? null : (
         <NativeHarnessSessionCard
           client={props.nativeHarnessClient}

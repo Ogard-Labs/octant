@@ -708,7 +708,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       )}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
-        <p className="code-delivery-pane__notice">Plan mode keeps terminal replay read-only.</p>
+        <OctantAlert layout="row" tone="neutral">
+          Plan mode keeps terminal replay read-only.
+        </OctantAlert>
       ) : null}
       {replayReady ? (
         <XtermTerminalAdapter

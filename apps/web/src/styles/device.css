@@ -719,3 +719,9 @@ html[data-octant-reduced-motion="true"] .device-touch {
   animation-name: device-touch-still;
   animation-timing-function: steps(1, end);
 }
+
+/* A state card's title is the pane bar, flush with the card's top and edges. */
+.device-card > .pane-bar {
+  margin: calc(var(--oct-space-5) * -1) calc(var(--oct-space-5) * -1) var(--oct-space-3);
+  border-radius: var(--oct-radius-md) var(--oct-radius-md) 0 0;
+}

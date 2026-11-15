@@ -375,9 +375,9 @@ export function AgentRunHierarchy(props: {
   const error = (
     <>
       {summaryReconnecting ? (
-        <p className="agent-hierarchy__banner" role="status">
+        <OctantAlert className="agent-hierarchy__banner" layout="row" tone="neutral">
           Reconnecting. Showing the last child activity and results reported.
-        </p>
+        </OctantAlert>
       ) : null}
       {errorMessage === undefined ? null : (
         <OctantAlert className="code-thread-workspace__error" tone="danger">
