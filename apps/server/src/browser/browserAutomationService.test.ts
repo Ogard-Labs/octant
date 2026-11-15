@@ -1925,6 +1925,26 @@ describe("BrowserAutomationService", () => {
       });
     }
 
+    it("refuses a declared tool's call after the person used the page, so their fields are not overwritten", async () => {
+      const fixture = harness();
+      await snapshotted(fixture);
+      fixture.personTyped();
+
+      const refused = await fixture.service.act({
+        windowId,
+        request: request({
+          kind: "page-tool-call",
+          target: undefined,
+          pageTool: { name: "search", arguments: { q: "shoes" } },
+        }),
+        ...agent,
+      });
+      expect(refused.failure?.category).toBe("stale");
+      expect(refused.failure?.message).toMatch(/person used the page/);
+      // Only the snapshot reached the runtime: nothing was filled or submitted.
+      expect(fixture.runtime.act).toHaveBeenCalledTimes(1);
+    });
+
     it("drops the agent's refs when the person types, refuses its next keystroke, and says so once", async () => {
       const fixture = harness();
       await snapshotted(fixture);

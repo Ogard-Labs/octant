@@ -61,8 +61,12 @@ export function browserApprovalSummary(approval: {
   readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
   readonly script?: { readonly source: string } | undefined;
+  readonly pageTool?: { readonly name: string; readonly arguments: string } | undefined;
 }): string {
   if (approval.script !== undefined) return `Run this script once on ${approval.origin}?`;
+  if (approval.pageTool !== undefined) {
+    return `Let the agent call ${approval.origin}'s tool “${approval.pageTool.name}” once?`;
+  }
   if (approval.signIn !== undefined) {
     return `The agent asks you to sign in on ${approval.origin}`;
   }
@@ -87,7 +91,11 @@ export function browserApprovalDetail(approval: {
   readonly download?: BrowserDownloadRequest | undefined;
   readonly signIn?: { readonly reason?: string | undefined } | undefined;
   readonly script?: { readonly source: string } | undefined;
+  readonly pageTool?: { readonly name: string; readonly arguments: string } | undefined;
 }): string {
+  if (approval.pageTool !== undefined) {
+    return `The page declared this tool itself. It fills the page's form with ${approval.pageTool.arguments} and may submit it. This answer covers this call once`;
+  }
   if (approval.script !== undefined) {
     const fallback =
       approval.profile === undefined

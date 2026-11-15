@@ -23,6 +23,7 @@ import {
   BrowserColorScheme,
   BrowserDialogAnswer,
   BrowserObservationPart,
+  BrowserPageToolCall,
   decodeBrowserWaitFor,
   decodeImportedCookie,
   MAX_BROWSER_HELD_DOWNLOAD_LIMIT,
@@ -684,6 +685,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
     "downloads",
     "dialog",
     "downloadLimits",
+    "pageTool",
   ]);
   if (Object.keys(value).some((key) => !allowedKeys.has(key))) return false;
   if (!(BrowserActionKind.literals as ReadonlyArray<unknown>).includes(value.kind)) return false;
@@ -708,6 +710,7 @@ function isBrowserAction(value: unknown): value is BrowserSurfaceAction {
         ))) &&
     (value.downloads === undefined || value.downloads === "hold") &&
     (value.dialog === undefined || Schema.is(BrowserDialogAnswer)(value.dialog)) &&
+    (value.pageTool === undefined || Schema.is(BrowserPageToolCall)(value.pageTool)) &&
     (value.downloadLimits === undefined || isDownloadLimits(value.downloadLimits)) &&
     (value.waitFor === undefined || isWaitFor(value.waitFor)) &&
     (value.diagnosticsSince === undefined ||
