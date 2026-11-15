@@ -1953,8 +1953,8 @@ except where a bullet says otherwise.
   per person, per Project, and for coordinator threads, travel beside each
   provider's own instruction files as standing blocks placed before person
   memory. Unlike person memory they reach every turn, including the turns the
-  host starts as itself. The person's own text is built; the Settings field,
-  Project instructions, and orchestration are designed, not built
+  host starts as itself; orchestration reaches only coordinator threads and
+  a Project's designated planner
   ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
@@ -8504,15 +8504,19 @@ prompt is therefore built to be appended, never rewritten:
     the sections, then `Current request:` and the request, in one message
     (`renderProviderTurnPrompt`). Octant Harness instead makes `instructions`
     and `skill-instructions` its system prompt, followed by
-    `person-instructions`, and renders the rest this way.
+    the person's own instructions (`person-instructions`,
+    `project-instructions`, `orchestration-instructions`), and renders the
+    rest this way.
   - _Measured_ against local stand-in endpoints (Codex 0.120.0 through
     0.164.0; Claude Code 2.1.211 and 2.1.318): placement, persistence across
     resume and compaction, size limits, and that consecutive requests share a
     byte-identical prefix apart from the newest turn.
 - **Only what is new.** Standing blocks (`instructions` and
   `skill-instructions`, which carry Octant's instructions and skills,
-  `person-instructions`, the person's own instructions for Octant, keyed so an
-  edit is a revision, `project-memory` and `work-item`) that the session
+  `person-instructions`, `project-instructions` and
+  `orchestration-instructions`, the person's own instructions for Octant,
+  keyed so an edit is a revision, `project-memory`
+  and `work-item`) that the session
   already holds are left out of the turn; per-turn blocks (messages, summaries,
   mentions, issue context, handoffs, and `turn-instructions`, Octant's
   instructions for one turn alone) are always sent. A new session, including
@@ -18187,6 +18191,9 @@ deliverable and keeps every gate above:
    secret guard as an OS rule), approved and documented here before any
    guarded level is admitted. Until then Work and Code stay refused on
    Windows at every level, and the honest capability report says so.
+   Partly built: the design below is documented and its launcher is built
+   dormant (maintainer decision, 2026-11-15). It has run only on a hosted
+   Windows runner, so every Windows launch stays refused.
 3. Work and Code at Full access on Windows on top of the confined launches'
    Windows forms; Code terminals with an explicit shell setting (PowerShell
    by default, never a guessed POSIX shell), Windows process-tree stop in
@@ -18198,6 +18205,142 @@ deliverable and keeps every gate above:
 5. An installer, Authenticode signing, and a signed update feed that builds
    on the Linux signed-feed trust root once that path has been exercised on a
    real image; the unsigned QA ZIP stays QA-only.
+
+**Windows confinement design** (step 2; maintainer decision, 2026-11-15:
+write it now, knowing it cannot yet run on a person's Windows machine). A
+confined launch on Windows starts through a fixed native launcher,
+`octant-windows-confine.exe` (source in `apps/desktop/native/windows-confine`),
+the counterpart of `sandbox-exec` and `bwrap`. The shared confinement port
+builds its arguments from the same `ProcessConfinementPrepareInput`
+(`process/windowsConfinement.ts`, with the pure plan in the domain's
+`windowsConfinementPolicy.ts`); the launcher runs unconfined as the broker,
+starts the command, and removes what it added when the command ends.
+
+- **Process.** Each launch gets a fresh AppContainer profile,
+  `Octant.Confined.<32 hex>`, created at start and deleted at exit, and a job
+  object with kill-on-close, die-on-unhandled-exception, no breakaway and the
+  desktop, clipboard, global-atom and system-setting UI limits. The job is
+  attached at creation (`PROC_THREAD_ATTRIBUTE_JOB_LIST`), so the command runs
+  no instruction outside it and no child escapes it. Ending or losing the
+  launcher closes the job and ends the whole tree: the Windows stop that
+  process groups give elsewhere, so `refuseNewSession` needs no rule. A launch
+  that may neither fork nor exec (Plan, Chat) gets an active-process limit of
+  one, since on Windows both are one call. When the command exits, the rest
+  of its job ends with it, as a capsule's PID namespace does on Linux.
+- **Files.** An AppContainer is deny-by-default: its SID reaches only objects
+  whose DACL names it or ALL APPLICATION PACKAGES, which system folders carry
+  and the person's profile does not. The launcher adds one inheritable allow
+  entry for the container's SID per grant: the bound root and extra folders
+  (modify, or read when the launch may not write them), the temporary
+  directory and extra write roots (modify), read roots and the program's own
+  folder (read, which also lists and runs). A grant ALL APPLICATION PACKAGES
+  already holds, as on System32 and Program Files, writes nothing, so Octant
+  never edits a folder it does not own. A grant whose path passes through a
+  junction or link anywhere, not only at its last name, is refused, because
+  an entry set through it lands on what it points at (`C:\alias\.aws`, with
+  `C:\alias` a junction to the home folder, would grant the real `.aws`).
+  The launcher opens every component from the drive root down as itself and
+  without delete sharing, holds them while it edits, and requires the held
+  object's final path to be the path asked for.
+  A file is not carved out of a grant: on Windows Server 2025 the launcher
+  wrote an explicit access-denied entry (all file rights) for the container's
+  SID on a file beneath its grant, `icacls` listed it first, and the
+  container still read the file. Why is not established (the read ran in the
+  confined process, which opened the file after the entry was written), so
+  no design relies on a deny entry. So a carve-out the launch
+  asks for inside a grant (isolated roots and extra denials) refuses the
+  launch; one outside every grant needs nothing, since the container already
+  misses it. The other direction keeps the shared port's meaning: an isolated
+  root denies its whole subtree and an extra write denial the writes beneath
+  it, and only the launch's own write roots are allowed past them (a
+  capture's one writer carries its directory as both), so any other grant
+  beneath an isolated root, and any other writable grant beneath a write
+  denial, refuses the launch. For the same reason a read-only bound root
+  beneath a folder the launch may write (a checkout under its temporary
+  directory) refuses the launch: the writable folder's inheritable entry
+  would reach the checkout, and nothing on Windows takes it back. A write
+  root inside a read-only checkout is its own explicit grant and is allowed,
+  as the other platforms re-allow it. At exit the launcher removes its
+  entries by rewriting the object's explicit entries itself, because the
+  standard revoke mode leaves deny entries behind. Every grant and removal
+  reads a DACL and writes it back whole, so launchers in one session take a
+  shared lock (`Local\octant-windows-confine-acl`) from the read through the
+  write: two launches on one checkout would otherwise drop each other's
+  entry, or one's cleanup erase the other's live grant. Removal takes out
+  only entries naming its own container's SID. A lock not had within a
+  minute refuses the edit.
+- **Secret guard as an OS rule.** No grant is made at, inside or above a
+  protected location; the plan refuses such a launch, so every protected file
+  stays outside every grant and the container's default denial refuses it. A
+  runtime's own account home is the one exception, from inside it, as on the
+  other platforms. A pattern entry (browser stores under `AppData`) refuses a
+  grant at or above its folder, and a grant that is itself a match or sits
+  inside one (a read root naming a `Cookies` file); a grant inside it with
+  levels of the pattern left is walked at launch, and a match, a walk past
+  4,096 entries, or a folder the host cannot list refuses the launch. A file
+  grant (`~/.ssh/config`) has nothing beneath it to walk, so the check of the
+  file itself is all it gets. Its entry names the file alone; the parent folder
+  gets none, so the file's siblings stay unreachable. Measured on Windows
+  Server 2025: a program that opens the file by its path reads it (curl did),
+  and one that first lists the parent folder is refused (cmd's `type` was). A path the guard cannot spell is
+  refused: a share, device or drive-relative path, a rewritten name (`.`,
+  `..`, a trailing dot or space, a stream) and an 8.3 short name, which opens
+  the same folder under a spelling no entry names. A whole drive is never
+  granted.
+- **Network.** `none` gives the container no capability, so no socket
+  reaches anything. `allow` gives the `internetClient` and
+  `privateNetworkClientServer` capabilities; the host's own loopback stays
+  unreachable, stricter than Linux `allow`. `proxied` is refused: an
+  AppContainer reaches the host's loopback, where the egress proxy listens,
+  only after an administrator exempts it, so the proxy-only boundary has no
+  Windows form yet and a launch is never widened to open network instead. The
+  inbound, loopback and server relays are refused for the same reason.
+- **Refused, not dropped.** A read-everywhere grant (it would take an
+  inheritable entry on every drive), Seatbelt `extraRules`, simulator
+  control, a pinned credential recipient (it needs `proxied`), and a program
+  that is not a `.exe` (a `.cmd` shim or script needs an interpreter chosen
+  on purpose, which step 3 decides). Each refusal is `incompatible`, so a
+  launch never runs with less confinement than it asked for.
+- **Full access** is full access here too: no AppContainer, no grants, no
+  network rule. Its Windows form is the job object alone
+  (`--full-access`), so a stop ends every process the launch started. Step 3
+  uses it.
+- **Not confined or not yet known.** The registry and named objects are what
+  an AppContainer gives by default (its own hive view and object namespace;
+  no per-launch rule is added). Writing an inheritable entry walks every
+  existing file under the grant, and that cost on a large checkout is not
+  measured. A pattern match created inside a grant after the launch starts
+  is reachable: it can arise only in a grant inside a pattern entry's folder,
+  and a read grant cannot create one. A launcher killed outright leaves its entries and
+  profile behind, naming a SID no later launch receives. The child inherits
+  the launcher's environment, so its caller must point `TEMP` and `TMP` into
+  the granted temporary directory. Interactive terminals (ConPTY) under the
+  container are not measured.
+- **Off by default.** `makeProcessConfinementLive` refuses `win32` exactly as
+  before unless its caller passes `unverifiedWindowsConfinement` with the
+  launcher's path, and no production caller does. The provider-level
+  refusals ("Provider processes require Windows host confinement") stay, the
+  launcher is not packaged, and the capability report still says Work and
+  Code are unavailable on Windows. Lifting any of these is step 3, after the
+  launcher has run a real provider on a person's Windows machine.
+- **Evidence.** The plan, argument building, refusals and the off-by-default
+  gate are pure tests that run on Linux CI, and the plan's also on the hosted
+  Windows package job. The `launcher` job of the Windows native confinement
+  workflow builds the launcher on `windows-2025` and drives it through the
+  server's own port against owned fixtures: exit-code relay, reads and writes
+  inside the bound root, a read root that refuses writes, refusal of an
+  ungranted folder and of a file in the home folder (each by Windows'
+  access-denied answer), a file granted on its own being readable by its
+  path while its parent folder gets no entry, the port
+  refusing a folder that holds a browser store, the launcher refusing a grant through a junction and leaving the
+  junction's target untouched, a child refused by the job's quota under the process limit and
+  allowed without it, curl failing to resolve a host without a capability
+  and fetching the same page with one, the container's entry present while
+  it runs and gone after, two launches on one checkout at once keeping both
+  entries and removing both, and the whole tree ending when the launcher is
+  killed. That runner
+  is an administrator account on Windows Server; an ordinary account, a
+  desktop Windows release and a real provider remain unverified.
 
 The Windows owned-control prerequisite is an original in-process Node-API
 binding, not a separate owner daemon. Only a host-selected scope UUID reaches

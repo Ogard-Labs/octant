@@ -34,6 +34,10 @@ import {
   type TodoListHostClient,
 } from "@octant/client-runtime/todo-client";
 import {
+  createOctantInstructionsClient,
+  type OctantInstructionsClient,
+} from "@octant/client-runtime/octant-instructions-client";
+import {
   createAgentMessageClient,
   type AgentMessageClient,
 } from "@octant/client-runtime/agent-message-client";
@@ -255,6 +259,7 @@ export interface LaunchedShellClients {
   readonly personMemoryClient: PersonMemoryClient;
   readonly todoClient: TodoClient;
   readonly todoListHostClient: TodoListHostClient;
+  readonly octantInstructionsClient: OctantInstructionsClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
   readonly workRequestClient: ReturnType<typeof createWorkRequestClient>;
@@ -432,6 +437,7 @@ export function createLaunchedShellClients(
     personMemoryClient: createPersonMemoryClient(port),
     todoClient: options.todoClient ?? localTodos,
     todoListHostClient: options.todoListHostClient ?? localTodos,
+    octantInstructionsClient: createOctantInstructionsClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),

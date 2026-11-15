@@ -12,7 +12,12 @@ import {
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import { PERSON_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
+import {
+  ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+  PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
+  PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
+  decodeOctantInstructionsCommand,
+} from "@octant/contracts/octant-instructions";
 import { afterEach, describe, expect, it } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -25,8 +30,10 @@ import { HeldTurnContext } from "../providers/heldTurnContext";
 import { AGENT_ACCESS_ORIGIN } from "../clientPrincipal";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
+  ORCHESTRATION_INSTRUCTIONS_CONTEXT_KEY,
   OctantInstructionsStore,
   PERSON_INSTRUCTIONS_CONTEXT_KEY,
+  projectInstructionsContextKey,
   type OctantInstructionsAuthor,
   registerOctantInstructionsEvents,
 } from "./octantInstructionsStore";
@@ -154,7 +161,9 @@ describe("your instructions for Octant", () => {
     expect(storeOn(journalOn(connection)).view(true)).toEqual({
       kind: "octant-instructions",
       instructions: "Second rule.",
+      orchestration: "",
       version: 2,
+      orchestrationVersion: 0,
       canChange: true,
     });
     connection.close();
@@ -292,6 +301,260 @@ describe("your instructions for Octant", () => {
       }),
     ]);
     expect(turn(true).context).toEqual([]);
+    connection.close();
+  });
+});
+
+describe("orchestration", () => {
+  it("journals orchestration on its own record, and keeps both texts across a restart", () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const store = storeOn(journal);
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+
+    const result = store.change(
+      {
+        kind: "change-orchestration-instructions",
+        expectedVersion: 0,
+        orchestration: "Start a worker per failing test.",
+      },
+      person,
+    );
+
+    expect(result).toMatchObject({
+      instructions: "Plan in Work.",
+      orchestration: "Start a worker per failing test.",
+      version: 1,
+      orchestrationVersion: 1,
+    });
+    expect(events(journal).map((event) => event.payload)).toEqual([
+      { instructions: "Plan in Work." },
+    ]);
+    expect(
+      journal
+        .replayAggregateType({
+          aggregateType: ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+          afterSequence: 0,
+          limit: 10,
+        })
+        .map((event) => [event.eventName, event.payload]),
+    ).toEqual([
+      [
+        "orchestration-instructions.changed@1",
+        { orchestration: "Start a worker per failing test." },
+      ],
+    ]);
+    expect(storeOn(journalOn(connection)).view(true)).toMatchObject({
+      instructions: "Plan in Work.",
+      orchestration: "Start a worker per failing test.",
+      version: 1,
+      orchestrationVersion: 1,
+    });
+    expect(
+      store.change(
+        { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "x" },
+        person,
+      ),
+    ).toMatchObject({ reason: "stale-version" });
+    expect(
+      store.change(
+        { kind: "change-orchestration-instructions", expectedVersion: 1, orchestration: "x" },
+        agent,
+      ),
+    ).toMatchObject({ reason: "not-the-person" });
+    connection.close();
+  });
+
+  it("never makes an open edit of your instructions stale by saving orchestration", () => {
+    const connection = openConnection();
+    const store = storeOn(journalOn(connection));
+    const opened = store.view(true);
+
+    store.change(
+      {
+        kind: "change-orchestration-instructions",
+        expectedVersion: opened.orchestrationVersion,
+        orchestration: "Split.",
+      },
+      person,
+    );
+    const saved = store.change(
+      {
+        kind: "change-person-instructions",
+        expectedVersion: opened.version,
+        instructions: "Plan in Work.",
+      },
+      person,
+    );
+
+    expect(saved).toMatchObject({
+      kind: "octant-instructions",
+      instructions: "Plan in Work.",
+      orchestration: "Split.",
+    });
+    connection.close();
+  });
+
+  it("gives orchestration only to a thread that orchestrates, after the other two texts", () => {
+    const connection = openConnection();
+    const store = new OctantInstructionsStore({
+      journal: journalOn(connection),
+      uuid,
+      clock: () => now,
+    });
+    const projectId = "00000000-0000-4000-8000-0000000000a1";
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+    store.change(
+      { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "Split." },
+      person,
+    );
+    store.change(
+      decodeOctantInstructionsCommand({
+        kind: "change-project-instructions",
+        projectId,
+        expectedVersion: 0,
+        instructions: "Ship.",
+      }),
+      person,
+    );
+
+    expect(
+      store.contextBlocks({ projectId, orchestrates: true }).map((block) => block.kind),
+    ).toEqual(["person-instructions", "project-instructions", "orchestration-instructions"]);
+    expect(store.contextBlocks({ projectId }).map((block) => block.kind)).toEqual([
+      "person-instructions",
+      "project-instructions",
+    ]);
+    expect(store.contextBlocks({ projectId, orchestrates: true }).at(-1)).toEqual({
+      kind: "orchestration-instructions",
+      key: ORCHESTRATION_INSTRUCTIONS_CONTEXT_KEY,
+      text: expect.stringMatching(/start setting and bounds[\s\S]*\n\nSplit\.$/),
+    });
+    connection.close();
+  });
+});
+
+describe("Project instructions", () => {
+  const projectId = "00000000-0000-4000-8000-0000000000a1";
+  const otherProjectId = "00000000-0000-4000-8000-0000000000a2";
+  const changeProject = (expectedVersion: number, instructions: string, project = projectId) =>
+    decodeOctantInstructionsCommand({
+      kind: "change-project-instructions",
+      projectId: project,
+      expectedVersion,
+      instructions,
+    });
+
+  function projectStoreOn(journal: Journal) {
+    return new OctantInstructionsStore({
+      journal,
+      uuid,
+      clock: () => now,
+      projectExists: (id) => id === projectId || id === otherProjectId,
+    });
+  }
+
+  it("journals a Project's whole text on the Project and keeps it across a restart", () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const store = projectStoreOn(journal);
+
+    expect(store.change(changeProject(0, "Ship from main only."), person)).toMatchObject({
+      kind: "project-instructions",
+      instructions: "Ship from main only.",
+      version: 1,
+    });
+
+    const [event] = journal.replayAggregateType({
+      aggregateType: PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(event).toMatchObject({
+      aggregateId: projectId,
+      payload: { projectId, instructions: "Ship from main only." },
+    });
+    expect(projectStoreOn(journalOn(connection)).projectView(projectId, true)).toMatchObject({
+      instructions: "Ship from main only.",
+      version: 1,
+    });
+    connection.close();
+  });
+
+  it("refuses a stale Project version, a Project not on this host, and an agent", () => {
+    const connection = openConnection();
+    const store = projectStoreOn(journalOn(connection));
+    store.change(changeProject(0, "First."), person);
+
+    expect(store.change(changeProject(0, "Second."), person)).toMatchObject({
+      reason: "stale-version",
+    });
+    expect(
+      store.change(changeProject(0, "Elsewhere.", "00000000-0000-4000-8000-0000000000a9"), person),
+    ).toMatchObject({ reason: "project-not-found" });
+    expect(store.change(changeProject(1, "Agent's."), agent)).toMatchObject({
+      reason: "not-the-person",
+    });
+    expect(store.projectView(projectId, true)).toMatchObject({ instructions: "First." });
+    connection.close();
+  });
+
+  it("gives a turn in the Project its block after yours, and a turn elsewhere none", () => {
+    const connection = openConnection();
+    const store = projectStoreOn(journalOn(connection));
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+    store.change(changeProject(0, "Ship from main only."), person);
+
+    expect(store.contextBlocks({ projectId })).toEqual([
+      expect.objectContaining({ kind: "person-instructions" }),
+      {
+        kind: "project-instructions",
+        key: projectInstructionsContextKey(projectId),
+        text: expect.stringMatching(/this Project[\s\S]*\n\nShip from main only\.$/),
+      },
+    ]);
+    expect(store.contextBlocks({ projectId: otherProjectId }).map((block) => block.kind)).toEqual([
+      "person-instructions",
+    ]);
+    expect(store.contextBlocks().map((block) => block.kind)).toEqual(["person-instructions"]);
+    connection.close();
+  });
+
+  it("shows a device someone else paired a Project's text read-only and refuses its change", async () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const windowAuthorityStore = new WindowAuthorityStore();
+    const route = createOctantInstructionsRouteHandler({
+      store: projectStoreOn(journal),
+      windowAuthorityStore,
+      now: () => 1,
+    });
+    const command = (body: unknown) =>
+      deviceRequest(
+        "hub-roster",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        "/api/octant-instructions/commands",
+      );
+
+    const read = await route(command({ kind: "read-project-instructions", projectId }));
+    const refused = await route(command(changeProject(0, "Hub says.")));
+
+    expect(read?.status).toBe(200);
+    expect(await read?.json()).toMatchObject({ kind: "project-instructions", canChange: false });
+    expect(refused?.status).toBe(403);
     connection.close();
   });
 });
