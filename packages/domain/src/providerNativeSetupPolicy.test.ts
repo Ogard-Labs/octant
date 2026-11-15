@@ -17,39 +17,20 @@ const everything = {
 } as const;
 
 describe("a key provider running as itself", () => {
-  it("keeps only the runtime's own web search on at Guarded and Reviewed until the person turns the rest on", () => {
+  it("keeps the runtime's own web search and fetch off in Work and Code for an account the person turned off", () => {
     for (const mode of ["work", "code"] as const) {
-      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
-        const setup = resolveProviderNativeSetup({
-          driverKind: "claude",
-          mode,
-          executionPolicy,
-          accountAllows: false,
-          projectTrusts: false,
-        });
-        expect(setup).toEqual({
-          subagents: false,
-          webTools: true,
-          skills: false,
-          toolServers: false,
-          hooks: false,
-          projectCode: false,
-        });
-        expect(providerRunsAsItself(setup)).toBe(false);
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+        expect(
+          resolveProviderNativeSetup({
+            driverKind: "claude",
+            mode,
+            executionPolicy,
+            accountAllows: false,
+            projectTrusts: false,
+          }),
+        ).toBeUndefined();
       }
     }
-  });
-
-  it("keeps the runtime's web search off in Plan and Chat until the person turns it on", () => {
-    expect(
-      resolveProviderNativeSetup({
-        driverKind: "claude",
-        mode: "code",
-        executionPolicy: "plan",
-        accountAllows: false,
-        projectTrusts: false,
-      }),
-    ).toBeUndefined();
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -61,7 +42,26 @@ describe("a key provider running as itself", () => {
     ).toBeUndefined();
   });
 
-  it("turns its own setup on at Full access, with a Project's code only where the Project is trusted", () => {
+  it("keeps the runtime's own web search and fetch on in Work and Code for an account running as itself", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of [
+        "approval-gated",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
+        const setup = resolveProviderNativeSetup({
+          driverKind: "claude",
+          mode,
+          executionPolicy,
+          accountAllows: true,
+          projectTrusts: false,
+        });
+        expect(setup?.webTools).toBe(true);
+      }
+    }
+  });
+
+  it("turns the rest of its own setup on at Full access, with a Project's code only where the Project is trusted", () => {
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -70,7 +70,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: false,
       }),
-    ).toEqual({ ...everything, projectCode: false });
+    ).toEqual({ ...everything, webTools: false, projectCode: false });
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -79,7 +79,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: true,
       }),
-    ).toEqual(everything);
+    ).toEqual({ ...everything, webTools: false });
   });
 
   it("loads the account's setup when the account allows it and the Project's code only when trusted", () => {
@@ -100,7 +100,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: true,
       }),
-    ).toEqual(everything);
+    ).toEqual({ ...everything, webTools: false });
   });
 
   it("never runs hooks, tool servers, or a Project's code in Plan, which stays read-only", () => {
@@ -180,7 +180,22 @@ describe("a key provider running as itself", () => {
     ).toBeUndefined();
   });
 
-  it("loads a thread's setup as the account switch would when the thread turned it on", () => {
+  it("keeps the web tools off for a thread that turned them off while its account runs as itself", () => {
+    for (const mode of ["work", "code"] as const) {
+      expect(
+        resolveProviderNativeSetup({
+          driverKind: "claude",
+          mode,
+          executionPolicy: "approval-gated",
+          accountAllows: true,
+          projectTrusts: false,
+          threadChoice: "off",
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it("loads a thread's setup as the account switch would when the thread turned it on, without the web tools of an account turned off", () => {
     expect(
       resolveProviderNativeSetup({
         driverKind: "opencode",
@@ -190,7 +205,7 @@ describe("a key provider running as itself", () => {
         projectTrusts: false,
         threadChoice: "on",
       }),
-    ).toEqual({ ...everything, projectCode: false });
+    ).toEqual({ ...everything, webTools: false, projectCode: false });
   });
 
   it("never loads a Project's own code for a thread that turned it on in an untrusted Project", () => {

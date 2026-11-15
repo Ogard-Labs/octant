@@ -331,8 +331,10 @@ shows no policy lock beside "Run as itself". Rationale: maintainer decision
 2026-11-15: provider search behaves as it does on its own; the policy governs
 only the backends Octant itself sends a query to.
 
-`webTools` is off where the thread's own choice is off, and in Chat and Plan
-where the account does not run as itself. Off means the runtime cannot search,
+`webTools` is off where the thread's own choice is off, and in every mode and
+at every level where the account does not run as itself: Full access, a trusted
+Project, and the thread's On do not turn it back on (maintainer decision,
+2026-11-15). Off means the runtime cannot search,
 at every level, Full access included,
 because each runtime is launched with its own search switched off unless the
 session's setup has `webTools` on, as the provider SDK's `nativeSetup` contract

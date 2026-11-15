@@ -45,6 +45,9 @@ describe("Run a key provider as itself", () => {
     expect(toggle).toHaveAccessibleDescription(/its own\s+subagents, web search and fetch, skills/);
     expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(/Plan stays read-only/);
+    expect(toggle).toHaveAccessibleDescription(
+      /Turned off, web search and fetch stay\s+off in every mode/,
+    );
     await userEvent.click(toggle);
     expect(onChange).toHaveBeenCalledWith(false);
   });

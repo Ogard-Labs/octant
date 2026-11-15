@@ -34,7 +34,8 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
 /**
  * The person's switch for one key provider account running as it does in its
  * own app: its own subagents, web tools, skills, and home configuration. On by
- * default; turning it off keeps them unloaded below Full access. Only a
+ * default; turning it off keeps them unloaded below Full access, and the web
+ * tools at every level and in every mode. Only a
  * window on this host may change it (the server refuses others). The line
  * under the switch says which of those this provider's driver can load at
  * all, so a feature Octant cannot see is never implied.
@@ -50,9 +51,10 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
           subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
           in its home folder. On by default; each call still follows the thread’s level. Octant
-          still shows each subagent and marks each web read. Turned off, Full access still turns it
-          on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
-          MCP servers, and plugins load only in a Project you trust for {name}.
+          still shows each subagent and marks each web read. Turned off, web search and fetch stay
+          off in every mode, and Full access still turns the rest on. Plan stays read-only, and Chat
+          never gets a folder or a shell. A Project’s own hooks, MCP servers, and plugins load only
+          in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}
