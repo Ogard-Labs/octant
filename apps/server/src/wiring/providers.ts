@@ -242,6 +242,7 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import { secretGuardEntries } from "../process/secretGuard";
 
 export interface ConfiguredProviderDriverOptions {
   readonly openCodeProcess: OpenCodeProcessPort;
@@ -262,6 +263,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
+  /** The host's protected files and folders in force, as absolute paths. */
+  readonly protectedPaths?: () => ReadonlyArray<string>;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -423,6 +426,7 @@ export function makeConfiguredProviderDriver(
       ...(options.isProjectConfinedPath === undefined
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
+      ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
@@ -517,6 +521,17 @@ function runDirectEndpointOnNativeHarness(
       : { transcripts: options.nativeHarnessTranscripts }),
     ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
   });
+}
+
+/**
+ * The protected files in force on this host, resolved here so a provider driver
+ * receives the list and never reads the protected-file configuration itself.
+ * A name pattern is given as its whole folder.
+ */
+function hostProtectedPaths(): ReadonlyArray<string> {
+  return secretGuardEntries({ platform: process.platform }).map((entry) =>
+    entry.kind === "path" ? entry.path : entry.directory,
+  );
 }
 
 export function pathIsProjectConfined(projectRoot: string, absolutePath: string): boolean {
@@ -1829,6 +1844,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeResumeIdentityPort: claudeResumeIdentityStore,
             claudeAuthorityNow: processAuthorityTime,
             isProjectConfinedPath,
+            protectedPaths: hostProtectedPaths,
             get claudeInstances() {
               return persistence.readProviderInstances();
             },
@@ -2079,6 +2095,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeResumeIdentityPort: claudeResumeIdentityStore,
       claudeAuthorityNow: processAuthorityTime,
       isProjectConfinedPath,
+      protectedPaths: hostProtectedPaths,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,

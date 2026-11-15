@@ -24,23 +24,22 @@ class FakeClient implements PiClientPort {
   readonly responses: Array<{ id: string; response: Record<string, unknown> }> = [];
   attestedTools: ReadonlyArray<ProviderToolDefinition> = [];
   attestation = true;
+  availableModels: ReadonlyArray<Record<string, unknown>> = [
+    {
+      provider: "anthropic",
+      id: "claude-sonnet",
+      name: "Claude Sonnet",
+      reasoning: true,
+      contextWindow: 200000,
+    },
+  ];
   readonly request = vi.fn(async (type: string, fields: Record<string, unknown> = {}) => {
     if (type === "get_available_models") {
       return {
         type: "response" as const,
         command: type,
         success: true,
-        data: {
-          models: [
-            {
-              provider: "anthropic",
-              id: "claude-sonnet",
-              name: "Claude Sonnet",
-              reasoning: true,
-              contextWindow: 200000,
-            },
-          ],
-        },
+        data: { models: this.availableModels },
       };
     }
     if (type === "get_state") {
@@ -1212,6 +1211,133 @@ describe("Pi provider driver", () => {
       ),
     ).rejects.toThrow(/unsupported/);
     await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("keeps a turn running through the person's own extension notices, dialogs and errors, and fails it when the bridge errs", async () => {
+    const { driver, client } = fixture();
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    client.emit({ type: "extension_ui_request", id: "n", method: "notify", message: "hi" });
+    client.emit({ type: "extension_ui_request", id: "s", method: "select", title: "Pick" });
+    client.emit({ type: "extension_ui_request", id: "c", method: "confirm", title: "Deploy?" });
+    client.emit({
+      type: "extension_error",
+      extensionPath: "/managed/pi/extensions/status.ts",
+      error: "boom",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(client.responses).toEqual([
+      { id: "s", response: { cancelled: true } },
+      { id: "c", response: { confirmed: false } },
+    ]);
+    client.emit({
+      type: "extension_error",
+      extensionPath: "/managed/pi/octant-approval-bridge.ts",
+      error: "bridge broke",
+    });
+    const events = await collected;
+    expect(events.filter((event) => event.kind === "failed")).toHaveLength(1);
+    expect(events.find((event) => event.kind === "approval-request")).toBeUndefined();
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("asks the person at Guarded before a tool from their own Pi extension runs", async () => {
+    const { driver, client } = fixture();
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "deploy", attachments: [], tools: [] }),
+    );
+    client.emit({
+      type: "tool_execution_start",
+      toolCallId: "ext-1",
+      toolName: "deploy_preview",
+      args: { target: "staging" },
+    });
+    client.emit({
+      type: "extension_ui_request",
+      id: "pi-ui-ext",
+      method: "confirm",
+      title: "Octant approval:ext-1:deploy_preview",
+      message: "Allow?",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await Effect.runPromise(
+      connection.answerApproval({ sessionId, requestId: "approval-1", approved: false }),
+    );
+    expect(client.responses).toEqual([{ id: "pi-ui-ext", response: { confirmed: false } }]);
+    client.emit({ type: "agent_settled" });
+    const events = await collected;
+    expect(events.find((event) => event.kind === "approval-request")).toMatchObject({
+      action: "deploy_preview",
+      description: "Allow Pi deploy_preview for this session?",
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("sends an attached image only for a model Pi's own list says takes images", async () => {
+    const { driver, client } = fixture();
+    client.availableModels = [
+      { provider: "anthropic", id: "claude-sonnet", name: "Sonnet", input: ["text", "image"] },
+      { provider: "openai", id: "text-only", name: "Text", input: ["text"] },
+    ];
+    const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(probed.capabilities.nativeAttachments).toBe("supported");
+    expect(probed.models.map((model) => model.inputModalities)).toEqual([
+      ["text", "image"],
+      ["text"],
+    ]);
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const attachment = {
+      attachmentId: "a-1",
+      displayName: "screen.png",
+      bytes: new Uint8Array([1, 2, 3]),
+    };
+    const pdf = await Effect.runPromise(
+      Effect.either(
+        connection.send({
+          sessionId,
+          prompt: "read",
+          attachments: [{ ...attachment, mediaType: "application/pdf" }],
+          tools: [],
+        }),
+      ),
+    );
+    expect(pdf).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    await Effect.runPromise(
+      connection.send({
+        sessionId,
+        prompt: "look",
+        attachments: [{ ...attachment, mediaType: "image/png" }],
+        tools: [],
+      }),
+    );
+    expect(client.request).toHaveBeenCalledWith("prompt", {
+      message: expect.any(String),
+      images: [{ type: "image", mimeType: "image/png", data: "AQID" }],
+    });
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 

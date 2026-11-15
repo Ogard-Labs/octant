@@ -14,7 +14,7 @@ import type {
 } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -926,12 +926,21 @@ describe("OpenCode driver", () => {
     ["approval-gated", "task", "ask"],
     ["approval-gated", "todowrite", "ask"],
     ["approval-gated", "external_directory", "deny"],
-    ["plan", "read", "ask"],
+    ["plan", "read", "allow"],
+    ["approval-gated", "read", "allow"],
+    ["approval-gated", "glob", "allow"],
+    ["plan", "grep", "allow"],
     ["plan", "edit", "deny"],
     ["plan", "bash", "deny"],
     ["plan", "task", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "allow"],
+    ["plan", "websearch", "allow"],
   ] as const)(
     "maps %s %s through official last-match permission semantics",
     async (policy, permission, action) => {
@@ -1055,7 +1064,7 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    for (const permission of ["edit", "bash", "task", "external_directory", "todowrite"]) {
+    for (const permission of ["edit", "bash", "task", "external_directory"]) {
       expect(evaluatePermission(fixture.createdPermissions[0]!, permission)).toBe("deny");
     }
 
@@ -2751,10 +2760,16 @@ describe("OpenCode driver", () => {
     ["plan", "shell", "deny"],
     ["plan", "subagent", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
-    ["plan", "webfetch", "deny"],
-    ["plan", "websearch", "deny"],
-    ["plan", "read", "ask"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "allow"],
+    ["plan", "websearch", "allow"],
+    ["plan", "read", "allow"],
+    ["approval-gated", "read", "allow"],
+    ["approval-gated", "list", "allow"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "shell", "ask"],
@@ -2768,6 +2783,80 @@ describe("OpenCode driver", () => {
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
     const rules = betaAgentPermissionRules(policy, "code");
     expect(evaluateV2Permission(rules, action)).toBe(effect);
+  });
+
+  it("reads a Project file without asking at Guarded and in Plan and still refuses a protected file", () => {
+    const projectFile = "/work/project/src/index.ts";
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const credentials = join(homedir(), ".aws", "credentials");
+    const protectedPaths = [join(homedir(), ".ssh"), credentials];
+    for (const policy of ["approval-gated", "plan"] as const) {
+      const legacy = permissionRules(
+        policy,
+        "code",
+        undefined,
+        [],
+        false,
+        undefined,
+        protectedPaths,
+      ).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      }));
+      const beta = betaAgentPermissionRules(policy, "code", [], [], protectedPaths);
+      for (const rules of [legacy, beta]) {
+        expect(lastMatch(rules, "read", projectFile), policy).toBe("allow");
+        expect(lastMatch(rules, "grep", "TODO"), policy).toBe("allow");
+        expect(lastMatch(rules, "read", key), policy).toBe("deny");
+        expect(lastMatch(rules, "read", credentials), policy).toBe("deny");
+        expect(lastMatch(rules, "list", join(homedir(), ".ssh")), policy).toBe("deny");
+        // OpenCode's own `.env` refusal is kept under the read allow.
+        expect(lastMatch(rules, "read", "/work/project/.env"), policy).toBe("deny");
+        expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("allow");
+        expect(lastMatch(rules, "external_directory", "/elsewhere/a.ts"), policy).toBe("deny");
+      }
+    }
+  });
+
+  it("keeps a person's own read deny of an env example over OpenCode's exception and protected files last", () => {
+    const own = {
+      rules: [
+        { action: "read", resource: "*", effect: "allow" },
+        { action: "read", resource: "*.env.example", effect: "deny" },
+      ],
+      toolServers: false,
+    } as const;
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const protectedPaths = [join(homedir(), ".ssh")];
+    for (const policy of ["approval-gated", "plan"] as const) {
+      const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
+        (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
+      );
+      const beta = betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths);
+      for (const rules of [legacy, beta]) {
+        expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("deny");
+        // The person's own allow-everything never reopens a protected file.
+        expect(lastMatch(rules, "read", key), policy).toBe("deny");
+      }
+    }
+  });
+
+  it("keeps a person's own web-fetch deny in Plan while Plan's edits stay denied over their allow", () => {
+    const own = {
+      rules: [
+        { action: "webfetch", resource: "*", effect: "deny" },
+        { action: "edit", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+    } as const;
+    const legacy = permissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluatePermission(legacy, "webfetch")).toBe("deny");
+    expect(evaluatePermission(legacy, "websearch")).toBe("allow");
+    expect(evaluatePermission(legacy, "edit")).toBe("deny");
+    const beta = betaAgentPermissionRules("plan", "code", [], own.rules);
+    expect(evaluateV2Permission(beta, "webfetch")).toBe("deny");
+    expect(evaluateV2Permission(beta, "edit")).toBe("deny");
   });
 
   it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {
@@ -3340,6 +3429,30 @@ function evaluatePermission(rules: PermissionRuleset, permission: string): strin
     }
   }
   return action;
+}
+
+/** OpenCode's last-match rule over action and resource, `*` matching anything. */
+function lastMatch(
+  rules: ReadonlyArray<{
+    readonly action: string;
+    readonly resource: string;
+    readonly effect: string;
+  }>,
+  action: string,
+  resource: string,
+): string | undefined {
+  const matches = (pattern: string, value: string) =>
+    new RegExp(
+      `^${pattern
+        .split("*")
+        .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
+        .join(".*")}$`,
+    ).test(value);
+  let effect: string | undefined;
+  for (const rule of rules) {
+    if (matches(rule.action, action) && matches(rule.resource, resource)) effect = rule.effect;
+  }
+  return effect;
 }
 
 function evaluateV2Permission(
