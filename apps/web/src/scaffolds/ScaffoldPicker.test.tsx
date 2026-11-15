@@ -61,6 +61,16 @@ describe("choosing a scaffold to start a project from", () => {
     expect(screen.getByText(/Needs swift, which is not on this machine/)).toBeInTheDocument();
   });
 
+  it("gives each kind of project its own glyph and keeps the row's name readable", () => {
+    picker();
+
+    const web = screen.getByRole("button", { name: /Web app/ });
+    const native = screen.getByRole("button", { name: /Native Swift package/ });
+    expect(web.querySelector(".octant-icon-globe")).not.toBeNull();
+    expect(native.querySelector(".octant-icon-code2")).not.toBeNull();
+    expect(web).toHaveAccessibleName(/Web app.*A browser app with a dev server and a build/);
+  });
+
   it("shows the exact command before it is started", async () => {
     const user = userEvent.setup();
     picker();

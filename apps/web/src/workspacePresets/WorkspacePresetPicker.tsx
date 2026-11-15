@@ -2,7 +2,16 @@ import type {
   WorkspacePreset,
   WorkspacePresetSkillReport,
 } from "@octant/contracts/workspace-presets";
-import { LayoutTemplate } from "../ui/icons";
+import {
+  Code2,
+  Files,
+  Globe,
+  type IconComponent,
+  LayoutTemplate,
+  MessageSquare,
+  SquareTerminal,
+} from "../ui/icons";
+import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -13,6 +22,20 @@ export interface WorkspacePresetPickerProps {
   /** Where each named skill stands after the last preset was applied. */
   readonly skills: ReadonlyArray<WorkspacePresetSkillReport>;
   readonly onApply: (preset: WorkspacePreset) => void;
+}
+
+/** The words and tool glyph a person knows each pane by, never its raw id. */
+const PANE_FACES: Readonly<Record<WorkspacePreset["panes"][number], PaneFace>> = {
+  "code-overview": { label: "Overview", Icon: Code2 },
+  browser: { label: "Browser", Icon: Globe },
+  "side-chat": { label: "Side chat", Icon: MessageSquare },
+  files: { label: "Files", Icon: Files },
+  "code-terminal": { label: "Terminal", Icon: SquareTerminal },
+};
+
+interface PaneFace {
+  readonly label: string;
+  readonly Icon: IconComponent;
 }
 
 /**
@@ -27,8 +50,13 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
   return (
     <section aria-label="Set up this workspace" className="workspace-presets">
       <header className="workspace-presets__header">
-        <LayoutTemplate aria-hidden="true" size={14} />
-        <span>Set up this workspace</span>
+        <span className="start-card__tile">
+          <LayoutTemplate aria-hidden="true" size={16} />
+        </span>
+        <div className="start-card__heading">
+          <h3 className="start-card__title">Set up this workspace</h3>
+          <p className="start-card__subtitle">Pick a ready layout for this thread's tools</p>
+        </div>
       </header>
       <ul className="workspace-presets__list">
         {props.presets.map((preset) => (
@@ -36,7 +64,18 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
             <div>
               <strong>{preset.displayName}</strong>
               <p>{preset.summary}</p>
-              <p className="workspace-presets__panes">Opens: {preset.panes.join(", ")}</p>
+              <p className="workspace-presets__panes">
+                <span>Opens</span>
+                {preset.panes.map((pane) => {
+                  const face = PANE_FACES[pane];
+                  return (
+                    <OctantBadge key={pane} variant="secondary">
+                      <face.Icon aria-hidden={true} size={12} />
+                      {face.label}
+                    </OctantBadge>
+                  );
+                })}
+              </p>
             </div>
             <OctantButton
               aria-label={`Apply ${preset.displayName}`}
@@ -44,7 +83,7 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
               onClick={() => props.onApply(preset)}
               size="sm"
               type="button"
-              variant="secondary"
+              variant="default"
             >
               Apply
             </OctantButton>

@@ -517,12 +517,12 @@ fetched, never emoji.
 | 3 Well     | A segmented track, a history capsule, a command block, a stepper              | `--octant-well` or the field paint                         | one hairline at most                              |
 | 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet, the tour card | `--octant-float-glass` (see [Translucency](#translucency)) | `--octant-shadow-pop`                             |
 
-| Shadow token               | Dark                                                                   | Light                                                                  | Use                                             |
-| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
-| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                          |
-| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card) |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer and a picker pinned to it          |
-| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used          |
+| Shadow token               | Dark                                                                   | Light                                                                  | Use                                                                              |
+| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                                                           |
+| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card)                                  |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer, a picker pinned to it, and the start cards in an empty Code thread |
+| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used                                           |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
 `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`,
@@ -1477,6 +1477,18 @@ one row at the trailing edge (the dismissing answer outlined first, the acting
   stops under reduced motion.
 - A route or tool still loading is one quiet line on the page, never a card.
 - A state inside a pane is `OctantEmpty`'s card layout.
+- The two start cards in a new, empty Code thread ("Set up this workspace" and
+  "Start a project") are an invitation a person must not miss, so they are the
+  one card that lifts: the card fill, `--oct-radius-md`, `--oct-shadow-float`,
+  at most 520px wide in the transcript's column. The head is a 28px
+  `--oct-radius-sm` tile washed with the accent (`--octant-accent` 16%) holding
+  a 16px glyph in `--octant-accent-text`, a 15/600 title and a 12px muted
+  subtitle. The preset's Apply is the primary button, and the panes it opens are
+  secondary badges with the tool's 12px glyph, named in words (Overview,
+  Browser, Side chat), never as ids. A scaffold is a 56px choice tile: a 16px
+  glyph for its kind (Web app, Cross-platform, Native Swift), the name at 500,
+  its summary in the meta ink cut to one line, a trailing chevron, and only
+  `--muted` under the pointer. Nothing moves when a tile is pointed at or chosen.
 - A section with nothing in it inside a card (an Inbox list, an Environment
   card) is one line in the detail role with at most one button, never an
   `OctantEmpty` card inside the card.

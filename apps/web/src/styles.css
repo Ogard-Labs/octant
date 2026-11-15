@@ -5568,24 +5568,65 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: var(--oct-space-1);
 }
 
-.scaffolds {
+/*
+ * The two cards offered inside a new, empty Code thread. They are an
+ * invitation, so they lift off the transcript ground: the card fill, the
+ * container radius and the soft float shadow, with a head whose accent tile
+ * says what the card is for.
+ */
+.scaffolds,
+.workspace-presets {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
   max-width: 520px;
   margin: 12px auto 0;
   padding: 12px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-card);
+  box-shadow: var(--oct-shadow-float);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
 }
 
-.scaffolds__header {
+.scaffolds__header,
+.workspace-presets__header {
   display: flex;
   align-items: center;
-  gap: var(--oct-space-1);
+  gap: 12px;
   color: var(--octant-text-primary);
+}
+
+.start-card__tile {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--oct-radius-sm);
+  background: color-mix(in oklab, var(--octant-accent) 16%, transparent);
+  color: var(--octant-accent-text);
+}
+
+.start-card__heading {
+  min-width: 0;
+}
+
+.start-card__title {
+  margin: 0;
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  line-height: 1.3;
+}
+
+.start-card__subtitle {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 .scaffolds__list {
@@ -5603,18 +5644,17 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: 2px;
 }
 
+/* A choice tile: a fixed 56px row, so a long summary is cut to one line and
+   nothing shifts when a tile is pointed at or chosen. */
 .scaffolds__entry-button {
   display: flex;
-  flex-direction: column;
-  /* The button recipe is a centred, one-line, fixed-height control. Left as it
-     was, each entry kept that 32px box while its name and summary ran to two
-     lines, so one entry's name printed over the summary above it. */
-  align-items: flex-start;
+  flex-direction: row;
+  align-items: center;
   justify-content: flex-start;
-  gap: 2px;
+  gap: 12px;
   width: 100%;
-  height: auto;
-  padding: 8px;
+  height: 56px;
+  padding: 0 12px;
   white-space: normal;
   border: 1px solid var(--octant-border-subtle);
   background: transparent;
@@ -5622,6 +5662,31 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font: inherit;
   text-align: left;
   cursor: default;
+}
+
+.scaffolds__entry-icon,
+.scaffolds__entry-chevron {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+}
+
+.scaffolds__entry-chevron {
+  margin-left: auto;
+}
+
+.scaffolds__entry-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scaffolds__entry-summary {
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scaffolds__entry-button[aria-pressed="true"] {
@@ -5635,6 +5700,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .scaffolds__entry-name {
   color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
 }
 
 .scaffolds__entry-blocked {
@@ -7318,31 +7384,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-danger-text);
 }
 
-/*
- * Curated workspace presets, offered beside the scaffolds and shaped like
- * them: the same card, the same list, so choosing an arrangement reads as the
- * same kind of decision as choosing a starting point.
- */
-.workspace-presets {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 520px;
-  margin: 12px auto 0;
-  padding: 12px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-detail);
-}
-
-.workspace-presets__header {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--octant-text-primary);
-}
-
 .workspace-presets__list,
 .workspace-presets__skills {
   display: flex;
@@ -7355,14 +7396,25 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .workspace-presets__entry {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
 }
 
-.workspace-presets__entry p,
-.workspace-presets__panes {
+.workspace-presets__entry strong {
+  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
+}
+
+.workspace-presets__entry p {
   margin: 2px 0 0;
+}
+
+.workspace-presets__panes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1);
 }
 
 .workspace-presets__skills li {

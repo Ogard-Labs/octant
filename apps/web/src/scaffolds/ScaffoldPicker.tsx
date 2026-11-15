@@ -1,9 +1,23 @@
 import type { ScaffoldEntry, ScaffoldRun } from "@octant/contracts/scaffolds";
 import { planScaffold } from "@octant/domain";
-import { Sparkles } from "../ui/icons";
+import {
+  ChevronRight,
+  Code2,
+  Globe,
+  type IconComponent,
+  Sparkles,
+  TabletSmartphone,
+} from "../ui/icons";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+
+/** One glyph per kind of project, so a row reads before its words are read. */
+const KIND_ICONS: Readonly<Record<ScaffoldEntry["target"], IconComponent>> = {
+  "web-app": Globe,
+  "cross-platform-app": TabletSmartphone,
+  "native-apple-app": Code2,
+};
 
 export interface ScaffoldPickerProps {
   readonly entries: ReadonlyArray<ScaffoldEntry>;
@@ -42,14 +56,20 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
   return (
     <section aria-label="Start a project" className="scaffolds">
       <header className="scaffolds__header">
-        <Sparkles aria-hidden="true" size={14} />
-        <span>Start a project</span>
+        <span className="start-card__tile">
+          <Sparkles aria-hidden="true" size={16} />
+        </span>
+        <div className="start-card__heading">
+          <h3 className="start-card__title">Start a project</h3>
+          <p className="start-card__subtitle">Start from a template</p>
+        </div>
       </header>
 
       <ul className="scaffolds__list">
         {props.entries.map((candidate) => {
           const id = String(candidate.id);
           const runnable = props.runnable.get(id) === true;
+          const KindIcon = KIND_ICONS[candidate.target];
           return (
             <li className="scaffolds__entry" key={id}>
               <OctantButton
@@ -60,8 +80,12 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
                 type="button"
                 variant="bare"
               >
-                <span className="scaffolds__entry-name">{candidate.displayName}</span>
-                <span className="scaffolds__entry-summary">{candidate.summary}</span>
+                <KindIcon aria-hidden={true} className="scaffolds__entry-icon" size={16} />
+                <span className="scaffolds__entry-text">
+                  <span className="scaffolds__entry-name">{candidate.displayName}</span>
+                  <span className="scaffolds__entry-summary">{candidate.summary}</span>
+                </span>
+                <ChevronRight aria-hidden={true} className="scaffolds__entry-chevron" size={16} />
               </OctantButton>
               {runnable ? null : (
                 <p className="scaffolds__entry-blocked">
