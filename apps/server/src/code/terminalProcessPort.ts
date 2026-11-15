@@ -381,35 +381,44 @@ export class TerminalProcessPort {
       ready: Promise.resolve(),
       remove: async () => undefined,
     };
-    const receiptReady = persistProcessReceipt(
-      {
-        supervisor: "terminal",
-        ...(this.#dependencies.receiptDirectory === undefined
-          ? {}
-          : { receiptDirectory: this.#dependencies.receiptDirectory }),
-        processIdentity: () => rootIdentity,
-      },
-      `${input.cwd}:${pty.pid}`,
-      pty.pid,
-    )
-      .then((value) => {
-        receipt = value;
-        return value.ready;
-      })
-      .catch((error) => {
-        if (this.#dependencies.receiptDirectory !== undefined) {
-          try {
-            this.#dependencies.killProcessGroup(-Math.abs(pty.pid), "SIGKILL");
-          } catch {
-            // The failed receipt remains a fail-closed launch failure.
-          }
-        }
-        throw error;
-      });
+    // Owned-process receipts prove a pid still names the same process by its
+    // identity, which has no Windows form yet: measured on windows-2025, every
+    // PowerShell terminal failed its receipt with "Owned process identity is
+    // unavailable", and the fail-closed stop below (a negated-pid signal)
+    // reached nothing, so the shell outlived the refused launch. A Windows
+    // terminal keeps no receipt: close ends its tree, and a host restart does
+    // not find one it left behind.
+    const windows = this.#dependencies.platform === "win32";
+    const receiptReady = windows
+      ? Promise.resolve()
+      : persistProcessReceipt(
+          {
+            supervisor: "terminal",
+            ...(this.#dependencies.receiptDirectory === undefined
+              ? {}
+              : { receiptDirectory: this.#dependencies.receiptDirectory }),
+            processIdentity: () => rootIdentity,
+          },
+          `${input.cwd}:${pty.pid}`,
+          pty.pid,
+        )
+          .then((value) => {
+            receipt = value;
+            return value.ready;
+          })
+          .catch((error) => {
+            if (this.#dependencies.receiptDirectory !== undefined) {
+              try {
+                this.#dependencies.killProcessGroup(-Math.abs(pty.pid), "SIGKILL");
+              } catch {
+                // The failed receipt remains a fail-closed launch failure.
+              }
+            }
+            throw error;
+          });
     // The shell's own exit, remembered: a close that comes after it must not
-    // wait for an exit event that already fired. Measured on windows-2025, a
-    // PowerShell that ran its command and exited left close() waiting out its
-    // whole timeout and then reporting that the tree did not exit.
+    // wait for an exit event that already fired, which the Windows close
+    // otherwise did for a PowerShell that had run its command and exited.
     let shellExited = false;
     pty.onExit(() => {
       shellExited = true;

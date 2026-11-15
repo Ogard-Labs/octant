@@ -18306,7 +18306,11 @@ deliverable and keeps every gate above:
      inherited environment names a Windows shell needs (`SYSTEMROOT`,
      `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
      allowlist. A Project action is written for a POSIX shell and is refused
-     on Windows.
+     on Windows. A Windows terminal keeps no owned-process receipt, because
+     the receipt's process identity has no Windows form yet (measured on
+     `windows-2025`, every terminal's receipt failed and its fail-closed stop
+     reached nothing); closing it ends its tree, and a host restart does not
+     find a terminal it left behind.
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process

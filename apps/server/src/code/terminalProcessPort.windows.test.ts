@@ -2,7 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { terminalShellFor } from "./terminalShell";
@@ -13,6 +14,30 @@ afterEach(() => {
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
+
+/**
+ * The shells and consoles still running when a real Windows check fails, so
+ * the job log shows what survived a close.
+ */
+function logSurvivingShells(): void {
+  onTestFailed(() => {
+    try {
+      const listing = execFileSync(
+        join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tasklist.exe"),
+        ["/FO", "CSV", "/NH"],
+        { encoding: "utf8", windowsHide: true },
+      );
+      console.log(
+        listing
+          .split(/\r?\n/)
+          .filter((line) => /powershell|pwsh|conhost|openconsole|cmd\.exe/i.test(line))
+          .join("\n"),
+      );
+    } catch (error) {
+      console.log(`tasklist failed: ${String(error)}`);
+    }
+  });
+}
 
 const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
@@ -151,6 +176,7 @@ describe("a Code terminal on a Windows host", () => {
   it.runIf(process.platform === "win32")(
     "runs a PowerShell command at Full access that writes a file in the folder and exits",
     async () => {
+      logSurvivingShells();
       const directory = mkdtempSync(join(tmpdir(), "octant-windows-terminal-"));
       directories.push(directory);
       const handle = new TerminalProcessPort({
@@ -190,6 +216,7 @@ describe("a Code terminal on a Windows host", () => {
   it.runIf(process.platform === "win32")(
     "ends a live interactive PowerShell and reports its exit when the terminal closes",
     async () => {
+      logSurvivingShells();
       const directory = mkdtempSync(join(tmpdir(), "octant-windows-terminal-"));
       directories.push(directory);
       const handle = new TerminalProcessPort({
