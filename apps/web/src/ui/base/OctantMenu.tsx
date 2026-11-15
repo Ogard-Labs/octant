@@ -83,6 +83,12 @@ export interface OctantMenuProps {
   readonly value: string;
   /** Action menus invoke every enabled item, including the current value. */
   readonly selectionMode?: "radio" | "action";
+  /**
+   * `false` keeps Octant's own menu in the desktop app. A system menu shows a
+   * row's label alone, so a menu whose rows carry a description, an icon or a
+   * colour mark opts out to keep them.
+   */
+  readonly native?: boolean;
 }
 
 /** Octant menu adapter over the owned shadcn/Base UI DropdownMenu recipe. */
@@ -121,7 +127,7 @@ export function OctantMenu(props: OctantMenuProps) {
     </>
   );
   return (
-    <DropdownMenu>
+    <DropdownMenu native={props.native !== false}>
       <DropdownMenuTrigger
         aria-label={props.triggerLabel}
         className={cn(props.triggerClassName ?? "octant-menu__trigger", "window-no-drag")}

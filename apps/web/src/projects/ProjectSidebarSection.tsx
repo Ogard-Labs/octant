@@ -1058,6 +1058,7 @@ function ProjectGroup(props: {
             )}
             {props.onSortChange === undefined || props.sort === undefined ? null : (
               <OctantMenu
+                native={false}
                 items={PROJECT_SORT_ITEMS}
                 onValueChange={(value) => {
                   if (value === "manual" || value === "updated" || value === "name") {
@@ -1785,6 +1786,7 @@ function CodeProjectViewSwitcher(props: {
             triggerClassName="code-project-views__trigger-wrap"
           >
             <OctantMenu
+              native={false}
               actions={[
                 {
                   icon: <Plus aria-hidden="true" size={14} />,

@@ -1277,11 +1277,17 @@ the navigation group role (12px, sentence case, muted, never mono), and the row
 the keyboard is on takes `--oct-fill-4` with no border; the Enter hint says
 what it will do.
 
-**Native menus.** In the desktop app context menus and ordinary dropdowns are
-the system's own; searchable pickers, popovers with embedded controls and every
-composer popup stay renderer surfaces. A composer menu built on `OctantMenuRoot`
-passes `native={false}`, because a system menu flattens a row's second line of
-detail into its label.
+**Native menus.** In the desktop app right-click menus and plain dropdowns
+(one line per row: filters, sorts with no description, action lists, Settings
+selects) are the system's own. A system menu shows a row's label alone, so any
+menu whose rows carry a description, an icon or a colour mark stays Octant's
+own and looks the same in the desktop app, a browser and the phone: the mode
+switcher, reply detail, the provider's own setup, the dock's named choice, add
+tool and more tools, the device switcher, the Project sort, colour and view
+pickers, a plan task's status, the composer's attach and mode menus, thread
+actions and Open in. Searchable pickers and popovers with embedded controls
+stay renderer surfaces too. Such a menu passes `native={false}` to
+`OctantMenu` or `OctantMenuRoot`.
 
 **Composer popups.** Every popup the composer opens (Project, base branch,
 checkout, Create from…, access, model) is the float at `--oct-radius-lg` with

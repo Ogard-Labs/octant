@@ -7,6 +7,7 @@ import { OctantSelectField } from "./OctantSelect";
 import { SidebarProfile } from "../../shell/SidebarProfile";
 import { SidebarMore } from "../../shell/SidebarMore";
 import {
+  OctantMenu,
   OctantMenuCheckboxItem,
   OctantMenuPopup,
   OctantMenuPortal,
@@ -214,5 +215,30 @@ describe("native dropdown menus", () => {
     await waitFor(() => expect(radio).toHaveBeenCalledWith("second", expect.anything()));
     fireEvent.click(trigger);
     await waitFor(() => expect(check).toHaveBeenCalledWith(false, expect.anything()));
+  });
+
+  it("keeps a menu whose rows carry a description in the page, so the description stays under its row", async () => {
+    const popup = vi.fn(async () => ({ kind: "dismissed" }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    render(
+      <OctantMenu
+        items={[
+          { value: "work", label: "Work", description: "Files and documents" },
+          { value: "code", label: "Code", description: "A checkout and a terminal" },
+        ]}
+        native={false}
+        onValueChange={vi.fn()}
+        trigger="Mode"
+        triggerLabel="Mode"
+        value="work"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mode" }));
+    const code = await screen.findByRole("menuitemradio", { name: "Code" });
+    expect(code).toHaveAccessibleDescription("A checkout and a terminal");
+    expect(popup).not.toHaveBeenCalled();
   });
 });

@@ -344,6 +344,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               <ProjectPageMark project={props.project} />
             ) : (
               <OctantMenu
+                native={false}
                 items={PROJECT_COLOR_MENU_ITEMS}
                 onValueChange={(value) => {
                   const color = projectColorFromMenuValue(value);

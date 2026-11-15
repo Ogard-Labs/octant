@@ -315,6 +315,7 @@ function DeviceSwitcher(props: {
   const onSelectDevice = props.onSelectDevice;
   return (
     <OctantMenu
+      native={false}
       items={choices.map((device) => ({
         value: device.id,
         label: device.name,

@@ -86,6 +86,7 @@ export function ComposerAttachButton(props: ComposerAttachButtonProps) {
       ) : (
         <>
           <OctantMenu
+            native={false}
             actions={threadActions}
             items={[
               {
