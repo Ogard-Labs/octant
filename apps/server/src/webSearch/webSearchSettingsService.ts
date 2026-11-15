@@ -86,6 +86,8 @@ export interface WebSearchSettingsServiceOptions {
   /** The credential broker's web search namespace; absent, no keyed vendor can search. */
   readonly keys?: WebSearchKeyStore;
   readonly fetch?: SearxngFetch;
+  /** Where a key the broker would not delete is reported; never given the key. */
+  readonly log?: (line: string) => void;
 }
 
 type AddressCheck =
@@ -135,6 +137,13 @@ export class WebSearchSettingsService {
   readonly #readChatSearxngBaseUrl: () => string | undefined;
   readonly #keys: WebSearchKeyStore | undefined;
   readonly #fetch: SearxngFetch | undefined;
+  readonly #log: (line: string) => void;
+  /**
+   * Saves of the list and of a key, one at a time: a key stored while the
+   * list moved its entry to a new reference would otherwise sit in the broker
+   * under a reference nothing names.
+   */
+  #changes: Promise<unknown> = Promise.resolve();
   /**
    * Entries whose vendor refused the stored key since it was last set. Held in
    * memory: after a restart the next search learns it again.
@@ -149,6 +158,24 @@ export class WebSearchSettingsService {
     this.#readChatSearxngBaseUrl = options.readChatSearxngBaseUrl;
     this.#keys = options.keys;
     this.#fetch = options.fetch;
+    this.#log = options.log ?? ((line) => console.warn(line));
+  }
+
+  #oneAtATime<T>(change: () => Promise<T>): Promise<T> {
+    const run = this.#changes.then(change, change);
+    this.#changes = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Delete a key nothing names any more, and say so when the broker would not. */
+  async #deleteKey(credentialRef: string): Promise<void> {
+    try {
+      await this.#keys?.delete(credentialRef);
+    } catch {
+      this.#log(
+        `[web-search] the credential broker did not delete the key under reference ${credentialRef}; it is no longer used.`,
+      );
+    }
   }
 
   read(): { readonly settings: WebSearchSettings; readonly source: "saved" | "migrated" } {
@@ -286,11 +313,19 @@ export class WebSearchSettingsService {
     }
   }
 
-  async set(
+  set(
     request: SetWebSearchSettingsRequest,
     principalKind: PrincipalKind,
     /** The paired device that asked. Absent, the change is the local person's. */
     actor?: EventActor,
+  ): Promise<SetWebSearchSettingsOutcome> {
+    return this.#oneAtATime(() => this.#set(request, principalKind, actor));
+  }
+
+  async #set(
+    request: SetWebSearchSettingsRequest,
+    principalKind: PrincipalKind,
+    actor: EventActor | undefined,
   ): Promise<SetWebSearchSettingsOutcome> {
     const decision = decideWebSearchSettings({ principalKind, settings: request.settings });
     if (decision.kind === "refused") {
@@ -362,13 +397,18 @@ export class WebSearchSettingsService {
         },
       ],
     });
-    for (const credentialRef of staleKeys) {
-      await this.#keys?.delete(credentialRef).catch(() => undefined);
-    }
+    for (const credentialRef of staleKeys) await this.#deleteKey(credentialRef);
     return { kind: "saved", view: await this.view() };
   }
 
-  async setKey(
+  setKey(
+    request: SetWebSearchKeyRequest,
+    principalKind: PrincipalKind,
+  ): Promise<SetWebSearchKeyOutcome> {
+    return this.#oneAtATime(() => this.#setKey(request, principalKind));
+  }
+
+  async #setKey(
     request: SetWebSearchKeyRequest,
     principalKind: PrincipalKind,
   ): Promise<SetWebSearchKeyOutcome> {
@@ -407,6 +447,19 @@ export class WebSearchSettingsService {
         kind: "refused",
         code: "unavailable",
         message: "The credential store did not keep the key.",
+      };
+    }
+    // Saves run one at a time, but the list is the journal's: if the entry no
+    // longer names this reference, the key just stored is no one's.
+    const current = this.read().settings.backends.find(
+      (candidate) => String(candidate.id) === String(request.entryId),
+    );
+    if (request.key !== undefined && current?.credentialRef !== entry.credentialRef) {
+      await this.#deleteKey(entry.credentialRef);
+      return {
+        kind: "refused",
+        code: "unknown-entry",
+        message: "The backend changed while its key was saved. Save the key again.",
       };
     }
     this.#refusedKeys.delete(String(entry.id));

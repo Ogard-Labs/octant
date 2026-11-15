@@ -26,7 +26,11 @@ afterEach(() => {
 
 function openHarness(
   chatAddress: { value: string | undefined },
-  extra: { readonly keys?: WebSearchKeyStore; readonly fetch?: typeof fetch } = {},
+  extra: {
+    readonly keys?: WebSearchKeyStore;
+    readonly fetch?: typeof fetch;
+    readonly log?: (line: string) => void;
+  } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-web-search-"));
   directories.push(directory);
@@ -49,6 +53,7 @@ function openHarness(
     readChatSearxngBaseUrl: () => chatAddress.value,
     ...(extra.keys === undefined ? {} : { keys: extra.keys }),
     ...(extra.fetch === undefined ? {} : { fetch: extra.fetch }),
+    ...(extra.log === undefined ? {} : { log: extra.log }),
   });
   return { connection, journal, runtime, service, clock };
 }
@@ -302,6 +307,56 @@ describe("web search keys", () => {
     expect(stored.size).toBe(1);
     await service.set({ settings: { policy: "any", backends: [] } }, "local-window");
     expect(stored.size).toBe(0);
+  });
+
+  it("leaves no key behind when the entry's address changes while its key is being stored", async () => {
+    const { keys, stored } = memoryKeys();
+    let release = () => {};
+    const slowKeys: WebSearchKeyStore = {
+      ...keys,
+      set: async (ref, value) => {
+        await new Promise<void>((resolve) => (release = resolve));
+        await keys.set(ref, value);
+      },
+    };
+    const { service } = openHarness({ value: undefined }, { keys: slowKeys });
+    const linkup = { ...braveEntry, kind: "linkup" as const, address: "https://a.linkup.example/" };
+    await service.set({ settings: { policy: "any", backends: [linkup] } }, "local-window");
+
+    const storing = service.setKey({ entryId: linkup.id, key: "first" }, "local-window");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const moving = service.set(
+      {
+        settings: {
+          policy: "any",
+          backends: [{ ...linkup, address: "https://b.linkup.example/" }],
+        },
+      },
+      "local-window",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    release();
+    await Promise.all([storing, moving]);
+
+    expect(stored.size).toBe(0);
+    expect((await service.view()).states[0]?.state).toEqual({ kind: "needs-key" });
+  });
+
+  it("logs a stored key it could not delete without the key itself", async () => {
+    const { keys } = memoryKeys();
+    const lines: string[] = [];
+    const { service } = openHarness(
+      { value: undefined },
+      {
+        keys: { ...keys, delete: async () => Promise.reject(new Error("locked")) },
+        log: (line) => lines.push(line),
+      },
+    );
+    await service.set({ settings: { policy: "any", backends: [braveEntry] } }, "local-window");
+    await service.setKey({ entryId: braveEntry.id, key: "brave-secret" }, "local-window");
+    await service.set({ settings: { policy: "any", backends: [] } }, "local-window");
+    expect(lines).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain("brave-secret");
   });
 
   it("journals the backend that answered and the one that refused its key with the thread's tool call, and reads that entry as Needs key", async () => {
