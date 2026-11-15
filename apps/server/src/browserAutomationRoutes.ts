@@ -737,6 +737,7 @@ export function createBrowserAutomationRouteHandler(
                       input.threadId,
                       input.contextId,
                       request.signal,
+                      input.freshPicture === undefined ? {} : { freshPicture: input.freshPicture },
                     ),
               ),
             ),

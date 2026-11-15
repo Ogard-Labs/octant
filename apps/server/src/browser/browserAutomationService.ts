@@ -2874,15 +2874,19 @@ export class BrowserAutomationService {
     threadId: BrowserThreadId,
     contextId: BrowserContextId,
     signal?: AbortSignal,
+    options: { readonly freshPicture?: boolean } = {},
   ): Promise<BrowserAutomationSnapshot> {
     const owned = this.#contexts.get(contextId);
     if (
       owned !== undefined &&
       owned.windowId === windowId &&
       String(owned.threadId) === String(threadId) &&
-      // A native page is not always on screen: minimised, its surface is
-      // detached and the card in the dock is the only place it is seen, so
-      // it is peeked like a headless one. The interval bounds the cost.
+      // A native page is on screen while its pane shows it, and that pane's
+      // poll spends no capture. Minimised, its surface is detached and the
+      // dock's card is the only place it is seen, so the card asks for one.
+      (owned.record.presentation === "native-live"
+        ? options.freshPicture === true
+        : options.freshPicture !== false) &&
       this.#authorityIsActive(owned)
     ) {
       await this.#refreshPicture(owned, signal);

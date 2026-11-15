@@ -105,7 +105,7 @@ describe("DockBrowserCard", () => {
         inspectThread: vi.fn(async () => snapshot()),
       }) as unknown as BrowserAutomationClient;
 
-    it("reads that context and not the thread's current one", async () => {
+    it("reads that context, asking for a picture of the off-screen page, and not the thread's current one", async () => {
       const client = both(async () => snapshot());
       const { container } = renderCard(client, { contextId: own });
       await waitFor(() =>
@@ -115,7 +115,7 @@ describe("DockBrowserCard", () => {
         ),
       );
       expect(client.inspect).toHaveBeenCalledWith(
-        { contextId: own, threadId },
+        { contextId: own, threadId, freshPicture: true },
         expect.any(AbortSignal),
       );
       expect(client.inspectThread).not.toHaveBeenCalled();
