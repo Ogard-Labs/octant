@@ -3,10 +3,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  combineOpenCodeSetups,
   openCodeOwnRulesAllow,
   projectOpenCodeOwnSetup,
   readOpenCodeProjectSetup,
 } from "./openCodeOwnSetup";
+
+describe("combineOpenCodeSetups", () => {
+  it("keeps a Project's denials when the person's own setup already fills its rule bound", () => {
+    const person = projectOpenCodeOwnSetup(
+      {
+        permission: Object.fromEntries(
+          Array.from({ length: 200 }, (_, index) => [`tool${index}`, "allow"]),
+        ),
+      },
+      environment,
+    );
+    expect(person.rules).toHaveLength(200);
+    const project = projectOpenCodeOwnSetup({ permission: { edit: "deny" } }, environment);
+    const combined = combineOpenCodeSetups(person, project);
+    expect(combined.rules.at(-1)).toEqual({ action: "edit", resource: "*", effect: "deny" });
+    expect(openCodeOwnRulesAllow(combined.rules, "tool0", ["*"])).toBe(true);
+  });
+});
 
 describe("readOpenCodeProjectSetup", () => {
   it("reads a Project's root and .opencode files in OpenCode's order, without its catch-all or an invalid file", () => {

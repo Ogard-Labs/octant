@@ -283,7 +283,9 @@ export function readOpenCodeProjectSetup(
  * The person's setup followed by a trusted Project's: the Project's rules come
  * later, so they decide where both name the same action, and both stay under
  * the level's denies; a Project server replaces the person's of the same
- * name, as OpenCode's own merge does.
+ * name, as OpenCode's own merge does. Every rule of both is kept: each file is
+ * already bounded when it is read, and cutting the combined list would drop
+ * the later, deciding rules (a Project's denials among them) without a word.
  */
 export function combineOpenCodeSetups(
   first: OpenCodeOwnSetup,
@@ -293,7 +295,7 @@ export function combineOpenCodeSetups(
   for (const [name, server] of Object.entries(then.mcp)) {
     if (name in mcp || Object.keys(mcp).length < MAX_SERVERS) mcp[name] = server;
   }
-  return { rules: [...first.rules, ...then.rules].slice(0, MAX_RULES), mcp };
+  return { rules: [...first.rules, ...then.rules], mcp };
 }
 
 /** One launch's identity for a setup, so a connection never carries a different one. */
