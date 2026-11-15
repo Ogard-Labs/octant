@@ -18,6 +18,7 @@ sidebar, composer, and thread view that open them; and Work Projects there,
 whose Work threads run on the Octant Harness with file tools and commands on
 the server, with the Work sidebar, composer, and thread view that open them
 ([Work Projects](#work-projects)); routines that target a server Project,
+chosen in Automation Center's editor or confirmed from a thread there and
 run by this host's scheduler ([Routines](#routines)); person-operated
 loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
 and the seam and host lifecycle for machines in the person's own cloud
@@ -493,8 +494,19 @@ Project's connection, under the same levels, approvals, and journal.
 - **Who sees them.** Automation lists and changes a server Project's routines
   for the host's own person, the principals that may read the server catalog;
   a restricted device reaches none.
+- **The editor.** Automation Center's routine editor lists the server
+  Projects of the chosen mode beside local ones, named with their
+  `alias:folder`, from the server catalog the window already reads, so a
+  restricted device, whose read is refused, lists none. A chosen server
+  Project binds the binding its host derives (the catalog reports a Code
+  Project's own folder checkout and a Work Project's binding revision, at
+  version 1), its execution profile is offered Octant Harness models only,
+  and the routine is saved and edited through the same Automation route as
+  any other, so every occurrence revalidates it as above.
 - **File triggers** watch a folder of this host, so a file routine cannot
-  target a server Project and is refused there.
+  target a server Project: the editor offers no file trigger for one, naming
+  why, the Automation route refuses one at save with the same reason, and
+  revalidation refuses one at every occurrence.
 
 ### Panels
 
@@ -628,10 +640,6 @@ Project's connection, under the same levels, approvals, and journal.
   Settings row above, which also offers a saved-action presentation switch; a
   general Developer tools pane remains absent.
 - Extra folders in a server Project.
-- Choosing a server Project in Automation Center's routine editor: it lists
-  local Projects only, so a server Project's routine is made by confirming a
-  proposal from one of its threads. Its routines are listed and managed there
-  once made.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,

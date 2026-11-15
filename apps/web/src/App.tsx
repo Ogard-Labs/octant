@@ -54,7 +54,10 @@ import {
   permissionModeOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
-import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
+import {
+  automationServerProviderChoices,
+  buildAutomationEditorCatalog,
+} from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
@@ -4036,6 +4039,10 @@ function LaunchedShell(
     ...codeProviderChoices.map(
       (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
     ),
+    "harness",
+    ...[...codeProviderGroups, ...workProviderGroups]
+      .filter((group) => group.runtime === "octant-harness")
+      .map((group) => String(group.instance.id)),
   ].join("\0");
   const automationCatalogCodeBootstrapKey =
     codeController.bootstrap === undefined
@@ -4077,6 +4084,16 @@ function LaunchedShell(
         ...(codeController.bootstrap === undefined
           ? {}
           : { codeBootstrap: codeController.bootstrap }),
+        // The host lists its server catalog only to its own person, so a
+        // restricted device's lists are empty and its editor offers none.
+        serverProjects: {
+          code: serverCodeProjects.projects,
+          work: serverCodeProjects.workProjects,
+        },
+        serverProviderChoicesByMode: automationServerProviderChoices(
+          [...codeProviderGroups, ...workProviderGroups],
+          { work: workProviderChoices, code: codeProviderChoices },
+        ),
       }),
     // Content keys keep the memo referentially stable across renders that only
     // allocate new Project/profile/provider array wrappers with identical facts.
@@ -4085,6 +4102,8 @@ function LaunchedShell(
       automationCatalogProfileKey,
       automationCatalogProjectKey,
       automationCatalogProviderKey,
+      serverCodeProjects.projects,
+      serverCodeProjects.workProjects,
       localHost?.displayName,
       props.launch.windowId,
     ],
