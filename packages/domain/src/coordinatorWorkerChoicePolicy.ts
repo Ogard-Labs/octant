@@ -271,6 +271,24 @@ export function chooseWorkerModel(
         [],
       );
     }
+    // A retry's floor holds for a named model too: it must be listed in a
+    // role at or above the tier the retry climbs to.
+    if (floor !== undefined) {
+      const tiers = WORKER_ROLE_ORDER.filter((slotRole) =>
+        (effectiveWorkerRoleSlot(roles, slotRole)?.candidates ?? []).some(
+          (candidate) =>
+            nativeHarnessSlotCandidateKey(candidate) ===
+            nativeHarnessSlotCandidateKey(named.candidate),
+        ),
+      ).map((slotRole) => TIER[slotRole]);
+      if (Math.max(...tiers) < TIER[floor]) {
+        return refused(
+          "policy",
+          `${request.model} is listed only below ${WORKER_ROLE_NAMES[floor]}; a retry starts at ${WORKER_ROLE_NAMES[floor]} or above and never goes down a tier.`,
+          [],
+        );
+      }
+    }
     const reasons = hardRejections(named.candidate, facts, request);
     if (reasons.length > 0) {
       return refused(

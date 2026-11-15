@@ -9,7 +9,10 @@ import {
   type WorkerChoiceRequest,
   type WorkerRoles,
 } from "./coordinatorWorkerChoicePolicy";
-import { providerAvailabilityFromFailure } from "./providerAvailabilityPolicy";
+import {
+  providerAvailabilityFromFailure,
+  usageLimitFromReading,
+} from "./providerAvailabilityPolicy";
 
 const host = "00000000-0000-4000-8000-0000000000aa";
 
@@ -312,6 +315,38 @@ describe("chooseWorkerModel", () => {
     );
   });
 
+  it("holds a named model on a retry to the retry's tier floor", () => {
+    const tiered = roles([slot("quick", [haiku]), slot("default", [sonnet]), slot("deep", [opus])]);
+    const handles = workerModelHandles(tiered);
+    const handleOf = (candidate: NativeHarnessSlotCandidate) =>
+      handles.find((entry) => entry.candidate === candidate)?.handle;
+    const below = chooseWorkerModel(
+      tiered,
+      facts(),
+      request({ retries: { role: "default" }, model: handleOf(sonnet), why: "it knows the code" }),
+    );
+    expect(below).toMatchObject({ kind: "refused", reason: "policy" });
+    if (below.kind === "refused") expect(below.message).toContain("never goes down a tier");
+    expect(
+      picked(
+        chooseWorkerModel(
+          tiered,
+          facts(),
+          request({ retries: { role: "default" }, model: handleOf(opus), why: "top tier" }),
+        ),
+      ),
+    ).toMatchObject({ candidate: opus, rank: "chosen" });
+    expect(
+      picked(
+        chooseWorkerModel(
+          tiered,
+          facts(),
+          request({ retries: { role: "quick" }, model: handleOf(sonnet), why: "one tier up" }),
+        ),
+      ).candidate,
+    ).toEqual(sonnet);
+  });
+
   it("turns a start in an ask-first role into a proposal, a retry that climbs into one included", () => {
     const asking = roles([
       slot("quick", [haiku]),
@@ -361,5 +396,60 @@ describe("providerAvailabilityFromFailure", () => {
     expect(providerAvailabilityFromFailure({ category: "rate-limited" })).toEqual({ kind: "down" });
     expect(providerAvailabilityFromFailure({ category: "unauthenticated" })).toBeUndefined();
     expect(providerAvailabilityFromFailure({ category: "provider-failed" })).toBeUndefined();
+  });
+});
+
+describe("usageLimitFromReading", () => {
+  const now = Date.parse("2026-11-15T12:00:00.000Z");
+  function reading(windows: ReadonlyArray<Record<string, unknown>>, status = "available") {
+    const limits = { rateLimitWindows: windows };
+    return (
+      status === "available"
+        ? { status, providerInstanceId: "p", limits }
+        : { status, providerInstanceId: "p", staleLimits: limits }
+    ) as never;
+  }
+
+  it("counts an account at its limit while a reading says the limit is reached, until its reset", () => {
+    expect(
+      usageLimitFromReading(
+        reading([
+          { window: "five-hour", status: "exhausted", resetsAt: "2026-11-15T14:00:00.000Z" },
+          {
+            window: "weekly",
+            status: "allowed",
+            utilization: 1,
+            resetsAt: "2026-11-16T09:00:00.000Z",
+          },
+        ]),
+        now,
+      ),
+    ).toEqual({ until: "2026-11-16T09:00:00.000Z" });
+    expect(
+      usageLimitFromReading(reading([{ window: "w", status: "exhausted" }], "failed"), now),
+    ).toEqual({});
+  });
+
+  it("never counts a reading below its limit, or one whose reset has passed", () => {
+    expect(
+      usageLimitFromReading(
+        reading([
+          {
+            window: "w",
+            status: "warning",
+            utilization: 0.99,
+            resetsAt: "2026-11-15T14:00:00.000Z",
+          },
+        ]),
+        now,
+      ),
+    ).toBeUndefined();
+    expect(
+      usageLimitFromReading(
+        reading([{ window: "w", status: "exhausted", resetsAt: "2026-11-15T11:00:00.000Z" }]),
+        now,
+      ),
+    ).toBeUndefined();
+    expect(usageLimitFromReading(undefined, now)).toBeUndefined();
   });
 });

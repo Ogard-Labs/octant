@@ -1,7 +1,7 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { appToolThreadLevel, browserToolTransport } from "@octant/domain";
+import { appToolThreadLevel, browserToolTransport, usageLimitFromReading } from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -364,6 +364,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerAvailabilityMarks"
+    | "providerUsageLimitsService"
     | "providerDataDirectory"
     | "verifyModelToolsOnFirstUse"
     | "resolveSelectedExtensions"
@@ -1816,6 +1817,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               deps.isProjectPolicyTargetAllowed(target, providerInstanceId, modelId),
             availability: (providerInstanceId) =>
               deps.providerAvailabilityMarks.read(providerInstanceId),
+            usageReading: (providerInstanceId) =>
+              usageLimitFromReading(
+                deps.providerUsageLimitsService
+                  .snapshot()
+                  .entries.find((entry) => String(entry.providerInstanceId) === providerInstanceId),
+                Date.now(),
+              ),
           },
           project,
           candidate,

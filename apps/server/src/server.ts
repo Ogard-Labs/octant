@@ -871,6 +871,7 @@ export function startOctantServer(
     } = yield* wireCodeRuntime({
       hostResourceBudget,
       providerAvailabilityMarks,
+      providerUsageLimitsService,
       nativeHarnessRoutingStore,
       isProjectPolicyTargetAllowed,
       threadMoveHolds,

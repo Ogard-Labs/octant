@@ -198,17 +198,22 @@ every `start`; the renderer and the agent decide nothing.
    Hard problems), never lower than `size` picks; else `size`: `quick` → Quick
    edit, `normal` → Builder, `hard` → Hard problems. A `review` goes to
    Reviewer, or to Hard problems with `risk: high`. A retry never goes down: a
-   `role` below the tier it must climb to is refused. An empty role uses
+   `role`, or a `model` handle listed only in roles below that tier, is
+   refused. An empty role uses
    Builder's list and says so.
 2. **Models.** The role's list as the Project chose it, else as Settings has
    it: the main model first, then the fallbacks.
 3. **Hard rules.** A model is passed over when its provider is turned off,
    signed out or down (its check failed, or its last request failed with an
    availability error within 5 minutes), the model is not offered, the account
-   is at a usage limit (until the reset the provider named), the Project's
+   is at a usage limit (a failed request's own limit signal, or the host's
+   plan-usage reading of a window the provider flagged exhausted or at 100%,
+   until that window's reset; a reading below the limit never filters), the Project's
    policy or data rules disallow it, an endpoint Octant runs has not proven its
    tools, or `needsImages` is set and it cannot read images while Sees images
-   has no model. A review passes over models on the reviewed worker's provider
+   has no model. Until Sees images describes images for such a model (not
+   built yet), image work can go to a model that cannot read images whenever
+   Sees images has a model. A review passes over models on the reviewed worker's provider
    while one on another provider is left.
 4. **Answer.** The first model left starts. The host records whether it was
    the main model or the n-th fallback, and why ("main Opus 5.5 at usage limit

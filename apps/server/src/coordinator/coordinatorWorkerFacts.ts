@@ -38,14 +38,19 @@ export interface CoordinatorWorkerFactSources {
     modelId: ProviderModelId,
   ) => boolean;
   readonly availability: (providerInstanceId: string) => ProviderAvailabilityMark | undefined;
+  /**
+   * The account's limit as the host's last plan-usage reading says it, while
+   * that reading says the limit is reached ({@link usageLimitFromReading}).
+   */
+  readonly usageReading: (providerInstanceId: string) => { readonly until?: string } | undefined;
 }
 
 /**
  * What the host knows about one role model for a worker in this Project,
  * read from what already exists: the provider's enabled and sign-in state,
  * its last check, the model list it reports (image input, context), tool
- * evidence, the Project's policy and data rules, and the availability marks
- * its own requests left.
+ * evidence, the Project's policy and data rules, the availability marks
+ * its own requests left, and the plan-usage readings the host keeps.
  */
 export function coordinatorCandidateFacts(
   sources: CoordinatorWorkerFactSources,
@@ -60,6 +65,8 @@ export function coordinatorCandidateFacts(
   const catalog = sources.catalogModel(candidate.providerInstanceId, candidate.modelId);
   const harness = instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   const mark = sources.availability(providerInstanceId);
+  // A failed request's own limit signal first, then the plan-usage reading.
+  const usageLimit = mark?.usageLimit ?? sources.usageReading(providerInstanceId);
   const contextTokens =
     catalog?.contextWindowOverride ?? reported?.contextLimit ?? catalog?.contextLimit;
   const notReady: WorkerCandidateFacts["notReady"] =
@@ -87,7 +94,7 @@ export function coordinatorCandidateFacts(
     providerKind: instance === undefined ? providerInstanceId : String(instance.driverKind),
     providerName: instance?.displayName ?? providerInstanceId,
     ...(notReady === undefined ? {} : { notReady }),
-    ...(mark?.usageLimit === undefined ? {} : { usageLimit: mark.usageLimit }),
+    ...(usageLimit === undefined ? {} : { usageLimit }),
     allowed:
       project !== undefined &&
       project.type !== "chat" &&

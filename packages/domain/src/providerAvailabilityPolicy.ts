@@ -1,4 +1,4 @@
-import type { ProviderFailure } from "@octant/contracts";
+import type { ProviderFailure, ProviderUsageLimitsEntry } from "@octant/contracts";
 
 /** How long a provider whose request failed for availability counts as down. */
 export const PROVIDER_DOWN_MS = 5 * 60_000;
@@ -30,4 +30,36 @@ export function providerAvailabilityFromFailure(
     default:
       return undefined;
   }
+}
+
+/**
+ * Whether the host's last plan-usage reading for an account says its limit
+ * is reached: a window the provider flagged exhausted, or one at 100%, whose
+ * reset has not come yet. The account counts as at its limit until the
+ * latest such reset; a reached window with no reset named holds while the
+ * reading says so. A window below its limit never counts, and a window whose
+ * reset has passed says nothing about the account now.
+ */
+export function usageLimitFromReading(
+  entry: ProviderUsageLimitsEntry | undefined,
+  now: number,
+): { readonly until?: string } | undefined {
+  const limits =
+    entry?.status === "available"
+      ? entry.limits
+      : entry?.status === "failed"
+        ? entry.staleLimits
+        : undefined;
+  const reached = (limits?.rateLimitWindows ?? []).filter(
+    (window) =>
+      (window.resetsAt === undefined || Date.parse(window.resetsAt) > now) &&
+      (window.status === "exhausted" ||
+        (window.utilization !== undefined && window.utilization >= 1)),
+  );
+  if (reached.length === 0) return undefined;
+  const resets = reached
+    .flatMap((window) => (window.resetsAt === undefined ? [] : [String(window.resetsAt)]))
+    .toSorted((a, b) => Date.parse(a) - Date.parse(b));
+  const until = resets.at(-1);
+  return until === undefined ? {} : { until };
 }
