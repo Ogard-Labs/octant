@@ -226,3 +226,50 @@ describe("RightUtilityDock", () => {
     }
   });
 });
+
+describe("RightUtilityDock beside the Environment strip", () => {
+  const environment = dockSurface("environment");
+  const tiles: NonNullable<RightUtilityDockProps["tiles"]> = {
+    narrow: false,
+    resolveSurface: (id) => ({ kind: "surface", surface: dockSurface(id) }),
+    onHideTile: vi.fn(),
+    onMinimise: vi.fn(),
+    onMove: vi.fn(),
+    onPlace: vi.fn(),
+    onResizeColumn: vi.fn(),
+    onResizeColumns: vi.fn(),
+    onShowAlone: vi.fn(),
+    onShowBelow: vi.fn(),
+    onShowBeside: vi.fn(),
+  };
+
+  it("offers no resize handle while only Environment is open", () => {
+    render(
+      <RightUtilityDock
+        {...props({
+          activeTabId: "environment",
+          resolution: { kind: "surface", surface: environment },
+          tabs: [environment],
+          tiles,
+        })}
+      />,
+    );
+    expect(screen.queryByRole("separator", { name: "Resize utility dock" })).toBeNull();
+  });
+
+  it("puts the resize handle on the tool column's edge, so a drag never moves the strip", () => {
+    render(
+      <RightUtilityDock
+        {...props({
+          activeTabId: "browser",
+          resolution: { kind: "surface", surface: browser },
+          tabs: [environment, browser],
+          tiles,
+        })}
+      />,
+    );
+    const splitter = screen.getByRole("separator", { name: "Resize utility dock" });
+    expect(splitter.parentElement).toHaveClass("dock-tool-column");
+    expect(screen.getByRole("region", { name: "Environment" }).contains(splitter)).toBe(false);
+  });
+});

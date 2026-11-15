@@ -444,6 +444,72 @@ describe("tool tiles in the right sidebar", () => {
     expect(divider.left).toBe("calc(50% - 4px)");
   });
 
+  describe("the Environment strip", () => {
+    const strip = () => screen.getByRole("region", { name: "Environment" });
+
+    it("stands alone at its own width with no tool column while only Environment is open", () => {
+      render(<TiledDock initial={opened("environment")} />);
+      expect(strip().style.width).toBe("240px");
+      expect(document.querySelector(".dock-tool-column")).toBeNull();
+    });
+
+    it("has no resize handle, expand or arrange control, only a close button", () => {
+      render(<TiledDock initial={opened("environment", "files")} />);
+      const buttons = within(strip())
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"));
+      expect(buttons).toEqual(["Close Environment"]);
+      expect(within(strip()).queryByRole("separator")).toBeNull();
+    });
+
+    it("keeps its width and place when a Browser opens beside it", () => {
+      const { unmount } = render(<TiledDock initial={opened("environment")} />);
+      const before = strip().style.width;
+      unmount();
+      render(<TiledDock initial={opened("environment", "browser")} />);
+      expect(strip().style.width).toBe(before);
+    });
+
+    it("opens a Browser in a column beside the strip, not under it", () => {
+      render(<TiledDock initial={opened("environment", "browser")} />);
+      const column = document.querySelector(".dock-tool-column") as HTMLElement;
+      expect(column).not.toBeNull();
+      expect(strip().nextElementSibling).toBe(column);
+      expect(within(column).getByText(/Live browser/)).toBeVisible();
+      expect(within(strip()).queryByText(/Live browser/)).toBeNull();
+    });
+
+    it("keeps the tool in view when Environment is brought to the front", () => {
+      render(
+        <TiledDock
+          initial={selectUtilityTabState(opened("browser", "environment"), "environment")}
+        />,
+      );
+      expect(screen.getByText(/Live browser/)).toBeVisible();
+      expect(strip()).toBeVisible();
+    });
+
+    it("draws minimised cards at the foot of the strip", () => {
+      const state = opened("environment", "browser");
+      const browserTab = state.tabs.find((tab) => tab.surface === "browser");
+      render(<TiledDock initial={minimiseUtilityTool(state, browserTab?.id ?? "")} />);
+      expect(strip().querySelector('[data-dock-card="browser"]')).not.toBeNull();
+      expect(document.querySelector(".dock-tool-column")).toBeNull();
+    });
+
+    it("keeps the shelf where it was when Environment is not open", () => {
+      const state = opened("files", "browser");
+      const browserTab = state.tabs.find((tab) => tab.surface === "browser");
+      render(<TiledDock initial={minimiseUtilityTool(state, browserTab?.id ?? "")} />);
+      expect(screen.queryByRole("region", { name: "Environment" })).toBeNull();
+      expect(
+        document.querySelector(
+          '.right-utility-dock__content > .dock-shelf [data-dock-card="browser"]',
+        ) ?? document.querySelector('.right-utility-dock__content [data-dock-card="browser"]'),
+      ).not.toBeNull();
+    });
+  });
+
   it("shows a hidden open tool beside the focused tile when its button is pressed", async () => {
     const user = userEvent.setup();
     render(<TiledDock initial={rowState()} />);
@@ -506,7 +572,7 @@ describe("tool tiles in the right sidebar", () => {
 
   it("leaves the dock's header empty when the row lives in the title band", () => {
     render(<TiledDock initial={rowState()} />);
-    const header = document.querySelector(".right-utility-dock__toolbar");
+    const header = document.querySelector(".dock-tool-column > .right-utility-dock__toolbar");
     expect(header).not.toBeNull();
     expect(within(header as HTMLElement).queryAllByRole("button")).toHaveLength(0);
     expect(screen.queryByRole("tablist", { name: "Open tools" })).toBeNull();
@@ -789,13 +855,13 @@ describe("tool tiles in the right sidebar", () => {
   it("keeps the first tool mounted when a second one is shown and when it is hidden again", async () => {
     const user = userEvent.setup();
     mounts.clear();
-    render(<TiledDock initial={opened("files", "environment")} />);
-    expect(mounts.get("environment")).toBe(1);
+    render(<TiledDock initial={opened("files", "canvas")} />);
+    expect(mounts.get("canvas")).toBe(1);
     await user.click(toolButton("Files"));
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
     await arrange(user, "Files", "Hide from view");
     expect(screen.queryByRole("region", { name: "Files" })).not.toBeInTheDocument();
-    expect(mounts.get("environment")).toBe(1);
+    expect(mounts.get("canvas")).toBe(1);
     expect(mounts.get("files")).toBe(1);
   });
 

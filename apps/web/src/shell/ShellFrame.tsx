@@ -8,7 +8,11 @@ import {
 } from "@octant/contracts/shell";
 import type { SidebarVibrancyMode, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import type { ResolvedSidebarMaterial } from "./hostBridge";
-import type { TranscriptTextSize, TranscriptWidth } from "@octant/contracts/shell";
+import {
+  MIN_CONTEXT_SIDEBAR_WIDTH,
+  type TranscriptTextSize,
+  type TranscriptWidth,
+} from "@octant/contracts/shell";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
@@ -54,6 +58,13 @@ export interface ShellFrameProps {
   readonly wideContextOpen: boolean;
   /** Columns of tool tiles the dock shows; two lets it take all the thread's own minimum leaves. */
   readonly dockTileColumns?: number;
+  /**
+   * The Environment strip's width while it is open in the dock, so the grid
+   * keeps it out of what the tool columns may shrink to. Absent otherwise.
+   */
+  readonly dockEnvironmentWidth?: number;
+  /** A tool is shown beside the strip, so the dock may not shrink past one tool column too. */
+  readonly dockToolsShown?: boolean;
   readonly bottomPanelOpen?: boolean;
   readonly bottomPanelHeight?: number;
   readonly workspace: ReactNode;
@@ -220,6 +231,15 @@ export function ShellFrame(props: ShellFrameProps) {
                     ? {}
                     : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
                   "--octant-context-sidebar-width": `${Math.round(props.contextSidebarWidth)}px`,
+                  ...(props.dockEnvironmentWidth === undefined
+                    ? {}
+                    : {
+                        "--octant-dock-env-width": `${props.dockEnvironmentWidth}px`,
+                        "--octant-context-sidebar-min": `${
+                          props.dockEnvironmentWidth +
+                          (props.dockToolsShown === true ? MIN_CONTEXT_SIDEBAR_WIDTH : 0)
+                        }px`,
+                      }),
                   "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
                   "--octant-native-traffic-light-leading-width": `${NATIVE_TRAFFIC_LIGHT_LEADING_WIDTH}px`,
                 }

@@ -791,7 +791,7 @@ where they are through the slide.
 panel: flat, touching, one line between neighbours, no corner or gap of their
 own. The dock's header is an empty spacer under the band; its tool row lives in
 the band. Divider hit areas are 8px centred on the line (`margin-left: -4px`).
-The dock is at least 280px.
+The dock's tool columns are at least 280px and open at 640px; Environment is a static 240px strip beside them, with no handle.
 
 **Narrow windows.**
 
