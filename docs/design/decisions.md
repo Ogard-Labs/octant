@@ -58,7 +58,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Start screen](#start-screen)                                                         | 3         | 3       | 0            | 0                   |
 | [Canvas](#canvas)                                                                     | 12        | 5       | 7            | 0                   |
 | [Artifact sync](#artifact-sync)                                                       | 5         | 4       | 1            | 0                   |
-| [Browser](#browser)                                                                   | 7         | 3       | 3            | 1                   |
+| [Browser](#browser)                                                                   | 7         | 3       | 4            | 0                   |
 | [Provider runtimes](#provider-runtimes)                                               | 6         | 4       | 2            | 0                   |
 | [Model endpoints and organization sign-in](#model-endpoints-and-organization-sign-in) | 6         | 4       | 2            | 0                   |
 | [Outside provider drivers](#outside-provider-drivers)                                 | 3         | 2       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **258**   | **155** | **99**       | **4**               |
+| **All areas**                                                                         | **258**   | **155** | **100**      | **3**               |
 
 ## Principles and hard lines
 
@@ -3000,13 +3000,15 @@ Status: Built. Since: 2026-10-31. Detail: [Browser profiles and extensions: Cook
 
 ### Page-declared tools
 
-Tools a page declares for agents (WebMCP) are read as outside content and are never added to a thread's tools by themselves (maintainer decision, 2026-11-14).
+The Browser agent tool reads the tools a page declares for agents and calls them on that page (maintainer decision, 2026-11-14).
 
-- Their names, descriptions and schemas mark the thread and are framed as evidence, never instructions.
-- Each call goes through the Browser tool on the declaring page and is approval-gated for that one call; at Full access it follows [The Full access rule](#the-full-access-rule). Its result is outside content.
-- A declared tool never reaches another page, the host or the person's credentials; site approvals and navigation guards still apply.
+- Octant reads the declarative WebMCP form, a `<form>` carrying `toolname` and `tooldescription`; the imperative registry is not read, because neither Browser enables it.
+- A declaration is outside content: listing one marks the thread under the `browser-page` source, it is bounded and framed as evidence, never instructions, and it adds nothing to the thread's tools by itself.
+- A call fills that page's form and submits it only when the page declared `toolautosubmit`, through the same Browser runtime, site approval and credential-field rule as other Browser actions; a form with a credential field is never listed or called.
+- Below Full access each call asks the person, naming the site, the tool and its arguments, and the answer is never remembered. At Full access a call runs without asking unless [The Full access rule](#the-full-access-rule)'s existing pay, buy or send-as-the-person entry covers it; no exception is added.
+- Built on the server and the headless Browser, with a real-Chromium test; the desktop Browser's path is wired but not yet run in the app.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
+Status: Partly built. Since: 2026-11-14. Detail: [Browser for agents: Page-declared tools](browser-agent-tool.md#page-declared-tools).
 
 ## Provider runtimes
 

@@ -1852,6 +1852,113 @@ describe("Code app-managed tools", () => {
     });
   });
 
+  describe("calling a tool the page declares", () => {
+    function pageToolTools(executionPolicy: "full-access" | "approval-gated") {
+      const current = thread({ executionPolicy });
+      const declared = {
+        tools: [
+          { name: "search", description: "Search the catalog.", autosubmit: true, parameters: [] },
+          {
+            name: "send_note",
+            description: "Send a message to the seller.",
+            autosubmit: true,
+            parameters: [],
+          },
+        ],
+        truncated: false,
+        withheld: 0,
+      };
+      const act = vi.fn(async (input: { readonly request: { readonly kind: string } }) => {
+        const snapshot = browserSnapshot(browserAuthority());
+        return input.request.kind === "page-tools"
+          ? {
+              ...snapshot,
+              observation: {
+                contextId: snapshot.context?.contextId,
+                actionId: snapshot.context?.actionId,
+                correlationId: snapshot.context?.correlationId,
+                authority: browserAuthority(),
+                pageTools: declared,
+                observedAt: "2026-08-06T08:00:00.000Z",
+                stale: false,
+              },
+            }
+          : snapshot;
+      });
+      const request = vi.fn(async (_input: unknown) => "approved" as const);
+      const tools = createCodeAppManagedTools({
+        windowId,
+        thread: current,
+        readThread: () => current,
+        uuid: uuidFactory(),
+        executeOperation: vi.fn(),
+        terminal: { read: vi.fn() },
+        browserApproval: {
+          isApproved: () => true,
+          request: vi.fn(),
+          remember: vi.fn(),
+          forget: vi.fn(),
+        },
+        browserProfiles: {
+          approvals: { request },
+          readBinding: () => undefined,
+          rememberBinding: vi.fn(),
+          forgetBinding: vi.fn(),
+        },
+        browser: {
+          resolveAuthority: () => browserAuthority(),
+          inspectThread: () => browserSnapshot(browserAuthority()),
+          create: vi.fn(),
+          act: act as never,
+          releaseThread: vi.fn(),
+        },
+      });
+      const call = (name: string) =>
+        tools.execute({
+          name: CODE_BROWSER_TOOL_NAME,
+          inputJson: JSON.stringify({ operation: "page-tool-call", name, arguments: {} }),
+        });
+      const calledKinds = () => act.mock.calls.map(([input]) => input.request.kind);
+      return { call, request, calledKinds };
+    }
+
+    it("asks the person before an ordinary call below Full access", async () => {
+      const { call, request, calledKinds } = pageToolTools("approval-gated");
+      expect(await call("search")).toMatchObject({ isError: false });
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ pageTool: { name: "search", arguments: "{}" } }),
+      );
+      expect(calledKinds()).toEqual(["page-tools", "page-tool-call"]);
+    });
+
+    it("runs an ordinary call unasked at Full access and still asks before one that sends a message", async () => {
+      const { call, request, calledKinds } = pageToolTools("full-access");
+      expect(await call("search")).toMatchObject({ isError: false });
+      expect(request).not.toHaveBeenCalled();
+      expect(await call("send_note")).toMatchObject({ isError: false });
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ pageTool: { name: "send_note", arguments: "{}" } }),
+      );
+      expect(calledKinds()).toEqual([
+        "page-tools",
+        "page-tool-call",
+        "page-tools",
+        "page-tool-call",
+      ]);
+    });
+
+    it("refuses a tool the page does not declare before asking anyone", async () => {
+      const { call, request, calledKinds } = pageToolTools("approval-gated");
+      expect(await call("checkout")).toEqual({
+        result: { error: "page-tool-not-declared" },
+        isError: true,
+      });
+      expect(request).not.toHaveBeenCalled();
+      expect(calledKinds()).toEqual(["page-tools"]);
+    });
+  });
+
   describe("uploading a file", () => {
     async function uploadTools(
       executionPolicy: "full-access" | "approval-gated",
@@ -3992,7 +4099,9 @@ describe("Code tool families", () => {
     // is in help.
     // The Browser wait's timeoutMs maximum grew from 30000 to 600000 (ten
     // minutes), one more digit.
-    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_026);
+    // The page-tools and page-tool-call operations and the call's arguments
+    // added about 60 bytes; what a page declares and who is asked is in help.
+    expect(JSON.stringify(families).length).toBeLessThanOrEqual(7_083);
   });
 
   it.each([
