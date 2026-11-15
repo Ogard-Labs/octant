@@ -18231,8 +18231,13 @@ starts the command, and removes what it added when the command ends.
   directory and extra write roots (modify), read roots and the program's own
   folder (read, which also lists and runs). A grant ALL APPLICATION PACKAGES
   already holds, as on System32 and Program Files, writes nothing, so Octant
-  never edits a folder it does not own. A grant on a junction or link is
-  refused, because an entry set through it lands on what it points at.
+  never edits a folder it does not own. A grant whose path passes through a
+  junction or link anywhere, not only at its last name, is refused, because
+  an entry set through it lands on what it points at (`C:\alias\.aws`, with
+  `C:\alias` a junction to the home folder, would grant the real `.aws`).
+  The launcher opens every component from the drive root down as itself and
+  without delete sharing, holds them while it edits, and requires the held
+  object's final path to be the path asked for.
   A file is not carved out of a grant: on Windows Server 2025 the launcher
   wrote an explicit access-denied entry (all file rights) for the container's
   SID on a file beneath its grant, `icacls` listed it first, and the
@@ -18249,8 +18254,9 @@ starts the command, and removes what it added when the command ends.
   stays outside every grant and the container's default denial refuses it. A
   runtime's own account home is the one exception, from inside it, as on the
   other platforms. A pattern entry (browser stores under `AppData`) refuses a
-  grant at or above its folder; a grant inside it with levels of the pattern
-  left is walked at launch, and a match, or a walk past 4,096 entries,
+  grant at or above its folder, and a grant that is itself a match or sits
+  inside one (a read root naming a `Cookies` file); a grant inside it with
+  levels of the pattern left is walked at launch, and a match, or a walk past 4,096 entries,
   refuses the launch. A path the guard cannot spell is
   refused: a share, device or drive-relative path, a rewritten name (`.`,
   `..`, a trailing dot or space, a stream) and an 8.3 short name, which opens
@@ -18300,7 +18306,8 @@ starts the command, and removes what it added when the command ends.
   inside the bound root, a read root that refuses writes, refusal of an
   ungranted folder and of a file in the home folder (each by Windows'
   access-denied answer), the port refusing a folder that holds a browser
-  store, a child refused by the job's quota under the process limit and
+  store, the launcher refusing a grant through a junction and leaving the
+  junction's target untouched, a child refused by the job's quota under the process limit and
   allowed without it, curl failing to resolve a host without a capability
   and fetching the same page with one, the container's entry present while
   it runs and gone after, and the whole tree ending when the launcher is

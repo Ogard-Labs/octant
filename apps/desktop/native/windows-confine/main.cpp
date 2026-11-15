@@ -186,9 +186,65 @@ bool packages_already_hold(PACL dacl, DWORD mask) {
   return (allowed & mask) == mask;
 }
 
-enum class Edit { applied, unnecessary, missing, failed };
+enum class Edit { applied, unnecessary, missing, linked, failed };
+
+// Every component of a path, from the drive root down, held open while the
+// launcher edits the object. Each is opened as itself (never followed) and
+// without delete sharing, so none can be renamed or swapped for a junction
+// between the check and the edit.
+class HeldPath {
+public:
+  ~HeldPath() {
+    for (HANDLE handle : handles_) CloseHandle(handle);
+  }
+  HeldPath() = default;
+  HeldPath(const HeldPath&) = delete;
+  HeldPath& operator=(const HeldPath&) = delete;
+
+  // A junction or link anywhere on the way down is refused: an ACE set
+  // through `C:\alias\.aws`, with `C:\alias` a junction to the home folder,
+  // would land on the real `.aws`, which the plan judged under another name.
+  Edit hold(const std::wstring& path) {
+    size_t next = 3;  // past `C:\`
+    for (;;) {
+      const size_t separator = path.find(L'\\', next);
+      const std::wstring component = path.substr(0, separator == std::wstring::npos ? path.size() : separator);
+      const std::wstring opened = component.size() == 2 ? component + L"\\" : component;
+      HANDLE handle = CreateFileW(opened.c_str(), FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+        OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+      if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? Edit::missing : Edit::failed;
+      }
+      handles_.push_back(handle);
+      BY_HANDLE_FILE_INFORMATION information{};
+      if (!GetFileInformationByHandle(handle, &information)) return Edit::failed;
+      if ((information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Edit::linked;
+      attributes_ = information.dwFileAttributes;
+      if (separator == std::wstring::npos) break;
+      next = separator + 1;
+    }
+    // The held leaf must be the very path asked for, under its long name, so
+    // no alias the guard never spelled (an 8.3 name, a mount point) reaches it.
+    std::wstring final_path(32768, L'\0');
+    const DWORD length = GetFinalPathNameByHandleW(handles_.back(), final_path.data(),
+      static_cast<DWORD>(final_path.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (length == 0 || length >= final_path.size()) return Edit::failed;
+    final_path.resize(length);
+    const std::wstring expected = L"\\\\?\\" + path;
+    if (CompareStringOrdinal(final_path.c_str(), -1, expected.c_str(), -1, TRUE) != CSTR_EQUAL) return Edit::linked;
+    return Edit::applied;
+  }
+
+  DWORD attributes() const { return attributes_; }
+
+private:
+  std::vector<HANDLE> handles_;
+  DWORD attributes_ = 0;
+};
 
 struct Object {
+  HeldPath held;
   DWORD attributes = 0;
   PACL dacl = nullptr;
   PSECURITY_DESCRIPTOR descriptor = nullptr;
@@ -196,16 +252,12 @@ struct Object {
   ~Object() { if (descriptor != nullptr) LocalFree(descriptor); }
 };
 
-// Reads one object's DACL. A reparse point is refused: an ACE set through a
-// junction or link lands on whatever it points at, which the plan never
-// judged. A NULL DACL (everyone, everything) is refused as well.
+// Reads one object's DACL with its whole path held (see HeldPath). A NULL
+// DACL (everyone, everything) is refused.
 Edit open_object(const std::wstring& path, Object& object) {
-  object.attributes = GetFileAttributesW(path.c_str());
-  if (object.attributes == INVALID_FILE_ATTRIBUTES) {
-    const DWORD error = GetLastError();
-    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? Edit::missing : Edit::failed;
-  }
-  if ((object.attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) return Edit::failed;
+  const Edit held = object.held.hold(path);
+  if (held != Edit::applied) return held;
+  object.attributes = object.held.attributes();
   if (GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr, nullptr, &object.dacl,
         nullptr, &object.descriptor) != ERROR_SUCCESS || object.dacl == nullptr) {
     return Edit::failed;
@@ -312,10 +364,10 @@ public:
     return true;
   }
 
-  bool grant(const Grant& grant) {
+  Edit grant(const Grant& grant) {
     const Edit edit = grant_acl(grant.path, sid_, grant.mask);
     if (edit == Edit::applied) edited_.push_back(grant.path);
-    return edit == Edit::applied || edit == Edit::unnecessary;
+    return edit;
   }
 
   SECURITY_CAPABILITIES capabilities() {
@@ -405,7 +457,12 @@ int run(const Options& options) {
   if (!options.full_access) {
     if (!container.create(options)) return refused_exit;
     for (const auto& grant : options.grants) {
-      if (!container.grant(grant)) {
+      const Edit edit = container.grant(grant);
+      if (edit == Edit::linked) {
+        report(L"refused a grant whose path passes through a junction or link");
+        return refused_exit;
+      }
+      if (edit != Edit::applied && edit != Edit::unnecessary) {
         report(L"could not grant a folder to the container; the launch was refused");
         return refused_exit;
       }

@@ -95,6 +95,17 @@ describe("Windows confined launch plan", () => {
     expect(refusal({ readRoots: [DATA] })).toBe("covers-protected");
   });
 
+  it("refuses a grant that is itself a protected store, or sits inside one", () => {
+    const network = `${HOME}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Network`;
+    expect(refusal({ readRoots: [`${network}\\Cookies`] })).toBe("covers-protected");
+    expect(refusal({ readRoots: [`${network}\\Cookies-journal`] })).toBe("covers-protected");
+    expect(refusal({ readRoots: [`${HOME}\\.ssh\\keys\\id_ed25519`] })).toBe("covers-protected");
+    expect(refusal({ additionalWriteRoots: [`${HOME}\\.ssh\\id_work\\cache`] })).toBe(
+      "covers-protected",
+    );
+    expect(refusal({ readRoots: [`${network}\\Reporting and NEL`] })).toBeUndefined();
+  });
+
   it("matches protected locations whatever spelling or case the grant uses", () => {
     expect(refusal({ readRoots: ["c:/users/ada/.AWS"] })).toBe("covers-protected");
   });

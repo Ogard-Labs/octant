@@ -1,4 +1,9 @@
-import { isSameOrInside, type ResolvedProtectedEntry, windowsGuardPath } from "./secretGuardPolicy";
+import {
+  isSameOrInside,
+  protectedEntryFor,
+  type ResolvedProtectedEntry,
+  windowsGuardPath,
+} from "./secretGuardPolicy";
 
 /**
  * The Windows form of a confined launch: what one AppContainer, its file
@@ -182,7 +187,17 @@ export function planWindowsConfinedLaunch(
       }
       if (isSameOrInside(entry.directory, form)) return coversProtected(grant.path, entry);
       if (!isSameOrInside(form, entry.directory) || exempt) continue;
-      const depthBelow = form.slice(entry.directory.length + 1).split("/").length;
+      // The grant itself, or a folder on its way down, may be the store: a
+      // read root naming a `Cookies` file sits at the pattern's last level, so
+      // no scan below it would ever look at it.
+      const segments = form.slice(entry.directory.length + 1).split("/");
+      for (let length = 1; length <= segments.length; length += 1) {
+        const prefix = `${entry.directory}/${segments.slice(0, length).join("/")}`;
+        if (protectedEntryFor([prefix], [entry]) !== undefined) {
+          return coversProtected(grant.path, entry);
+        }
+      }
+      const depthBelow = segments.length;
       const levels = entry.depth - depthBelow;
       if (levels > 0) patternScans.push({ directory: grant.path, levels, entry });
     }

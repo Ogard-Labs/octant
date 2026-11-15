@@ -154,6 +154,26 @@ try {
     storeRefusal,
   );
 
+  // A grant whose path runs through a junction would land on the junction's
+  // target, which the plan judged under another name: the launcher refuses.
+  const alias = join(root, "alias");
+  mkdirSync(join(outside, "inner"), { recursive: true });
+  const junction = spawnSync(cmd, ["/d", "/c", "mklink", "/J", alias, outside], {
+    encoding: "utf8",
+  });
+  const throughJunction = run(cmd, shell("exit 0"), {
+    readRoots: [readOnly, join(alias, "inner")],
+  });
+  const innerAfter = spawnSync("icacls", [join(outside, "inner")], { encoding: "utf8" });
+  check(
+    "refuses a grant whose path passes through a junction",
+    junction.status === 0 &&
+      throughJunction.status === 125 &&
+      /passes through a junction or link/u.test(throughJunction.stderr) &&
+      !/S-1-15-2-\d+-\d+/u.test(innerAfter.stdout),
+    { junction: junction.stdout, throughJunction, inner: innerAfter.stdout },
+  );
+
   const nested = run(cmd, shell("cmd /d /c echo nested-ran"));
   check(
     "lets a launch that may create processes start a child",
