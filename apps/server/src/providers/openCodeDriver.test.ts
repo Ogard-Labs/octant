@@ -25,6 +25,7 @@ import {
   betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
+  OpenCodeCommandNotRun,
   openCodePromptParts,
   permissionRules,
   type OpenCodeClientPort,
@@ -1806,6 +1807,105 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.filter((call) => call === "session.promptAsync")).toHaveLength(1);
   });
 
+  it("routes a command by its own Project's list, not by the list another Project's session left", async () => {
+    const fixture = betaDriver({
+      commands: (root) => (root === "/tmp/project" ? [{ name: "review" }] : [{ name: "deploy" }]),
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                // Another Project's session started since and left its own list.
+                fixture.registry.setObservedCommands(instanceId, [{ name: "deploy" }]),
+              ),
+              Effect.flatMap(() =>
+                Effect.all([
+                  Effect.exit(
+                    connection.send({
+                      sessionId,
+                      prompt: "/deploy now",
+                      attachments: [],
+                      tools: [],
+                    }),
+                  ),
+                  Effect.exit(
+                    connection.send({
+                      sessionId,
+                      prompt: "/review main",
+                      attachments: [],
+                      tools: [],
+                    }),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // This Project lists no /deploy: it is neither run nor sent to the model as text.
+    expect(String(sent[0])).toContain("not one of OpenCode's commands in this Project");
+    expect(fixture.calls).not.toContain("session.command:deploy:now:");
+    expect(fixture.calls).not.toContain("session.promptAsync");
+    // Its own /review runs, though the list the other Project left lacks it.
+    expect(Exit.isSuccess(sent[1])).toBe(true);
+    expect(fixture.calls).toContain("session.command:review:main:");
+  });
+
+  it("never resumes a session holding a turn's context that its failed command left queued", async () => {
+    const fixture = betaDriver({
+      commands: [{ name: "review" }],
+      commandFailure: "context-queued",
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const first = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap((handle) =>
+                Effect.exit(
+                  connection.send({
+                    sessionId,
+                    prompt: "/review main",
+                    attachments: [],
+                    tools: [],
+                    context: [{ kind: "instructions", text: "Octant instructions" }],
+                  }),
+                ).pipe(Effect.map((exit) => ({ exit, handle }))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(Exit.isFailure(first.exit)).toBe(true);
+    expect(String(first.exit)).toContain("stale-resume");
+    const resumeCursor = first.handle.resumeCursor;
+    expect(resumeCursor).toBeDefined();
+    const resumed = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.exit(
+              connection.resume({
+                sessionId,
+                resumeCursor: resumeCursor!,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(resumed)).toContain("did not run its command");
+  });
+
   it("refuses a listed OpenCode command in Plan before it reaches the runtime", async () => {
     const fixture = betaDriver({ commands: [{ name: "review" }] });
     const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
@@ -3581,6 +3681,17 @@ async function callBridgeTool(
   return called.text();
 }
 
+type FixtureCommands =
+  | ReadonlyArray<{ readonly name: string; readonly description?: string }>
+  | ((root: string) => ReadonlyArray<{ readonly name: string; readonly description?: string }>);
+
+function commandsAt(
+  commands: FixtureCommands | undefined,
+  root: string,
+): ReadonlyArray<{ readonly name: string; readonly description?: string }> {
+  return typeof commands === "function" ? commands(root) : (commands ?? []);
+}
+
 function betaDriver(
   options: {
     readonly worktreeProviders?: "refused";
@@ -3591,7 +3702,8 @@ function betaDriver(
     readonly permissionPersistence?: "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
-    readonly commands?: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+    readonly commands?: FixtureCommands;
+    readonly commandFailure?: "context-queued";
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -3655,7 +3767,9 @@ function driverFixture(
     /** The version a 2.x client reports: its process's, never a health route's. */
     readonly healthVersion?: string;
     /** OpenCode's own commands, as a runtime with the command routes lists them. */
-    readonly commands?: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+    readonly commands?: FixtureCommands;
+    /** The command route fails after the turn's context was queued. */
+    readonly commandFailure?: "context-queued";
   } = {},
 ) {
   const calls: string[] = [];
@@ -3786,10 +3900,13 @@ function driverFixture(
       : {
           commands: async () => {
             calls.push("command.list");
-            return options.commands ?? [];
+            return commandsAt(options.commands, "/tmp/project");
           },
           command: async ({ name, arguments: text, context }) => {
             calls.push(`session.command:${name}:${text}:${context === undefined ? "" : "context"}`);
+            if (options.commandFailure === "context-queued") {
+              throw new OpenCodeCommandNotRun("OpenCode 2 command failed with status 500.", true);
+            }
           },
         }),
   };
@@ -3821,6 +3938,14 @@ function driverFixture(
           (scratch === undefined || !root.startsWith(`${scratch}/`));
         return {
           ...client,
+          ...(client.commands === undefined
+            ? {}
+            : {
+                commands: async () => {
+                  calls.push(`command.list:${root}`);
+                  return commandsAt(options.commands, root);
+                },
+              }),
           providers: async () => {
             catalogueRoots.push(root);
             if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {

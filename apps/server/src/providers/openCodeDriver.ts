@@ -122,7 +122,8 @@ export interface OpenCodeClientPort {
   /**
    * Runs one of OpenCode's own commands as the session's next turn, after
    * admitting the turn's Octant context as input that starts no run. Offered
-   * with `commands`.
+   * with `commands`. A command that did not run throws
+   * {@link OpenCodeCommandNotRun}.
    */
   readonly command?:
     | ((input: {
@@ -299,6 +300,23 @@ export class OpenCodeRouteError extends Error {
     super(message);
   }
 }
+
+/**
+ * A command OpenCode did not run. `contextAdmitted` says the turn's Octant
+ * context was already queued in the session, where the next run would read
+ * it, stale, beside the next turn's own copy.
+ */
+export class OpenCodeCommandNotRun extends Error {
+  constructor(
+    message: string,
+    readonly contextAdmitted: boolean,
+  ) {
+    super(message);
+  }
+}
+
+const OPENCODE_STALE_CONTEXT_MESSAGE =
+  "OpenCode kept this turn's context but did not run its command, so this session would carry that context into the next turn. Start the thread again on a new session.";
 
 interface PendingToolAnswer {
   readonly controller: AbortController;
@@ -705,6 +723,24 @@ async function listedCommands(
   return client.commands().catch(() => []);
 }
 
+/** A prompt that opens with `/name`, which may name one of the runtime's commands. */
+const COMMAND_PROMPT = /^\s*\/[^\s/]+(?:\s|$)/u;
+
+/**
+ * Why a prompt naming a command the observation lists, but this session's
+ * Project does not, is refused; sent as text the model would only read the
+ * slash.
+ */
+function commandNotListedHere(
+  prompt: string,
+  observed: ReadonlyArray<ProviderSlashCommand> | undefined,
+): string | undefined {
+  const name = providerCommandOf(prompt, observed);
+  return name === undefined
+    ? undefined
+    : `/${name} is not one of OpenCode's commands in this Project, so nothing was sent.`;
+}
+
 /** A command's arguments: the prompt after its leading `/name`. */
 function commandArguments(prompt: string): string {
   return prompt.replace(/^\s*\/[^\s/]+/u, "").trim();
@@ -1068,30 +1104,49 @@ async function runBetaCommand(
   const headers = { ...betaMcpHeaders(server, projectRoot), "content-type": "application/json" };
   const route = (path: "prompt" | "command") =>
     new URL(`/api/session/${encodeURIComponent(input.sessionId)}/${path}`, server.url).toString();
+  const contextAdmitted = input.context !== undefined;
   if (input.context !== undefined) {
-    const admitted = await fetch(route("prompt"), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ text: input.context, resume: false }),
-      signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
-    });
+    let admitted: Response;
+    try {
+      admitted = await fetch(route("prompt"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ text: input.context, resume: false }),
+        signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+      });
+    } catch {
+      // Unanswered, the context may have been queued all the same.
+      throw new OpenCodeCommandNotRun("OpenCode 2 did not answer the turn's context.", true);
+    }
     if (!admitted.ok) {
-      throw new Error(`OpenCode 2 prompt failed with status ${admitted.status}.`);
+      // A refused admission queued nothing.
+      throw new OpenCodeCommandNotRun(
+        `OpenCode 2 prompt failed with status ${admitted.status}.`,
+        false,
+      );
     }
   }
   const files = openCodeBetaPromptFiles(input.attachments ?? []);
-  const response = await fetch(route("command"), {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      name: input.name,
-      text: input.arguments,
-      ...(files.length === 0 ? {} : { files }),
-    }),
-    signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(route("command"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        name: input.name,
+        text: input.arguments,
+        ...(files.length === 0 ? {} : { files }),
+      }),
+      signal: AbortSignal.timeout(BETA_MUTATION_TIMEOUT_MS),
+    });
+  } catch {
+    throw new OpenCodeCommandNotRun("OpenCode 2 did not answer the command.", contextAdmitted);
+  }
   if (!response.ok) {
-    throw new Error(`OpenCode 2 command failed with status ${response.status}.`);
+    throw new OpenCodeCommandNotRun(
+      `OpenCode 2 command failed with status ${response.status}.`,
+      contextAdmitted,
+    );
   }
 }
 
@@ -1400,6 +1455,9 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const resumeToolCatalogs = new Map<string, ReadonlyArray<ProviderToolDefinition>>();
+  // OpenCode sessions holding a turn's Octant context that no command ran;
+  // they outlive the connection whose turn failed, so they are kept here.
+  const sessionsHoldingStaleContext = new Set<string>();
   // What OpenCode remembers from an `always` answer outlives the session and
   // connection that gave it, so the admission is kept per Project root.
   const rememberedEditGrants = new Map<string, Set<string>>();
@@ -1576,6 +1634,7 @@ export function makeOpenCodeDriver(options: OpenCodeDriverOptions): ProviderDriv
               makeCorrelation,
               resumeToolCatalogs,
               rememberedEditsFor(projectRoot),
+              sessionsHoldingStaleContext,
             );
           }),
   };
@@ -1679,6 +1738,7 @@ function makeConnection(
   makeCorrelation: () => string,
   resumeToolCatalogs: Map<string, ReadonlyArray<ProviderToolDefinition>>,
   rememberedEdits: Set<string>,
+  sessionsHoldingStaleContext: Set<string>,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -2548,6 +2608,12 @@ function makeConnection(
                   fail("stale-resume", "The saved session belongs to another task or Project."),
                 );
               }
+              // Its next run would read a turn's context that no command ran,
+              // stale, beside the next turn's own; the thread starts again on
+              // a new session instead.
+              if (sessionsHoldingStaleContext.has(input.resumeCursor.value)) {
+                return Effect.fail(fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE));
+              }
               if (
                 sessionSetupInFlight ||
                 [...sessionsBySource.values()].some(
@@ -2728,69 +2794,112 @@ function makeConnection(
             // refused it in Chat and Plan before this; the driver holds the
             // same line for any caller that did not.
             const runCommand = runtimeClient.command;
-            const command =
-              runCommand === undefined
-                ? undefined
-                : providerCommandOf(input.prompt, observed?.commands);
-            const commandRefusal = providerCommandRefusal({
-              prompt: input.prompt,
-              commands: command === undefined ? undefined : observed?.commands,
-              mode,
-              executionPolicy: state.executionPolicy,
-            });
-            if (commandRefusal !== undefined) {
-              return Effect.fail(fail("unauthorized", commandRefusal));
-            }
-            return Effect.try({
-              try: () => splitModelId(state.modelId),
-              catch: providerFailure,
-            }).pipe(
-              Effect.flatMap((modelSelection) =>
-                prepareManagedTools(state, input.tools).pipe(
-                  Effect.flatMap(() =>
-                    Effect.gen(function* () {
-                      const managedTools = state.managedTools;
-                      state.usageTotals = undefined;
-                      state.turnSent = true;
-                      if (command !== undefined && runCommand !== undefined) {
-                        const context =
-                          input.context === undefined || input.context.length === 0
-                            ? undefined
-                            : renderProviderContextSections(input.context);
-                        return yield* request(() =>
-                          runCommand({
-                            sessionId: source,
-                            providerId: modelSelection.providerId,
-                            modelId: modelSelection.modelId,
-                            name: command,
-                            arguments: commandArguments(input.prompt),
-                            ...(context === undefined ? {} : { context }),
-                            attachments: input.attachments,
-                          }),
-                        );
-                      }
-                      return yield* request(() =>
-                        runtimeClient.prompt({
-                          sessionId: source,
-                          providerId: modelSelection.providerId,
-                          modelId: modelSelection.modelId,
-                          prompt: renderProviderTurnPrompt(input),
-                          attachments: input.attachments,
-                          permission: permissionRules(
-                            state.executionPolicy,
-                            mode,
-                            managedTools?.serverName,
-                            extraFolders,
-                            state.nativeSetup?.skills === true,
-                            state.own,
-                            state.protectedPaths,
-                          ),
+            const listCommands = runtimeClient.commands;
+            // The observation holds the list of whichever Project's session
+            // started last, and a command may have been removed since; a
+            // `/name` is routed by this session's own root, read now, before
+            // anything is queued in the session.
+            const commandsHere: Effect.Effect<
+              ReadonlyArray<ProviderSlashCommand>,
+              ProviderFailure
+            > = runCommand === undefined ||
+            listCommands === undefined ||
+            !COMMAND_PROMPT.test(input.prompt)
+              ? Effect.succeed([])
+              : Effect.tryPromise({
+                  try: listCommands,
+                  catch: () =>
+                    fail("unavailable", "OpenCode's commands could not be read. Nothing was sent."),
+                });
+            return commandsHere.pipe(
+              Effect.flatMap((listed) => {
+                const command =
+                  runCommand === undefined ? undefined : providerCommandOf(input.prompt, listed);
+                const commandRefusal =
+                  providerCommandRefusal({
+                    prompt: input.prompt,
+                    commands: command === undefined ? undefined : listed,
+                    mode,
+                    executionPolicy: state.executionPolicy,
+                  }) ??
+                  // A command another Project lists, or one OpenCode no longer
+                  // lists here, is refused rather than sent to the model as text.
+                  (command === undefined && runCommand !== undefined
+                    ? commandNotListedHere(input.prompt, observed?.commands)
+                    : undefined);
+                if (commandRefusal !== undefined) {
+                  return Effect.fail(fail("unauthorized", commandRefusal));
+                }
+                return Effect.try({
+                  try: () => splitModelId(state.modelId),
+                  catch: providerFailure,
+                }).pipe(
+                  Effect.flatMap((modelSelection) =>
+                    prepareManagedTools(state, input.tools).pipe(
+                      Effect.flatMap(() =>
+                        Effect.gen(function* () {
+                          const managedTools = state.managedTools;
+                          state.usageTotals = undefined;
+                          state.turnSent = true;
+                          if (command !== undefined && runCommand !== undefined) {
+                            const context =
+                              input.context === undefined || input.context.length === 0
+                                ? undefined
+                                : renderProviderContextSections(input.context);
+                            return yield* Effect.tryPromise({
+                              try: () =>
+                                runCommand({
+                                  sessionId: source,
+                                  providerId: modelSelection.providerId,
+                                  modelId: modelSelection.modelId,
+                                  name: command,
+                                  arguments: commandArguments(input.prompt),
+                                  ...(context === undefined ? {} : { context }),
+                                  attachments: input.attachments,
+                                }),
+                              catch: (error) => {
+                                if (!(error instanceof OpenCodeCommandNotRun)) {
+                                  return providerFailure(error);
+                                }
+                                if (!error.contextAdmitted) {
+                                  return fail(
+                                    "unavailable",
+                                    `/${command} did not run. ${error.message}`,
+                                  );
+                                }
+                                // The context is queued with no run to read it. The
+                                // session is retired and never resumed, so the next
+                                // turn does not carry it stale.
+                                sessionsHoldingStaleContext.add(source);
+                                retireState(state);
+                                return fail("stale-resume", OPENCODE_STALE_CONTEXT_MESSAGE);
+                              },
+                            });
+                          }
+                          return yield* request(() =>
+                            runtimeClient.prompt({
+                              sessionId: source,
+                              providerId: modelSelection.providerId,
+                              modelId: modelSelection.modelId,
+                              prompt: renderProviderTurnPrompt(input),
+                              attachments: input.attachments,
+                              permission: permissionRules(
+                                state.executionPolicy,
+                                mode,
+                                managedTools?.serverName,
+                                extraFolders,
+                                state.nativeSetup?.skills === true,
+                                state.own,
+                                state.protectedPaths,
+                              ),
+                            }),
+                          );
                         }),
-                      );
-                    }),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              }),
             );
           }),
         ),

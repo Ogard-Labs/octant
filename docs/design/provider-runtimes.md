@@ -1171,13 +1171,22 @@ Work or Code session replaces that list when it starts or resumes, as Claude
 Code's and an ACP agent's are ([Architecture: the composer's `@` and
 `/`](../architecture.md#person-memory)). The answer is untrusted: a body over
 256 KiB lists none, and an entry whose name Octant cannot send as `/name` is
-dropped. A turn whose prompt opens with a listed name goes to `POST
+dropped. The observation is the instance's, so it holds the list of
+whichever Project's session started last; a turn whose prompt opens with
+`/name` is routed by its own Project's list, read again before anything is
+queued, so a command another Project lists, or one removed since, is
+refused rather than run or sent to the model as text. A turn whose prompt
+opens with a name listed there goes to `POST
 /api/session/{id}/command` with `{name, text, files?}`, the text being what
 follows the name, after the model switch every prompt makes; the turn's Octant
 context goes first as a prompt with `resume: false`, which OpenCode admits
 without starting a run, so the command's own text stays only its arguments.
 The route answers 204 once the command's input is admitted, and the run
-reports through the same events as a prompt. The host refuses such a turn in
+reports through the same events as a prompt. A command route that fails
+after the context was admitted leaves that context queued in the session,
+where the next run would read it stale beside the next turn's own; the turn
+fails as `stale-resume` and the driver never resumes that session again (in
+this host process), so the thread starts on a new session. The host refuses such a turn in
 Plan and in Chat, and the driver refuses it again. A command may run a shell
 before the model sees it: a configured command's template expands
 `` !`…` `` through OpenCode's shell, which asks no approval, inside the

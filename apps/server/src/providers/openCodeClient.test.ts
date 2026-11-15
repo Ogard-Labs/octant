@@ -713,6 +713,43 @@ describe("official OpenCode client routing", () => {
     expect(sent[2]?.headers.get("x-opencode-directory")).toBe("%2Ftmp%2Fproject");
   });
 
+  it("says a turn's context was left queued when the command route fails after admitting it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request | string, init?: RequestInit) => {
+        const request = typeof input === "string" ? new Request(input, init) : input;
+        return new URL(request.url).pathname.endsWith("/command")
+          ? new Response(null, { status: 404 })
+          : new Response(JSON.stringify({ data: {} }), {
+              headers: { "content-type": "application/json" },
+            });
+      }),
+    );
+    const client = makeOfficialOpenCodeClient(
+      {
+        authorization: "Basic redacted",
+        pid: 1,
+        runtime: "beta",
+        version: "opencode v2.2.0",
+        url: new URL("http://127.0.0.1:41734/"),
+      },
+      "/tmp/project",
+    );
+    const run = (context?: string) =>
+      client.command?.({
+        sessionId: "ses_1",
+        providerId: "openai",
+        modelId: "gpt-5",
+        name: "review",
+        arguments: "main",
+        ...(context === undefined ? {} : { context }),
+      });
+    await expect(run("<octant-context>standing</octant-context>")).rejects.toMatchObject({
+      contextAdmitted: true,
+    });
+    await expect(run()).rejects.toMatchObject({ contextAdmitted: false });
+  });
+
   it("offers no command route on a 1.x runtime, whose route answers only after the run ends", () => {
     const client = makeOfficialOpenCodeClient(
       { authorization: "Basic redacted", pid: 1, url: new URL("http://127.0.0.1:41735/") },
