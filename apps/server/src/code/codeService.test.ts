@@ -345,6 +345,46 @@ describe("CodeService reads", () => {
     );
   });
 
+  it("says Unavailable, not Waiting, when the Project's folder cannot be observed at restart", async () => {
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    const fixture = serviceFixture({ threads: [thread()], checkout: waiting });
+    fixture.checkouts.observe.mockRejectedValueOnce(
+      new Error("Code Project binding is unavailable."),
+    );
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "code.checkout-observed@1" })],
+      }),
+    );
+    expect(result.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+  });
+
+  it("lets a thread whose own checkout observes cleanly again leave Unavailable", async () => {
+    const unavailable = decodeCodeCheckoutIdentity({ ...checkout, availability: "unavailable" });
+    const fixture = serviceFixture({ threads: [thread()], checkout: unavailable });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "rebind-code-thread-checkout",
+      threadId: ids.thread,
+      expectedVersion: 1,
+    });
+
+    expect(result).toMatchObject({
+      kind: "thread-checkout-rebind",
+      outcome: { status: "rebound", checkout: { id: ids.checkout, availability: "available" } },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventName: "code.checkout-observed@1" })],
+      }),
+    );
+  });
+
   it("journals nothing when a reconnect poll observes the checkout it already recorded as unavailable", async () => {
     // A previous bootstrap already journaled this checkout as unavailable after
     // the Project was rebound. Re-observing that recorded answer on every

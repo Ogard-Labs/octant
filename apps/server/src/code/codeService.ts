@@ -1177,6 +1177,7 @@ export class CodeService {
     const recoveredCheckouts = new Map<string, CodeCheckoutIdentity>();
     const observedExistingCheckouts = new Map<string, CodeCheckoutIdentity | undefined>();
     const attemptedManagedCheckoutIds = new Set<string>();
+    const observationFailedProjects = new Set<string>();
     for (const thread of threads) {
       const persisted = this.#persistence.readCodeCheckout(thread.checkoutId);
       if (persisted === undefined) continue;
@@ -1220,18 +1221,33 @@ export class CodeService {
           const projectId = String(thread.projectId);
           if (!observedExistingCheckouts.has(projectId)) {
             observedExistingCheckouts.set(projectId, undefined);
-            const prepared = await this.#checkouts.observe(authenticatedWindowId, thread.projectId);
-            observedExistingCheckouts.set(projectId, prepared.checkout);
+            try {
+              const prepared = await this.#checkouts.observe(
+                authenticatedWindowId,
+                thread.projectId,
+              );
+              observedExistingCheckouts.set(projectId, prepared.checkout);
+            } catch {
+              // The Project's folder cannot be observed as a checkout now: the
+              // binding is gone, the folder moved, or Git refuses it. Leaving
+              // the thread Waiting would show a reconnection spinner nobody is
+              // attempting; Unavailable offers the way back instead.
+              observationFailedProjects.add(projectId);
+            }
           }
           const observed = observedExistingCheckouts.get(projectId);
-          if (observed !== undefined && String(observed.id) !== String(thread.checkoutId)) {
-            // The Project binds a checkout this thread is not on. That id is
-            // derived from the binding revision the thread was created
-            // against, so once the Project is rebound no observation can
-            // produce the thread's own id again and Waiting will never end.
-            // Say Unavailable, which already tells the reader to relink the
-            // Project or start a fresh thread, rather than render a spinner
-            // for a reconnection nobody is attempting.
+          if (
+            observationFailedProjects.has(projectId) ||
+            (observed !== undefined && String(observed.id) !== String(thread.checkoutId))
+          ) {
+            // Either the Project binds a checkout this thread is not on, or its
+            // folder cannot be observed at all. A superseding id is derived
+            // from the binding revision the thread was created against, so once
+            // the Project is rebound no observation can produce the thread's
+            // own id again and Waiting would never end. Say Unavailable, which
+            // tells the reader to relink the Project or start a fresh thread,
+            // rather than render a spinner for a reconnection nobody is
+            // attempting.
             recovered = decodeCodeCheckoutIdentity({
               ...persisted,
               availability: "unavailable",
@@ -2493,7 +2509,28 @@ export class CodeService {
           return this.#rebindRefused(current.id, "checkout-unavailable");
         }
         if (String(prepared.checkout.id) === String(current.checkoutId)) {
-          return this.#rebindRefused(current.id, "already-bound");
+          if (bound === undefined || bound.availability === "available") {
+            return this.#rebindRefused(current.id, "already-bound");
+          }
+          // The Project's checkout is the thread's own and observes cleanly
+          // now, but the journal still says it could not be read. Record the
+          // fresh answer; the thread itself does not move.
+          this.#append(
+            "code-checkout",
+            prepared.checkout.id,
+            this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
+            "code.checkout-observed@1",
+            { kind: "checkout-observed", checkout: prepared.checkout },
+          );
+          return {
+            kind: "thread-checkout-rebind",
+            threadId: current.id,
+            outcome: {
+              status: "rebound",
+              thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, current),
+              checkout: prepared.checkout,
+            },
+          };
         }
         if (
           !repeatsJournaledCheckout(
