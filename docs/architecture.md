@@ -18275,7 +18275,10 @@ starts the command, and removes what it added when the command ends.
   levels of the pattern left is walked at launch, and a match, a walk past
   4,096 entries, or a folder the host cannot list refuses the launch. A file
   grant (`~/.ssh/config`) has nothing beneath it to walk, so the check of the
-  file itself is all it gets. A path the guard cannot spell is
+  file itself is all it gets. Its entry names the file alone; the parent folder
+  gets none, so the file's siblings stay unreachable. Measured on Windows
+  Server 2025: a program that opens the file by its path reads it (curl did),
+  and one that first lists the parent folder is refused (cmd's `type` was). A path the guard cannot spell is
   refused: a share, device or drive-relative path, a rewritten name (`.`,
   `..`, a trailing dot or space, a stream) and an 8.3 short name, which opens
   the same folder under a spelling no entry names. A whole drive is never
@@ -18323,7 +18326,8 @@ starts the command, and removes what it added when the command ends.
   server's own port against owned fixtures: exit-code relay, reads and writes
   inside the bound root, a read root that refuses writes, refusal of an
   ungranted folder and of a file in the home folder (each by Windows'
-  access-denied answer), a file granted on its own being readable, the port
+  access-denied answer), a file granted on its own being readable by its
+  path while its parent folder gets no entry, the port
   refusing a folder that holds a browser store, the launcher refusing a grant through a junction and leaving the
   junction's target untouched, a child refused by the job's quota under the process limit and
   allowed without it, curl failing to resolve a host without a capability
