@@ -3591,6 +3591,65 @@ describe("the provider's own web search in a harness turn", () => {
     expect(await onFallback(true)).toEqual([withOwnSearch, withOwnSearch]);
   });
 
+  it("offers the provider's own search again on the lead's next turn after a fallback that could not run it", async () => {
+    const offered = [...tools, tool("web-search")];
+    const down = downEndpoint();
+    const lead: NativeHarnessRequest[] = [];
+    let leadSends = 0;
+    const recovering: NativeHarnessTransportSession = {
+      fits: () => true,
+      release: () => undefined,
+      // Down for the first turn, answering on the next.
+      send: async (request, stream) => {
+        leadSends += 1;
+        if (leadSends === 1) return down.session.send(request, stream);
+        lead.push(request);
+        return { text: "From the lead", toolCalls: [] };
+      },
+    };
+    const backup = answeringEndpoint("From the backup");
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(
+            { open: async () => recovering },
+            new MemoryNativeHarnessTranscriptStore(),
+            {
+              next: async () => ({
+                status: "switched",
+                target: backupTarget,
+                endpoint: backup.session,
+              }),
+            },
+          );
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            tools: offered,
+          });
+          for (const prompt of ["First", "Second"]) {
+            const all = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.send({
+              sessionId,
+              prompt,
+              attachments: [],
+              tools: offered,
+              providerWebSearch: { withdrawAfterFirstStep: false },
+            });
+            yield* Fiber.join(all);
+          }
+        }),
+      ),
+    );
+
+    expect(backup.requests[0]?.providerWebSearch).toBeUndefined();
+    expect(lead[0]?.providerWebSearch).toBe(true);
+    expect(lead[0]?.tools.map((definition) => definition.name)).not.toContain("web-search");
+  });
+
   it("keeps offering it after a tool answer at Full access", async () => {
     const scripted = scriptedTransport([
       { text: "", toolCalls: [{ toolCallId: "read-1", toolName: "read", argumentsJson: "{}" }] },

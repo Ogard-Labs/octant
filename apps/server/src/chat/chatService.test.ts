@@ -412,6 +412,7 @@ function openFixture(options?: {
         readonly displayName: string;
       }>;
       readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
     }>;
     readonly driver: ProviderDriver;
     readonly queue: Queue.Queue<never>;
@@ -572,6 +573,7 @@ function openFixture(options?: {
       readonly displayName: string;
     }>;
     readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+    readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
@@ -612,6 +614,7 @@ function openFixture(options?: {
         readonly displayName: string;
       }>;
       readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
@@ -2027,6 +2030,33 @@ describe("ChatService", () => {
     expect(
       (fakeDriver.sentTurns[1]?.context ?? []).map((block) => block.text).join("\n"),
     ).toContain("ship the notes");
+  });
+
+  it("sends the provider's own search the turn's tools were granted, through the merge with extension tools", async () => {
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_task", inputSchema: { type: "object", properties: {} } }],
+        providerWebSearch: { withdrawAfterFirstStep: true },
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Provider search",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "What shipped?",
+      },
+      { windowId: decodeWindowId("84000000-0000-4000-8000-000000000011") },
+    );
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(1));
+    expect(fakeDriver.sentTurns[0]?.providerWebSearch).toEqual({ withdrawAfterFirstStep: true });
   });
 
   it("refuses a queued send revoked during provider preparation before accepting a turn", async () => {

@@ -1532,6 +1532,10 @@ export function createNativeHarnessConnection(
             state.tools = input.tools;
             state.providerWebSearch = input.providerWebSearch;
             state.providerWebSearchWithdrawn = false;
+            // Each turn starts on the lead's own model again, so its first
+            // request is built for the lead's search, not the last fallback's.
+            state.fallback?.endpoint.release();
+            state.fallback = undefined;
             const user: NativeHarnessMessage = {
               role: "user",
               text: renderProviderTurnPrompt({ prompt: input.prompt, context: rest }),
@@ -1553,9 +1557,6 @@ export function createNativeHarnessConnection(
             state.messages.splice(0, state.messages.length, ...earlier, live);
             state.pending = undefined;
             state.answered.clear();
-            // Each turn starts on the lead's own model again.
-            state.fallback?.endpoint.release();
-            state.fallback = undefined;
             state.attempted = [];
             state.turn = input;
             state.turnMessage = user;
