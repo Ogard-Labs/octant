@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
+import { ObservedChildDetail } from "./ObservedChildActivity";
 import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
 import { observedChildFixture, resultPacketFixture } from "./agentActivityFixtures";
 
@@ -92,6 +93,39 @@ describe("SubagentsTray", () => {
     );
     expect(screen.getByRole("button", { name: /Stop subagent/ })).toHaveTextContent("Stopping");
     expect(screen.getByRole("button", { name: /Opens it in Agents/ })).toHaveTextContent("Working");
+  });
+
+  it("previews a finished observed child's closing report and reported usage, never inventing zeros", () => {
+    renderTray([], {
+      observations: [
+        observedChildFixture({
+          childAgentId: "reported",
+          observationId: "reported",
+          lifecycleStatus: "failed",
+          finalSummary: "Parser handles nested quotes.",
+          usage: { inputTokens: 14_700, outputTokens: 300 },
+        }),
+        observedChildFixture({
+          childAgentId: "total-only",
+          observationId: "total-only",
+          task: "Count tokens",
+          lifecycleStatus: "failed",
+          usage: { totalTokens: 2_000 },
+        }),
+        observedChildFixture({
+          childAgentId: "silent",
+          observationId: "silent",
+          task: "Say nothing",
+          lifecycleStatus: "failed",
+        }),
+      ],
+    });
+    const reported = screen.getByRole("button", { name: /^Inspect parser\. / });
+    expect(reported).toHaveTextContent("Parser handles nested quotes.");
+    expect(reported).toHaveTextContent("IN 14.7k · OUT 300");
+    expect(screen.getByRole("button", { name: /^Count tokens\. / })).toHaveTextContent("2k tokens");
+    const silent = screen.getByRole("button", { name: /^Say nothing\. / });
+    expect(silent).not.toHaveTextContent(/IN |OUT |tokens/);
   });
 
   it("says why a stop was refused", async () => {
@@ -459,5 +493,32 @@ describe("ThreadSubagentsTray", () => {
         name: "Stop subagent: Task 90000000-0000-4000-8000-000000000002",
       }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ObservedChildDetail", () => {
+  afterEach(cleanup);
+
+  it("folds the subagent's final summary and states usage only as reported", async () => {
+    const user = userEvent.setup();
+    render(
+      <ObservedChildDetail
+        child={observedChildFixture({
+          lifecycleStatus: "completed",
+          finalSummary: "Parser handles nested quotes.",
+          usage: { inputTokens: 900, outputTokens: 120 },
+        })}
+        onBack={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Usage: IN 900 · OUT 120")).toBeVisible();
+    expect(screen.getByText("Parser handles nested quotes.")).not.toBeVisible();
+    await user.click(screen.getByText("Final summary from the subagent"));
+    expect(screen.getByText("Parser handles nested quotes.")).toBeVisible();
+    cleanup();
+
+    render(<ObservedChildDetail child={observedChildFixture()} onBack={vi.fn()} />);
+    expect(screen.getByText("Usage not reported")).toBeVisible();
+    expect(screen.queryByText("Final summary from the subagent")).not.toBeInTheDocument();
   });
 });

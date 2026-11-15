@@ -531,6 +531,44 @@ describe("ACP event normalization", () => {
     }
   });
 
+  it("carries a finished subagent's closing answer for the person, and nothing when the agent sends none", () => {
+    const finish = (meta: Record<string, unknown>) => {
+      const ctx = context({ childRunMetaKey: "child_session_id" });
+      const notify = (update: Record<string, unknown>) =>
+        mapAcpNotification(ctx, {
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: "acp-session-1", update },
+        });
+      notify({
+        sessionUpdate: "tool_call",
+        toolCallId: "spawn-1",
+        title: "Subagent",
+        status: "in_progress",
+        _meta: { child_session_id: "child-7" },
+      });
+      const done = notify({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "spawn-1",
+        status: "completed",
+        _meta: { child_session_id: "child-7", ...meta },
+      })
+        .map((item) => (item.kind === "event" ? item.event : undefined))
+        .find((value) => value?.kind === "child-agent-activity");
+      if (done !== undefined) decodeProviderRuntimeEvent(done);
+      return done;
+    };
+    expect(finish({ response: "Routes live in app/routes." })).toMatchObject({
+      status: "completed",
+      finalSummary: "Routes live in app/routes.",
+    });
+    const quiet = finish({});
+    expect(quiet).toMatchObject({ status: "completed" });
+    expect(quiet).not.toHaveProperty("finalSummary");
+    expect(quiet).not.toHaveProperty("modelId");
+    expect(quiet).not.toHaveProperty("usage");
+  });
+
   it("reads no child run from an agent that never named where it reports one", () => {
     const result = mapAcpNotification(context(), {
       kind: "notification",

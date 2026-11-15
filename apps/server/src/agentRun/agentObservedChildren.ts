@@ -41,6 +41,10 @@ export function observedChildren(input: {
             : { parentChildAgentId: child.parentChildAgentId }),
           ...(child.modelId === undefined ? {} : { modelId: child.modelId }),
           ...(child.task === undefined ? {} : { task: child.task }),
+          // A snapshot keeps only the latest closing report and usage, so each
+          // replayed entry carries them; the fold keeps the newest it sees.
+          ...(child.finalSummary === undefined ? {} : { finalSummary: child.finalSummary }),
+          ...(child.usage === undefined ? {} : { usage: child.usage }),
         });
       }
       if (child.historyStatus !== "partial") {

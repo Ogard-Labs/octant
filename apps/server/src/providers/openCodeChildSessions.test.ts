@@ -92,6 +92,58 @@ describe("OpenCodeChildSessions", () => {
     });
   });
 
+  it("reports the model a child answered with, then its closing text and summed tokens when it finishes", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    const assistant = (id: string, input: number, output: number) =>
+      event("message.updated", {
+        sessionID: "child",
+        info: {
+          id,
+          sessionID: "child",
+          role: "assistant",
+          providerID: "anthropic",
+          modelID: "claude-haiku",
+          tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      });
+    expect(children.route(assistant("m1", 100, 20), "child", isRoot)).toMatchObject({
+      activity: { status: "starting", modelId: "anthropic/claude-haiku" },
+    });
+    expect(children.route(assistant("m1", 120, 30), "child", isRoot)).not.toHaveProperty(
+      "activity",
+    );
+    children.route(assistant("m2", 200, 40), "child", isRoot);
+    children.route(
+      event("message.part.updated", {
+        sessionID: "child",
+        part: { id: "p1", messageID: "m2", type: "text", text: "The build passes." },
+      }),
+      "child",
+      isRoot,
+    );
+    expect(
+      children.route(event("session.idle", { sessionID: "child" }), "child", isRoot),
+    ).toMatchObject({
+      activity: {
+        status: "completed",
+        finalSummary: "The build passes.",
+        usage: { inputTokens: 320, outputTokens: 70 },
+      },
+    });
+  });
+
+  it("leaves model, closing text and usage unknown when a child reports none", () => {
+    const children = new OpenCodeChildSessions();
+    children.route(created("child", "root"), "child", isRoot);
+    const route = children.route(event("session.idle", { sessionID: "child" }), "child", isRoot);
+    if (route.kind !== "child") throw new Error("Expected the child's route");
+    expect(route.activity).toMatchObject({ status: "completed" });
+    expect(route.activity).not.toHaveProperty("modelId");
+    expect(route.activity).not.toHaveProperty("finalSummary");
+    expect(route.activity).not.toHaveProperty("usage");
+  });
+
   it("reports a child that errored as failed", () => {
     const children = new OpenCodeChildSessions();
     children.route(created("child", "root"), src(created("child", "root")), isRoot);

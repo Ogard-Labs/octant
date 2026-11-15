@@ -4,6 +4,8 @@ import { ArrowLeft } from "lucide-react";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
+import { observedChildUsageLine } from "./agentRunGraphFacts";
 import { subagentElapsedLabel, subagentStatusWord, SubagentStatusIcon } from "./subagentStatus";
 
 /** Selection keys never enter the managed run identifier or command paths. */
@@ -91,6 +93,7 @@ export function ObservedChildRow(props: {
     subagentStatusWord(child.lifecycleStatus),
     `Started by ${props.providerName}`,
     child.modelId ?? "Model unknown",
+    observedChildUsageLine(child.usage),
     age === "" ? undefined : `First seen ${age} ago`,
   ]
     .filter((part): part is string => part !== undefined)
@@ -113,7 +116,7 @@ export function ObservedChildRow(props: {
           <span className="composer-subagents__task">{task}</span>
           <span className="composer-subagents__meta">{meta}</span>
           <span className="composer-subagents__reason">
-            {child.latestSummary || "No activity reported."}
+            {child.finalSummary ?? (child.latestSummary || "No activity reported.")}
           </span>
         </span>
       </OctantButton>
@@ -128,6 +131,7 @@ export function ObservedChildDetail(props: {
   readonly client?: Pick<AgentRunClient, "stopObserved">;
 }) {
   const child = props.child;
+  const usage = observedChildUsageLine(child.usage);
   return (
     <section aria-label="Observed child" className="agent-run-detail">
       <div className="agent-run-detail__nav">
@@ -153,6 +157,9 @@ export function ObservedChildDetail(props: {
         <p className="agent-run-detail__fact">
           {child.modelId === undefined ? "Model unknown" : `Model: ${child.modelId}`}
         </p>
+        <p className="agent-run-detail__fact">
+          {usage === undefined ? "Usage not reported" : `Usage: ${usage}`}
+        </p>
         <p className="agent-run-detail__fact">Child: {child.childAgentId}</p>
         {child.parentChildAgentId === undefined ? null : (
           <p className="agent-run-detail__fact">Parent child: {child.parentChildAgentId}</p>
@@ -163,6 +170,16 @@ export function ObservedChildDetail(props: {
       </header>
       <div className="agent-run-detail__transcript">
         <p>{child.latestSummary || "No activity reported."}</p>
+        {child.finalSummary === undefined ? null : (
+          // The subagent's own words as its provider relayed them; shown here
+          // only, folded, as plain text.
+          <OctantCollapsible
+            className="agent-observation__final"
+            summary="Final summary from the subagent"
+          >
+            <p className="whitespace-pre-wrap">{child.finalSummary}</p>
+          </OctantCollapsible>
+        )}
         <p className="agent-run-detail__note">
           {child.historyStatus === "conflicted"
             ? "Conflicting observations; the child's current state is unknown."

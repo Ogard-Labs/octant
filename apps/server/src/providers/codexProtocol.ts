@@ -350,10 +350,19 @@ const ThreadItem = Schema.Union(
     status: Schema.Literal("inProgress", "completed", "failed", "interrupted"),
     receiverThreadIds: Schema.Array(Schema.String).pipe(Schema.maxItems(32)),
     prompt: Schema.optional(Schema.NullOr(Schema.String)),
+    /** The model a `spawnAgent` call asked for, when it named one. */
+    model: Schema.optional(Schema.NullOr(Schema.String)),
     agentsStates: Schema.optional(
       Schema.Record({
         key: Schema.String,
-        value: Schema.Struct({ status: Schema.String }),
+        /**
+         * `message` is the agent's last answer once it completed, or its
+         * error once it errored (codex-cli 0.164.0 `CollabAgentState`).
+         */
+        value: Schema.Struct({
+          status: Schema.String,
+          message: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
       }),
     ),
   }),

@@ -1,13 +1,39 @@
+import {
+  decodeProviderModelId,
+  MAX_PROVIDER_CHILD_FINAL_SUMMARY,
+  type ProviderChildUsage,
+  type ProviderModelId,
+} from "@octant/contracts";
+import {
+  boundedChildFinalSummary,
+  reportedChildUsage,
+} from "@octant/provider-sdk/child-observations";
 import type { OpenCodeEvent } from "./openCodeEventMapper";
 
 /** What Octant reports of one delegated OpenCode session. */
 export interface OpenCodeChildActivity {
   readonly childAgentId: string;
   readonly parentChildAgentId?: string;
+  readonly modelId?: ProviderModelId;
   readonly task?: string;
   readonly status: "starting" | "running" | "completed" | "failed";
   readonly summary: string;
+  readonly finalSummary?: string;
+  readonly usage?: ProviderChildUsage;
 }
+
+/**
+ * What a child's own assistant messages reported: the model that answered,
+ * each message's token counts, and its latest text, which OpenCode's `task`
+ * tool hands back to the parent as the child's result.
+ */
+interface OpenCodeChildReport {
+  modelId?: ProviderModelId;
+  readonly tokens: Map<string, { readonly input: number; readonly output: number }>;
+  lastText?: string;
+}
+
+const MAX_TRACKED_MESSAGES = 256;
 
 export type OpenCodeChildRoute =
   | { readonly kind: "none" }
@@ -69,6 +95,7 @@ function titleOf(event: OpenCodeEvent): string | undefined {
 export class OpenCodeChildSessions {
   readonly #owners = new Map<string, { root: string; parent: string }>();
   readonly #statuses = new Map<string, OpenCodeChildActivity["status"]>();
+  readonly #reports = new Map<string, OpenCodeChildReport>();
 
   /** `source` is the session the event belongs to, as the driver read it. */
   route(
@@ -92,6 +119,7 @@ export class OpenCodeChildSessions {
         if (finished === undefined) return { kind: "none" };
         this.#owners.delete(finished);
         this.#statuses.delete(finished);
+        this.#reports.delete(finished);
       }
       this.#owners.set(source, { root, parent });
       const task = titleOf(event);
@@ -105,6 +133,27 @@ export class OpenCodeChildSessions {
     }
     if (!this.#owners.has(source)) return { kind: "none" };
     if (FORWARDED_EVENTS.has(type)) return this.#child(source, undefined, event);
+    if (type === "message.updated" || type === "message.part.updated") {
+      const learnedModel = this.#readReport(event, type, source);
+      const status = this.#statuses.get(source);
+      // The model is first known from the child's first answer, after it
+      // started; it is reported then, under the status the child already has.
+      if (learnedModel === undefined || status === undefined) return this.#child(source, undefined);
+      return this.#child(
+        source,
+        {
+          ...this.#lineage(source),
+          modelId: learnedModel,
+          status,
+          summary:
+            status === "starting"
+              ? "OpenCode delegated a task to a subagent."
+              : "The subagent is working.",
+        },
+        undefined,
+        true,
+      );
+    }
     const status = this.#statusFor(event, type, source);
     return this.#child(source, status);
   }
@@ -128,7 +177,83 @@ export class OpenCodeChildSessions {
       if (owner.root !== rootSource) continue;
       this.#owners.delete(child);
       this.#statuses.delete(child);
+      this.#reports.delete(child);
     }
+  }
+
+  #lineage(source: string): {
+    readonly childAgentId: string;
+    readonly parentChildAgentId?: string;
+  } {
+    const parent = this.#owners.get(source)?.parent;
+    return {
+      childAgentId: source,
+      ...(parent !== undefined && this.#owners.has(parent) ? { parentChildAgentId: parent } : {}),
+    };
+  }
+
+  /** Records what a child's assistant message reported; returns a model first learned here. */
+  #readReport(event: OpenCodeEvent, type: string, source: string): ProviderModelId | undefined {
+    const report: OpenCodeChildReport = this.#reports.get(source) ?? { tokens: new Map() };
+    this.#reports.set(source, report);
+    if (type === "message.part.updated") {
+      const part = (event.properties as { readonly part?: Readonly<Record<string, unknown>> }).part;
+      if (
+        part?.type === "text" &&
+        typeof part.text === "string" &&
+        part.synthetic !== true &&
+        part.ignored !== true &&
+        part.text.trim().length > 0
+      ) {
+        report.lastText = part.text.slice(0, MAX_PROVIDER_CHILD_FINAL_SUMMARY * 2);
+      }
+      return undefined;
+    }
+    const info = (event.properties as { readonly info?: Readonly<Record<string, unknown>> }).info;
+    if (info?.role !== "assistant" || typeof info.id !== "string") return undefined;
+    const tokens = info.tokens as
+      | { readonly input?: unknown; readonly output?: unknown }
+      | undefined;
+    const counted = reportedChildUsage({
+      inputTokens: tokens?.input,
+      outputTokens: tokens?.output,
+    });
+    if (
+      counted?.inputTokens !== undefined &&
+      counted.outputTokens !== undefined &&
+      (report.tokens.has(info.id) || report.tokens.size < MAX_TRACKED_MESSAGES)
+    ) {
+      report.tokens.set(info.id, { input: counted.inputTokens, output: counted.outputTokens });
+    }
+    if (report.modelId !== undefined) return undefined;
+    const provider = typeof info.providerID === "string" ? info.providerID.trim() : "";
+    const model = typeof info.modelID === "string" ? info.modelID.trim() : "";
+    if (provider.length === 0 || model.length === 0 || provider.length + model.length > 254)
+      return undefined;
+    // Octant names an OpenCode model as `provider/model`, as the session's own.
+    report.modelId = decodeProviderModelId(`${provider}/${model}`);
+    return report.modelId;
+  }
+
+  /** The child's closing text and summed usage, for the report that it finished. */
+  #closing(source: string): Pick<OpenCodeChildActivity, "finalSummary" | "usage"> {
+    const report = this.#reports.get(source);
+    if (report === undefined) return {};
+    const finalSummary = boundedChildFinalSummary(report.lastText);
+    let input = 0;
+    let output = 0;
+    for (const counts of report.tokens.values()) {
+      input += counts.input;
+      output += counts.output;
+    }
+    const usage =
+      report.tokens.size === 0
+        ? undefined
+        : reportedChildUsage({ inputTokens: input, outputTokens: output });
+    return {
+      ...(finalSummary === undefined ? {} : { finalSummary }),
+      ...(usage === undefined ? {} : { usage }),
+    };
   }
 
   #statusFor(
@@ -149,10 +274,9 @@ export class OpenCodeChildSessions {
       return undefined;
     })();
     if (status === undefined) return undefined;
-    const parent = this.#owners.get(source)?.parent;
     return {
-      childAgentId: source,
-      ...(parent !== undefined && this.#owners.has(parent) ? { parentChildAgentId: parent } : {}),
+      ...this.#lineage(source),
+      ...(status === "completed" ? this.#closing(source) : {}),
       status,
       summary:
         status === "running"
@@ -167,6 +291,7 @@ export class OpenCodeChildSessions {
     childSource: string,
     activity: OpenCodeChildActivity | undefined,
     forward?: OpenCodeEvent,
+    learnedModel = false,
   ): OpenCodeChildRoute {
     const owner = this.#owners.get(childSource);
     if (owner === undefined) return { kind: "none" };
@@ -174,7 +299,7 @@ export class OpenCodeChildSessions {
     const previous = this.#statuses.get(childSource);
     // A finished child OpenCode resumes through `task_id` keeps its session,
     // so it reports again when it runs.
-    const fresh = activity !== undefined && activity.status !== previous;
+    const fresh = activity !== undefined && (learnedModel || activity.status !== previous);
     if (fresh) this.#statuses.set(childSource, activity.status);
 
     return {

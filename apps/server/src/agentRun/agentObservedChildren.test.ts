@@ -45,6 +45,42 @@ describe("observed child reads", () => {
     ).toEqual(chat);
   });
 
+  it("keeps a finished child's closing report and usage when read back from a stored snapshot", () => {
+    const finished = decodeProviderRuntimeEvent({
+      ...report("done", 2),
+      status: "completed",
+      summary: "Finished",
+      finalSummary: "Two routes lack tests.",
+      usage: { inputTokens: 900, outputTokens: 120 },
+    });
+    if (finished.kind !== "child-agent-activity") throw new Error("Invalid fixture");
+    const live = observedChildren({
+      parentThreadId: root,
+      mode: "work",
+      events: [report("done", 1), finished],
+    });
+    expect(live.observations[0]).toMatchObject({
+      finalSummary: "Two routes lack tests.",
+      usage: { inputTokens: 900, outputTokens: 120 },
+    });
+    const observed = live.observations[0];
+    if (observed === undefined) throw new Error("Expected the child");
+    const {
+      kind: _kind,
+      observationId: _id,
+      parentThreadId: _parent,
+      mode: _mode,
+      control: _control,
+      ...stored
+    } = observed;
+    const replayed = observedChildren({
+      parentThreadId: root,
+      mode: "work",
+      states: [{ children: [stored], truncated: false }],
+    });
+    expect(replayed.observations).toEqual(live.observations);
+  });
+
   it("offers stop only for an unfinished child the live turn can stop", () => {
     const finished = decodeProviderRuntimeEvent({
       ...report("done", 2),

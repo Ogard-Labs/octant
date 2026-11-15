@@ -22,6 +22,10 @@ import type {
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
 import { outputStopReason } from "./outputStopReason";
+import {
+  boundedChildFinalSummary,
+  reportedChildUsage,
+} from "@octant/provider-sdk/child-observations";
 import { outsideContentTarget } from "./outsideContentRead";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -1101,12 +1105,35 @@ function mapTask(
       context.subagentTaskIds.set(parent.toolCallId, message.taskId);
     }
   }
+  const progress = event(context, {
+    kind: "task-progress",
+    taskId: next.taskId,
+    status: normalizedTaskStatus(next.lifecycle),
+    summary: next.summary,
+  });
+  const childAgentId =
+    message.subtype === "task_notification"
+      ? [...context.subagentTaskIds].find(([, taskId]) => taskId === message.taskId)?.[0]
+      : undefined;
+  if (childAgentId === undefined) return [progress];
+  // The subagent's closing report and the total tokens Claude counted for it.
+  // Claude reports no input/output split, so only the total is carried. The
+  // report reaches the person only; the parent already holds it as the tool
+  // result Claude itself returned.
+  const finalSummary = boundedChildFinalSummary(message.summary);
+  const usage =
+    message.usage === undefined
+      ? undefined
+      : reportedChildUsage({ totalTokens: message.usage.totalTokens });
   return [
+    progress,
     event(context, {
-      kind: "task-progress",
-      taskId: next.taskId,
-      status: normalizedTaskStatus(next.lifecycle),
-      summary: next.summary,
+      kind: "child-agent-activity",
+      childAgentId,
+      status: next.lifecycle === "completed" ? "completed" : "failed",
+      summary: next.lifecycle === "completed" ? "The subagent finished." : "The subagent failed.",
+      ...(finalSummary === undefined ? {} : { finalSummary }),
+      ...(usage === undefined ? {} : { usage }),
     }),
   ];
 }

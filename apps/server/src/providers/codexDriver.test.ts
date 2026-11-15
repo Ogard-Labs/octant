@@ -3985,6 +3985,95 @@ describe("Codex running as itself", () => {
     },
   );
 
+  it("reports a subagent's requested model, closing answer and thread usage only when Codex reports them", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const observed = takeEvents(acquired.connection, 3);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Delegate.", attachments: [], tools: [] }),
+    );
+    const collab = (id: string, item: Readonly<Record<string, unknown>>) =>
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "collabAgentToolCall", id, status: "completed", ...item },
+        completedAtMs: 20,
+      });
+    f.emit(
+      collab("collab-1", {
+        tool: "spawnAgent",
+        receiverThreadIds: ["thread-child", "thread-quiet"],
+        model: "gpt-5.4-mini",
+      }),
+    );
+    const breakdown = (inputTokens: number, outputTokens: number) => ({
+      totalTokens: inputTokens + outputTokens,
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens,
+      reasoningOutputTokens: 0,
+    });
+    f.emit(
+      notification("thread/tokenUsage/updated", {
+        threadId: "thread-child",
+        turnId: "turn-child",
+        tokenUsage: {
+          total: breakdown(1200, 300),
+          last: breakdown(10, 3),
+          modelContextWindow: null,
+        },
+      }),
+    );
+    f.emit(
+      collab("collab-2", {
+        tool: "wait",
+        receiverThreadIds: [],
+        agentsStates: { "thread-child": { status: "completed", message: "Two tests fail." } },
+      }),
+    );
+    const events = await observed;
+    expect(events[0]).toMatchObject({ childAgentId: "thread-child", modelId: "gpt-5.4-mini" });
+    expect(events[2]).toMatchObject({
+      childAgentId: "thread-child",
+      status: "completed",
+      finalSummary: "Two tests fail.",
+      usage: { inputTokens: 1200, outputTokens: 300, totalTokens: 1500 },
+    });
+    await acquired.close();
+
+    const quiet = await parentWithSubagent();
+    const finished = takeEvents(quiet.acquired.connection, 1);
+    quiet.f.emit(
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-3",
+          tool: "wait",
+          status: "completed",
+          receiverThreadIds: [],
+          agentsStates: { "thread-child": { status: "completed", message: null } },
+        },
+        completedAtMs: 30,
+      }),
+    );
+    const done = (await finished)[0];
+    expect(done).toMatchObject({ status: "completed" });
+    expect(done).not.toHaveProperty("modelId");
+    expect(done).not.toHaveProperty("finalSummary");
+    expect(done).not.toHaveProperty("usage");
+    await quiet.acquired.close();
+  });
+
   it("refuses a subagent's request outside the Project as it refuses the parent's, without asking", async () => {
     const { f, acquired } = await parentWithSubagent();
     f.emit(
