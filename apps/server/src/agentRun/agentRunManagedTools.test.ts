@@ -720,6 +720,48 @@ describe("agents managed tools", () => {
     }
   });
 
+  it("waits on children on different providers together, returning the first to settle or all of them", async () => {
+    const second = "00000000-0000-4000-8000-0000000000a2";
+    const runs = [
+      queuedRun({ lifecycleStatus: "completed", result: { text: "x" } as never }),
+      queuedRun({ id: second as never, lifecycleStatus: "running" }),
+    ];
+    const any = await call(tool({ runs }).set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      waitFor: "any",
+      timeoutMs: 10,
+    });
+    expect(any.result).toMatchObject({
+      status: "settled",
+      waitFor: "any",
+      settled: [{ runId: ids.run, status: "completed", text: "child reply" }],
+      pending: [second],
+    });
+    const all = await call(tool({ runs }).set, {
+      operation: "wait",
+      runIds: [ids.run, second],
+      timeoutMs: 0,
+    });
+    expect(all.result).toMatchObject({
+      status: "still-running",
+      waitFor: "all",
+      settled: [{ runId: ids.run, status: "completed" }],
+      pending: [second],
+    });
+  });
+
+  it("refuses a wait that names both runId and runIds, or repeats a child", async () => {
+    const { set } = tool();
+    for (const input of [
+      { operation: "wait", runId: ids.run, runIds: [ids.run] },
+      { operation: "wait", runIds: [ids.run, ids.run] },
+      { operation: "status", runIds: [ids.run] },
+    ]) {
+      expect((await call(set, input)).result).toMatchObject({ error: "invalid-agents-input" });
+    }
+  });
+
   it("answers a running child's wait with its live status after the timeout", async () => {
     const { set } = tool({ runs: [queuedRun({ lifecycleStatus: "running" })] });
     const outcome = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 0 });

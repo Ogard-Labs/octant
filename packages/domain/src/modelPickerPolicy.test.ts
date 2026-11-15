@@ -1267,7 +1267,37 @@ describe("delegated work eligibility", () => {
   });
 
   it("keeps an agent runtime to ready providers that list the model", () => {
-    expect(modelCanTakeDelegatedWork("codex", observed("ready", false), flash)).toBe(true);
-    expect(modelCanTakeDelegatedWork("codex", observed("degraded", false), flash)).toBe(false);
+    const carrying = (readiness: "ready" | "degraded") => ({
+      ...observed(readiness, false),
+      capabilities: { appManagedTools: "supported" as const },
+    });
+    expect(modelCanTakeDelegatedWork("codex", carrying("ready"), flash)).toBe(true);
+    expect(modelCanTakeDelegatedWork("codex", carrying("degraded"), flash)).toBe(false);
+  });
+
+  it("withholds an agent runtime that cannot carry Octant's tools, which would refuse the start", () => {
+    const acp = {
+      ...observed("ready", false),
+      capabilities: { appManagedTools: "unsupported" as const },
+    };
+    expect(modelCanTakeDelegatedWork("acp", acp, flash)).toBe(false);
+    expect(modelCanTakeDelegatedWork("codex", observed("ready", false), flash)).toBe(false);
+  });
+
+  it("offers a runtime whose tools are mixed only to a child that runs at Full access", () => {
+    const openCode = {
+      ...observed("ready", false),
+      capabilities: {
+        appManagedTools: "unsupported" as const,
+        appManagedToolsAtFullAccess: "mixed" as const,
+      },
+    };
+    expect(modelCanTakeDelegatedWork("opencode", openCode, flash)).toBe(false);
+    expect(
+      modelCanTakeDelegatedWork("opencode", openCode, flash, { executionPolicy: "full-access" }),
+    ).toBe(true);
+    expect(
+      modelCanTakeDelegatedWork("opencode", openCode, flash, { executionPolicy: "approval-gated" }),
+    ).toBe(false);
   });
 });

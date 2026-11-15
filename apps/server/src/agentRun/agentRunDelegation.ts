@@ -56,6 +56,18 @@ export interface AgentsToolTarget {
   readonly reasoningByModel?: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
+/**
+ * A provider this parent may not target, with why. `capabilities` reports
+ * these beside the targets so the model never guesses at a provider that is
+ * missing from the list, and can tell the person what would make it eligible.
+ */
+export interface AgentsToolUnavailableTarget {
+  readonly providerInstanceId: string;
+  readonly displayName: string;
+  readonly driverKind: string;
+  readonly reason: "not-ready" | "tools-unsupported" | "project-policy";
+}
+
 export interface AgentRunDelegationInput {
   readonly role?: AgentRunRole;
   readonly task: string;
@@ -107,6 +119,8 @@ export interface AgentRunDelegationOptions {
   readonly windowId: string;
   readonly uuid: () => string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
+  /** Enabled providers this parent may not target, with why; absent lists none. */
+  readonly listUnavailableTargets?: () => ReadonlyArray<AgentsToolUnavailableTarget>;
   readonly routing?: AgentRunDelegationRouting;
   /**
    * Outside content the thread read gates its helpers: never true at Full
@@ -200,6 +214,7 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),
+    unavailableTargets: options.listUnavailableTargets?.() ?? [],
   } as const;
 }
 
@@ -473,55 +488,91 @@ export type AgentRunFollowUpResult =
  * revalidated against, so filtering here guards all three. Chat Projects carry
  * no provider policy.
  */
-export function agentRunEligibleTargets(input: {
+export function agentRunEligibleTargets(
+  input: AgentRunTargetAvailabilityInput,
+): ReadonlyArray<AgentsToolTarget> {
+  return agentRunTargetAvailability(input).targets;
+}
+
+export interface AgentRunTargetAvailabilityInput {
   readonly project: Project | undefined;
   readonly instances: ReadonlyArray<
     Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind">
   >;
   readonly observedState: (
     instanceId: ProviderInstance["id"],
-  ) =>
-    | (Pick<ProviderObservedState, "readiness" | "models"> &
-        Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>)
-    | undefined;
+  ) => Parameters<typeof modelCanTakeDelegatedWork>[1] | undefined;
   readonly isTargetAllowed: (
     project: Exclude<Project, { readonly type: "chat" }>,
     providerInstanceId: ProviderInstance["id"],
     modelId: ProviderModel["id"],
   ) => boolean;
-}): ReadonlyArray<AgentsToolTarget> {
+}
+
+/**
+ * The targets this parent may delegate to, and every enabled provider it may
+ * not, each with the first reason that excludes it. A disabled provider is left
+ * out of both: the person turned it off, so it is not a choice to explain.
+ */
+export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInput): {
+  readonly targets: ReadonlyArray<AgentsToolTarget>;
+  readonly unavailable: ReadonlyArray<AgentsToolUnavailableTarget>;
+} {
   const { project } = input;
-  return input.instances.flatMap((instance) => {
-    if (!instance.enabled) return [];
+  const targets: Array<AgentsToolTarget> = [];
+  const unavailable: Array<AgentsToolUnavailableTarget> = [];
+  for (const instance of input.instances) {
+    if (!instance.enabled) continue;
+    const named = {
+      providerInstanceId: String(instance.id),
+      displayName: instance.displayName,
+      driverKind: String(instance.driverKind),
+    };
     const observed = input.observedState(instance.id);
-    if (observed === undefined) return [];
+    if (observed === undefined || observed.models.length === 0) {
+      unavailable.push({ ...named, reason: "not-ready" });
+      continue;
+    }
     const serving = observed.models.filter((model) =>
       modelCanTakeDelegatedWork(instance.driverKind, observed, model.id),
     );
+    if (serving.length === 0) {
+      // It would serve a model if it carried Octant's tools, so that is what
+      // excludes it; otherwise it is still starting or signed out.
+      const servesWithTools = observed.models.some((model) =>
+        modelCanTakeDelegatedWork(
+          instance.driverKind,
+          { ...observed, capabilities: { appManagedTools: "supported" } },
+          model.id,
+        ),
+      );
+      unavailable.push({ ...named, reason: servesWithTools ? "tools-unsupported" : "not-ready" });
+      continue;
+    }
     const models =
       project === undefined || project.type === "chat"
         ? serving
         : serving.filter((model) => input.isTargetAllowed(project, instance.id, model.id));
-    if (models.length === 0) return [];
-    return [
-      {
-        providerInstanceId: String(instance.id),
-        displayName: instance.displayName,
-        driverKind: String(instance.driverKind),
-        modelIds: models.map((model) => String(model.id)),
-        reasoningByModel: Object.fromEntries(
-          models.map((model) => [
-            String(model.id),
-            model.options.flatMap((option) =>
-              option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
-                ? option.values
-                : [],
-            ),
-          ]),
-        ),
-      },
-    ];
-  });
+    if (models.length === 0) {
+      unavailable.push({ ...named, reason: "project-policy" });
+      continue;
+    }
+    targets.push({
+      ...named,
+      modelIds: models.map((model) => String(model.id)),
+      reasoningByModel: Object.fromEntries(
+        models.map((model) => [
+          String(model.id),
+          model.options.flatMap((option) =>
+            option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
+              ? option.values
+              : [],
+          ),
+        ]),
+      ),
+    });
+  }
+  return { targets, unavailable };
 }
 
 export function isAgentRunTargetEligible(

@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain";
 import { describe, expect, it } from "vitest";
-import { agentRunEligibleTargets } from "./agentRunDelegation";
+import { agentRunEligibleTargets, agentRunTargetAvailability } from "./agentRunDelegation";
 
 const timestamp = "2026-07-14T09:00:00.000Z";
 const binding = { canonicalRoot: "/Users/example/Atlas" } as const;
@@ -187,5 +187,58 @@ describe("agentRunEligibleTargets", () => {
       expect(targetsOf("degraded", [])).toEqual([]);
       expect(targetsOf("ready", [])).toEqual([]);
     });
+  });
+});
+
+describe("agentRunTargetAvailability", () => {
+  const runtime = (id: string, displayName: string, driverKind: "codex" | "acp") =>
+    ({ id, displayName, driverKind, enabled: true }) as const;
+  const codex = runtime("80000000-0000-4000-8000-000000000020", "Codex", "codex");
+  const acp = runtime("80000000-0000-4000-8000-000000000021", "ACP agent", "acp");
+  const starting = runtime("80000000-0000-4000-8000-000000000022", "Starting", "codex");
+
+  it("names each enabled provider the parent may not target, with why", () => {
+    const availability = agentRunTargetAvailability({
+      project: decodeProject({
+        ...boundProject,
+        type: "work",
+        providerPolicy: {
+          mode: "whitelist",
+          providerInstanceIds: [codex.id, acp.id, starting.id].map((id) =>
+            decodeProviderInstance({ ...resident, id }).id,
+          ),
+        },
+      }),
+      instances: [
+        codex,
+        acp,
+        starting,
+        { ...resident, enabled: false },
+        { ...other, enabled: true },
+      ] as never,
+      observedState: (instanceId) => {
+        if (String(instanceId) === String(starting.id)) return undefined;
+        if (String(instanceId) === String(other.id))
+          return { readiness: "ready", models: [model("other-plain")], verifiedToolModelIds: [model("other-plain").id] };
+        return {
+          readiness: "ready",
+          models: [model("m")],
+          capabilities: {
+            appManagedTools: String(instanceId) === String(acp.id) ? "unsupported" : "supported",
+          },
+        };
+      },
+      isTargetAllowed: (project, instanceId, modelId) =>
+        allowedByProjectPolicy(project, instanceId, modelId) ||
+        String(instanceId) === String(codex.id),
+    });
+    expect(availability.targets.map((target) => target.displayName)).toEqual(["Codex"]);
+    expect(
+      availability.unavailable.map((target) => [target.displayName, target.reason]),
+    ).toEqual([
+      ["ACP agent", "tools-unsupported"],
+      ["Starting", "not-ready"],
+      ["Other", "project-policy"],
+    ]);
   });
 });

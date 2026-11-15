@@ -65,7 +65,7 @@ import {
 } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import {
-  agentRunEligibleTargets as eligibleAgentRunTargets,
+  agentRunTargetAvailability,
   recordAgentRunResultIngestion,
   type RemoteDelegationPort,
 } from "../agentRun/agentRunDelegation";
@@ -1200,8 +1200,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     uuid: randomUUID,
   };
-  const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
-    eligibleAgentRunTargets({
+  const agentRunTargetsFor = (projectId: ProjectId | undefined) =>
+    agentRunTargetAvailability({
       project: projectId === undefined ? undefined : persistence.readProject(projectId),
       instances: persistence.readProviderInstances(),
       observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
@@ -1209,6 +1209,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       isTargetAllowed: (project, instanceId, modelId) =>
         isProjectPolicyTargetAllowed(project, instanceId, modelId),
     });
+  const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
+    agentRunTargetsFor(projectId).targets;
   const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -1260,6 +1262,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       windowId: input.windowId,
       parentThreadId: input.parentThreadId,
       listTargets: () => agentRunEligibleTargets(input.projectId),
+      listUnavailableTargets: () => agentRunTargetsFor(input.projectId).unavailable,
       projectId: input.projectId,
       remote: remoteDelegation,
       routing: {
