@@ -1752,6 +1752,19 @@ export const ProviderTurnInput = Schema.Struct({
   tools: Schema.Array(ProviderToolDefinition).pipe(
     Schema.filter((tools) => tools.length <= MAX_PROVIDER_TOOLS),
   ),
+  /**
+   * The host let the native harness offer the provider's own web search this
+   * turn, under its data policy. `withdrawAfterFirstStep` (below Full access)
+   * leaves it out of every request after the turn's first search or first
+   * tool answer, which may have read outside content the provider's own
+   * search could carry out in a query Octant never sees.
+   */
+  providerWebSearch: Schema.optional(
+    Schema.Struct({
+      basicOnly: Schema.Boolean,
+      withdrawAfterFirstStep: Schema.Boolean,
+    }).annotations(strict),
+  ),
 }).annotations(strict);
 export type ProviderTurnInput = typeof ProviderTurnInput.Type;
 

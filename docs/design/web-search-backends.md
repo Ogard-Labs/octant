@@ -11,20 +11,25 @@ one definition, and its result shape
 harness refuses on a tainted thread stay in
 [Search queries on a tainted thread](search-query-taint.md).
 
-Status: partly built. Built: the settings contract and its journaled
-`/api/host-control/web-search` route, the eligibility policy, the research
-route's "Octant web search" label, the migration, the credential broker namespace
-`/v1/web-search-credentials/*` with its `/api/host-control/web-search/key`
-route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
-its 20-second budget, the journaled record of where each query went, Settings ›
-Web search, and Claude Code, Codex, OpenCode, and Mistral Vibe each launched
-with its own search off wherever the session's setup has `webTools` off. Not built: a
-generic ACP agent's own web tools, which Octant cannot switch off; a provider's own
-search in the native harness (slice 4), which still refuses any built-in tool
-a provider starts in its stream as `unsupported`, so a harness endpoint
-reports `nativeWebResearch` as `unsupported`. A per-entry processing region is
-not built: no kind in the table takes one through its API, and Linkup's
-EU-pinned host is the entry's address.
+Status: partly built. Built: all four delivery slices: the settings
+contract and its journaled `/api/host-control/web-search` route, the
+eligibility policy, the research route's "Octant web search" label, the migration,
+the credential broker namespace `/v1/web-search-credentials/*` with its
+`/api/host-control/web-search/key` route, the Staan, Mojeek, Linkup, Brave, and
+Exa backends, the fallback with its 20-second budget, the journaled record of
+where each query went, Settings › Web search, Claude Code, Codex, OpenCode, and
+Mistral Vibe each launched with its own search off wherever the session's setup
+has `webTools` off, and a provider's own search in
+the native harness on Anthropic's and OpenAI's own APIs, with the one-search
+cap and its stream enforcement, tainted-thread withholding, outside-content
+marks, and its journal as provider-native research. Not built: a generic ACP agent's own web tools, which Octant cannot
+switch off; each built-in
+search's count and price in the turn's usage and cost (the count is journaled
+as research events; neither stream reports a price); replaying a built-in
+search's result blocks in the turn's later requests; and a per-entry processing
+region (no kind takes one through its API; Linkup's EU-pinned host is the
+entry's address). Not yet run: the acceptance's live search on each of the two
+origins, which needs a maintainer's keys.
 
 ## Why
 
@@ -163,8 +168,7 @@ and the provider's tool call id it belongs to, so it reads beside that call;
 the query stays with the thread's own tool call. A vendor's refusal of the query itself
 (an HTTP 4xx other than a refused key or a rate limit) is an answer and does
 not move on; a SearXNG instance's is read the same way, except that it takes
-no key, so its 401 or 403 refuses every query and moves on as a server error.
-Which entry's key was refused is held in memory, so after a
+no key, so its 401 or 403 refuses every query and moves on as a server error. Which entry's key was refused is held in memory, so after a
 restart the next search learns it again.
 
 ## Research route
@@ -245,8 +249,11 @@ a provider that ignores the cap cannot search again on what it just read. Every
 built-in tool other than web search stays refused.
 
 **Tainted threads.** Below Full access, a thread that has read outside content
-is not offered the provider's own search: the next request leaves the built-in
-tool out and offers `web-search` when an eligible backend exists, where the
+is not offered the provider's own search. Within a turn the offer ends at the
+turn's first search or first tool answer: the loop cannot tell which tool
+result was outside content before the host records it, so it withdraws at the
+first one, at the cost of one prompt cache miss in such a turn. A request
+that withholds it leaves the built-in tool out and offers `web-search` when an eligible backend exists, where the
 tool-call policy can refuse a query that looks like it carries data
 ([Search queries on a tainted thread](search-query-taint.md)). With no eligible
 backend, a tainted thread has no search, and the turn's search status says so.

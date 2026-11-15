@@ -535,3 +535,85 @@ describe("sendResponsesTurn tool calls", () => {
     expect(body).not.toHaveProperty("prompt_cache_key");
   });
 });
+
+describe("OpenAI's own web search in one response", () => {
+  const searchItem = (id: string, status: "in_progress" | "completed") => ({
+    id,
+    type: "web_search_call",
+    status,
+    ...(status === "completed"
+      ? {
+          action: {
+            type: "search",
+            query: "octant release",
+            sources: [{ type: "url", url: "https://example.com/octant" }],
+          },
+        }
+      : {}),
+  });
+
+  it("asks for the web search tool capped at one built-in call and reports the search with its sources", async () => {
+    const observed: ProtocolTurnEvent[] = [];
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        {
+          type: "response.web_search_call.searching",
+          sequence_number: 3,
+          item_id: "ws_1",
+          output_index: 0,
+        },
+        functionCallDone(4, searchItem("ws_1", "completed")),
+        {
+          type: "response.output_text.annotation.added",
+          sequence_number: 5,
+          annotation: { type: "url_citation", url: "https://example.com/octant", title: "Octant" },
+        },
+        completed(6, [searchItem("ws_1", "completed")]),
+      ),
+    );
+    await Effect.runPromise(
+      sendResponsesTurn({
+        ...input(fetch),
+        webSearch: true,
+        onEvent: (event) => observed.push(event),
+      }),
+    );
+    const init = (fetch.mock.calls[0] as unknown as [unknown, RequestInit | undefined])[1];
+    const body = JSON.parse(String(init?.body));
+    expect(body.tools).toEqual([{ type: "web_search" }]);
+    expect(body.max_tool_calls).toBe(1);
+    expect(observed.filter((event) => event.kind === "web-search")).toEqual([
+      {
+        kind: "web-search",
+        sequence: expect.any(Number),
+        searchId: "ws_1",
+        query: "octant release",
+        sources: [{ url: "https://example.com/octant", title: "Octant" }],
+        citedText: [],
+      },
+    ]);
+  });
+
+  it("refuses a second built-in search in the same response as unsupported", async () => {
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        functionCallDone(3, searchItem("ws_1", "completed")),
+        functionCallAdded(4, searchItem("ws_2", "in_progress"), 1),
+      ),
+    );
+    const failure = await failureOf(sendResponsesTurn({ ...input(fetch), webSearch: true }));
+    expect(failure.category).toBe("unsupported");
+  });
+
+  it("still refuses a built-in search the request did not offer", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), functionCallAdded(2, searchItem("ws_1", "in_progress"))),
+    );
+    const failure = await failureOf(sendResponsesTurn(input(fetch)));
+    expect(failure.category).toBe("unsupported");
+  });
+});

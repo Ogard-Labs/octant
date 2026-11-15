@@ -1,5 +1,6 @@
 import type {
   ProviderToolDefinition,
+  ProviderTurnInput,
   ProviderToolImage,
   ShieldWatcherLabel,
   ThreadRoutineReceipt,
@@ -7,6 +8,13 @@ import type {
 
 export interface AppManagedToolSet {
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
+  /**
+   * The native harness's own search grant for this turn: the provider's
+   * built-in web search the host's data policy and the thread's taint allow.
+   * Carried through every set that combines or wraps this one, and sent with
+   * the turn; absent offers none.
+   */
+  readonly providerWebSearch?: ProviderTurnInput["providerWebSearch"];
   readonly close?: () => Promise<void>;
   readonly execute: (input: {
     readonly name: string;
@@ -41,8 +49,12 @@ export function combineAppManagedToolSets(
 ): AppManagedToolSet {
   const present = sets.filter((set): set is AppManagedToolSet => set !== undefined);
   let closing: Promise<void> | undefined;
+  const providerWebSearch = present.find(
+    (set) => set.providerWebSearch !== undefined,
+  )?.providerWebSearch;
   return {
     definitions: present.flatMap((set) => set.definitions),
+    ...(providerWebSearch === undefined ? {} : { providerWebSearch }),
     close: () => {
       closing ??= Promise.all(present.map((set) => set.close?.())).then(() => undefined);
       return closing;

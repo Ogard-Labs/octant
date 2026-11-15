@@ -1744,6 +1744,9 @@ export class ChatTurnRunner {
               context: [...context],
               attachments: [...input.attachments],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...(input.appManagedTools?.providerWebSearch === undefined
+                ? {}
+                : { providerWebSearch: input.appManagedTools.providerWebSearch }),
             })
             .pipe(Effect.catchAll(persistProviderFailure));
         }),

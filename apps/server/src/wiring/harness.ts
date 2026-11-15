@@ -86,7 +86,11 @@ import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { harnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
-import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
+import {
+  isNativeHarnessDriverKind,
+  providerOwnSearchOrigin,
+  workThreadAccessOf,
+} from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -1179,6 +1183,16 @@ export function wireHarness(deps: HarnessDependencies) {
     hostId: deriveToolHostId(providerDataDirectory),
     readThreadTaint: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    providerWebSearchFacts: (providerInstanceId) => {
+      const instance = persistence.readProviderInstance(providerInstanceId);
+      if (instance === undefined) return undefined;
+      return {
+        origin: providerOwnSearchOrigin(instance),
+        zdrStated: instance.providerSearchZdr === true,
+        policy: webSearchSettings.read().settings.policy,
+        webSearchReady: webSearchSettings.eligible().length > 0,
+      };
+    },
     recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
     uuid: randomUUID,
     clock: () => new Date().toISOString(),

@@ -3,6 +3,8 @@ import {
   decodeProviderFailure,
   decodeProviderSessionId,
   NativeHarnessTodoWriteArguments,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+  WEB_SEARCH_TOOL_DEFINITION,
   type CorrelationId,
   type NativeHarnessTranscriptToolCall,
   type NativeHarnessTranscriptToolResult,
@@ -52,6 +54,9 @@ import type {
 } from "./nativeHarnessTransport";
 import { addNativeHarnessUsage } from "./nativeHarnessTransport";
 import { toolEffectClass } from "../toolEffects/toolEffectClass";
+
+/** The provider's own search as its runtime events name it; a plain name the outside-content record keeps. */
+const PROVIDER_WEB_SEARCH_TOOL_NAME = "web_search";
 
 const OMITTED_RESULT_JSON = JSON.stringify({
   omitted: true,
@@ -217,6 +222,14 @@ interface SessionState {
   acceptingSteering: boolean;
   system: string | undefined;
   tools: ReadonlyArray<ProviderToolDefinition>;
+  /** The provider's own web search the host let this turn offer, if any. */
+  providerWebSearch: ProviderTurnInput["providerWebSearch"];
+  /**
+   * The provider's own search is left out of the rest of the turn: below Full
+   * access, once the turn searched or answered a tool call, the conversation
+   * may hold outside content a built-in query could carry out unseen.
+   */
+  providerWebSearchWithdrawn: boolean;
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
@@ -319,6 +332,66 @@ export function createNativeHarnessConnection(
         correlationId: state.correlationId,
         occurredAt: options.clock() as UtcTimestamp,
       } as ProviderRuntimeEvent);
+    /**
+     * A built-in search the provider ran: the thread is marked as having read
+     * outside content before the model's next step, whatever the Watcher
+     * finds, and the search is journaled as research with the provider as its
+     * backend. The Watcher reads the titles, addresses, and cited text only:
+     * the provider never returns page text Octant can read.
+     */
+    const reportProviderWebSearch = (
+      state: SessionState,
+      search: Extract<NativeHarnessStreamEvent, { readonly kind: "provider-web-search" }>,
+    ) => {
+      if (state.providerWebSearch?.withdrawAfterFirstStep === true) {
+        state.providerWebSearchWithdrawn = true;
+      }
+      const toolCallId = `provider-web-search-${search.searchId}`.slice(0, 120);
+      const query = search.query?.trim().slice(0, 1_024);
+      emit(state, {
+        kind: "outside-content-read",
+        toolCallId,
+        toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+        source: "web-search",
+        ...(query === undefined || query.length === 0 ? {} : { target: query }),
+      });
+      const watched = [
+        ...search.sources.map((source) =>
+          source.title === undefined ? source.url : `${source.title} ${source.url}`,
+        ),
+        ...search.citedText,
+      ]
+        .join("\n")
+        .slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+      if (watched.trim().length > 0) {
+        emit(state, {
+          kind: "outside-content-result",
+          toolCallId,
+          toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+          source: "web-search",
+          text: watched,
+        });
+      }
+      emit(state, {
+        kind: "research-started",
+        researchId: toolCallId,
+        query: query === undefined || query.length === 0 ? "(query not reported)" : query,
+        backend: "provider-native",
+      });
+      for (const [index, source] of search.sources.entries()) {
+        emit(state, {
+          kind: "citation",
+          citationId: `${toolCallId.slice(0, 116)}-${index}`,
+          sourceTitle: (source.title ?? source.url).slice(0, 512),
+          sourceUrl: source.url.slice(0, 2_048),
+        });
+      }
+      emit(state, {
+        kind: "research-completed",
+        researchId: toolCallId,
+        sourceCount: search.sources.length,
+      });
+    };
     const cursorFor = (state: SessionState): ProviderResumeCursor => ({
       driverKind: options.driverKind,
       value: String(state.transcriptId),
@@ -393,6 +466,8 @@ export function createNativeHarnessConnection(
       acceptingSteering: false,
       system: undefined,
       tools: input.tools ?? [],
+      providerWebSearch: undefined,
+      providerWebSearchWithdrawn: false,
       pending: undefined,
       answered: new Set(),
       todoTaskIds: new Map(),
@@ -552,6 +627,10 @@ export function createNativeHarnessConnection(
         // A request's own usage says when that request was sent, which is what
         // lets its timing leave out the tool time between requests.
         onEvent: (event: NativeHarnessStreamEvent) => {
+          if (event.kind === "provider-web-search") {
+            reportProviderWebSearch(state, event);
+            return;
+          }
           if (event.kind === "retrying") state.pricingBoundariesKnown = false;
           if (event.kind === "usage") {
             state.contextTokens = requestContextTokens(event);
@@ -688,6 +767,12 @@ export function createNativeHarnessConnection(
       if (pending === undefined) return;
       state.messages.push(resultsMessage(pending));
       state.pending = undefined;
+      // A tool's result may be outside content the host is only now
+      // recording; below Full access the provider's own search, whose query
+      // Octant never sees first, is not offered on what follows it.
+      if (state.providerWebSearch?.withdrawAfterFirstStep === true) {
+        state.providerWebSearchWithdrawn = true;
+      }
       const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
       if (request === undefined) {
         emit(state, {
@@ -1211,18 +1296,33 @@ export function createNativeHarnessConnection(
       return noted === request || state.endpoint.fits(noted) ? noted : request;
     };
 
-    const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
-      fitRequest(
+    const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) => {
+      // A request offers one search: the provider's own while it is offered,
+      // Octant's `web-search` otherwise, never both.
+      const providerSearch =
+        state.providerWebSearch !== undefined && !state.providerWebSearchWithdrawn
+          ? state.providerWebSearch
+          : undefined;
+      const tools = sortToolDefinitionsByName(
+        providerSearch === undefined
+          ? state.tools
+          : state.tools.filter((tool) => tool.name !== WEB_SEARCH_TOOL_DEFINITION.name),
+      );
+      return fitRequest(
         state.endpoint,
         {
           sessionId: state.sessionId,
           modelId: state.modelId,
           system: state.system,
           history,
-          tools: sortToolDefinitionsByName(state.tools),
+          tools,
+          ...(providerSearch === undefined
+            ? {}
+            : { providerWebSearch: { basicOnly: providerSearch.basicOnly } }),
         },
         { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
+    };
 
     return {
       subscribe: Stream.fromPubSub(events, { scoped: true }),
@@ -1342,6 +1442,8 @@ export function createNativeHarnessConnection(
             const { system, rest } = splitInstructions(input.context);
             state.system = composeSystem(system, input.tools);
             state.tools = input.tools;
+            state.providerWebSearch = input.providerWebSearch;
+            state.providerWebSearchWithdrawn = false;
             const user: NativeHarnessMessage = {
               role: "user",
               text: renderProviderTurnPrompt({ prompt: input.prompt, context: rest }),

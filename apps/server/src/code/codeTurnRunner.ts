@@ -833,6 +833,9 @@ export class CodeTurnRunner {
               ...(input.context === undefined ? {} : { context: input.context }),
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...(input.appManagedTools?.providerWebSearch === undefined
+                ? {}
+                : { providerWebSearch: input.appManagedTools.providerWebSearch }),
             })
             .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
           const promptSent = input.onPromptSent;
