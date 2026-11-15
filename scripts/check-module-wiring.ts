@@ -674,14 +674,6 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/code/language/read",
     "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
-  [
-    "/api/octant-instructions",
-    "Octant instructions read and save, served by the host since 2026-11-14 ahead of the Settings field that calls them (docs/design/octant-instructions.md, delivery slice 2). Remove once Settings › General edits Your instructions.",
-  ],
-  [
-    "/api/octant-instructions/commands",
-    "Octant instructions read and save, served by the host since 2026-11-14 ahead of the Settings field that calls them (docs/design/octant-instructions.md, delivery slice 2). Remove once Settings › General edits Your instructions.",
-  ],
   ...[
     "/api/hub/join",
     "/api/hub/leave",
