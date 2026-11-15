@@ -45,7 +45,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 9       | 1            | 0                   |
-| [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
+| [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 15        | 10      | 4            | 1                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **261**   | **157** | **100**      | **4**               |
+| **All areas**                                                                         | **261**   | **156** | **101**      | **4**               |
 
 ## Principles and hard lines
 
@@ -1555,10 +1555,13 @@ Direct-endpoint requests follow one retry policy, and models are chosen by routi
 - A request goes out at most five times and is retried only while nothing has streamed. A spent allowance, rejected credential or malformed event is never retried.
 - When retries are spent, the lead falls back once per other ready model, and a failure after output streamed never moves the turn.
 - Child runs take their model from the role's slot through one admission path; the lead runs on the thread's chosen model.
-- Routing is by slot (default, plan, slow, task, smol, vision, advisor, reviewer, plus custom), and every harness model call names one. An unconfigured slot resolves to default with a visible warning, except the advisor, which stays off. _Here only._
+- Routing is by slot (default, plan, slow, task, smol, vision, advisor, quick, deep, reviewer, plus custom), and every harness model call names one. An unconfigured slot resolves to default with a visible warning, except the advisor, which stays off. _Here only._
+- Settings names the slots as model roles: Planner (plan), Scout (task), Quick edit (quick), Builder (default), Hard problems (deep), Reviewer (slow), Sees images (vision) and Small jobs (smol), each an ordered list of a main model and up to 15 fallbacks with a reasoning level per model, on one page with plain tags per model (maintainer decision, 2026-11-15). Built.
+- Every role setting is global with a per-Project override per role: **Use Settings** (the default) or **Choose for this Project**, which may keep only models Settings lists for that role, with **Add in Settings too** for one it lacks. Only a person changes either layer, and each change is journaled (maintainer decision, 2026-11-15). Built for the model list, its order and reasoning, and the two choices as stored values.
+- A role carries **Ask before using** (off by default for every role) and **Continue on the fallback if the model stops** (on by default) (maintainer decision, 2026-11-15). Stored and shown; not built yet: the resolver does not act on either, and workers do not start from roles until a later slice.
 - The advisor reviews compact turn digests and may cancel, redirect or pause, but never executes tools, edits files or grants approvals. _Here only._
 
-Status: Built. Since: —. Detail: [Architecture: Native harness](../architecture.md#native-harness).
+Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Native harness](../architecture.md#native-harness) and [Model endpoints: Model roles](model-endpoints.md#model-roles).
 
 ### Harness sessions, goals and steering
 

@@ -401,6 +401,19 @@ worker's title is, and the window already lists that; what the worker found
 stays behind the worker. Reading facts through the coordinator is the smallest
 widening that shows the orchestration (maintainer request, 2026-11-11).
 
+## Model roles
+
+Workers will pick their model from the model roles in Settings, which a Project
+may override per role (maintainer decision, 2026-11-15; see
+[Model endpoints: Model roles](model-endpoints.md#model-roles)). The roles
+exist now: Planner, Scout, Quick edit, Builder, Hard problems, Reviewer, Sees
+images and Small jobs, each a list with a main model and fallbacks, and two
+choices per role, **Ask before using** and **Continue on the fallback if the
+model stops**. Workers do not use them yet: a start still takes the model the
+thread chose, and choosing by task size, falling back when the main model is
+unavailable, asking before an expensive role, and continuing on the fallback
+are designed, not built.
+
 ## Not in this design
 
 - A coordinator cannot stop, steer mid-turn, complete, put away, archive, or

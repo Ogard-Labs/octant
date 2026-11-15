@@ -25,7 +25,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
-import { decodeContextSubjectRef } from "@octant/contracts";
+import { LOCAL_HOST_ID, decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -86,6 +86,11 @@ import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMove
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
+import {
+  nativeHarnessPickerGroups,
+  nativeHarnessProviderOptions,
+  nativeHarnessReadinessById,
+} from "../harness/modelRoleOptions";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
@@ -2421,6 +2426,18 @@ function renderNonCodeTab(
           ? {}
           : { octantInstructionsClient: props.octantInstructionsClient })}
         memoryProjects={props.projects}
+        {...(props.nativeHarnessClient === undefined
+          ? {}
+          : {
+              modelRoles: {
+                client: props.nativeHarnessClient,
+                groups: nativeHarnessPickerGroups(props.providerController),
+                hostId: LOCAL_HOST_ID,
+                readiness: nativeHarnessReadinessById(
+                  nativeHarnessProviderOptions(props.providerController),
+                ),
+              },
+            })}
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}

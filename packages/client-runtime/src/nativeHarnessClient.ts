@@ -41,6 +41,14 @@ export interface NativeHarnessClient {
     projectId: string,
     signal?: AbortSignal,
   ): Promise<NativeHarnessProjectRoutingOverride | null>;
+  /** The override and the version the next change must assert, which a cleared override keeps. */
+  projectRoutingState(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    readonly override: NativeHarnessProjectRoutingOverride | null;
+    readonly version: number;
+  }>;
   setProjectRouting(
     projectId: string,
     input: {
@@ -165,6 +173,19 @@ export function createNativeHarnessClient(
       return override === null || override === undefined
         ? null
         : decodeHostAnswer(NativeHarnessProjectRoutingOverride)(override);
+    },
+    async projectRoutingState(projectId, signal) {
+      const body = (await get(
+        `/api/native-harness/routing/projects/${encodeURIComponent(projectId)}`,
+        signal,
+      )) as { override: unknown; version?: unknown };
+      return {
+        override:
+          body.override === null || body.override === undefined
+            ? null
+            : decodeHostAnswer(NativeHarnessProjectRoutingOverride)(body.override),
+        version: typeof body.version === "number" ? body.version : 0,
+      };
     },
     async setProjectRouting(projectId, input, signal) {
       return decodeHostAnswer(NativeHarnessRoutingCommandResult)(
