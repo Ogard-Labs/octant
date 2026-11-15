@@ -1,5 +1,5 @@
 import type { WebSearchBackendFailure, WebSearchBackendKind } from "@octant/contracts";
-import type { SearxngFetch } from "../chat/research/searxngClient";
+import { stripMarkup, type SearxngFetch } from "../chat/research/searxngClient";
 import { validateSearxngEndpoint } from "../chat/research/searxngEndpoint";
 
 /**
@@ -68,7 +68,7 @@ function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
 
 function text(value: unknown, maximum: number): string | undefined {
   if (typeof value !== "string") return undefined;
-  const trimmed = value.replace(/<[^>]*>/g, "").trim();
+  const trimmed = stripMarkup(value);
   return trimmed.length === 0 ? undefined : trimmed.slice(0, maximum);
 }
 

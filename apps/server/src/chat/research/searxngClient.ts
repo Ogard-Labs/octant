@@ -77,8 +77,20 @@ function boundedString(value: unknown, maximum = 512): string | undefined {
   return Array.from(normalized).length <= maximum ? normalized : undefined;
 }
 
-function stripMarkup(value: string): string {
-  return value.replace(/<[^>]*>/g, "").trim();
+/**
+ * A search result's text with every tag removed. One pass of a tag pattern
+ * leaves a tag behind when tags nest (`<scr<b>ipt>` becomes `<script>`), so
+ * tags are removed until none remain, and an angle bracket left over from an
+ * unclosed tag is dropped too.
+ */
+export function stripMarkup(value: string): string {
+  let current = value;
+  let previous: string;
+  do {
+    previous = current;
+    current = current.replace(/<[^<>]*>/g, "");
+  } while (current !== previous);
+  return current.replace(/[<>]/g, "").trim();
 }
 
 function isJsonMediaType(value: string): boolean {
