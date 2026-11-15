@@ -19,6 +19,7 @@ export type WindowsProcessTreeStop = "stopped" | "absent" | "failed";
 export function stopWindowsProcessTree(
   pid: number,
   environment: NodeJS.ProcessEnv = process.env,
+  timeoutMs = WINDOWS_TREE_STOP_TIMEOUT_MS,
 ): Promise<WindowsProcessTreeStop> {
   if (!Number.isSafeInteger(pid) || pid < 1) return Promise.resolve("failed");
   return new Promise((resolve) => {
@@ -37,12 +38,25 @@ export function stopWindowsProcessTree(
       resolve("failed");
       return;
     }
-    child.once("error", () => resolve("failed"));
-    child.once("exit", (code) =>
-      resolve(code === 0 ? "stopped" : code === 128 ? "absent" : "failed"),
-    );
+    // A stop that does not answer is a failed stop, so no caller (a host
+    // starting up, a tool call) waits on it without end.
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve("failed");
+    }, timeoutMs);
+    child.once("error", () => {
+      clearTimeout(timer);
+      resolve("failed");
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? "stopped" : code === 128 ? "absent" : "failed");
+    });
   });
 }
+
+/** How long a tree stop may take before it counts as failed. */
+export const WINDOWS_TREE_STOP_TIMEOUT_MS = 10_000;
 
 /**
  * A program in the Windows system folder, by absolute path. `SystemRoot` is

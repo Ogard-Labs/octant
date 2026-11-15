@@ -1,10 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
+import { persistProcessReceipt } from "../process/nodeOwnedProcessReceipt";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
+import { windowsSystemProgram } from "../process/windowsProcessTree";
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { terminalShellFor } from "./terminalShell";
 
@@ -38,6 +41,8 @@ function logSurvivingShells(): void {
     }
   });
 }
+
+const SHELL_IDENTITY = `sha256:${"a".repeat(64)}`;
 
 const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
 
@@ -155,6 +160,91 @@ describe("a Code terminal on a Windows host", () => {
     await handle.close();
     expect(stopWindowsTree).not.toHaveBeenCalled();
   });
+
+  it("stops a terminal a crashed host left behind through the tree stop and removes its receipt", async () => {
+    const receiptDirectory = mkdtempSync(join(tmpdir(), "octant-terminal-receipts-"));
+    directories.push(receiptDirectory);
+    // A pid no process holds, so the stop's effect is the identity changing.
+    const pid = 2_147_483_000;
+    let alive = true;
+    const processIdentity = async () => (alive ? SHELL_IDENTITY : undefined);
+    const receipt = await persistProcessReceipt(
+      { supervisor: "terminal", receiptDirectory, processIdentity },
+      "C:\\fixture\\project:1",
+      pid,
+    );
+    await receipt.ready;
+    const stopWindowsTree = vi.fn(async () => {
+      alive = false;
+      return "stopped" as const;
+    });
+    await new TerminalProcessPort({
+      platform: "win32",
+      receiptDirectory,
+      processIdentity,
+      stopWindowsTree,
+      confinement: confinementThatMustNotRun(),
+    }).reconcile();
+    expect(stopWindowsTree).toHaveBeenCalledWith(pid);
+    expect(readdirSync(receiptDirectory)).toEqual([]);
+  });
+
+  it("keeps the receipt of a terminal it cannot show stopped and lets the host start", async () => {
+    const receiptDirectory = mkdtempSync(join(tmpdir(), "octant-terminal-receipts-"));
+    directories.push(receiptDirectory);
+    const processIdentity = async () => SHELL_IDENTITY;
+    const receipt = await persistProcessReceipt(
+      { supervisor: "terminal", receiptDirectory, processIdentity },
+      "C:\\fixture\\project:2",
+      2_147_483_001,
+    );
+    await receipt.ready;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      await expect(
+        new TerminalProcessPort({
+          platform: "win32",
+          receiptDirectory,
+          processIdentity,
+          stopWindowsTree: async () => "failed",
+          confinement: confinementThatMustNotRun(),
+        }).reconcile(),
+      ).resolves.toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+    expect(readdirSync(receiptDirectory)).toHaveLength(1);
+  }, 60_000);
+
+  it.runIf(process.platform === "win32")(
+    "stops a live shell from its receipt when the host starts again",
+    async () => {
+      logSurvivingShells();
+      const receiptDirectory = mkdtempSync(join(tmpdir(), "octant-terminal-receipts-"));
+      directories.push(receiptDirectory);
+      const shell = spawn(
+        windowsSystemProgram("WindowsPowerShell\\v1.0\\powershell.exe"),
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 300"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      const pid = shell.pid;
+      if (pid === undefined) throw new Error("The fixture shell did not start.");
+      try {
+        const receipt = await persistProcessReceipt(
+          { supervisor: "terminal", receiptDirectory },
+          "C:\\fixture\\project:3",
+          pid,
+        );
+        await receipt.ready;
+        await new TerminalProcessPort({ receiptDirectory }).reconcile();
+        expect(() => process.kill(pid, 0)).toThrow();
+        expect(readdirSync(receiptDirectory)).toEqual([]);
+      } finally {
+        shell.kill();
+      }
+    },
+    90_000,
+  );
 
   it("refuses a shell other than PowerShell or Command Prompt rather than handing it POSIX arguments", () => {
     const port = new TerminalProcessPort({

@@ -11,6 +11,7 @@ import {
   persistProcessReceipt,
   readProcessIdentity,
   reconcileProcessReceipts,
+  reconcileWindowsProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
@@ -564,6 +565,20 @@ export class TerminalProcessPort {
   }
 
   async reconcile(): Promise<void> {
+    // A Windows terminal left by a crashed host is stopped with its tree, and
+    // one that cannot be shown stopped keeps its receipt rather than holding
+    // up the start: the negated-pid signal below reaches nothing there.
+    if (this.#dependencies.platform === "win32")
+      return await reconcileWindowsProcessReceipts({
+        supervisor: "terminal",
+        ...(this.#dependencies.receiptDirectory === undefined
+          ? {}
+          : { receiptDirectory: this.#dependencies.receiptDirectory }),
+        ...(this.#dependencies.processIdentity === undefined
+          ? {}
+          : { processIdentity: this.#dependencies.processIdentity }),
+        stopTree: this.#dependencies.stopWindowsTree,
+      });
     await reconcileProcessReceipts({
       supervisor: "terminal",
       ...(this.#dependencies.receiptDirectory === undefined

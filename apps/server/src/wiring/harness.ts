@@ -433,6 +433,17 @@ export function wireHarness(deps: HarnessDependencies) {
       platform: "win32",
       windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
     });
+  // Full access on Windows runs harness commands in the terminal shell
+  // Settings › Code names; each keeps a receipt beside the other harness
+  // commands' so a restart finds and stops what a crash left running.
+  const windowsHarnessShellPort =
+    process.platform === "win32"
+      ? createWindowsFullAccessShellPort({
+          shell: windowsHarnessShell,
+          scriptDirectory: harnessScriptDirectory,
+          receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
+        })
+      : undefined;
   const harnessFullAccessProcessPort = new RepositoryTestProcessPort({
     resourceBudget: deps.hostResourceBudget,
     receiptDirectory: join(providerDataDirectory, "harness", "receipts"),
@@ -1058,12 +1069,9 @@ export function wireHarness(deps: HarnessDependencies) {
     // Code names, since the POSIX form runs `/bin/sh`; the levels below
     // refuse on Windows before any command is planned.
     fullAccessShell:
-      process.platform === "win32"
+      windowsHarnessShellPort !== undefined
         ? createNativeHarnessShell({
-            process: createWindowsFullAccessShellPort({
-              shell: windowsHarnessShell,
-              scriptDirectory: harnessScriptDirectory,
-            }),
+            process: windowsHarnessShellPort,
             scriptDirectory: harnessScriptDirectory,
             scriptFileName: () => windowsScriptFileName(windowsHarnessShell()),
             scriptText: (command) => windowsScriptText(windowsHarnessShell(), command),
@@ -1163,7 +1171,11 @@ export function wireHarness(deps: HarnessDependencies) {
       ).map((row) => row.receipt),
 
     beginGoogleCliChange: googleCliCommands.beginChange,
-    recoverGoogleCliCommands: () => googleCliCommands.recover(() => harnessProcessPort.reconcile()),
+    // Awaited at startup, before any turn can run a command.
+    recoverGoogleCliCommands: async () => {
+      await windowsHarnessShellPort?.reconcile();
+      await googleCliCommands.recover(() => harnessProcessPort.reconcile());
+    },
     credentialCommandProcess: harnessFullAccessProcessPort,
     // The Seatbelt-confined, network-less launcher for Benchmarks check commands:
     // a port of its own that refuses setsid(), no cloud, SSH or Google

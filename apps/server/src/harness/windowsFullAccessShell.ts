@@ -4,6 +4,11 @@ import { dirname, win32 } from "node:path";
 import type { HarnessShellScriptInput } from "../code/repositoryTestProcessPort";
 import type { RepositoryTestProcessResult } from "../code/repositoryTestRunner";
 import { WINDOWS_PROCESS_ENVIRONMENT_NAMES } from "../process/windowsEnvironment";
+import {
+  persistProcessReceipt,
+  reconcileWindowsProcessReceipts,
+  type OwnedProcessReceiptHandle,
+} from "../process/nodeOwnedProcessReceipt";
 import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
 import type { SandboxedProcessPort } from "./nativeHarnessShell";
 
@@ -17,6 +22,24 @@ export interface WindowsFullAccessShellOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly maxOutputBytes?: number;
   readonly stopTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
+  /**
+   * Where each running command's ownership receipt is kept, so a host that
+   * crashed finds and stops it at its next start. Absent keeps none.
+   */
+  readonly receiptDirectory?: string;
+  /** How long a command may take to end after its stop before it is left uncertain. */
+  readonly stopWaitMs?: number;
+  readonly processIdentity?: (pid: number) => Promise<string | undefined>;
+  readonly spawn?: typeof spawn;
+}
+
+/** The supervisor name a Windows harness command's receipt carries. */
+const RECEIPT_SUPERVISOR = "windows-harness-shell";
+const DEFAULT_STOP_WAIT_MS = 10_000;
+
+export interface WindowsFullAccessShellPort extends SandboxedProcessPort {
+  /** Stops each command a crashed host left running, from its receipt. */
+  reconcile(): Promise<void>;
 }
 
 /**
@@ -100,10 +123,21 @@ function scriptArguments(shell: string, script: string): ReadonlyArray<string> |
  */
 export function createWindowsFullAccessShellPort(
   options: WindowsFullAccessShellOptions,
-): SandboxedProcessPort {
+): WindowsFullAccessShellPort {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const stopTree = options.stopTree ?? stopWindowsProcessTree;
   return {
+    reconcile: () =>
+      reconcileWindowsProcessReceipts({
+        supervisor: RECEIPT_SUPERVISOR,
+        ...(options.receiptDirectory === undefined
+          ? {}
+          : { receiptDirectory: options.receiptDirectory }),
+        ...(options.processIdentity === undefined
+          ? {}
+          : { processIdentity: options.processIdentity }),
+        stopTree,
+      }),
     executeShellScript: async (input, signal) => {
       const shell = options.shell();
       const args = scriptArguments(shell, input.script);
@@ -114,6 +148,22 @@ export function createWindowsFullAccessShellPort(
         maxOutputBytes,
         stopTree,
         inherited: options.inheritedEnvironment ?? process.env,
+        stopWaitMs: options.stopWaitMs ?? DEFAULT_STOP_WAIT_MS,
+        ...(options.spawn === undefined ? {} : { spawnCommand: options.spawn }),
+        receipt: (pid) =>
+          persistProcessReceipt(
+            {
+              supervisor: RECEIPT_SUPERVISOR,
+              ...(options.receiptDirectory === undefined
+                ? {}
+                : { receiptDirectory: options.receiptDirectory }),
+              ...(options.processIdentity === undefined
+                ? {}
+                : { processIdentity: options.processIdentity }),
+            },
+            input.script,
+            pid,
+          ),
       });
     },
   };
@@ -154,6 +204,9 @@ function run(
     readonly maxOutputBytes: number;
     readonly stopTree: (pid: number) => Promise<WindowsProcessTreeStop>;
     readonly inherited: NodeJS.ProcessEnv;
+    readonly stopWaitMs: number;
+    readonly receipt: (pid: number) => Promise<OwnedProcessReceiptHandle>;
+    readonly spawnCommand?: typeof spawn;
   },
 ): Promise<RepositoryTestProcessResult> {
   if (input.beforeLaunch?.() === false) return Promise.resolve(unavailable());
@@ -162,11 +215,12 @@ function run(
     const stderr: Buffer[] = [];
     let captured = 0;
     let truncated = false;
-    let ending: "timed-out" | "cancelled" | undefined;
+    let ending: "timed-out" | "cancelled" | "unowned" | undefined;
     let cleanupUncertain = false;
+    let settled = false;
     let child;
     try {
-      child = spawn(shell, [...args], {
+      child = (options.spawnCommand ?? spawn)(shell, [...args], {
         cwd: input.cwd,
         env: { ...inheritedWindowsEnvironment(options.inherited), ...input.environment },
         shell: false,
@@ -188,38 +242,72 @@ function run(
       captured += kept.length;
       into.push(kept);
     };
-    child.stdout.on("data", capture(stdout));
-    child.stderr.on("data", capture(stderr));
+    child.stdout?.on("data", capture(stdout));
+    child.stderr?.on("data", capture(stderr));
     const pid = child.pid;
-    const end = (reason: "timed-out" | "cancelled") => {
+    // The command's receipt, written once it runs and removed once it has
+    // ended, so a host that crashes meanwhile stops it at its next start. A
+    // command whose receipt cannot be kept is stopped: nothing could find it
+    // after a crash.
+    const receipt: Promise<OwnedProcessReceiptHandle | undefined> =
+      pid === undefined
+        ? Promise.resolve(undefined)
+        : options
+            .receipt(pid)
+            .then(async (handle) => {
+              await handle.ready;
+              return handle;
+            })
+            .catch(() => {
+              end("unowned");
+              return undefined;
+            });
+    let stopWait: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: RepositoryTestProcessResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (stopWait !== undefined) clearTimeout(stopWait);
+      signal?.removeEventListener("abort", abort);
+      resolve(result);
+    };
+    const end = (reason: "timed-out" | "cancelled" | "unowned") => {
       if (ending !== undefined || pid === undefined) return;
       ending = reason;
       void options.stopTree(pid).then((stopped) => {
         if (stopped === "failed") cleanupUncertain = true;
       });
+      // A stop that fails leaves a command that may never end; the call ends
+      // anyway once the wait is over, marked uncertain, rather than hanging.
+      stopWait = setTimeout(() => {
+        cleanupUncertain = true;
+        finish(result(null));
+      }, options.stopWaitMs);
     };
+    const result = (exitCode: number | null): RepositoryTestProcessResult =>
+      ending === "unowned"
+        ? { ...unavailable(), cleanupUncertain }
+        : {
+            termination: ending ?? "exited",
+            exitCode: ending === undefined ? exitCode : null,
+            stdout: Buffer.concat(stdout),
+            stderr: Buffer.concat(stderr),
+            parserFailed: false,
+            cleanupUncertain,
+            ...(truncated ? { outputTruncated: true } : {}),
+          };
     const timer = setTimeout(() => end("timed-out"), input.timeoutMs);
     const abort = () => end("cancelled");
     signal?.addEventListener("abort", abort, { once: true });
-    const settle = (exitCode: number | null) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      resolve({
-        termination: ending ?? "exited",
-        exitCode: ending === undefined ? exitCode : null,
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
-        parserFailed: false,
-        cleanupUncertain,
-        ...(truncated ? { outputTruncated: true } : {}),
-      });
-    };
-    child.once("error", () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      resolve(unavailable());
+    child.once("error", () => finish(unavailable()));
+    child.once("close", (code) => {
+      void receipt
+        .then((handle) => handle?.remove())
+        .catch(() => {
+          cleanupUncertain = true;
+        })
+        .finally(() => finish(result(code)));
     });
-    child.once("close", (code) => settle(code));
   });
 }
 

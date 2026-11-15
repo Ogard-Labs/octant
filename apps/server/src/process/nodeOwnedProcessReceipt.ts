@@ -92,7 +92,16 @@ export async function persistProcessReceipt(
   };
 }
 
-export async function reconcileProcessReceipts(options: ProcessReceiptOptions): Promise<void> {
+export async function reconcileProcessReceipts(
+  options: ProcessReceiptOptions & {
+    /**
+     * Keeps a receipt whose process could not be shown stopped, and moves on
+     * to the next, rather than failing the whole pass. The receipt stays for
+     * the next start. Absent, such a receipt fails the pass, as it always has.
+     */
+    readonly onUncertain?: (receipt: OwnedProcessReceipt) => void;
+  },
+): Promise<void> {
   validateReceiptDirectory(options.receiptDirectory);
   if (options.receiptDirectory === undefined) return;
   let names: string[];
@@ -125,14 +134,20 @@ export async function reconcileProcessReceipts(options: ProcessReceiptOptions): 
         await unlink(path).catch(() => undefined);
         continue;
       }
-      await terminateOwnedProcess(
-        receipt.pid,
-        receipt.processIdentity,
-        options.shutdownTimeoutMs ?? 2_000,
-        identity,
-        options.killProcessGroup ?? signalProcessGroup,
-        processGroupExists,
-      );
+      try {
+        await terminateOwnedProcess(
+          receipt.pid,
+          receipt.processIdentity,
+          options.shutdownTimeoutMs ?? 2_000,
+          identity,
+          options.killProcessGroup ?? signalProcessGroup,
+          processGroupExists,
+        );
+      } catch (error) {
+        if (options.onUncertain === undefined) throw error;
+        options.onUncertain(receipt);
+        continue;
+      }
       await unlink(path).catch(() => undefined);
     } catch (error) {
       // Only disappearance of the receipt file itself is benign. Once the
@@ -468,6 +483,39 @@ export async function readProcessIdentity(pid: number): Promise<string | undefin
   if (!processLeaderExists(pid)) return undefined;
   throw new Error("Owned process identity is unavailable on this platform.");
 }
+
+/**
+ * Reconciles a supervisor's receipts on a Windows host. A process there is
+ * stopped with its whole tree through the tree stop (Windows has no process
+ * groups), each owned check reads its identity through PowerShell, so the
+ * wait is longer than a POSIX one, and a receipt whose process cannot be
+ * shown stopped is kept for the next start instead of holding up this one.
+ */
+export async function reconcileWindowsProcessReceipts(
+  options: Pick<ProcessReceiptOptions, "receiptDirectory" | "supervisor" | "processIdentity"> & {
+    readonly stopTree?: (pid: number) => Promise<unknown>;
+    readonly onUncertain?: (receipt: OwnedProcessReceipt) => void;
+  },
+): Promise<void> {
+  const stopTree = options.stopTree ?? stopWindowsProcessTree;
+  await reconcileProcessReceipts({
+    supervisor: options.supervisor,
+    ...(options.receiptDirectory === undefined
+      ? {}
+      : { receiptDirectory: options.receiptDirectory }),
+    ...(options.processIdentity === undefined ? {} : { processIdentity: options.processIdentity }),
+    killProcessGroup: (pid) => void stopTree(pid),
+    shutdownTimeoutMs: WINDOWS_RECONCILE_TIMEOUT_MS,
+    onUncertain:
+      options.onUncertain ??
+      ((receipt) =>
+        console.warn(
+          `Octant kept a ${receipt.supervisor} ownership receipt: process ${receipt.pid} could not be shown stopped.`,
+        )),
+  });
+}
+
+const WINDOWS_RECONCILE_TIMEOUT_MS = 15_000;
 
 /** Runs one program with an exact argument list and no shell; answers its stdout. */
 export type WindowsIdentityRead = (program: string, args: ReadonlyArray<string>) => Promise<string>;

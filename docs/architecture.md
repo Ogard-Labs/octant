@@ -18314,9 +18314,16 @@ deliverable and keeps every gate above:
      an exact argument list and no shell
      (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
      never matches. Provider runtimes and terminals keep their receipts there
-     as elsewhere, and a host restart finds and stops what it left behind.
-     Without it every receipt failed on Windows, and a provider launch, which
-     waits for its receipt, never started.
+     as elsewhere, and so do the harness shell's Windows commands (supervisor
+     `windows-harness-shell`, beside the other harness receipts). A host
+     restart finds and stops what it left behind, through the tree stop, and
+     a receipt whose process cannot be shown stopped is kept for the next
+     start instead of holding up this one. Without the identity every receipt
+     failed on Windows, and a provider launch, which waits for its receipt,
+     never started. A tree stop that has not answered within 10 seconds
+     counts as failed, and a harness command whose stop failed ends its call
+     10 seconds later as timed out or cancelled, marked cleanup-uncertain,
+     rather than leaving the call waiting.
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process
@@ -18381,7 +18388,9 @@ deliverable and keeps every gate above:
      The `server-windows` CI job runs against real processes on
      `windows-2025`: the tree stop (a PowerShell root and the program it
      started both end), a running process's identity read twice alike and
-     its receipt kept and removed, the production Codex driver reading its
+     its receipt kept and removed, a live shell stopped from its receipt when
+     the terminal port starts again, a long harness command a "crashed" port
+     left running stopped from its receipt by a fresh port, the production Codex driver reading its
      catalog through a runtime registry that keeps receipts, a failed native
      program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
      and a live one that close ends, the harness shell running a turn's

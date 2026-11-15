@@ -1,7 +1,16 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { terminalShellFor } from "../code/terminalShell";
 import { createNativeHarnessShell } from "./nativeHarnessShell";
 import {
@@ -59,6 +68,80 @@ describe("the harness shell at Full access on a Windows host", () => {
       "@echo off\r\nnpm test\r\nexit /b %errorlevel%\r\n",
     );
   });
+
+  it("ends a timed-out command's call as uncertain when its tree stop fails and the command never closes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "octant-windows-harness-"));
+    directories.push(root);
+    const folder = join(root, "scripts", "octant-harness-1");
+    mkdirSync(folder, { recursive: true });
+    const script = join(folder, "command.ps1");
+    writeFileSync(script, "Start-Sleep -Seconds 300\n");
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+    });
+    const stopTree = vi.fn(async () => "failed" as const);
+    const port = createWindowsFullAccessShellPort({
+      shell: () => "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      scriptDirectory: join(root, "scripts"),
+      stopTree,
+      stopWaitMs: 50,
+      spawn: (() => child) as never,
+    });
+    const result = await port.executeShellScript({
+      script,
+      cwd: root,
+      environment: {},
+      timeoutMs: 20,
+    });
+    expect(result).toMatchObject({ termination: "timed-out", cleanupUncertain: true });
+    expect(stopTree).toHaveBeenCalledWith(4242);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "finds and stops a long command a crashed host left running, from its receipt, and removes the receipt",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-windows-harness-"));
+      directories.push(root);
+      const scriptDirectory = join(root, "scripts");
+      const receiptDirectory = join(root, "receipts");
+      const checkout = join(root, "checkout");
+      mkdirSync(scriptDirectory);
+      mkdirSync(checkout);
+      const shell = () => terminalShellFor({ platform: "win32", windowsShell: undefined });
+      const harness = createNativeHarnessShell({
+        process: createWindowsFullAccessShellPort({ shell, scriptDirectory, receiptDirectory }),
+        scriptDirectory,
+        scriptFileName: () => windowsScriptFileName(shell()),
+        scriptText: (command) => windowsScriptText(shell(), command),
+      });
+      const running = harness.run({
+        command:
+          "$child = Start-Process -PassThru -WindowStyle Hidden -FilePath ping.exe -ArgumentList '-n','300','127.0.0.1'; Set-Content -LiteralPath child.pid -Value $child.Id; Start-Sleep -Seconds 300",
+        cwd: checkout,
+        timeoutMs: 280_000,
+      });
+      await vi.waitFor(() => expect(existsSync(join(checkout, "child.pid"))).toBe(true), {
+        timeout: 30_000,
+      });
+      await vi.waitFor(() => expect(readdirSync(receiptDirectory)).toHaveLength(1), {
+        timeout: 30_000,
+      });
+      const childPid = Number(readFileSync(join(checkout, "child.pid"), "utf8").trim());
+      // The restart: a fresh port over the same receipts, as the next start builds.
+      await createWindowsFullAccessShellPort({
+        shell,
+        scriptDirectory,
+        receiptDirectory,
+      }).reconcile();
+      const ended = await running;
+      expect(ended.status).not.toBe("timed-out");
+      expect(() => process.kill(childPid, 0)).toThrow();
+      expect(readdirSync(receiptDirectory)).toEqual([]);
+    },
+    120_000,
+  );
 
   it.runIf(process.platform === "win32")(
     "reports a failed native program, a failed cmdlet and a failed Command Prompt command as failures",
