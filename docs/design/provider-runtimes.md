@@ -795,21 +795,29 @@ as a `local_bash` task: the decoder reads its `task_started`,
 `task-progress` row, as it does a subagent's. When such a task ends, or a
 watch prints a line, the runtime wakes the model and starts a turn by itself.
 
-In Code the session outlives its turn (maintainer decision, 2026-11-14). The
-turn completes when the model's reply is done; the background tasks keep
-running and show as live tasks above the thread's composer, with Stop. The
-host keeps the session (`OutlivingSessions`) and starts every Code session
-with `outlivesTurn`, which tells the driver not to hold the turn. When the
-runtime then starts a turn by itself while the thread is idle, the driver
-holds that turn's events, and every one of its tool calls waits unanswered
-(Full access's unasked allow included, and refused if the session stops
-first), until the host opens a runtime-started turn for the thread: an ordinary Code turn started
-as the host at the thread's own level, whose recorded prompt says why it
-exists and is never sent. That turn reattaches to the kept session with
-`attachRuntimeTurn` instead of sending, reads the held events from their
-`runtime-turn-started` event (`trigger: "background-task"`), and is journaled
-and replayed like any other turn, the frame keeping the runtime as its
-origin. A turn the runtime finishes before the host attaches still waits,
+In Work and Code the session outlives its turn (maintainer decision,
+2026-11-14; Work, a maintainer request on 2026-11-15, under the shared
+capability set). The turn completes when the model's reply is done; the
+background tasks keep running and show as live tasks above the thread's
+composer, with Stop. The host keeps the session (`OutlivingSessions`, one
+keeper for Code threads and one for Work threads) and starts every Work and
+Code session with `outlivesTurn`, which tells the driver not to hold the
+turn. When the runtime then starts a turn by itself while the thread is
+idle, the driver holds that turn's events, and every one of its tool calls
+waits unanswered (Full access's unasked allow included, and refused if the
+session stops first), until the host opens a runtime-started turn for the
+thread: an ordinary turn of the thread's mode started as the host at the
+thread's own level, whose recorded prompt says why it exists and is never
+sent. That turn reattaches to the kept session with `attachRuntimeTurn`
+instead of sending, reads the held events from their `runtime-turn-started`
+event (`trigger: "background-task"`), and is journaled and replayed like any
+other turn: in Code the frame keeps the runtime as its origin; in Work the
+turn is journaled as the system's with the host's fixed prompt, carries no
+sibling thread's messages, and is refused unless it takes up the session the
+thread's last turn left. A Work session is kept per provider session, folder
+and extra folders, and the Work request runtime answers a kept session's
+approvals and Shield reviews for whichever turn holds it when the call
+arrives. A turn the runtime finishes before the host attaches still waits,
 its events held, and is read whole on attach; a second turn the runtime
 starts before the first was attached stops the session, because one attach
 reads one turn. A person's send is refused while such a turn waits to be
@@ -821,15 +829,19 @@ live tasks.
 The kept session is always stopped, never orphaned: when its last task has
 ended and no turn runs (after up to 5 seconds for the turn the runtime
 starts for that task's end, which reaches the host first), when the person
-stops the thread (Stop on the live tasks, or a Stop with no turn running),
-when the person changes the thread so it would start a session on other
-terms (its level or how asks are answered, its provider or model, its
-checkout or folder) or archives, moves, or deletes it, or when the thread's
-Project is relinked, archived, or loses an extra folder or the thread's
-working folder, read from the journal (a Project change touches no thread, so
-every kept session of that Project is judged again against the Project as
-the append committed it), so a session never goes on acting at the level it
-launched with or reaching a folder its Project no longer grants,
+stops the thread (Stop on the live tasks, or in Code a Stop with no turn
+running), when the person changes the thread so it would start a session on
+other terms (its level or how asks are answered, its provider or model, its
+checkout or folder, or for Work its Project binding, working folder or
+working directory) or archives, moves, marks Done, or deletes it, or when the
+thread's Project is relinked, archived, or loses an extra folder or the
+thread's working folder, read from the journal (a Project change touches no
+thread, so every kept session of that Project is judged again against the
+Project as the append committed it; Work reads the thread from the committed
+change itself, since its thread projection is applied only after the journal
+tells its listeners and reading it there missed a level just lowered), so a
+session never goes on acting at the level it launched with or reaching a
+folder its Project no longer grants,
 after the background work limit with no turn in the thread (a host setting:
 2 hours by default, Off for no bound), when the host cannot open the
 runtime's turn (the thread was archived, or stayed busy for 20 tries), when
@@ -863,11 +875,10 @@ turn keeps a dev server from holding it open forever, and opening the
 runtime's turn through the thread's ordinary admission reuses the gate, the
 journal, the stop and replay unchanged rather than adding a turn kind.
 
-Work and other callers (a child run, a single-use session) still keep the
-earlier lifecycle: a session lasts one person's turn, so the driver holds
-that turn open instead of letting such a turn start after the runner has
-stopped the session (a Work session that outlives its turn is not built
-yet). When the runtime's result arrives while a background task the turn
+Other callers (a child run, a single-use session) still keep the earlier
+lifecycle: a session lasts one person's turn, so the driver holds that turn
+open instead of letting such a turn start after the runner has stopped the
+session. When the runtime's result arrives while a background task the turn
 started still runs, or before the runtime says it is idle, the completion is
 held. Each turn the runtime then starts is folded into the person's turn,
 opened by a `runtime-turn-started` event (`trigger: "background-task"`); its
@@ -881,9 +892,9 @@ with `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS`; a runtime that never reports
 its state is taken as idle after each result, and only a task's end makes it
 wait again). Code journals the event as the operation's
 `runtime-turn-started` frame, and the transcript's summary line says the
-turn continued after background work. Work and Chat fold the runtime's text,
-tool steps, and task rows into the person's turn without a separate marker
-(not built yet).
+turn continued after background work. Chat and child runs fold the runtime's
+text, tool steps, and task rows into the person's turn without a separate
+marker (not built yet).
 
 The hold is bounded. The stalled-turn limit counts its silence as it counts
 any other; the person's stop ends it, and on an idle runtime the driver
@@ -980,12 +991,12 @@ records the level it left as the thread's `planReturnPolicy` (Full access
 is recorded as approval-gated, because only the person chooses Full access),
 and an approved plan returns the thread there, or to approval-gated when the
 person put the thread in Plan. A declined ask leaves the level and the turn
-as they were. Work, Chat, and child runs do not answer level changes yet, so
-their sessions hold neither tool. Changing the level inside the running turn,
-through the runtime's `setPermissionMode` as Claude Code does on its own, is
-decided and not built yet (maintainer decision, 2026-11-14): the port exposes
-the control, but a session's launch profile and tool set would still be the
-old level's, so the turn ends until a session can change them in place.
+as they were. Chat and child runs do not answer level changes yet, so their
+sessions hold neither tool. Work does not either, and by rule rather than as
+a gap: both asks move a thread into or out of Plan, and Work has no Plan
+([Guardrail levels](decisions.md#guardrail-levels)). Building them for Work
+first needs a Plan level in Work, a change to that decision; until then a
+Work session holds neither tool and the runtime cannot change its own mode. Changing the level inside the running turn, through the runtime's `setPermissionMode` as Claude Code does on its own, is decided and not built yet (maintainer decision, 2026-11-14): the port exposes the control, but a session's launch profile and tool set would still be the old level's, so the turn ends until a session can change them in place.
 
 #### Sessions started outside Octant
 
@@ -1031,7 +1042,28 @@ checkout or folder changed while the provider was asked: a session journaled
 for a checkout the thread no longer has could be taken up by neither a send
 nor another adoption. A session still open in a terminal is not
 detected; continuing it in both places writes two branches of one
-conversation. A Work thread cannot be started from a session yet.
+conversation.
+
+An empty Work thread can continue such a session the same way (maintainer
+request, 2026-11-15), under Work's own folder rules rather than a checkout:
+the folder listed and adopted is the one the thread's turns run in, the
+Project's approved folder for the thread with its working directory
+resolved inside it, never a folder the caller names. Only an active Work
+thread with no turn, not marked Done, on this computer (a server Project's
+thread is refused), on its Project's current binding, in a Project the
+caller holds, is adopted, and only by the person, as in Code. Work has no
+operation journal, so the adoption is recorded on the thread
+(`adoptedSession` in a `work.thread-updated@1`): the runtime's session id,
+the new Octant session id and its resume cursor, and the provider, model,
+binding, working folder and working directory it was adopted under, after
+the thread is marked as carrying outside content (`adopted-provider-session`).
+The thread's first turn resumes that session only while all of those still
+match; a thread moved to another provider, model or folder before its first
+turn is refused with a sentence saying so, rather than starting fresh and
+dropping the conversation. While a Work adoption runs, a message sent to the
+thread is refused with a note to send again, and the adoption checks again
+that the thread is empty just before it journals. Its picker and details row
+are Code's, above the Work composer.
 
 #### Wake-ups the model schedules
 

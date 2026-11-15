@@ -88,9 +88,11 @@ import {
   decodeProjectId,
   decodeBindingRevisionId,
   decodeProviderInstance,
+  decodeProviderResumeCursor,
   decodeWindowId,
   type AgentRun,
   type Project,
+  type WorkThreadAdoptedSession,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -2268,6 +2270,154 @@ describe("WorkTurnService", () => {
     expect(result.kind === "accepted" && result.turn.capabilities.confinement).toBe(
       "project-root-confined",
     );
+  });
+
+  describe("a thread started from a session begun outside Octant", () => {
+    const cursor = decodeProviderResumeCursor({ driverKind: "claude", value: "outside-cursor" });
+    const withSessions = (
+      adopt: NonNullable<ProviderDriver["nativeSessions"]>["adopt"],
+    ): Parameters<typeof serviceFixture>[0] => ({
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        nativeSessions: {
+          list: () =>
+            Effect.succeed([
+              { nativeSessionId: "outside-1", title: "Draft notes", lastModified: 1 },
+              { nativeSessionId: "../escape", lastModified: 2 },
+            ]),
+          adopt,
+        },
+      }),
+    });
+
+    it("offers the provider's sessions for the folder the thread works in, and only well-formed ids", async () => {
+      const list = vi.fn(() =>
+        Effect.succeed([
+          { nativeSessionId: "outside-1", title: "Draft notes", lastModified: 1 },
+          { nativeSessionId: "../escape", lastModified: 2 },
+        ]),
+      );
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list, adopt: () => Effect.die("unused") },
+        }),
+      });
+      const listed = await fixture.service.nativeSessions(ids.window, ids.thread);
+      expect(list).toHaveBeenCalledWith({
+        instanceId: ids.provider,
+        projectRoot: "/private/tmp/knowledge",
+      });
+      expect(listed.sessions.map((session) => session.nativeSessionId)).toEqual(["outside-1"]);
+    });
+
+    it("adopts the session under the thread's own folder and resumes it on the first turn", async () => {
+      let adopted: WorkThreadAdoptedSession | undefined;
+      const adopt = vi.fn(() => Effect.succeed(cursor));
+      const seen: Array<{ readonly sessionId: string; readonly cursor?: string }> = [];
+      const fixture = serviceFixture({
+        ...withSessions(adopt),
+        recordAdoptedSession: (_thread, record) => {
+          adopted = record;
+          return { status: "recorded" };
+        },
+        adoptedSession: () => adopted,
+        turnRuntime: {
+          run: async (input) => {
+            seen.push({
+              sessionId: String(input.providerSessionId),
+              ...(input.resumeCursor === undefined ? {} : { cursor: input.resumeCursor.value }),
+            });
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+
+      const result = await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(result).toEqual({
+        kind: "work-native-session-adopted",
+        threadId: ids.thread,
+        nativeSessionId: "outside-1",
+      });
+      expect(adopt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "work",
+          projectRoot: "/private/tmp/knowledge",
+          nativeSessionId: "outside-1",
+        }),
+      );
+      expect(adopted).toMatchObject({
+        nativeSessionId: "outside-1",
+        resumeCursor: cursor,
+        workingDirectory: ".",
+        bindingRevisionId: ids.binding,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(seen).toEqual([
+        { sessionId: String(adopted?.providerSessionId), cursor: "outside-cursor" },
+      ]);
+    });
+
+    it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
+      let release: (() => void) | undefined;
+      const adopt = vi.fn(() =>
+        Effect.async<typeof cursor>((resume) => {
+          release = () => resume(Effect.succeed(cursor));
+        }),
+      );
+      const fixture = serviceFixture({
+        ...withSessions(adopt),
+        recordAdoptedSession: () => ({ status: "recorded" }),
+      });
+
+      const adopting = fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalled());
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+      release?.();
+      expect((await adopting).kind).toBe("work-native-session-adopted");
+
+      const busy = serviceFixture({
+        ...withSessions(() => Effect.succeed(cursor)),
+        recordAdoptedSession: () => ({ status: "recorded" }),
+      });
+      await busy.service.startFirstTurn(ids.window, startCommand());
+      await busy.waitForIdle();
+      expect(await busy.service.adoptNativeSession(ids.window, ids.thread, "outside-1")).toEqual({
+        kind: "work-native-session-refused",
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+      });
+    });
+
+    it("refuses the first turn once the thread moved to another model than the session it adopted", async () => {
+      const fixture = serviceFixture({
+        adoptedSession: () => ({
+          nativeSessionId: "outside-1",
+          providerSessionId: ids.session as never,
+          resumeCursor: cursor,
+          providerInstanceId: ids.provider as never,
+          modelId: "model-b" as never,
+          bindingRevisionId: ids.binding as never,
+          workingDirectory: "." as never,
+        }),
+      });
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+      expect(fixture.acquireInputs).toHaveLength(0);
+    });
+  });
+
+  it("refuses to open the runtime's own turn on a thread with no session to open it in", async () => {
+    const run = vi.fn();
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, startCommand(), { runtimeTurn: true }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("validates host, Project, binding, working directory, and confinement before launching", async () => {
@@ -6015,6 +6165,9 @@ function serviceFixture(
     readonly serverProjects?: WorkTurnServiceDependencies["serverProjects"];
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
+    readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    /** Read on every thread read, so a test can adopt a session between reads. */
+    readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -6134,6 +6287,9 @@ function serviceFixture(
         ...(options.documentDelivery === undefined
           ? {}
           : { documentDelivery: options.documentDelivery }),
+        ...(options.adoptedSession?.() === undefined
+          ? {}
+          : { adoptedSession: options.adoptedSession() }),
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -6232,6 +6388,9 @@ function serviceFixture(
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
     ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
+    ...(options.recordAdoptedSession === undefined
+      ? {}
+      : { recordAdoptedSession: options.recordAdoptedSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),

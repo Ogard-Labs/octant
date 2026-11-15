@@ -495,6 +495,112 @@ describe("WorkRequestRuntime", () => {
     expect(interruptSession).toHaveBeenCalledWith(sessionId);
   });
 
+  it("still answers a kept session's requests in the turn after one completed", async () => {
+    const answerApproval = vi.fn(() => Effect.void);
+    const runtime = new WorkRequestRuntime({
+      requests: { record: vi.fn(), interruptSession: vi.fn(() => []) } as never,
+      uuid: () => "00000000-0000-4000-8000-000000000905",
+    });
+    const connection = {
+      subscribe: Effect.succeed(
+        Stream.succeed<ProviderRuntimeEvent>({
+          instanceId: providerInstanceId,
+          sequence: 1,
+          correlationId: decodeCorrelationId(String(projectId)),
+          occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+          kind: "completed",
+          sessionId,
+        }),
+      ),
+      answerApproval,
+      answerUserInput: () => Effect.void,
+      interrupt: () => Effect.void,
+    };
+    await Effect.runPromise(
+      runtime.subscribe({ connection, projectId, threadId, providerInstanceId, sessionId }),
+    );
+
+    await runtime.answerApproval({ sessionId, requestId: "approval-2", approved: true });
+
+    expect(answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "approval-2",
+      approved: true,
+    });
+  });
+
+  it("shows Shield's decision on the turn that holds a kept session when the call arrives", async () => {
+    const approvalEvent: ProviderRuntimeEvent = {
+      instanceId: providerInstanceId,
+      sequence: 1,
+      correlationId: decodeCorrelationId(String(projectId)),
+      occurredAt: decodeTimestamp("2026-08-10T08:00:00.000Z"),
+      kind: "approval-request",
+      sessionId,
+      requestId: "approval-1",
+      action: "run-terminal-command",
+      description: "Run a command",
+    };
+    const review = vi.fn(async (_input: { readonly signal?: AbortSignal | undefined }) => ({
+      reviewer: "octant-shield" as const,
+      verdict: "allow" as const,
+      stage: "fast-allow" as const,
+      rule: "read-only-git",
+      reason: "A read-only Git command.",
+      latencyMs: 1,
+      decidedAt: decodeTimestamp("2026-10-31T10:00:00.000Z"),
+    }));
+    const runtime = new WorkRequestRuntime({
+      requests: { record: vi.fn(), interruptSession: vi.fn(() => []) } as never,
+      uuid: () => "00000000-0000-4000-8000-000000000905",
+      shield: () => ({ review }),
+    });
+    const connection = {
+      subscribe: Effect.succeed(Stream.succeed(approvalEvent)),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      interrupt: () => Effect.void,
+      approvalCall: () => ({ tool: "Bash", input: "{}" }),
+    };
+    // The connection is acquired once, by the first turn; a later turn holds
+    // it when the call arrives, so the turn is read when the call is judged.
+    const firstTurn = new AbortController();
+    const laterTurn = new AbortController();
+    const firstReviewed = vi.fn();
+    const laterReviewed = vi.fn();
+    let current = { signal: firstTurn.signal, reviewed: firstReviewed };
+    const attached = attachWorkRequestRuntime(
+      { acquire: () => Effect.succeed(connection) } as unknown as ProviderDriver,
+      () => runtime,
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const acquired = yield* attached.acquire({
+            instanceId: providerInstanceId,
+            projectRoot: "/work",
+            mode: "work",
+            workRequest: {
+              projectId,
+              threadId,
+              sessionId,
+              get signal() {
+                return current.signal;
+              },
+              onApprovalReviewed: (reviewed) => current.reviewed(reviewed),
+            },
+          });
+          current = { signal: laterTurn.signal, reviewed: laterReviewed };
+          yield* Stream.unwrapScoped(acquired.subscribe).pipe(Stream.runDrain);
+        }),
+      ),
+    );
+
+    expect(review.mock.calls[0]?.[0].signal).toBe(laterTurn.signal);
+    expect(laterReviewed).toHaveBeenCalledOnce();
+    expect(firstReviewed).not.toHaveBeenCalled();
+  });
+
   it("interrupts pending requests when the provider connection detaches", () => {
     const interruptSession = vi.fn(() => []);
     const runtime = new WorkRequestRuntime({
