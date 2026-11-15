@@ -106,6 +106,27 @@ describe("sendResponsesTurn", () => {
     expect(JSON.parse(String(init.body))).not.toHaveProperty("previous_response_id");
   });
 
+  it("sends an attached image with the prompt as an input_image part", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(10), completed(20, { input_tokens: 3, output_tokens: 2, total_tokens: 5 })),
+    );
+    await Effect.runPromise(
+      sendResponsesTurn(
+        input(fetch, { history: [], promptImages: [{ mediaType: "image/jpeg", data: "AQID" }] }),
+      ),
+    );
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "next" },
+          { type: "input_image", image_url: "data:image/jpeg;base64,AQID" },
+        ],
+      },
+    ]);
+  });
+
   it("normalizes text, reasoning, usage, and completion with independent sequences", async () => {
     const observed = vi.fn();
     const fetch = vi.fn(async () =>

@@ -9,6 +9,9 @@ import {
   guardrailLowered,
   guardrailScopeOf,
   guardrailLevelOf,
+  hostSandboxRefusal,
+  hostStartsThreadsAtOpenFullAccess,
+  WINDOWS_SANDBOX_MISSING_REASON,
   outsideContentRecordedOnly,
   permissionModeOf,
   permissionModeOfWorkAccess,
@@ -196,6 +199,53 @@ describe("guardrail levels", () => {
           mode: "chat",
         }),
       ).toMatchObject({ egress: "none" });
+    }
+  });
+});
+
+describe("levels on a host without Octant's sandbox", () => {
+  it("runs only Full access with the sandbox off on Windows and names the missing sandbox for every other level", () => {
+    expect(
+      hostSandboxRefusal({ platform: "win32", access: { executionPolicy: "full-access" } }),
+    ).toBeUndefined();
+    for (const access of [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "approval-gated", autoApprove: true },
+      { executionPolicy: "auto-accept-edits" },
+      { executionPolicy: "plan" },
+      { executionPolicy: "full-access", fullAccessSandbox: true },
+    ] as const) {
+      expect(hostSandboxRefusal({ platform: "win32", access })).toBe(
+        WINDOWS_SANDBOX_MISSING_REASON,
+      );
+    }
+    expect(WINDOWS_SANDBOX_MISSING_REASON).toMatch(/sandbox.*Windows/);
+  });
+
+  it("counts a host as starting threads at open Full access only when a Code or Work default is Full access without the sandbox", () => {
+    expect(hostStartsThreadsAtOpenFullAccess({})).toBe(false);
+    expect(
+      hostStartsThreadsAtOpenFullAccess({ code: { defaultExecutionPolicy: "full-access" } }),
+    ).toBe(true);
+    expect(
+      hostStartsThreadsAtOpenFullAccess({
+        code: { defaultExecutionPolicy: "full-access", defaultFullAccessSandbox: true },
+      }),
+    ).toBe(false);
+    expect(
+      hostStartsThreadsAtOpenFullAccess({ code: { defaultExecutionPolicy: "approval-gated" } }),
+    ).toBe(false);
+    expect(hostStartsThreadsAtOpenFullAccess({ work: { defaultAccess: "full-access" } })).toBe(
+      true,
+    );
+    expect(hostStartsThreadsAtOpenFullAccess({ work: { defaultAccess: "auto" } })).toBe(false);
+  });
+
+  it("refuses nothing on macOS or Linux, where the sandbox exists", () => {
+    for (const platform of ["darwin", "linux"]) {
+      expect(
+        hostSandboxRefusal({ platform, access: { executionPolicy: "approval-gated" } }),
+      ).toBeUndefined();
     }
   });
 });

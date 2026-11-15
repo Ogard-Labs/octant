@@ -781,6 +781,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
+          id: settingId("code-terminal-shell"),
+          label: "Terminal shell",
+          scope: "mode",
+          keywords: "terminal shell windows powershell pwsh command prompt cmd",
+        },
+        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",

@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
@@ -902,6 +903,14 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       {handoff === undefined ? null : (
         <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
       )}
+      <DescribedImagesNote
+        className="chat-transcript__handoff"
+        images={props.attempt.describedImages?.map((image) => ({
+          attachmentId: String(image.attachmentId),
+          name: image.name,
+          describedBy: image.describedBy,
+        }))}
+      />
       {props.attempt.inputReceipt === undefined ? null : (
         <ConversationInputs
           mode="chat"

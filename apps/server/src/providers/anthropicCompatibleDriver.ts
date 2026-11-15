@@ -10,6 +10,7 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { attachedImagesSupport, sendsEveryAttachment } from "./promptImages";
 import {
   unsupportedChatCapabilities,
   validateChatTurnInput,
@@ -224,6 +225,11 @@ function admitTurn(
   // tools for its siblings on the same endpoint.
   const isVerifiedModel =
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
+  // The request carries images only; a document the model lists would be
+  // dropped on the wire, so it is refused here instead.
+  if (!sendsEveryAttachment(turn.attachments)) {
+    return failure("unsupported", "This endpoint sends attached images only.");
+  }
   return validateChatTurnInput(
     turn,
     {
@@ -361,6 +367,7 @@ function recordObservedTurn(
     models,
     capabilities: {
       ...initialCapabilities,
+      nativeAttachments: attachedImagesSupport(models),
       streaming: "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
       usage: result.usage === undefined ? "unavailable" : "supported",
@@ -511,7 +518,10 @@ function recordProbe(
     // What requests taught about each model's window, and a person's
     // override, outlive the probe a Chat turn runs first.
     models: carryModelContextWindowFacts(result.models, prior?.models),
-    capabilities: initialCapabilities,
+    capabilities: {
+      ...initialCapabilities,
+      nativeAttachments: attachedImagesSupport(result.models),
+    },
     ...(result.failure === undefined ? {} : { message: result.failure.message }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,

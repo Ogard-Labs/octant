@@ -126,6 +126,8 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
+import { useSeesImages } from "../harness/useSeesImages";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
@@ -762,6 +764,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const seesImages = useSeesImages({
+    readsImages:
+      view === undefined
+        ? undefined
+        : boundModelReadsImages(props.providerGroups ?? [], view.thread),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: view === undefined ? undefined : String(view.thread.projectId),
+    providerInstanceId: view === undefined ? undefined : String(view.thread.providerInstanceId),
+    modelId: view === undefined ? undefined : String(view.thread.modelId),
+  });
   const folderDrops = useDroppedFolderMentions({
     scope:
       view === undefined
@@ -778,8 +793,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     hostId: props.hostId,
     refused: serverCheckout || props.pairedDevice === true,
     onFiles: (files) => {
-      if (boundModelReadsImages(providerGroups, thread) === false)
-        attachments.refuse("Choose a vision model to attach images.");
+      if (seesImages.takesImages === false)
+        attachments.refuse(seesImages.refusal ?? "Choose a vision model to attach images.");
       else void attachments.attach(files);
     },
   });
@@ -792,8 +807,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       if (props.attachmentClient === undefined) {
         reason = "Image attachments are unavailable on this host.";
         attachments.refuse(reason);
-      } else if (boundModelReadsImages(providerGroups, thread) === false) {
-        reason = "Choose a vision model to attach images.";
+      } else if (seesImages.takesImages === false) {
+        reason = seesImages.refusal ?? "Choose a vision model to attach images.";
         attachments.refuse(reason);
       } else {
         reason = await attachments.attach([file]);
@@ -1224,9 +1239,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (files.length === 0) return false;
     // The host refuses this turn anyway. Saying so at the paste is kinder than
     // letting the user write the message first and lose it at send.
-    if (boundModelReadsImages(providerGroups, thread) === false) {
+    if (seesImages.takesImages === false) {
       attachments.refuse(
-        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
+        seesImages.refusal ??
+          `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
       );
       return true;
     }
@@ -1921,14 +1937,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ? undefined
                     : checkpoints.byAnchor.get(String(message.operationId));
                 const gallery =
-                  message.attachments === undefined ? null : (
-                    <CodeAttachmentGallery
-                      attachments={message.attachments}
-                      {...(props.attachmentClient === undefined
-                        ? {}
-                        : { client: props.attachmentClient })}
-                      threadId={message.sourceThreadId ?? props.threadId}
-                    />
+                  message.attachments === undefined &&
+                  message.describedImages === undefined ? null : (
+                    <>
+                      {message.attachments === undefined ? null : (
+                        <CodeAttachmentGallery
+                          attachments={message.attachments}
+                          {...(props.attachmentClient === undefined
+                            ? {}
+                            : { client: props.attachmentClient })}
+                          threadId={message.sourceThreadId ?? props.threadId}
+                        />
+                      )}
+                      <DescribedImagesNote
+                        className="code-thread-workspace__handoff"
+                        images={message.describedImages}
+                      />
+                    </>
                   );
                 // Code's conversation turns do not carry the delivery mark, so the
                 // host's own delivery wording is what says this is a subagent's
@@ -2817,8 +2842,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 refusedReason={
                   props.attachmentClient === undefined
                     ? "Image attachments are unavailable on this host."
-                    : boundModelReadsImages(providerGroups, thread) === false
-                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                    : seesImages.takesImages === false
+                      ? (seesImages.refusal ??
+                        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`)
                       : undefined
                 }
                 onRefused={attachments.refuse}

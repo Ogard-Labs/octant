@@ -60,7 +60,7 @@ import { CodeFollowUpService } from "../code/codeFollowUpService";
 import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "../code/terminalProcessPort";
-import { defaultTerminalShell } from "../code/terminalShell";
+import { terminalShellFor } from "../code/terminalShell";
 import type { CodeRouteService } from "../codeRoutes";
 import { GitMutationPort } from "../code/gitMutationPort";
 import { codeThreadTurns } from "../code/codeForkPoint";
@@ -83,6 +83,10 @@ import { CoordinatorService } from "../coordinator/coordinatorService";
 import { createCoordinatorWakeJournal } from "../coordinator/coordinatorWakeJournal";
 import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStore";
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
+import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
+import { lookToolForThread } from "../image/lookTool";
+import { supportsConversationInput } from "./conversationInputs";
+import { modelLabelOf } from "./imageDescriber";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
@@ -290,8 +294,10 @@ import {
 } from "../serverProjects/serverTests";
 import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 
-export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
+  /** Sees images; absent on a host started without one. */
+  readonly imageDescriber?: ImageDescriber;
+} & Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,
@@ -420,6 +426,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const designSystemFiles = new DesignSystemFiles();
+  const imageDescriber = deps.imageDescriber;
   const {
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
@@ -594,6 +601,39 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           (readThread()?.executionPolicy ?? thread.executionPolicy) === "plan"
             ? "Plan mode cannot generate images. Leave Plan mode to generate one."
             : undefined,
+      });
+    });
+    // Sees images: a thread whose model cannot read images may ask for one
+    // to be described, from its own attachments or its own folder.
+    contributeCodeTools(({ thread, folders }) => {
+      const describer = imageDescriber;
+      if (describer === undefined) return undefined;
+      return lookToolForThread({
+        describer,
+        threadId: String(thread.id),
+        threadType: "code-thread",
+        projectId: thread.projectId,
+        threadModel: modelLabelOf(
+          { persistence, providerRuntimeRegistry },
+          thread.providerInstanceId,
+          thread.modelId,
+        ),
+        // The same test an attached image meets, so a thread that cannot
+        // take an image from Octant can always ask for one to be described.
+        readsImages: supportsConversationInput(
+          providerRuntimeRegistry.observedState(thread.providerInstanceId),
+          String(thread.modelId),
+          "image/png",
+        ),
+        attachment: async (attachmentId) => {
+          const reference = codeBoardEventStore.turnAttachmentOfThread(thread.id, attachmentId);
+          if (reference === undefined || codeAttachments === undefined) return undefined;
+          const bytes = await codeAttachments.read(thread.id, reference);
+          return { name: reference.displayName, mediaType: reference.mediaType, bytes };
+        },
+        folder: folders[0],
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        uuid: randomUUID,
       });
     });
     contributeCodeTools(({ windowId, thread }) =>
@@ -895,7 +935,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               );
             },
             workingDirectory,
-            shell: defaultTerminalShell(),
+            shell: terminalShellFor({
+              platform: process.platform,
+              windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+            }),
             credentialReferences: [],
             environment: {},
           };
@@ -1096,6 +1139,22 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                   },
                 }),
           }),
+        ...(imageDescriber === undefined
+          ? {}
+          : {
+              describeImages: ({ thread, images, signal }) =>
+                describeTurnImages(imageDescriber, {
+                  signal,
+                  scope: { threadId: String(thread.id), threadType: "code-thread" },
+                  projectId: thread.projectId,
+                  threadModel: modelLabelOf(
+                    { persistence, providerRuntimeRegistry },
+                    thread.providerInstanceId,
+                    thread.modelId,
+                  ),
+                  images,
+                }),
+            }),
         supportsAttachments: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           if (observed?.capabilities.nativeAttachments !== "supported") return false;
@@ -1835,6 +1894,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           project,
           candidate,
         ),
+      ...(imageDescriber === undefined
+        ? {}
+        : {
+            seesImagesAvailable: (project) =>
+              imageDescriber.available({ projectId: project.id, threadModel: "The builder" })
+                .kind === "available",
+          }),
       markProviderDown: (providerInstanceId) =>
         deps.providerAvailabilityMarks.markDown(providerInstanceId),
       // The host moves a worker whose first request failed before any work as

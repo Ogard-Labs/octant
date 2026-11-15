@@ -617,6 +617,7 @@ export function startOctantServer(
       nativeHarnessEgressRoutes,
       nativeHarnessHooks,
       nativeHarnessRoutingRoutes,
+      imageDescriber,
       shieldServerRoutes,
       shieldServerStore,
       serverProjectRoutes,
@@ -632,6 +633,8 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      providerAvailabilityMarks,
+      isProjectPolicyTargetAllowed,
       toolEffectLedger,
       hostResourceBudget,
       serverConnection,
@@ -870,6 +873,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      imageDescriber,
       hostResourceBudget,
       providerAvailabilityMarks,
       providerUsageLimitsService,
@@ -1052,6 +1056,7 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      imageDescriber,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,
@@ -1126,6 +1131,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      imageDescriber,
       codeProjectAccess,
       isPairedDeviceScope,
       isRestrictedDeviceScope,

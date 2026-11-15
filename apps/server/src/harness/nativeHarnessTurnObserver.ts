@@ -1,3 +1,4 @@
+import type { WindowsTerminalShell } from "@octant/contracts";
 import {
   decodeNativeHarnessAdvisorIntervention,
   decodeNativeHarnessContextReduction,
@@ -69,6 +70,8 @@ export interface NativeHarnessTurnObserverOptions {
   readonly serverContext?: (projectId: string | undefined) => string | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /** The terminal shell Settings › Code names, which a Windows host's bash tool runs. */
+  readonly windowsShell?: () => WindowsTerminalShell | undefined;
 }
 
 interface CompletedHarnessResponse extends NativeHarnessTurnScope {
@@ -111,7 +114,7 @@ export class NativeHarnessTurnObserver {
     const goal = this.#goalContext(scope.threadId);
     const servers = scope.mode === "chat" ? undefined : this.#serverContext(scope.projectId);
     return [
-      ...nativeHarnessInstructions(scope.mode),
+      ...nativeHarnessInstructions(scope.mode, { windowsShell: this.#options.windowsShell?.() }),
       // Per-turn content, after the stable instructions, so the goal's
       // changing statuses never move the cached prefix.
       ...(goal === undefined ? [] : [{ kind: "work-item" as const, text: goal }]),

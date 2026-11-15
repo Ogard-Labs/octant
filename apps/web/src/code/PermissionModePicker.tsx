@@ -2,6 +2,8 @@ import type { PermissionMode, ProviderExecutionPolicy } from "@octant/contracts/
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
+  hostSandboxRefusal,
+  threadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
 import { clampTurnAccessPosture, type PickerGroup } from "@octant/domain";
@@ -16,6 +18,7 @@ import {
 } from "../ui/icons";
 import { useId } from "react";
 import { ComposerOutsideContentMark } from "../composer/OutsideContentNotice";
+import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
@@ -171,6 +174,16 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
+  // A host without Octant's sandbox (Windows today) runs only Full access with
+  // the sandbox off. The host refuses the rest; the picker shows them
+  // unavailable with that reason rather than offering a choice it refuses.
+  const hostPlatform = useHostPlatform();
+  const hostRefusalOf = (mode: PermissionMode) =>
+    hostSandboxRefusal({ platform: hostPlatform, access: threadAccessOf(mode) });
+  const sandboxHostRefusal = hostSandboxRefusal({
+    platform: hostPlatform,
+    access: { executionPolicy: "full-access", fullAccessSandbox: true },
+  });
   const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
   const triggerLabel = autoFallsBack
     ? "Ask first"
@@ -258,8 +271,14 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                 }}
               >
                 {options.map((option) => {
-                  const unsupported = option.id === "auto" && !autoSupported;
-                  const note = unsupported ? unsupportedReason : detailOf(option.id);
+                  const hostRefusal = hostRefusalOf(option.id);
+                  const unsupported =
+                    hostRefusal !== undefined || (option.id === "auto" && !autoSupported);
+                  const note =
+                    hostRefusal ??
+                    (option.id === "auto" && !autoSupported
+                      ? unsupportedReason
+                      : detailOf(option.id));
                   return (
                     <OctantMenuRadioItem
                       aria-describedby={`${idPrefix}-${option.id}-note`}
@@ -293,7 +312,8 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      (!sandboxSupported && props.fullAccessSandbox !== true)
+                      ((!sandboxSupported || sandboxHostRefusal !== undefined) &&
+                        props.fullAccessSandbox !== true)
                     }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
@@ -303,7 +323,8 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     <span className="flex min-w-0 flex-col">
                       <span>Keep the sandbox</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
-                        {sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL}
+                        {sandboxHostRefusal ??
+                          (sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>

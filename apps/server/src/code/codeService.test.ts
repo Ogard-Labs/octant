@@ -1119,6 +1119,36 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps the Windows terminal shell a person chose across later default changes, and stores nothing for Windows PowerShell", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      windowsTerminalShell: "pwsh",
+    });
+    expect(chosen).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      windowsTerminalShell: "powershell",
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(back.settings.windowsTerminalShell).toBeUndefined();
+  });
+
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
     const fixture = serviceFixture();
     const defaults = {

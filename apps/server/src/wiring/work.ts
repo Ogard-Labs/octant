@@ -118,6 +118,10 @@ import {
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { saveGeneratedImageUnder } from "../image/generatedImageSave";
 import { createThreadImageAgentTools } from "../image/imageAgentTools";
+import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
+import { lookToolForThread } from "../image/lookTool";
+import { supportsConversationInput } from "./conversationInputs";
+import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
@@ -139,8 +143,10 @@ import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 
-export type WorkDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
+export type WorkDependencies = Pick<ServerStart, "persistence"> & {
+  /** Sees images; absent on a host started without one. */
+  readonly imageDescriber?: ImageDescriber;
+} & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "automationEventStore"
@@ -257,6 +263,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
   };
 
 export function wireWork(deps: WorkDependencies) {
+  const imageDescriber = deps.imageDescriber;
   const {
     conversationInputTransfer,
     agentRunPersistence,
@@ -773,6 +780,41 @@ export function wireWork(deps: WorkDependencies) {
                   saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
               },
             });
+        // Sees images: a thread whose model cannot read images may ask for one
+        // to be described, from its own attachments or its own folder.
+        const lookTools =
+          !browserSupported || imageDescriber === undefined
+            ? undefined
+            : lookToolForThread({
+                describer: imageDescriber,
+                threadId: String(input.thread.id),
+                threadType: "work-thread",
+                projectId: input.thread.projectId,
+                threadModel: modelLabelOf(
+                  { persistence, providerRuntimeRegistry },
+                  input.thread.providerInstanceId,
+                  input.thread.modelId,
+                ),
+                // The same test an attached image meets.
+                readsImages: supportsConversationInput(
+                  observed,
+                  String(input.thread.modelId),
+                  "image/png",
+                ),
+                attachment: async (attachmentId) => {
+                  const reference = workTurnProjection
+                    .listForThread(input.thread.id)
+                    .flatMap((turn) => turn.attachments ?? [])
+                    .find((attachment) => String(attachment.attachmentId) === attachmentId);
+                  if (reference === undefined) return undefined;
+                  const bytes = await workAttachments.read(input.thread.id, reference);
+                  return { name: reference.displayName, mediaType: reference.mediaType, bytes };
+                },
+                folder: input.projectRoot,
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
+                uuid: randomUUID,
+              });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -818,7 +860,8 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools === undefined &&
           computer === undefined &&
           canvasTools === undefined &&
-          imageTools === undefined
+          imageTools === undefined &&
+          lookTools === undefined
         )
           return undefined;
         return combineAppManagedToolSets(
@@ -831,6 +874,7 @@ export function wireWork(deps: WorkDependencies) {
           agentsTools,
           canvasTools,
           imageTools,
+          lookTools,
           pastThreads,
           projectMemoryTools,
         );
@@ -871,6 +915,29 @@ export function wireWork(deps: WorkDependencies) {
           readThread: (id) => workThreadProjection.read(id),
           readTurns: (id) => workTurnProjection.listForThread(id),
         }),
+      ...(imageDescriber === undefined
+        ? {}
+        : {
+            describeImages: ({
+              threadId,
+              projectId,
+              providerInstanceId,
+              modelId,
+              images,
+              signal,
+            }) =>
+              describeTurnImages(imageDescriber, {
+                signal,
+                scope: { threadId: String(threadId), threadType: "work-thread" },
+                projectId,
+                threadModel: modelLabelOf(
+                  { persistence, providerRuntimeRegistry },
+                  providerInstanceId,
+                  modelId,
+                ),
+                images,
+              }),
+          }),
       supportsAttachments: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         if (observed?.capabilities.nativeAttachments !== "supported") return false;

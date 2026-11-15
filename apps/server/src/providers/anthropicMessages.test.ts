@@ -47,6 +47,29 @@ function fixture(response: Response): AnthropicCompatibleFetch {
 }
 
 describe("sendAnthropicMessagesTurn", () => {
+  it("sends an image the person attached as a base64 image block before the text", () => {
+    const body = buildAnthropicMessagesBody({
+      modelId: "fixture-model",
+      prompt: "",
+      history: [
+        {
+          role: "user",
+          text: "What is wrong?",
+          attachments: [
+            { mediaType: "image/png", bytes: new Uint8Array([1, 2, 3]) },
+            { mediaType: "application/pdf", bytes: new Uint8Array([4]) },
+          ],
+        },
+      ],
+    });
+    const [message] = body.messages as ReadonlyArray<{ content: ReadonlyArray<unknown> }>;
+    expect(message?.content.slice(0, 2)).toEqual([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
+      expect.objectContaining({ type: "text", text: "What is wrong?" }),
+    ]);
+    expect(message?.content).toHaveLength(2);
+  });
+
   it("keeps screenshots inside their tool result when replaying observations", () => {
     const body = buildAnthropicMessagesBody({
       modelId: "fixture-model",

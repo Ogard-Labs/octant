@@ -11,6 +11,7 @@ import type {
   CoordinatorWorkerListingByProject,
   CoordinatorWorkerLevel,
   SideChatDraftReturnReference,
+  WindowsTerminalShell,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -2719,6 +2720,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorWorkerListingByProject?: CoordinatorWorkerListingByProject;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
       readonly restartContinuation?: boolean;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({

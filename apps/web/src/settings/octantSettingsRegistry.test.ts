@@ -283,6 +283,7 @@ describe("octantSettingsRegistry", () => {
       "code-default-access",
       "code-auto-reviewer",
       "code-full-access-sandbox",
+      "code-terminal-shell",
       "code-editor-executable",
       "code-editor-arguments",
       "archived-worktrees",

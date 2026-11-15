@@ -33,6 +33,7 @@ import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMenti
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
+import { DescribedTurnImages } from "./imageDescription";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -287,6 +288,8 @@ export const WorkTurnState = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   failure: Schema.optional(WorkTurnFailure),
   /** Files that changed in the bound folder while this turn ran. */
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
@@ -549,6 +552,8 @@ export const WorkTurnAccepted = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   capabilities: WorkTurnCapabilityFacts,
   /**

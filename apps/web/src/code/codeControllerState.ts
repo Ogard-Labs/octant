@@ -68,6 +68,8 @@ export interface CodeConversationMessage {
   readonly at?: string;
   /** Images this message carried, as the turn's start event recorded them. */
   readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
+  /** The images a Sees images model described for this message, and which model. */
+  readonly describedImages?: CodeConversationTurn["describedImages"];
   /**
    * The checkout as it stood before this turn ran. Present on a user message
    * whose turn the host managed to checkpoint, and what the transcript's
@@ -536,6 +538,7 @@ async function projectConversationTurns(
       ...(turn.attachments === undefined || turn.attachments.length === 0
         ? {}
         : { attachments: turn.attachments }),
+      ...(turn.describedImages === undefined ? {} : { describedImages: turn.describedImages }),
       ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
       ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
     });

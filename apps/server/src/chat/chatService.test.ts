@@ -282,6 +282,7 @@ function openFixture(options?: {
     readonly modelId: string;
   }>;
   readonly chatEnabled?: { current: boolean };
+  readonly describeImages?: ChatServiceOptions["describeImages"];
   /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
   readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
@@ -731,6 +732,7 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     ...(options?.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
@@ -2999,6 +3001,116 @@ describe("ChatService", () => {
         { kind: "project-memory", text: "Remember the launch date." },
       ]),
     );
+  });
+
+  it("gives a model that cannot read images the words Sees images wrote, and keeps them for later history", async () => {
+    const textOnly = probeFixture({
+      capabilities: {
+        ...searxngResearchProbe().capabilities,
+        nativeAttachments: "unsupported",
+      },
+    });
+    const describeImages = vi.fn(
+      async (input: {
+        readonly images: ReadonlyArray<{ attachmentId: string; name: string }>;
+      }) => ({
+        status: "described" as const,
+        images: input.images.map((image) => ({
+          attachmentId: image.attachmentId,
+          name: image.name,
+          describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+          text: "A sign-in form with a red error.",
+        })),
+      }),
+    );
+    const { service, fakeDriver } = openFixture({ probe: textOnly, describeImages });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Images",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    });
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "What is wrong?",
+      attachmentIds: [upload.id],
+    });
+    expect(sent.kind).toBe("turn-created");
+    expect(describeImages).toHaveBeenCalledOnce();
+    expect(fakeDriver.sentTurns[0]?.attachments).toEqual([]);
+    const words = `[Image login.png (attachment ${String(upload.id)}), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.`;
+    expect(JSON.stringify(fakeDriver.sentTurns[0])).toContain(JSON.stringify(words).slice(1, -1));
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.describedImages?.[0]).toMatchObject({
+      attachmentId: upload.id,
+      name: "login.png",
+      describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+    });
+
+    // The next turn's history carries the words with the person's message.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "And now?",
+    });
+    expect(JSON.stringify(fakeDriver.sentTurns.at(-1))).toContain(
+      "A sign-in form with a red error.",
+    );
+    // A compaction summarizes the words with the message too.
+    expect(service.sessionCompactionConversation(created.thread.id)[0]?.content).toContain(
+      "A sign-in form with a red error.",
+    );
+  });
+
+  it("refuses an image Sees images cannot describe, with its reason, before any turn is journaled", async () => {
+    const textOnly = probeFixture({
+      capabilities: { ...searxngResearchProbe().capabilities, nativeAttachments: "unsupported" },
+    });
+    const { service, fakeDriver } = openFixture({
+      probe: textOnly,
+      describeImages: async () => ({
+        status: "refused",
+        reason: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Images",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    });
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "What is wrong?",
+        attachmentIds: [upload.id],
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Luna can't read images. Set a model that sees images in Model roles." },
+    });
+    expect(service.read(created.thread.id).turns).toEqual([]);
+    expect(fakeDriver.sentTurns).toEqual([]);
   });
 
   it("purges an unsent attachment but refuses to discard durable turn evidence", async () => {
