@@ -446,6 +446,20 @@ held HTTP connections are closed and listener completion is awaited. Failures
 remain explicit, including startup and cleanup errors together. This reuses the
 desktop's existing quit deadline rather than adding a separate watchdog.
 
+A Browser page's favicon is the one image the desktop host fetches for the
+person's tab strip. On the page's `page-favicon-updated` the host takes the first
+http(s) icon address and fetches it once, through the page's own session (so it
+follows the profile and network rules the page already has, without the page's
+cookies), only from a site the context admits for the page itself. The fetch has
+a 5 second timeout and a 64 KB cap, accepts only PNG, ICO, JPEG, GIF, WebP and SVG
+by sniffing the bytes (the declared type and the address are not trusted), and
+keeps the result as a `data:` URL in memory for the tab, refetched only when the
+icon address changes. Any failure leaves no icon, which the renderer draws as
+the globe. The icon is never written to disk, its address is never logged, and
+it rides only the person's preview read (the `faviconDataUrl` of the Browser
+observation, at most 90,000 characters, validated by the server before it is
+kept); it is never part of an agent's tool result.
+
 Accepted quit is terminal for host start and restart admission, including
 queued work. A start already in progress must close a late desktop-owned
 result; a late borrowed attachment is left alone. Confirmation remains

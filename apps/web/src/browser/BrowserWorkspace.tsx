@@ -84,6 +84,8 @@ import {
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
 import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
+import { recallPageFavicon, rememberPageFavicon } from "./pageFavicons";
+import { PageFavicon } from "../shell/PageFavicon";
 import { BrowserProfileControl, browserProfileMenuItems } from "./BrowserProfileControl";
 import {
   BrowserExtensionsButton,
@@ -530,6 +532,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     if (committedAddress === undefined || !/^https?:/i.test(committedAddress)) return;
     setRecentPages(recordRecentBrowserPage(committedAddress));
   }, [committedAddress]);
+  const shownFavicon = snapshot?.observation?.faviconDataUrl;
+  useEffect(() => {
+    if (committedAddress !== undefined && shownFavicon !== undefined)
+      rememberPageFavicon(committedAddress, shownFavicon);
+  }, [committedAddress, shownFavicon]);
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
@@ -1899,10 +1906,15 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
                         variant="ghost"
                       >
                         <span className="browser-workspace__server">
-                          <Globe2
-                            aria-hidden="true"
-                            className="browser-workspace__recent-icon"
-                            size={14}
+                          <PageFavicon
+                            fallback={
+                              <Globe2
+                                aria-hidden="true"
+                                className="browser-workspace__recent-icon"
+                                size={14}
+                              />
+                            }
+                            src={recallPageFavicon(page.url)}
                           />
                           <span className="browser-workspace__server-text">
                             <span className="browser-workspace__server-name">{host}</span>

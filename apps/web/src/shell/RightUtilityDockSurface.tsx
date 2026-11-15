@@ -14,6 +14,7 @@ import { DockTiles, type DockTileContent } from "./DockTiles";
 import { DockToolButtons, type DockToolButtonsProps } from "./DockToolButtons";
 import { endDockToolDrag, useDraggedDockTool } from "./dockToolDrag";
 import { DockToolIcon } from "./dockToolIcons";
+import { PageFavicon } from "./PageFavicon";
 import { PanelTab, PanelTabStrip } from "./PanelTabs";
 import { IconButton } from "./IconButton";
 import { StartQuickTools, StartQuickToolsPlacementContext } from "./StartQuickTools";
@@ -51,25 +52,6 @@ const PAGED_SURFACES: Readonly<
 
 function isPagedSurface(surface: RightUtilityDockSurfaceId): surface is PagedSurface {
   return surface === "browser" || surface === "terminal";
-}
-
-/** A page's own icon at 16px, or the Browser's globe when it has none or fails to load. */
-function PageFavicon(props: { readonly src: string | undefined }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [props.src]);
-  if (props.src === undefined || failed) return <DockToolIcon surface="browser" />;
-  return (
-    <img
-      alt=""
-      className="dock-page-favicon"
-      draggable={false}
-      height={16}
-      onError={() => setFailed(true)}
-      referrerPolicy="no-referrer"
-      src={props.src}
-      width={16}
-    />
-  );
 }
 
 function unavailableMessage(): string {

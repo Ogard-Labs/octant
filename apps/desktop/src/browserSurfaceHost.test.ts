@@ -388,6 +388,68 @@ describe("BrowserSurfaceHost", () => {
     },
   );
 
+  describe("a page's favicon", () => {
+    const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    async function withIcon(icon: string) {
+      const created = view();
+      const fetch = vi.fn(async () => ({
+        ok: true,
+        headers: { get: () => "image/png" },
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () =>
+                sent ? { done: true } : ((sent = true), { done: false, value: PNG }),
+              cancel: async () => undefined,
+            };
+          },
+        },
+      }));
+      (created.webContents.session as { fetch?: unknown }).fetch = fetch;
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+        if (name === "page-favicon-updated") listener({}, [icon]);
+      await vi.waitFor(() => expect(fetch.mock.calls.length).toBeLessThanOrEqual(1));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return { fetch, host };
+    }
+
+    it("shows the declared icon of an admitted site in the preview read, fetched once", async () => {
+      const { fetch, host } = await withIcon("https://example.com/favicon.png");
+      try {
+        expect(fetch).toHaveBeenCalledTimes(1);
+        const peeked = await host.peek(contextId);
+        expect(peeked.faviconDataUrl).toBe(
+          `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`,
+        );
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("does not fetch an icon from a site the context does not admit", async () => {
+      const { fetch, host } = await withIcon("https://tracker.example.net/favicon.png");
+      try {
+        expect(fetch).not.toHaveBeenCalled();
+        expect((await host.peek(contextId)).faviconDataUrl).toBeUndefined();
+      } finally {
+        await host.closeAll();
+      }
+    });
+  });
+
   it("opens inside the native selection-start rectangle without moving a selected range", async () => {
     const f = await keyboardMenuSurface(0, 20);
     try {

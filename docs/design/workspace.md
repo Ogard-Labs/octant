@@ -1541,7 +1541,10 @@ thread's open tools; the bottom panel never has one.
   collapsed dock without expanding it; the Browser card has no separate hide. A card never starts a process, never writes to the journal and never sends input
   to a shell or a page, and it shows nothing the tool could not show this window
   under the same checks. A paired remote window has no dock and gets none of it.
-- **The Browser card** shows the page's title, or its host, with the profile's
+- **The Browser card** shows the page's title, or its host, with the page's own
+  16px favicon before it when the host fetched one (see
+  [Architecture: favicons](../architecture.md#process-topology); the globe
+  otherwise), with the profile's
   name beside it where the page lives in one (a signed-in page acts as the
   person's account) and the page count past one, over a picture of the page
   cropped to the preview from its top left, never stretched. It reads the same host

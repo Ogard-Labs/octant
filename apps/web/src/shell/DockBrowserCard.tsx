@@ -3,6 +3,7 @@ import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import { useBrowserThreadRead } from "../threadActivity/useBrowserThreadSnapshot";
 import { DockMiniCard } from "./DockShelf";
+import { PageFavicon } from "./PageFavicon";
 
 /**
  * The Browser as a card: the page a thread's session has open, as a picture
@@ -48,6 +49,9 @@ export function DockBrowserCard(props: {
   return (
     <DockMiniCard
       {...(detail === "" ? {} : { detail })}
+      {...(observation?.faviconDataUrl === undefined
+        ? {}
+        : { icon: <PageFavicon src={observation.faviconDataUrl} /> })}
       onClose={props.onClose}
       onHide={props.onClose}
       onExpand={props.onExpand}

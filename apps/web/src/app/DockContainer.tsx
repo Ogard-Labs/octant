@@ -4,6 +4,7 @@ import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
+import { useBrowserThreadSnapshot } from "../threadActivity/useBrowserThreadSnapshot";
 import {
   decodeCodeThreadId,
   type CodeCheckoutId,
@@ -213,6 +214,8 @@ export interface DockContainerProps {
  * so a streaming turn re-renders them only while a tool that shows the turn
  * is open.
  */
+const NO_THREAD = "00000000-0000-4000-8000-000000000000";
+
 export const DockContainer = memo(function DockContainer(props: DockContainerProps) {
   const {
     actions,
@@ -589,6 +592,25 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     [activeMode, agentBrowserLive, displayedDockState],
   );
 
+  // The pages' icons for the tab row, read from what the host already holds
+  // (no new picture, so next to free). A page the read does not list keeps the globe.
+  const browserTabCount = displayedDockState.tabs.filter((tab) => tab.surface === "browser").length;
+  const pageIconSnapshot = useBrowserThreadSnapshot({
+    client: browserAutomationClient,
+    enabled:
+      browserAutomationClient !== undefined && dockThread !== undefined && browserTabCount > 0,
+    liveOnly: false,
+    picture: false,
+    threadId: decodeBrowserThreadId(dockThread?.threadId ?? NO_THREAD),
+  });
+  const pageIcon = (tabId: string): string | undefined => {
+    const contextId = displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId;
+    if (contextId === undefined) return pageIconSnapshot?.observation?.faviconDataUrl;
+    return pageIconSnapshot?.contexts?.find(
+      (entry) => String(entry.context.contextId) === contextId,
+    )?.observation?.faviconDataUrl;
+  };
+
   /** The Browser context of the page a card stands for, when that page has one of its own. */
   function contextOf(entry: DockShelfEntry): string | undefined {
     return displayedDockState.tabs.find((tab) => tab.id === entry.tabId)?.browserContextId;
@@ -804,6 +826,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : threadUtility("tests")
         }
+        pageIcon={pageIcon}
         tabs={dockTabs}
         tiles={{
           ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),

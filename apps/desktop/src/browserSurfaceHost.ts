@@ -93,6 +93,7 @@ import {
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
+import { fetchFaviconDataUrl, firstHttpIcon, type FaviconSession } from "./browserFavicon";
 import {
   autoAttachSurfaceFrames,
   scriptString,
@@ -224,6 +225,8 @@ export function appShortcutOf(
 }
 
 interface BrowserSurfaceSessionPort {
+  /** Electron's session fetch: the page's own network rules, used for its icon. */
+  readonly fetch?: FaviconSession["fetch"];
   /**
    * Electron reports the download item and the page that started it. A
    * download is held only for a context's agent action; see `DesktopDownloadHold`.
@@ -421,6 +424,14 @@ interface HibernatedTab {
 /** One page of a context. Tabs share the context's session and its guards. */
 interface OwnedTab {
   readonly tabId: string;
+  /**
+   * The page's declared icon and the address it came from, in memory only. An
+   * address already fetched is not fetched again; a failed fetch keeps the
+   * address with no image, so the globe stands and the page is not asked twice.
+   */
+  favicon?:
+    | { readonly url: string; readonly pageOrigin: string; readonly dataUrl: string | undefined }
+    | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
@@ -716,6 +727,8 @@ export interface BrowserSurfaceRuntimeObservation {
     readonly active: boolean;
   }>;
   readonly screenshotDataUrl?: string;
+  /** Only a peek fills this: the page's icon, for the person's tab strip, never an agent. */
+  readonly faviconDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Only a resize fills this: what the page reports about its device now. */
   readonly emulation?: BrowserEmulationReport;
@@ -1594,6 +1607,36 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         publish(contextId, owned);
       });
     }
+    // The page's declared icon, fetched once through its own session and only
+    // from a site the context admits for the page itself.
+    view.webContents.on("page-favicon-updated", (...args: readonly unknown[]) => {
+      const declared = args.find(Array.isArray) as readonly unknown[] | undefined;
+      const iconUrl = firstHttpIcon(declared ?? []);
+      if (iconUrl === undefined) {
+        if (tab.favicon !== undefined) {
+          tab.favicon = undefined;
+          publish(contextId, owned);
+        }
+        return;
+      }
+      if (tab.favicon?.url === iconUrl) return;
+      const session = view.webContents.session;
+      if (
+        session.fetch === undefined ||
+        !originAllowed(iconUrl, owned.policy.allowedOrigins) ||
+        view.webContents.isDestroyed()
+      ) {
+        tab.favicon = undefined;
+        return;
+      }
+      const pageOrigin = originOf(view.webContents.getURL()) ?? "";
+      tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
+      void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl).then((dataUrl) => {
+        if (tab.favicon?.url !== iconUrl || dataUrl === undefined) return;
+        tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
+        publish(contextId, owned);
+      });
+    });
     const guardNavigation =
       (knownMainFrame: boolean) =>
       (event: unknown, ...details: readonly unknown[]) => {
@@ -3374,12 +3417,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           ? undefined
           : await captureScreenshot(contentsView(owned));
         checkObservation();
+        const favicon = activeFavicon(owned);
         return {
           ...(contents.getURL() === ""
             ? {}
             : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
           ...(contents.getTitle() === "" ? {} : { title: contents.getTitle().slice(0, 1_024) }),
           ...(screenshotDataUrl === undefined ? {} : { screenshotDataUrl }),
+          ...(favicon === undefined ? {} : { faviconDataUrl: favicon }),
         };
       });
     },
@@ -3927,6 +3972,15 @@ function originOf(target: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** The active page's icon, only while the page is still on the site that declared it. */
+function activeFavicon(owned: OwnedSurface): string | undefined {
+  const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+  if (tab === undefined || tab.favicon === undefined) return undefined;
+  return originOf(tab.contents.getURL()) === tab.favicon.pageOrigin
+    ? tab.favicon.dataUrl
+    : undefined;
 }
 
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {

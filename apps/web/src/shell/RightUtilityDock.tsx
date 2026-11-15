@@ -43,6 +43,8 @@ export interface RightUtilityDockProps {
   /** A drag was abandoned: drop the preview rather than keep the width it started from. */
   readonly onCancelWidthPreview?: () => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
+  /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
+  readonly pageIcon?: (tabId: string) => string | undefined;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
   readonly open: boolean;
@@ -162,6 +164,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.artifacts === undefined ? {} : { artifacts: props.artifacts })}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
+      {...(props.pageIcon === undefined ? {} : { pageIcon: props.pageIcon })}
       onSelectSurface={props.onSelectSurface}
       {...(props.overview === undefined ? {} : { overview: props.overview })}
       {...(props.plan === undefined ? {} : { plan: props.plan })}

@@ -1118,6 +1118,26 @@ describe("BrowserAutomationService", () => {
     expect(runtime.peek).toHaveBeenCalledTimes(1);
   });
 
+  it("passes a page's icon to the person's preview and drops one that is not a bounded image", async () => {
+    const { advance, runtime, service } = harness();
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    advance(2_000);
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    vi.mocked(runtime.peek!).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      faviconDataUrl: icon,
+    });
+    expect((await service.peekThread(windowId, threadOne)).observation?.faviconDataUrl).toBe(icon);
+    advance(2_000);
+    vi.mocked(runtime.peek!).mockResolvedValueOnce({
+      url: "https://example.com/driven",
+      faviconDataUrl: "data:text/html;base64,PGh0bWw+",
+    });
+    expect(
+      (await service.peekThread(windowId, threadOne)).observation?.faviconDataUrl,
+    ).toBeUndefined();
+  });
+
   it("takes a picture of a native page only when its minimised card asks, never for the pane that shows it", async () => {
     const { advance, contexts, runtime, service } = harness();
     vi.mocked(runtime.createContext).mockImplementationOnce(async (contextId) => {

@@ -63,6 +63,22 @@ function renderCard(
 }
 
 describe("DockBrowserCard", () => {
+  it("shows the page's own icon in the card head and the globe when it has none", async () => {
+    const icon = "data:image/png;base64,iVBORw0KGgo=";
+    const withIcon = snapshot();
+    (withIcon.observation as { faviconDataUrl?: string }).faviconDataUrl = icon;
+    const view = renderCard(clientOf(() => withIcon));
+    const card = await screen.findByRole("region", { name: "Minimised Browser" });
+    await waitFor(() =>
+      expect(card.querySelector(".dock-mini-card__head img")).toHaveAttribute("src", icon),
+    );
+    view.unmount();
+    renderCard(clientOf(() => snapshot()));
+    const plain = await screen.findByRole("region", { name: "Minimised Browser" });
+    await waitFor(() => expect(within(plain).getByText("Your account")).toBeVisible());
+    expect(plain.querySelector(".dock-mini-card__head img")).toBeNull();
+  });
+
   it("shows the page's title and its picture fitted to the card, with the tool's own controls", async () => {
     const { container } = renderCard(clientOf(() => snapshot()));
     const card = await screen.findByRole("region", { name: "Minimised Browser" });

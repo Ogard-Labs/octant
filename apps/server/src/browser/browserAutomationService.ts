@@ -13,6 +13,7 @@ import {
   type OwnerBrowserTarget,
 } from "@octant/contracts/owner-browser";
 import type { EventActor, HubMemberId, UtcTimestamp } from "@octant/contracts";
+import { isBrowserFaviconDataUrl } from "@octant/contracts/browser-automation";
 import type { PersistentBrowserLeaseBinding } from "@octant/contracts/persistent-browser-owner";
 import type { OwnerBrowserHost } from "./ownerBrowserControl";
 import type {
@@ -2955,6 +2956,10 @@ export class BrowserAutomationService {
           ...(observed.screenshotDataUrl === undefined
             ? {}
             : { screenshotDataUrl: observed.screenshotDataUrl }),
+          ...(observed.faviconDataUrl === undefined ||
+          !isBrowserFaviconDataUrl(observed.faviconDataUrl)
+            ? {}
+            : { faviconDataUrl: observed.faviconDataUrl }),
           ...(observed.viewport === undefined ? {} : { viewport: observed.viewport }),
           revision: samePage ? owned.observationRevision : ++owned.observationRevision,
           observedAt: this.#clock() as BrowserObservation["observedAt"],
