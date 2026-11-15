@@ -2,7 +2,8 @@
 #
 # Fires on a `vMAJOR.MINOR.PATCH` tag and publishes signed feeds at
 # `<base>/stable/<platform>-<arch>.json` for the release matrix (darwin-arm64
-# plus linux-x64 AppImage dogfood). The same one-deliverable rule as the
+# plus linux-x64 AppImage dogfood), and the signed Windows installer through
+# `release-windows.yml`. The same one-deliverable rule as the
 # preview ring applies (`docs/architecture.md`, "Current Release Boundary"): a
 # live feed is signed or not published at all.
 #
@@ -238,3 +239,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ matrix.target }}
         run: scripts/publish-update-feed.sh stable "${RUNNER_TEMP}/feed/stable/${TARGET}.json"
+
+  # The Windows installer, signed with Authenticode through Azure Artifact
+  # Signing in the approval-gated stable environment, attached to this
+  # release, and listed in the stable feed.
+  windows:
+    name: Windows installer
+    needs: verify
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/release-windows.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      ring: stable
+      flavor: stable
+      product: Octant
+      asset_prefix: Octant
+      environment: stable
+    secrets: inherit

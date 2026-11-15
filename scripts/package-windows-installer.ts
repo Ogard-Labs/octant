@@ -302,11 +302,16 @@ async function main(argv: ReadonlyArray<string>): Promise<void> {
     if (process.platform !== "win32") throw new Error("The uninstaller is written on Windows.");
     const out = option(argv, "out");
     await rm(out, { force: true });
+    // WriteUninstaller writes nothing, and reports nothing, into a folder that
+    // does not exist; the first CI run ended with no uninstaller this way.
+    await mkdir(dirname(out), { recursive: true });
     const work = await mkdtemp(join(tmpdir(), "octant-uninstaller-"));
     try {
       const writer = join(work, "write-uninstaller.exe");
       await compile(packageDirectory, writer, { kind: "uninstaller", writeTo: out });
-      await run(writer, []);
+      // An installer runs in the foreground; only an uninstaller re-launches
+      // itself from a copy. `/S` keeps the writer from showing a window.
+      await run(writer, ["/S"]);
       await access(out);
       console.log(out);
     } finally {

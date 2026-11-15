@@ -1,0 +1,350 @@
+# The Windows installer for a release: built, signed with Authenticode through
+# Azure Artifact Signing, verified, attached to the release, and listed in the
+# ring's signed feed.
+#
+# Called by `release-build.yml` (Nightly and Preview) and `release-stable.yml`.
+# Four jobs so that no job both runs the built source's own code and holds a
+# credential:
+#
+#   build    runs the source (install scripts, build, packaging) with no
+#            secret and no Azure identity, and writes the uninstaller.
+#   sign     holds the Azure identity (OIDC, no stored password) and runs only
+#            this workflow's own scripts: it signs every program in the
+#            package and the uninstaller, builds the installer from them, signs
+#            it, and verifies every signature names Octant's publisher.
+#   publish  attaches the signed installer to the release.
+#   feed     signs the ring's win32-x64 feed over the installer's hash.
+#
+# Signing fails closed: with any Azure variable unset, or any program not
+# signed by Octant's publisher afterwards, the job fails and nothing is
+# published. The unsigned QA zip from `windows-desktop.yml` never reaches a
+# release (`docs/architecture.md`, "Current Release Boundary").
+#
+# The repository (or the named environment) must define these variables, and
+# the Entra application must trust GitHub's OIDC token for that environment:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID,
+#   AZURE_ARTIFACT_SIGNING_ENDPOINT, AZURE_ARTIFACT_SIGNING_ACCOUNT,
+#   AZURE_ARTIFACT_SIGNING_PROFILE
+name: Release Windows (shared)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to build and publish."
+        required: true
+        type: string
+      ring:
+        description: "Update ring: stable, candidate or preview."
+        required: true
+        type: string
+      flavor:
+        description: "Packaged flavor: stable or nightly."
+        required: true
+        type: string
+      product:
+        description: "Product name, with its space: Octant or Octant Nightly."
+        required: true
+        type: string
+      asset_prefix:
+        description: "Release asset name prefix, with no space."
+        required: true
+        type: string
+      environment:
+        description: "Environment holding the Azure federation and the ring's feed key: stable or preview."
+        required: true
+        type: string
+      source_commit:
+        description: "Commit a Nightly rollback rebuilds; empty to build the running ref."
+        required: false
+        default: ""
+        type: string
+      rollback_ref:
+        description: "Published Nightly tag a rollback rebuilds, for the release notes."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the Windows package (unsigned)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit != '' && inputs.source_commit || github.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: bun install --frozen-lockfile
+      - name: Prepare the pinned Electron runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ensure-ci-electron.ts
+      - name: Fetch the pinned NSIS
+        run: ./scripts/windows-installer/install-nsis.ps1
+      - name: Build the Windows package
+        env:
+          OCTANT_PACKAGE_TARGET: win32-x64
+          OCTANT_PACKAGE_FLAVOR: ${{ inputs.flavor }}
+          OCTANT_RELEASE_VERSION: ${{ inputs.version }}
+        run: bun run package:desktop
+      - name: Write the uninstaller and gather what the sign job needs
+        env:
+          PRODUCT: ${{ inputs.product }}
+        run: |
+          $octantSigning = Join-Path $pwd 'out/windows-signing'
+          if (Test-Path -LiteralPath $octantSigning) { throw 'Refusing a pre-existing signing folder' }
+          [void](New-Item -ItemType Directory -Path $octantSigning)
+          Move-Item -LiteralPath "out/$env:PRODUCT-win32-x64" -Destination (Join-Path $octantSigning 'package')
+          bun scripts/package-windows-installer.ts uninstaller --package out/windows-signing/package --out "out/windows-signing/Uninstall $env:PRODUCT.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-unsigned
+          path: out/windows-signing
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign and verify the Windows installer
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PRODUCT: ${{ inputs.product }}
+      SIGNING_ROOT: ${{ github.workspace }}\out\windows-signing
+      INSTALLER_ROOT: ${{ github.workspace }}\out\windows-installer
+    steps:
+      # This workflow's own commit: the scripts that sign and verify are never
+      # the built source's.
+      - uses: actions/checkout@v4
+      - name: Refuse to build a release that cannot be signed
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $octantMissing = @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'AZURE_ARTIFACT_SIGNING_ENDPOINT', 'AZURE_ARTIFACT_SIGNING_ACCOUNT', 'AZURE_ARTIFACT_SIGNING_PROFILE') |
+            Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($octantMissing) { throw ('Windows releases are signed or not built; unset: ' + ($octantMissing -join ', ')) }
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Fetch the pinned NSIS
+        run: ./scripts/windows-installer/install-nsis.ps1
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-unsigned
+          path: out/windows-signing
+      - name: List the programs to sign
+        run: |
+          # Beside the signing folder: the catalog's paths are relative to its own folder.
+          bun scripts/windows-authenticode.ts list-unsigned --root "$env:SIGNING_ROOT" --catalog "$env:SIGNING_ROOT\..\sign-package.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Sign in to Azure with this workflow's OIDC token
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign the package's programs and the uninstaller
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-catalog: ${{ github.workspace }}\out\sign-package.txt
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify every program, and that Octant's are signed by its publisher
+        run: |
+          bun scripts/windows-authenticode.ts verify --root "$env:SIGNING_ROOT" --ours "$env:SIGNING_ROOT\..\sign-package.txt" --file "$env:SIGNING_ROOT\Uninstall $env:PRODUCT.exe" --file "$env:SIGNING_ROOT\package\$env:PRODUCT.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the installer from the signed programs
+        run: |
+          bun scripts/package-windows-installer.ts installer --package "$env:SIGNING_ROOT\package" --uninstaller "$env:SIGNING_ROOT\Uninstall $env:PRODUCT.exe" --out-dir "$env:INSTALLER_ROOT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $octantInstaller = @(Get-ChildItem -LiteralPath $env:INSTALLER_ROOT -Filter '*-win32-x64-setup.exe')
+          if ($octantInstaller.Count -ne 1) { throw 'Expected one installer' }
+          "INSTALLER=$($octantInstaller[0].FullName)" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          [IO.File]::WriteAllText("$env:INSTALLER_ROOT\sign-installer.txt", $octantInstaller[0].Name + "`r`n")
+      - name: Sign the installer
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-catalog: ${{ github.workspace }}\out\windows-installer\sign-installer.txt
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify the installer, as an installed copy will before updating
+        env:
+          VERSION: ${{ inputs.version }}
+          ASSET_PREFIX: ${{ inputs.asset_prefix }}
+        run: |
+          bun scripts/windows-authenticode.ts verify --root "$env:INSTALLER_ROOT" --ours "$env:INSTALLER_ROOT\sign-installer.txt" --file "$env:INSTALLER"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # A second, independent reader of the same signature: Windows' own
+          # Authenticode policy, requiring a timestamp so it outlives the
+          # short-lived signing certificate.
+          $octantSigntool = @(Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName)[-1]
+          if (-not $octantSigntool) { throw 'signtool is not on this runner' }
+          & $octantSigntool.FullName verify /pa /tw /v "$env:INSTALLER"
+          if ($LASTEXITCODE -ne 0) { throw 'signtool did not verify the installer' }
+          $octantRelease = Join-Path $env:RUNNER_TEMP 'release'
+          [void](New-Item -ItemType Directory -Path $octantRelease)
+          Copy-Item -LiteralPath $env:INSTALLER -Destination (Join-Path $octantRelease "$env:ASSET_PREFIX-$env:VERSION-win32-x64-setup.exe")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-win32-x64
+          path: ${{ runner.temp }}/release/*-win32-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Attach the signed installer to the release
+    needs: sign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-win32-x64
+          path: ${{ runner.temp }}/release
+      - name: Publish the installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          PRODUCT: ${{ inputs.product }}
+          SOURCE_COMMIT: ${{ inputs.source_commit != '' && inputs.source_commit || github.sha }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=("${RUNNER_TEMP}"/release/*)
+          # Only the signed installer goes out; a QA zip or anything else here
+          # is a mistake upstream, and refusing it keeps the release clean.
+          if [ "${#files[@]}" -ne 1 ] || [[ "${files[0]}" != *-win32-x64-setup.exe ]]; then
+            echo "Expected exactly one signed installer, found: ${files[*]}" >&2
+            exit 1
+          fi
+          tag="v${VERSION}"
+          # The other platforms' rows may create the release first; attach to it.
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[0]}" --clobber --repo "$GITHUB_REPOSITORY"
+          elif [ "$RING" = "stable" ]; then
+            gh release create "$tag" "${files[0]}" --repo "$GITHUB_REPOSITORY" \
+              --title "${PRODUCT} ${VERSION}" --generate-notes \
+              || gh release upload "$tag" "${files[0]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$tag" "${files[0]}" --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --target "${SOURCE_COMMIT}" \
+              --title "${PRODUCT} ${VERSION} (${RING})" \
+              --notes "${RING} build of ${ROLLBACK_REF:-${GITHUB_REF_NAME}} at ${SOURCE_COMMIT}. Not a stable release." \
+              || gh release upload "$tag" "${files[0]}" --clobber --repo "$GITHUB_REPOSITORY"
+          fi
+
+  # Signs the feed from the published installer's bytes without running the
+  # built source, as `release-build.yml`'s feed job does. Installed Windows
+  # copies do not read this feed yet (the hand-off is not wired in until the
+  # Linux signed-feed path has been exercised on a real image); publishing it
+  # signed is what lets that path be exercised without a second release.
+  feed:
+    name: Sign and publish the Windows feed
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-win32-x64
+          path: ${{ runner.temp }}/release
+      - name: Sign the feed
+        env:
+          # Only the ring's own key is ever in this job.
+          OCTANT_UPDATE_FEED_PRIVATE_KEY: ${{ inputs.ring == 'stable' && secrets.OCTANT_UPDATE_FEED_PRIVATE_KEY || '' }}
+          OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY: ${{ inputs.ring != 'stable' && secrets.OCTANT_UPDATE_FEED_PREVIEW_PRIVATE_KEY || '' }}
+          VERSION: ${{ inputs.version }}
+          RING: ${{ inputs.ring }}
+          FLAVOR: ${{ inputs.flavor }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          installers=("${RUNNER_TEMP}"/release/*-win32-x64-setup.exe)
+          if [ "${#installers[@]}" -ne 1 ]; then
+            echo "Expected one signed installer, found ${#installers[@]}." >&2
+            exit 1
+          fi
+          installer="${installers[0]}"
+          asset=$(python3 -c 'import os, sys, urllib.parse; print(urllib.parse.quote(os.path.basename(sys.argv[1]), safe=""))' "$installer")
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${asset}"
+          machine=(--ring "$RING" --platform win32 --arch x64)
+          out="${RUNNER_TEMP}/feed/$(bun scripts/sign-update-feed.ts --print-feed-path "${machine[@]}")"
+          # No dry run: a Windows release either carries a signed feed or fails.
+          bun scripts/sign-update-feed.ts \
+            --version "$VERSION" "${machine[@]}" --flavor "$FLAVOR" \
+            --url "$url" --artifact "$installer" \
+            --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            --out "$out"
+          printf '%s\n' "$out" > "${RUNNER_TEMP}/feed-files"
+      - name: Publish the feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RING: ${{ inputs.ring }}
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < "${RUNNER_TEMP}/feed-files"
+          scripts/publish-update-feed.sh "$RING" "${files[@]}"
