@@ -5,6 +5,7 @@ import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-cli
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type {
   ProjectAction,
   ProjectAvailability,
@@ -42,6 +43,7 @@ import {
   projectColorMenuValue,
 } from "./ProjectTile";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
+import { ProjectInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
@@ -135,6 +137,8 @@ export interface ProjectOverviewProps {
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
+  /** The person's instructions for this Project, beside its memory. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
 }
 
@@ -459,6 +463,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   project={props.project}
                   projects={props.memoryProjects ?? []}
                   {...(connectionStale ? { readOnly: true } : {})}
+                />
+              </ProjectOverviewInspector>
+            )}
+            {props.octantInstructionsClient === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-instructions`}
+                label="Instructions"
+                summary="Your rules for work in this Project"
+              >
+                <ProjectInstructionsSettings
+                  client={props.octantInstructionsClient}
+                  projectId={String(props.project.id)}
+                  readOnly={archived || connectionStale}
                 />
               </ProjectOverviewInspector>
             )}

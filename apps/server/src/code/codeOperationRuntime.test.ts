@@ -12596,7 +12596,7 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
   }
 });
 
-it("gives a Code session your instructions after Octant's own, once, and an edit once as a revision", async () => {
+it("gives a Code session your and its Project's instructions after Octant's own, once, and an edit once as a revision", async () => {
   const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
   const connection = providerConnection(queue);
   let instructions = "Plan in Work before coding.";
@@ -12604,6 +12604,7 @@ it("gives a Code session your instructions after Octant's own, once, and an edit
     provider: { ...providerDriver(connection), conversationOwnership: "provider" },
     octantInstructionBlocks: () => [
       { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+      { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
     ],
     personMemoryBlock: () => "Remembered: prefers short replies.",
     projectMemoryEntries: () => ["Releases ship from main only."],
@@ -12638,12 +12639,13 @@ it("gives a Code session your instructions after Octant's own, once, and an edit
     const own = first.lastIndexOf("instructions");
     const yours = first.indexOf("person-instructions");
     expect(yours).toBeGreaterThan(own);
-    expect(first.indexOf("person-memory")).toBe(yours + 1);
-    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 1);
+    expect(first.indexOf("project-instructions")).toBe(yours + 1);
+    expect(first.indexOf("person-memory")).toBe(yours + 2);
+    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 2);
 
-    expect((await turn(141, "second")).map((block) => block.kind)).not.toContain(
-      "person-instructions",
-    );
+    const second = (await turn(141, "second")).map((block) => block.kind);
+    expect(second).not.toContain("person-instructions");
+    expect(second).not.toContain("project-instructions");
 
     instructions = "Plan in Code instead.";
     const edited = await turn(142, "third");

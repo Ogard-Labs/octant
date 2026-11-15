@@ -12,7 +12,11 @@ import {
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
-import { PERSON_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
+import {
+  PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
+  PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
+  decodeOctantInstructionsCommand,
+} from "@octant/contracts/octant-instructions";
 import { afterEach, describe, expect, it } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -27,6 +31,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   OctantInstructionsStore,
   PERSON_INSTRUCTIONS_CONTEXT_KEY,
+  projectInstructionsContextKey,
   type OctantInstructionsAuthor,
   registerOctantInstructionsEvents,
 } from "./octantInstructionsStore";
@@ -292,6 +297,125 @@ describe("your instructions for Octant", () => {
       }),
     ]);
     expect(turn(true).context).toEqual([]);
+    connection.close();
+  });
+});
+
+describe("Project instructions", () => {
+  const projectId = "00000000-0000-4000-8000-0000000000a1";
+  const otherProjectId = "00000000-0000-4000-8000-0000000000a2";
+  const changeProject = (expectedVersion: number, instructions: string, project = projectId) =>
+    decodeOctantInstructionsCommand({
+      kind: "change-project-instructions",
+      projectId: project,
+      expectedVersion,
+      instructions,
+    });
+
+  function projectStoreOn(journal: Journal) {
+    return new OctantInstructionsStore({
+      journal,
+      uuid,
+      clock: () => now,
+      projectExists: (id) => id === projectId || id === otherProjectId,
+    });
+  }
+
+  it("journals a Project's whole text on the Project and keeps it across a restart", () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const store = projectStoreOn(journal);
+
+    expect(store.change(changeProject(0, "Ship from main only."), person)).toMatchObject({
+      kind: "project-instructions",
+      instructions: "Ship from main only.",
+      version: 1,
+    });
+
+    const [event] = journal.replayAggregateType({
+      aggregateType: PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(event).toMatchObject({
+      aggregateId: projectId,
+      payload: { projectId, instructions: "Ship from main only." },
+    });
+    expect(projectStoreOn(journalOn(connection)).projectView(projectId, true)).toMatchObject({
+      instructions: "Ship from main only.",
+      version: 1,
+    });
+    connection.close();
+  });
+
+  it("refuses a stale Project version, a Project not on this host, and an agent", () => {
+    const connection = openConnection();
+    const store = projectStoreOn(journalOn(connection));
+    store.change(changeProject(0, "First."), person);
+
+    expect(store.change(changeProject(0, "Second."), person)).toMatchObject({
+      reason: "stale-version",
+    });
+    expect(
+      store.change(changeProject(0, "Elsewhere.", "00000000-0000-4000-8000-0000000000a9"), person),
+    ).toMatchObject({ reason: "project-not-found" });
+    expect(store.change(changeProject(1, "Agent's."), agent)).toMatchObject({
+      reason: "not-the-person",
+    });
+    expect(store.projectView(projectId, true)).toMatchObject({ instructions: "First." });
+    connection.close();
+  });
+
+  it("gives a turn in the Project its block after yours, and a turn elsewhere none", () => {
+    const connection = openConnection();
+    const store = projectStoreOn(journalOn(connection));
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+    store.change(changeProject(0, "Ship from main only."), person);
+
+    expect(store.contextBlocks({ projectId })).toEqual([
+      expect.objectContaining({ kind: "person-instructions" }),
+      {
+        kind: "project-instructions",
+        key: projectInstructionsContextKey(projectId),
+        text: expect.stringMatching(/this Project[\s\S]*\n\nShip from main only\.$/),
+      },
+    ]);
+    expect(store.contextBlocks({ projectId: otherProjectId }).map((block) => block.kind)).toEqual([
+      "person-instructions",
+    ]);
+    expect(store.contextBlocks().map((block) => block.kind)).toEqual(["person-instructions"]);
+    connection.close();
+  });
+
+  it("shows a device someone else paired a Project's text read-only and refuses its change", async () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const windowAuthorityStore = new WindowAuthorityStore();
+    const route = createOctantInstructionsRouteHandler({
+      store: projectStoreOn(journal),
+      windowAuthorityStore,
+      now: () => 1,
+    });
+    const command = (body: unknown) =>
+      deviceRequest(
+        "hub-roster",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        "/api/octant-instructions/commands",
+      );
+
+    const read = await route(command({ kind: "read-project-instructions", projectId }));
+    const refused = await route(command(changeProject(0, "Hub says.")));
+
+    expect(read?.status).toBe(200);
+    expect(await read?.json()).toMatchObject({ kind: "project-instructions", canChange: false });
+    expect(refused?.status).toBe(403);
     connection.close();
   });
 });
