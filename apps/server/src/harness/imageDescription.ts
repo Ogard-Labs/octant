@@ -105,7 +105,13 @@ export interface ImageDescriptionSpend {
     readonly candidate: NativeHarnessSlotCandidate;
   }) =>
     | { readonly status: "refused"; readonly reason: string }
-    | { readonly status: "admitted"; readonly settle: (usage: TurnUsage | undefined) => void };
+    | {
+        readonly status: "admitted";
+        /** The describe went out: record what it used, unknown when unreported. */
+        readonly settle: (usage: TurnUsage | undefined) => void;
+        /** Nothing went out: release the reservation and record nothing. */
+        readonly abandon: () => void;
+      };
 }
 
 export type ImageDescriptionOutcome =
@@ -218,7 +224,8 @@ export class ImageDescriber {
             });
       if (admission?.status === "refused") return { kind: "refused", reason: admission.reason };
       const asked = await this.#ask(route.candidate, image, input.question, input.signal);
-      admission?.settle(asked.usage);
+      if (asked.sent) admission?.settle(asked.usage);
+      else admission?.abandon();
       const text = asked.text;
       if (text !== undefined) return { kind: "described", text, describedBy: route.describedBy };
       failed.push({ ...route.describedBy, reason: "provider-not-ready" });
@@ -305,9 +312,9 @@ export class ImageDescriber {
     image: ImageToDescribe,
     question: string | undefined,
     signal: AbortSignal | undefined,
-  ): Promise<{ readonly text?: string; readonly usage?: TurnUsage }> {
+  ): Promise<{ readonly sent: boolean; readonly text?: string; readonly usage?: TurnUsage }> {
     const driver = this.#sources.resolveDriver(candidate.providerInstanceId);
-    if (driver === undefined) return {};
+    if (driver === undefined) return { sent: false };
     const asking = (this.#sources.complete ?? completeOnceOutcome)({
       driver,
       providerInstanceId: candidate.providerInstanceId,
@@ -343,9 +350,12 @@ export class ImageDescriber {
         ]));
     // A withheld answer read outside content on the way, so its words are
     // not used; it was paid for all the same.
+    // An unreached request got no answer because no connection was made; it
+    // is not counted. Anything else may have been billed.
+    if (outcome.status === "unreached") return { sent: false };
     const usage =
       outcome.status === "completed" || outcome.status === "withheld" ? outcome.usage : undefined;
-    const spent = usage === undefined ? {} : { usage };
+    const spent = usage === undefined ? { sent: true } : { sent: true, usage };
     if (outcome.status !== "completed") return spent;
     const text = boundImageDescription(outcome.text);
     return text.length === 0 ? spent : { ...spent, text };

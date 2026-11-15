@@ -47,7 +47,7 @@ export function createHostImageDescriber(deps: {
   readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
   readonly providerDataDirectory: string;
   /** The ceilings a describe is admitted under; absent, none applies. */
-  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle">;
+  readonly spendCeiling?: Pick<SpendCeilingService, "admit" | "settle" | "abandon">;
 }): ImageDescriber {
   const { persistence, providerRuntimeRegistry } = deps;
   return new ImageDescriber({
@@ -148,6 +148,7 @@ export function createHostImageDescriber(deps: {
                 : { observedTokens: usage.inputTokens + usage.outputTokens }),
             });
           },
+          abandon: () => deps.spendCeiling?.abandon({ reservationId }),
         };
       },
     },

@@ -180,6 +180,7 @@ describe("Sees images", () => {
     const admit = vi.fn(() => ({
       status: "admitted" as const,
       settle: (usage: unknown) => settled.push(usage),
+      abandon: () => settled.push("abandoned"),
     }));
     const { describer } = fixture({
       host: vision([haiku]),
@@ -217,5 +218,26 @@ describe("Sees images", () => {
       }),
     ).resolves.toEqual({ kind: "refused", reason: "This thread reached its token ceiling." });
     expect(complete).not.toHaveBeenCalled();
+  });
+
+  it("records nothing for a describe that never went out, and releases its reservation", async () => {
+    const outcomes: string[] = [];
+    const { describer } = fixture({
+      host: vision([haiku]),
+      outcomes: [{ status: "unreached" }],
+      spend: {
+        admit: () => ({
+          status: "admitted",
+          settle: () => outcomes.push("settled"),
+          abandon: () => outcomes.push("abandoned"),
+        }),
+      },
+    });
+    await describer.describe({
+      scope: { threadId: "thread-1", threadType: "code-thread" },
+      threadModel: "Luna",
+      image,
+    });
+    expect(outcomes).toEqual(["abandoned"]);
   });
 });
