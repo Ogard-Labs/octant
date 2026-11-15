@@ -54,6 +54,7 @@ import { createBenchmarkCheckCommands } from "../benchmarks/benchmarkCheckComman
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import { createHostImageDescriber, modelLabelOf } from "./imageDescriber";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import {
   createFollowUp,
   type FollowUpCreationDependencies,
@@ -499,6 +500,16 @@ export function wireHarness(deps: HarnessDependencies) {
   const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore,
     store: nativeHarnessRoutingStore,
+    windowSeesProject: (windowId, projectId) => {
+      const project = persistence.readProject(projectId);
+      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+      return (
+        project !== undefined &&
+        project.lifecycle === "active" &&
+        workspace !== undefined &&
+        windowAdmitsProject(workspace, project.type, projectId)
+      );
+    },
     seesImages: (input) =>
       imageDescriber.available({
         projectId: input.projectId,

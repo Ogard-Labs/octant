@@ -2368,7 +2368,7 @@ describe("CodeOperationService", () => {
     const sent = turns.start.mock.calls[0]?.[0];
     expect(sent?.attachments).toBeUndefined();
     expect(sent?.context?.map((block) => block.text)).toContain(
-      "[Image login.png, described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
+      "[Image login.png (attachment 40000000-0000-4000-8000-000000000021), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
     );
   });
 

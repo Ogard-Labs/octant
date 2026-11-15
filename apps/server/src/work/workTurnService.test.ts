@@ -3502,7 +3502,7 @@ describe("WorkTurnService", () => {
     expect(asked).toEqual([["login.png"]]);
     expect(sent[0]?.attachments).toEqual([]);
     expect(sent[0]?.context.map((block) => block.text)).toContain(
-      "[Image login.png, described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
+      "[Image login.png (attachment 30000000-0000-4000-8000-000000000011), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
     );
     const accepted = fixture.projection.lookup(ids.request);
     expect(accepted?.attachments?.map((attachment) => String(attachment.attachmentId))).toEqual([
@@ -3513,8 +3513,15 @@ describe("WorkTurnService", () => {
         attachmentId: String(attachmentId),
         name: "login.png",
         describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+        description: "A sign-in form with a red error.",
       },
     ]);
+    // A later history rebuild or compaction reads the words with the message.
+    expect(
+      fixture.service
+        .sessionCompactionConversation(ids.thread)
+        .find((message) => message.role === "user")?.content,
+    ).toContain("A sign-in form with a red error.");
   });
 
   it("refuses an image for a model that cannot read it, with Sees images' reason, and journals nothing", async () => {

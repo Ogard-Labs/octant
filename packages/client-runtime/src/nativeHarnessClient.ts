@@ -135,6 +135,7 @@ export class NativeHarnessClientFailure extends Error {
 
 const ROUTING_PATH = "/api/native-harness/routing";
 const PROJECT_ROUTING_PATH = "/api/native-harness/routing/projects";
+const SEES_IMAGES_PATH = "/api/native-harness/routing/sees-images";
 const SESSIONS_PATH = "/api/native-harness/sessions";
 const EGRESS_PATH = "/api/native-harness/egress/threads";
 
@@ -173,7 +174,7 @@ export function createNativeHarnessClient(
         ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
       });
       return decodeHostAnswer(SeesImagesAvailability)(
-        await get(`/api/native-harness/routing/sees-images?${query.toString()}`, signal),
+        await get(`${SEES_IMAGES_PATH}?${query.toString()}`, signal),
       );
     },
     async routing(signal) {

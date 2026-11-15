@@ -104,6 +104,27 @@ describe("sendChatCompletionsTurn", () => {
     });
   });
 
+  it("sends an attached image with the prompt as an image_url part", async () => {
+    const fetch = vi.fn(async () =>
+      stream(chunk({ role: "assistant" }), chunk({}, "stop"), "[DONE]"),
+    );
+    await Effect.runPromise(
+      sendChatCompletionsTurn(
+        input(fetch, { history: [], promptImages: [{ mediaType: "image/png", data: "AQID" }] }),
+      ),
+    );
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "next" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } },
+        ],
+      },
+    ]);
+  });
+
   it("normalizes text, finish, usage-before-DONE, and Octant sequence values", async () => {
     const observed = vi.fn();
     const fetch = vi.fn(async () =>

@@ -38,7 +38,7 @@ afterEach(() => {
   while (directories.length > 0) rmSync(directories.pop()!, { recursive: true, force: true });
 });
 
-function fixture() {
+function fixture(seen: ReadonlyArray<string> = []) {
   const directory = mkdtempSync(join(tmpdir(), "octant-routing-routes-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -55,10 +55,24 @@ function fixture() {
     actor,
     clock: () => now,
   });
+  const asked: unknown[] = [];
   const handler = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore: new WindowAuthorityStore(),
     store,
+    seesImages: (input) => {
+      asked.push(input);
+      return { kind: "available", describedBy: { model: "Haiku 5.5", provider: "Anthropic" } };
+    },
+    windowSeesProject: (_window, projectId) => seen.includes(String(projectId)),
   });
+  const seesImages = (query: string) => {
+    const request = new Request(`http://127.0.0.1/api/native-harness/routing/sees-images?${query}`);
+    bindPrincipalRouteContext(request, {
+      principal: { kind: "local-window" } as never,
+      scopeId: windowId,
+    });
+    return handler(request);
+  };
   const put = (authenticated: boolean) => {
     const request = new Request("http://127.0.0.1/api/native-harness/routing", {
       method: "PUT",
@@ -88,10 +102,23 @@ function fixture() {
     });
     return handler(request);
   };
-  return { store, put, projectRead };
+  return { store, put, projectRead, seesImages, asked };
 }
 
 describe("native harness role routes", () => {
+  it("refuses to say whether Sees images works for a Project the window cannot see", async () => {
+    const visible = "00000000-0000-4000-8000-0000000000e1";
+    const hidden = "00000000-0000-4000-8000-0000000000e2";
+    const { seesImages, asked } = fixture([visible]);
+    const model = "providerInstanceId=00000000-0000-4000-8000-000000000001&modelId=luna";
+    expect((await seesImages(`projectId=${hidden}&${model}`))?.status).toBe(403);
+    expect(asked).toEqual([]);
+    const answer = await seesImages(`projectId=${visible}&${model}`);
+    expect(answer?.status).toBe(200);
+    expect(await answer?.json()).toMatchObject({ kind: "available" });
+    expect((await seesImages(model))?.status).toBe(200);
+  });
+
   it("refuses a role change that does not come from a person's window and changes nothing", async () => {
     const { store, put } = fixture();
     const response = await put(false);

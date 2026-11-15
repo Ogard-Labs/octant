@@ -6510,6 +6510,7 @@ export class CodeOperationService {
               description: this.#options.evidence.put(
                 describedImageText({
                   name: reference.displayName,
+                  attachmentId: String(reference.attachmentId),
                   describedBy: image.describedBy,
                   description: image.text,
                 }),

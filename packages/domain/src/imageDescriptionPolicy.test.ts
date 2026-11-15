@@ -11,11 +11,12 @@ describe("image descriptions for a model that cannot see", () => {
     expect(
       describedImageText({
         name: "login.png",
+        attachmentId: "a-1",
         describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
         description: "  A sign-in form with an error under the password field.  ",
       }),
     ).toBe(
-      "[Image login.png, described by Haiku 5.5 (Anthropic)]: A sign-in form with an error under the password field.",
+      "[Image login.png (attachment a-1), described by Haiku 5.5 (Anthropic)]: A sign-in form with an error under the password field.",
     );
   });
 

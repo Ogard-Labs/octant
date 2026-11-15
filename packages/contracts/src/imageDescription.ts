@@ -33,6 +33,14 @@ export const DescribedTurnImage = Schema.Struct({
   attachmentId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   name: DescribedImageName,
   describedBy: ImageDescribedBy,
+  /**
+   * The words themselves, where the mode keeps a turn's text in its own
+   * record (Work, Chat), so a later turn rebuilt from the transcript, or a
+   * compaction, still reads them. Code keeps them in its content store.
+   */
+  description: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_IMAGE_DESCRIPTION_CHARACTERS)),
+  ),
 }).annotations(strict);
 export type DescribedTurnImage = typeof DescribedTurnImage.Type;
 

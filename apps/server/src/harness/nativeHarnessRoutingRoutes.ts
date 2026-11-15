@@ -7,6 +7,7 @@ import {
   type ProjectId,
   type ProviderInstanceId,
   type ProviderModelId,
+  type WindowId,
 } from "@octant/contracts";
 import type { ImageDescriptionAvailability } from "./imageDescription";
 import { authenticateRouteWindowId } from "../principalRouteContext";
@@ -36,6 +37,12 @@ export interface NativeHarnessRoutingRouteDependencies {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => ImageDescriptionAvailability;
+  /**
+   * Whether the asking window may see the Project it names, by its own
+   * persisted workspace, as other Project reads decide. A window that may
+   * not is refused before anything is said about the Project's models.
+   */
+  readonly windowSeesProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
   readonly now?: () => number;
 }
 
@@ -82,8 +89,13 @@ export function createNativeHarnessRoutingRouteHandler(
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
+    let windowId: WindowId;
     try {
-      authenticateRouteWindowId({ request, store: dependencies.windowAuthorityStore, now: now() });
+      windowId = authenticateRouteWindowId({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness routing request is unauthorized.", 401, origin);
@@ -96,10 +108,22 @@ export function createNativeHarnessRoutingRouteHandler(
       if (dependencies.seesImages === undefined) {
         return failure("Sees images is unavailable on this host.", 404, origin);
       }
+      let projectId: ProjectId | undefined;
       try {
         const project = url.searchParams.get("projectId");
+        projectId = project === null ? undefined : decodeProjectId(project);
+      } catch {
+        return failure("Sees images request is invalid.", 400, origin);
+      }
+      if (
+        projectId !== undefined &&
+        dependencies.windowSeesProject?.(windowId, projectId) !== true
+      ) {
+        return failure("This window cannot see that Project.", 403, origin);
+      }
+      try {
         const answer = dependencies.seesImages({
-          ...(project === null ? {} : { projectId: decodeProjectId(project) }),
+          ...(projectId === undefined ? {} : { projectId }),
           providerInstanceId: decodeProviderInstanceId(url.searchParams.get("providerInstanceId")),
           modelId: decodeProviderModelId(url.searchParams.get("modelId")),
         });

@@ -1246,10 +1246,12 @@ export class WorkTurnService {
         attachmentId: image.attachmentId,
         name: image.name,
         describedBy: image.describedBy,
+        description: image.text,
       }));
       describedTexts = described.images.map((image) =>
         describedImageText({
           name: image.name,
+          attachmentId: image.attachmentId,
           describedBy: image.describedBy,
           description: image.text,
         }),
@@ -3085,10 +3087,18 @@ export class WorkTurnService {
 
   /** The conversation a requested compaction may summarize, sourced as turn context sources it. */
   sessionCompactionConversation(threadId: WorkThreadId): ReadonlyArray<SessionConversationMessage> {
-    return this.#projection.listForThread(threadId).flatMap((turn) =>
-      turn.transcript.flatMap(
-        (entry, index): ReadonlyArray<SessionConversationMessage> =>
-          entry.text.trim() === ""
+    return this.#projection.listForThread(threadId).flatMap((turn) => {
+      // The words Sees images wrote for the turn's images were part of what
+      // the person's message said to the model, so a rebuilt history and a
+      // compaction read them with it.
+      const described = describedImageLines(turn.describedImages);
+      return turn.transcript.flatMap(
+        (entry, index): ReadonlyArray<SessionConversationMessage> => {
+          const text =
+            index === 0 && entry.role === "user" && described.length > 0
+              ? [...described, entry.text].join("\n\n")
+              : entry.text;
+          return text.trim() === ""
             ? []
             : [
                 {
@@ -3098,11 +3108,12 @@ export class WorkTurnService {
                   },
                   role: entry.role,
                   exchangeKey: String(turn.turnId),
-                  content: entry.text,
+                  content: text,
                 },
-              ],
-      ),
-    );
+              ];
+        },
+      );
+    });
   }
 
   /** Whether a turn on this thread is accepted, running, or waiting on the person. */
@@ -3675,4 +3686,20 @@ function personMemoryContributions(
       block: { kind: "person-memory", text },
     },
   ];
+}
+
+/** The model-facing text of each image a turn's model got described, in order. */
+function describedImageLines(images: DescribedTurnImages | undefined): ReadonlyArray<string> {
+  return (images ?? []).flatMap((image) =>
+    image.description === undefined
+      ? []
+      : [
+          describedImageText({
+            name: image.name,
+            attachmentId: image.attachmentId,
+            describedBy: image.describedBy,
+            description: image.description,
+          }),
+        ],
+  );
 }

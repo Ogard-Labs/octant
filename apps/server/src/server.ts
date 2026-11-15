@@ -1055,6 +1055,7 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
+      imageDescriber,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,

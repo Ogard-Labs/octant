@@ -84,6 +84,10 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
+import { lookToolForThread } from "../image/lookTool";
+import { modelLabelOf } from "./imageDescriber";
+import { supportsConversationInput } from "./conversationInputs";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -107,8 +111,10 @@ import type { CanvasWiring } from "./canvas";
  */
 const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 
-export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<
+export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
+  /** Sees images; absent on a host started without one. */
+  readonly imageDescriber?: ImageDescriber;
+} &   Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
@@ -175,6 +181,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
   } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
+  const imageDescriber = deps.imageDescriber;
   const {
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
@@ -515,6 +522,21 @@ export function wireChat(deps: ChatDependencies) {
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
+      ...(imageDescriber === undefined
+        ? {}
+        : {
+            describeImages: ({ thread, images, signal }) =>
+              describeTurnImages(imageDescriber, {
+                signal,
+                projectId: thread.projectId,
+                threadModel: modelLabelOf(
+                  { persistence, providerRuntimeRegistry },
+                  thread.providerInstanceId,
+                  thread.modelId,
+                ),
+                images,
+              }),
+          }),
       resolveAppManagedTools: ({
         windowId,
         thread,
@@ -583,6 +605,50 @@ export function wireChat(deps: ChatDependencies) {
                   thread,
                   port: canvasAgentToolPort,
                 }),
+                // Sees images for a model that cannot read images: only the
+                // thread's own attachments, since a Chat thread has no folder.
+                // It runs its own Watcher wrapper and marks nothing.
+                imageDescriber === undefined
+                  ? undefined
+                  : lookToolForThread({
+                      describer: imageDescriber,
+                      threadId: String(thread.id),
+                      projectId: thread.projectId,
+                      threadModel: modelLabelOf(
+                        { persistence, providerRuntimeRegistry },
+                        thread.providerInstanceId,
+                        thread.modelId,
+                      ),
+                      readsImages: supportsConversationInput(
+                        providerRuntimeRegistry.observedState(thread.providerInstanceId),
+                        String(thread.modelId),
+                        "image/png",
+                      ),
+                      attachment: async (attachmentId) => {
+                        const attachment = persistence
+                          .readChatThreadView(thread.id)
+                          ?.attachments.find(
+                            (item) => String(item.id) === attachmentId && item.status === "finalized",
+                          );
+                        if (attachment === undefined) return undefined;
+                        const bytes = await chatAttachmentStore.read({
+                          chatThreadId: thread.id,
+                          chatAttachmentId: attachment.id,
+                          displayName: attachment.displayName,
+                          size: attachment.byteLength,
+                          hash: attachment.digest,
+                          finalizedAt: attachment.createdAt,
+                        });
+                        return {
+                          name: attachment.displayName,
+                          mediaType: attachment.mediaType,
+                          bytes,
+                        };
+                      },
+                      recordExternalContentIngestion: (input) =>
+                        externalContentIngestionStore.record(input),
+                      uuid: randomUUID,
+                    }),
                 // Outside the taint wrapper too: what it returns is memory
                 // Octant wrote from the person's own messages, not outside
                 // content.

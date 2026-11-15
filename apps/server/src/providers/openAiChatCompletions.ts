@@ -1,4 +1,5 @@
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
+import { chatCompletionsUserContent, type PromptImage } from "./promptImages";
 import {
   decodeProviderFailure,
   type ProviderFailure,
@@ -29,6 +30,8 @@ export interface ChatCompletionsTurnInput {
   readonly modelId: string;
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  /** Images the person attached, sent with the prompt as `image_url` parts. */
+  readonly promptImages?: ReadonlyArray<PromptImage>;
   /** Stable instructions, sent as the leading system message so the prefix cache keeps them. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
@@ -165,7 +168,9 @@ function requestBody(input: ChatCompletionsTurnInput, streaming: boolean): Recor
               },
         ];
       }),
-      ...(includeUserPrompt ? [{ role: "user", content: input.prompt }] : []),
+      ...(includeUserPrompt
+        ? [{ role: "user", content: chatCompletionsUserContent(input.prompt, input.promptImages) }]
+        : []),
       ...(toolAnswers === undefined ? [] : toolAnswers),
     ],
     stream: streaming,

@@ -19,13 +19,17 @@ export function boundImageDescription(text: string): string {
   return `${trimmed.slice(0, MAX_IMAGE_DESCRIPTION_CHARACTERS - TRUNCATED_MARK.length).trimEnd()}${TRUNCATED_MARK}`;
 }
 
-/** The text a model that cannot see receives for one attached image. */
+/**
+ * The text a model that cannot see receives for one attached image. It names
+ * the attachment id, so the model can ask `look` about the same image again.
+ */
 export function describedImageText(input: {
   readonly name: string;
+  readonly attachmentId: string;
   readonly describedBy: ImageDescribedBy;
   readonly description: string;
 }): string {
-  return `[Image ${input.name}, described by ${input.describedBy.model} (${input.describedBy.provider})]: ${boundImageDescription(input.description)}`;
+  return `[Image ${input.name} (attachment ${input.attachmentId}), described by ${input.describedBy.model} (${input.describedBy.provider})]: ${boundImageDescription(input.description)}`;
 }
 
 /**

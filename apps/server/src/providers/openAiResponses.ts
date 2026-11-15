@@ -6,6 +6,7 @@ import {
   type ProviderToolDefinition,
   type ProviderToolImage,
 } from "@octant/contracts";
+import { responsesUserContent, type PromptImage } from "./promptImages";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { contextOverflowFromBody } from "./contextOverflowRefusal";
@@ -101,6 +102,8 @@ export interface ResponsesTurnInput {
   readonly modelId: string;
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  /** Images the person attached, sent with the prompt as `input_image` parts. */
+  readonly promptImages?: ReadonlyArray<PromptImage>;
   /** Stable instructions, sent as the request's `instructions` so the prefix cache keeps them. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
@@ -256,7 +259,9 @@ async function runResponsesTurn(
           ...responsesToolImages(entry.toolResults ?? []),
         ];
       }),
-      ...(includeUserPrompt ? [{ role: "user" as const, content: input.prompt }] : []),
+      ...(includeUserPrompt
+        ? [{ role: "user" as const, content: responsesUserContent(input.prompt, input.promptImages) }]
+        : []),
       ...(toolAnswers === undefined ? [] : toolAnswers),
     ],
     stream: true,

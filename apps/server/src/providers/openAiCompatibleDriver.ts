@@ -1,4 +1,11 @@
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
+import { attachedImagesSupport, sendsEveryAttachment } from "./promptImages";
+import {
+  chatCompletionsUserContent,
+  promptImagesOf,
+  responsesUserContent,
+  type PromptImage,
+} from "./promptImages";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
@@ -315,6 +322,11 @@ function admitTurn(
     ...(observed?.capabilities ?? initialCapabilities),
     appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
   };
+  // The request carries images only; a document the model lists would be
+  // dropped on the wire, so it is refused here instead.
+  if (!sendsEveryAttachment(input.attachments)) {
+    return failure("unsupported", "This endpoint sends attached images only.");
+  }
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }
 
@@ -434,13 +446,17 @@ function sessionOver(
 function protocolInput(request: HarnessEndpointRequest): {
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  readonly promptImages?: ReadonlyArray<PromptImage>;
   readonly toolAnswers: readonly ProviderToolAnswer[] | undefined;
 } {
   const last = request.history.at(-1);
   if (last?.role === "user" && last.toolResults === undefined) {
+    // A turn's attachments ride on its own user message only.
+    const promptImages = promptImagesOf(last.attachments);
     return {
       history: request.history.slice(0, -1),
       prompt: last.text,
+      ...(promptImages.length === 0 ? {} : { promptImages }),
       toolAnswers: undefined,
     };
   }
@@ -464,7 +480,7 @@ async function sendCompatibleRequest(
     readonly subscriptionUsageGranted: boolean | undefined;
   } = { profile: undefined, subscriptionUsageGranted: undefined },
 ): Promise<CompatibleTurnResult> {
-  const { history, prompt, toolAnswers } = protocolInput(request);
+  const { history, prompt, promptImages, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
     // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
@@ -480,6 +496,7 @@ async function sendCompatibleRequest(
     modelId: request.modelId,
     history,
     prompt,
+    ...(promptImages === undefined ? {} : { promptImages }),
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools.length === 0 ? {} : { tools: request.tools }),
     ...(toolAnswers === undefined ? {} : { toolAnswers }),
@@ -578,6 +595,7 @@ function recordObservedTurn(
     models,
     capabilities: {
       ...initialCapabilities,
+      nativeAttachments: attachedImagesSupport(models),
       streaming: result.protocol === "chat-completions" ? result.streaming : "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
       usage: result.usage === undefined ? "unavailable" : "supported",
@@ -711,7 +729,10 @@ function recordProbe(
     // What requests taught about each model's window, and a
     // person's override, outlive the probe a Chat turn runs first.
     models: carryModelContextWindowFacts(result.models, prior?.models),
-    capabilities: initialCapabilities,
+    capabilities: {
+      ...initialCapabilities,
+      nativeAttachments: attachedImagesSupport(result.models),
+    },
     ...(result.failure === undefined ? {} : { message: result.failure.message }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,
@@ -920,7 +941,7 @@ function estimateBody(
  * a responses token count is never paired with a chat-completions estimate.
  */
 function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, unknown> {
-  const { history, prompt, toolAnswers } = protocolInput(request);
+  const { history, prompt, promptImages, toolAnswers } = protocolInput(request);
   const includeUserPrompt = !(prompt.length === 0 && toolAnswers !== undefined);
   const input = [
     ...history.flatMap((entry) => {
@@ -950,7 +971,9 @@ function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, 
             }))),
       ];
     }),
-    ...(includeUserPrompt ? [{ role: "user" as const, content: prompt }] : []),
+    ...(includeUserPrompt
+      ? [{ role: "user" as const, content: responsesUserContent(prompt, promptImages) }]
+      : []),
     ...(toolAnswers === undefined
       ? []
       : toolAnswers.map((answer) => ({
@@ -994,7 +1017,10 @@ function compatibleEstimateBody(request: HarnessEndpointRequest): Record<string,
       }
       return [
         entry.toolCalls === undefined
-          ? { role: entry.role, content: entry.text }
+          ? {
+              role: entry.role,
+              content: chatCompletionsUserContent(entry.text, promptImagesOf(entry.attachments)),
+            }
           : {
               role: entry.role,
               content: entry.text,

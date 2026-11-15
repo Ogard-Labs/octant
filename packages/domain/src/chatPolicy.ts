@@ -244,6 +244,7 @@ export interface BeginChatTurnInput {
   /** Set when this turn's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
   readonly inputReceipt?: ChatAttempt["inputReceipt"];
+  readonly describedImages?: ChatAttempt["describedImages"];
   readonly contextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly sideChatReturns?: ChatTurn["sideChatReturns"];
@@ -279,6 +280,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
+    ...(input.describedImages === undefined ? {} : { describedImages: input.describedImages }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
     ...(input.sideChatSourceReceipt === undefined
@@ -427,6 +429,7 @@ export interface RetryChatTurnInput {
   /** Set when the retried attempt's new provider session starts with the conversation handed over. */
   readonly handoff?: ChatAttempt["handoff"];
   readonly inputReceipt?: ChatAttempt["inputReceipt"];
+  readonly describedImages?: ChatAttempt["describedImages"];
   readonly newContextManifestId: ContextManifestId;
   readonly sideChatSourceReceipt?: ChatAttempt["sideChatSourceReceipt"];
   readonly expectedVersion: AggregateVersion;
@@ -479,6 +482,7 @@ export function retryChatTurn(
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
     ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     ...(input.inputReceipt === undefined ? {} : { inputReceipt: input.inputReceipt }),
+    ...(input.describedImages === undefined ? {} : { describedImages: input.describedImages }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
     ...(input.sideChatSourceReceipt === undefined
