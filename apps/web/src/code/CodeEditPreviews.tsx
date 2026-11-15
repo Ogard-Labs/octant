@@ -3,6 +3,7 @@ import type { CodeLanguageEditPreview } from "@octant/contracts/code-language";
 import type { CodeLanguageEditOutcome } from "./useCodeLanguageServices";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 /** Explicit preparation never writes; the existing editor save route owns each reviewed write. */
 export function CodeEditPreviews(props: {
@@ -128,13 +129,12 @@ export function CodeEditPreviews(props: {
                 remain.
               </p>
               {preview.files.map((file) => (
-                <details key={file.path}>
-                  <summary>{file.path}</summary>
+                <OctantCollapsible key={file.path} summary={file.path}>
                   <p>Before</p>
                   <pre>{file.before}</pre>
                   <p>After</p>
                   <pre>{file.after}</pre>
-                </details>
+                </OctantCollapsible>
               ))}
               <OctantButton
                 type="button"

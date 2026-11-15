@@ -139,6 +139,31 @@ describe("TerminalBrowserApprovalPrompt", () => {
     );
   });
 
+  it("asks about one call of a tool the page declares, naming it and its arguments, with only a one-use answer", async () => {
+    const browser = client([
+      { ...approval(), pageTool: { name: "search_flights", arguments: '{"from":"OSL"}' } },
+    ]);
+    render(
+      <TerminalBrowserApprovalPrompt
+        client={browser}
+        threadId={threadId}
+        threadTitle="Check the page"
+      />,
+    );
+    const card = await screen.findByRole("group", { name: "Browser page tool" });
+    expect(card).toHaveTextContent("search_flights");
+    expect(card).toHaveTextContent('{"from":"OSL"}');
+    expect(card).toHaveTextContent("https://example.com");
+    expect(screen.queryByRole("button", { name: "Always allow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Call once" }));
+    await waitFor(() =>
+      expect(browser.decideApproval).toHaveBeenCalledWith({
+        approvalId: approval().approvalId,
+        decision: "approved",
+      }),
+    );
+  });
+
   it("names the thread and the site, and says the terminal asked rather than the thread's agent", async () => {
     const browser = client([approval()]);
     render(

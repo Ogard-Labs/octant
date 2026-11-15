@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
 import {
   ProjectMemoryProposalPrompt,
@@ -17,6 +18,7 @@ import { threadCompactionSubject } from "../context/CompactionDivider";
 import type { AutoReview } from "./autoReview";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues, ThreadDocumentDelivery } from "@octant/contracts";
+import { decodeMentionableThreadId } from "@octant/contracts";
 import {
   MAX_CODE_THREAD_TITLE_LENGTH,
   type CodeApprovalId,
@@ -45,6 +47,7 @@ import {
 } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -64,7 +67,6 @@ import {
   applyComposerCaret,
   COMPOSER_STAGED_DROPPED_NOTE,
 } from "../composer/composerThreadDraftStore";
-import { ShellState } from "../shell/ShellState";
 import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
@@ -576,6 +578,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft,
+    readerThreadId: decodeMentionableThreadId(String(props.threadId)),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -728,7 +731,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   if (props.controller.status === "disconnected") {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        <ShellState
+        <OctantEmpty
           action={{ label: "Retry Code", onClick: props.controller.retry }}
           eyebrow="Code workspace"
           message={props.controller.errorMessage ?? "The local Code service is unavailable."}
@@ -744,7 +747,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const unavailable = props.controller.errorCategory;
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
-        <ShellState
+        <OctantEmpty
           {...(unavailable === undefined
             ? {}
             : { action: { label: "Retry Code", onClick: props.controller.retry } })}
@@ -1658,7 +1661,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           >
             <div className="code-thread-workspace__transcript thread-column">
               {props.controller.conversationHistory === "loading" ? (
-                <ShellState
+                <OctantEmpty
                   message="Loading the existing thread transcript from this host."
                   state="loading"
                   title="Loading conversation"
@@ -2365,7 +2368,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
           info={
-            <ThreadInfo>
+            <ThreadInfo
+              notes={{
+                threadId: String(thread.id),
+                onInsert: (note) => {
+                  const next = draftWithNote(draft, note);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                },
+              }}
+            >
               <ThreadGuardrailLevel
                 factsVersion={thread.version}
                 factsActivity={`${providerTurnOperationId ?? ""}:${props.controller.turnStatus}`}

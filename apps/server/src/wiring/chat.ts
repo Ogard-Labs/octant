@@ -50,6 +50,7 @@ import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
   createChatThreadMentionDirectory,
+  codeMentionWithinReach,
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   threadMentionContextResolver,
@@ -67,6 +68,8 @@ import {
   type SideChatFileSource,
 } from "../chat/sideChatSourceTools";
 import { createThreadMentionRouteHandler } from "../threadMentionRoutes";
+import { ThreadNoteStore, ThreadNotesService } from "../threadNotes/threadNotes";
+import { createThreadNotesRouteHandler } from "../threadNotes/threadNotesRoutes";
 import { threadToolCallRecorders } from "../threadToolCallRecorder";
 import {
   createExtensionChatResolver,
@@ -710,6 +713,35 @@ export function wireChat(deps: ChatDependencies) {
       }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
+      // A Code transcript reaches a composer only from the Project a window
+      // showing that composer alone would reach: a Code composer's own
+      // Project, any other composer's Code lead. Another pane's Project never
+      // becomes mentionable by sitting beside it (maintainer decision,
+      // 2026-11-14). A paired device holds no workspace and keeps its reach.
+      admitsMention: ({ windowId, readerThreadId, thread }) => {
+        if (thread.mode !== "code") return true;
+        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+        if (workspace === undefined) return true;
+        let target;
+        let reader;
+        try {
+          target = persistence.readCodeThread(decodeCodeThreadId(String(thread.threadId)));
+          reader =
+            readerThreadId === undefined
+              ? undefined
+              : persistence.readCodeThread(decodeCodeThreadId(readerThreadId));
+        } catch {
+          return false;
+        }
+        return (
+          target !== undefined &&
+          codeMentionWithinReach({
+            workspace,
+            readerCodeProjectId: reader?.projectId,
+            mentionedProjectId: target.projectId,
+          })
+        );
+      },
     });
     threadDialogueService = new ThreadDialogueService({
       resolveChatTargets: (windowId, threadIds) =>
@@ -725,6 +757,31 @@ export function wireChat(deps: ChatDependencies) {
       service: threadMentionService,
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
+    // A thread's notes and recap reach exactly the threads a mention resolves
+    // for this window, read through each mode's own transcript reader.
+    const threadNotesRoutes = createThreadNotesRouteHandler({
+      service: new ThreadNotesService({
+        store: new ThreadNoteStore({
+          journal: persistence.journal,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+        canOpen: async (windowId, threadId) =>
+          (await threadMentionService.openableThread(windowId, threadId)) !== undefined,
+        readRecapSource: async (windowId, threadId) => {
+          const read = await threadMentionService.resolveSideChatSource(windowId, threadId);
+          if (read.kind === "unreadable") return read;
+          return {
+            kind: "readable",
+            mode: read.source.mode,
+            title: read.source.title,
+            transcript: read.source.transcript,
+            truncated: read.source.truncated,
+          };
+        },
+      }),
+      windowAuthorityStore,
     });
     // At start every running attempt is one the previous host was giving when
     // it stopped; the host continues those once it is up (wiring/continuation.ts).
@@ -903,6 +960,7 @@ export function wireChat(deps: ChatDependencies) {
       threadCheckpointRoutes,
       threadMentionRoutes,
       threadMentionService,
+      threadNotesRoutes,
       workspacePresetRoutes,
     };
   });

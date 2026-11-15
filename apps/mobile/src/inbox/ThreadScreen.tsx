@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, AppState, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileAttachmentOffer,
   readRemoteSessionStanding,
+  setMobileUsageResume,
   RESTRICTED_REMOTE_SESSION,
   type MobileAttachmentSource,
   type MobileInboxRow,
@@ -14,7 +24,6 @@ import { presentStaleHostSecurity } from "@octant/domain";
 import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
-import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
 import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
@@ -34,7 +43,9 @@ import { mobileSpacing } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { AttachSourceSheet } from "../ui/AttachSourceSheet";
 import { FloatingComposer } from "../ui/FloatingComposer";
+import { IconButton } from "../ui/IconButton";
 import { NavBar } from "../ui/NativeChrome";
+import { ThreadPanesSheet } from "../panes/ThreadPanesSheet";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { RewindSheet } from "../ui/RewindSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
@@ -44,6 +55,7 @@ import { DefaultLevelsPanel } from "./thread/DefaultLevelsPanel";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
 import { ThreadLevelPanel } from "./thread/ThreadLevelPanel";
 import { ThreadTranscript } from "./thread/ThreadTranscript";
+import { ResumeBar, type ResumeOffer } from "./thread/ResumeBar";
 import { useThreadReplyDetail } from "./thread/useThreadReplyDetail";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
 import { useChatThread } from "./thread/useChatThread";
@@ -64,6 +76,8 @@ export interface ThreadScreenProps {
   readonly onBack: () => void;
   /** Opens the thread a fork made. */
   readonly onOpenThread: (row: MobileInboxRow) => void;
+  /** A Chat turn a message search matched; the thread opens scrolled to it. */
+  readonly focusTurnId?: string | undefined;
 }
 
 export function ThreadScreen(props: ThreadScreenProps) {
@@ -96,6 +110,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [busy, setBusy] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [panesOpen, setPanesOpen] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
   const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
   // The surfaces on offer come from the shared remote matrix, so a host that
   // would refuse one never has it shown here.
@@ -118,6 +134,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
     [selected?.mode, standing],
   );
   const activeSurface = surfaces.some((entry) => entry.id === surface) ? surface : "chat";
+  // A view can shrink to a small card over the conversation, so the person can
+  // read the reply and watch the page at once; a view always opens full size.
+  const [viewFloating, setViewFloating] = useState(false);
+  const fullView = activeSurface !== "chat" && !viewFloating;
+  const openSurface = (next: RemoteThreadSurfaceKind) => {
+    setViewFloating(false);
+    setSurface(next);
+  };
   const browserReach = surfaces.find((entry) => entry.id === "browser")?.reach ?? "unavailable";
 
   const mode = selected?.mode;
@@ -166,6 +190,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   useEffect(() => {
     setError(undefined);
     setBusy(false);
+    setPanesOpen(false);
   }, [identity]);
 
   useEffect(() => {
@@ -253,6 +278,77 @@ export function ThreadScreen(props: ThreadScreenProps) {
     mode === "code" || mode === "work" ? mobileThreadComposerCopy(mode) : undefined;
   const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
   const liveBusy = busy || chat.activeAttempt !== undefined;
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const resetLabel = (resetsAt: string | undefined) =>
+    resetsAt === undefined
+      ? undefined
+      : `Resets ${new Date(resetsAt).toLocaleString(undefined, {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        })}`;
+  const usageResume = async (
+    mode: "work" | "code",
+    thread: { readonly id: unknown; readonly version: number },
+    action: { readonly kind: "schedule"; readonly turnId: string } | { readonly kind: "cancel" },
+  ) => {
+    if (transport === undefined) return;
+    setResumeBusy(true);
+    try {
+      const result = await setMobileUsageResume({
+        transport,
+        row: { mode, threadId: String(thread.id), version: thread.version },
+        action,
+      });
+      if (result.status === "refused") setError(result.message);
+      await (mode === "work" ? work.refresh({ quiet: true }) : code.refresh({ quiet: true }));
+    } catch {
+      setError("The host could not be reached. Nothing changed.");
+    } finally {
+      setResumeBusy(false);
+    }
+  };
+  // Only over an empty composer: a draft the person is writing is the next turn.
+  const resumeOffer: ResumeOffer | undefined = (() => {
+    if (prompt.trim().length > 0 || !staleGate.allowProductMutations || offlineDemo)
+      return undefined;
+    if (selected?.mode === "chat") {
+      const stopped = chat.retryableAttempt;
+      if (stopped === undefined || chat.activeAttempt !== undefined) return undefined;
+      const interrupted = stopped.outcome === "interrupted";
+      return {
+        label: interrupted ? "This turn was interrupted." : "This turn failed.",
+        actionLabel: interrupted ? "Resume" : "Retry",
+        onPress: () => void chat.retry(),
+      };
+    }
+    const thread =
+      selected?.mode === "work" ? work.thread : selected?.mode === "code" ? code.thread : undefined;
+    const mode = selected?.mode === "work" ? "work" : "code";
+    if (thread === undefined) return undefined;
+    if (thread.usageResume?.status === "scheduled") {
+      const detail = resetLabel(thread.usageResume.record.usageLimit.resetsAt);
+      return {
+        label: "Resume scheduled",
+        ...(detail === undefined ? {} : { detail }),
+        actionLabel: "Cancel",
+        onPress: () => void usageResume(mode, thread, { kind: "cancel" }),
+      };
+    }
+    // Work knows a turn stopped at a usage limit from the turn itself; the phone's
+    // Code conversation carries no failure, so Code offers only a scheduled resume.
+    const last = selected?.mode === "work" ? work.turns?.at(-1) : undefined;
+    const limit = last?.failure?.usageLimit;
+    if (last === undefined || limit === undefined || last.status !== "waiting") return undefined;
+    const detail = resetLabel(limit.resetsAt);
+    return {
+      label: "Usage limit reached",
+      ...(detail === undefined ? {} : { detail }),
+      actionLabel: "Resume when it resets",
+      onPress: () =>
+        void usageResume("work", thread, { kind: "schedule", turnId: String(last.turnId) }),
+    };
+  })();
   const composerEditable =
     mode === "chat"
       ? staleGate.allowProductMutations && chat.activeAttempt === undefined
@@ -305,6 +401,55 @@ export function ThreadScreen(props: ThreadScreenProps) {
           color: colors.textSecondary,
           fontSize: 12,
         },
+        viewBar: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: mobileSpacing.sm,
+          paddingHorizontal: mobileSpacing.md,
+          paddingBottom: mobileSpacing.xs,
+        },
+        viewReturn: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 2,
+          minHeight: 30,
+          paddingLeft: 6,
+          paddingRight: 10,
+          borderRadius: 15,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        viewReturnLabel: { color: colors.accent, fontSize: 13, fontWeight: "500" },
+        viewName: { flex: 1, color: colors.textSecondary, fontSize: 13, fontWeight: "500" },
+        viewFloat: { padding: 4 },
+        stage: { flex: 1 },
+        floatingView: {
+          position: "absolute",
+          top: mobileSpacing.sm,
+          right: mobileSpacing.md,
+          width: 148,
+          borderRadius: 12,
+          overflow: "hidden",
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStrokeStrong,
+          // Solid, not glass: the card sits over transcript text, and a see-through
+          // fill let that text show through the page picture and its label.
+          backgroundColor: colors.surfaceElevatedSolid,
+          shadowColor: colors.shadow,
+          shadowOpacity: 0.25,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 6,
+        },
+        floatingHeader: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingHorizontal: 8,
+          paddingVertical: 5,
+        },
+        floatingLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: "500" },
       }),
     [colors],
   );
@@ -337,124 +482,201 @@ export function ThreadScreen(props: ThreadScreenProps) {
         onBack={props.onBack}
         subtitle={hostLabel}
         title={title}
+        trailing={
+          offlineDemo || transport === undefined ? undefined : (
+            <IconButton
+              accessibilityLabel="Views and panes"
+              iconSize={19}
+              name="grid-outline"
+              onPress={() => setPanesOpen(true)}
+              size={34}
+              testID="mobile-thread-panes-open"
+              variant="ghost"
+            />
+          )
+        }
       />
 
-      {offlineDemo ? null : (
-        <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />
+      {/* A view replaces the transcript, so while one is open a single chip
+          leads back; the views themselves are chosen in the views and panes
+          sheet rather than from a tab row every thread would pay for. */}
+      {!fullView ? null : (
+        <View style={styles.viewBar} testID="mobile-thread-view-bar">
+          <Pressable
+            accessibilityLabel="Back to the conversation"
+            accessibilityRole="button"
+            onPress={() => openSurface("chat")}
+            style={({ pressed }) => [styles.viewReturn, pressed ? { opacity: 0.6 } : null]}
+            testID="mobile-thread-view-return"
+          >
+            <Ionicons color={colors.accent} name="chevron-back" size={15} />
+            <Text style={styles.viewReturnLabel}>{MOBILE_COPY.threadViewReturn}</Text>
+          </Pressable>
+          <Text numberOfLines={1} style={styles.viewName}>
+            {surfaces.find((entry) => entry.id === activeSurface)?.label ?? ""}
+          </Text>
+          <Pressable
+            accessibilityLabel="Keep it small over the conversation"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => setViewFloating(true)}
+            style={({ pressed }) => [styles.viewFloat, pressed ? { opacity: 0.6 } : null]}
+            testID="mobile-thread-view-float"
+          >
+            <Ionicons color={colors.accent} name="contract-outline" size={17} />
+          </Pressable>
+        </View>
       )}
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        style={styles.scroll}
-        testID="mobile-thread-transcript"
-      >
-        {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
-          <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
-        ) : connectionStatus.kind === "offline" ? (
-          <Text style={styles.connectionStatus}>Waiting for the network.</Text>
-        ) : null}
-        {!offlineDemo && activeSurface === "browser" && transport !== undefined ? (
-          <BrowserSurfacePanel
-            mode={selected.mode}
-            reach={browserReach}
-            threadId={selected.threadId}
-            transport={transport}
-          />
-        ) : null}
-        {activeSurface === "browser" ? null : (
-          <>
-            {offlineDemo || transport === undefined ? null : (
-              <ExtensionToolApprovalCard
-                actsAsHostPerson={standing.actsAsHostPerson}
-                threadId={selected.threadId}
-                transport={transport}
-              />
-            )}
-            {offlineDemo || transport === undefined ? null : (
-              <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
-            )}
-            {busy && chat.activeAttempt === undefined ? (
-              <ActivityIndicator color={colors.accent} />
-            ) : null}
-            {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
-            {turnActions.notice !== undefined ? (
-              <Text style={styles.connectionStatus} testID="mobile-thread-notice">
-                {turnActions.notice}
-              </Text>
-            ) : null}
-            {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
-              code.thread !== undefined ? (
-              <ThreadLevelPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                onChanged={() => void code.refresh({ quiet: true })}
-                subject={{ mode: "code", thread: code.thread }}
-                transport={transport}
-              />
-            ) : selected.mode === "work" && work.thread !== undefined ? (
-              <ThreadLevelPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                onChanged={() => void work.refresh({ quiet: true })}
-                subject={{ mode: "work", thread: work.thread }}
-                transport={transport}
-              />
-            ) : null}
-            {!offlineDemo &&
-            transport !== undefined &&
-            (selected.mode === "work" || selected.mode === "code") &&
-            routinesProjectId !== undefined ? (
-              <DefaultLevelsPanel
-                actsAsHostPerson={standing.actsAsHostPerson}
-                warnings={fullAccessWarnings}
-                mode={selected.mode}
-                projectId={routinesProjectId}
-                transport={transport}
-              />
-            ) : null}
-            {!offlineDemo &&
-            selected.mode === "code" &&
-            (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
-              <ApprovalDeferralSheet
-                executionPolicy={codePolicy}
-                mode="code"
-                operationSummary="Approval-gated Code operations"
-                threadTitle={title}
-                {...(hostLabel === undefined ? {} : { hostLabel })}
-              />
-            ) : null}
-            {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
-              <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
-            ) : null}
-            {!offlineDemo &&
-            selected.mode === "code" &&
-            transport !== undefined &&
-            code.thread !== undefined ? (
-              <CoordinatorProposalsPanel thread={code.thread} transport={transport} />
-            ) : null}
-            {!offlineDemo &&
-            transport !== undefined &&
-            (selected.mode === "work" || selected.mode === "code") &&
-            routinesProjectId !== undefined ? (
-              <ThreadRoutinesPanel
-                mode={selected.mode}
-                projectId={routinesProjectId}
-                threadId={selected.threadId}
-                transport={transport}
-              />
-            ) : null}
-            <ThreadTranscript
-              allowProductMutations={staleGate.allowProductMutations}
-              chat={chat}
-              codeConversation={code.conversation}
-              replyDetail={replyDetail}
-              turnActionsFor={turnActions.actionsFor}
-              workTurns={work.turns}
+      <View style={styles.stage}>
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          style={styles.scroll}
+          testID="mobile-thread-transcript"
+        >
+          {connectionStatus.kind === "waiting-to-retry" || chat.reconnecting ? (
+            <Text style={styles.connectionStatus}>{RECONNECTING_COPY}</Text>
+          ) : connectionStatus.kind === "offline" ? (
+            <Text style={styles.connectionStatus}>Waiting for the network.</Text>
+          ) : null}
+          {!offlineDemo && fullView && activeSurface === "browser" && transport !== undefined ? (
+            <BrowserSurfacePanel
+              mode={selected.mode}
+              reach={browserReach}
+              threadId={selected.threadId}
+              transport={transport}
             />
-          </>
-        )}
-      </ScrollView>
+          ) : null}
+          {fullView ? null : (
+            <>
+              {offlineDemo || transport === undefined ? null : (
+                <ExtensionToolApprovalCard
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  threadId={selected.threadId}
+                  transport={transport}
+                />
+              )}
+              {offlineDemo || transport === undefined ? null : (
+                <NativeHarnessSessionPanel threadId={selected.threadId} transport={transport} />
+              )}
+              {busy && chat.activeAttempt === undefined ? (
+                <ActivityIndicator color={colors.accent} />
+              ) : null}
+              {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
+              {turnActions.notice !== undefined ? (
+                <Text style={styles.connectionStatus} testID="mobile-thread-notice">
+                  {turnActions.notice}
+                </Text>
+              ) : null}
+              {offlineDemo || transport === undefined ? null : selected.mode === "code" &&
+                code.thread !== undefined ? (
+                <ThreadLevelPanel
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  warnings={fullAccessWarnings}
+                  onChanged={() => void code.refresh({ quiet: true })}
+                  subject={{ mode: "code", thread: code.thread }}
+                  transport={transport}
+                />
+              ) : selected.mode === "work" && work.thread !== undefined ? (
+                <ThreadLevelPanel
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  warnings={fullAccessWarnings}
+                  onChanged={() => void work.refresh({ quiet: true })}
+                  subject={{ mode: "work", thread: work.thread }}
+                  transport={transport}
+                />
+              ) : null}
+              {!offlineDemo &&
+              transport !== undefined &&
+              (selected.mode === "work" || selected.mode === "code") &&
+              routinesProjectId !== undefined ? (
+                <DefaultLevelsPanel
+                  actsAsHostPerson={standing.actsAsHostPerson}
+                  warnings={fullAccessWarnings}
+                  mode={selected.mode}
+                  projectId={routinesProjectId}
+                  transport={transport}
+                />
+              ) : null}
+              {!offlineDemo &&
+              selected.mode === "code" &&
+              (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
+                <ApprovalDeferralSheet
+                  executionPolicy={codePolicy}
+                  mode="code"
+                  operationSummary="Approval-gated Code operations"
+                  threadTitle={title}
+                  {...(hostLabel === undefined ? {} : { hostLabel })}
+                />
+              ) : null}
+              {!offlineDemo && selected.mode === "code" && transport !== undefined ? (
+                <PullRequestReviewPanel threadId={selected.threadId} transport={transport} />
+              ) : null}
+              {!offlineDemo &&
+              selected.mode === "code" &&
+              transport !== undefined &&
+              code.thread !== undefined ? (
+                <CoordinatorProposalsPanel thread={code.thread} transport={transport} />
+              ) : null}
+              {!offlineDemo &&
+              transport !== undefined &&
+              (selected.mode === "work" || selected.mode === "code") &&
+              routinesProjectId !== undefined ? (
+                <ThreadRoutinesPanel
+                  mode={selected.mode}
+                  projectId={routinesProjectId}
+                  threadId={selected.threadId}
+                  transport={transport}
+                />
+              ) : null}
+              <ThreadTranscript
+                {...(props.focusTurnId === undefined
+                  ? {}
+                  : {
+                      focus: {
+                        turnId: props.focusTurnId,
+                        onFound: (y: number) =>
+                          scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }),
+                      },
+                    })}
+                allowProductMutations={staleGate.allowProductMutations}
+                chat={chat}
+                codeConversation={code.conversation}
+                replyDetail={replyDetail}
+                turnActionsFor={turnActions.actionsFor}
+                workTurns={work.turns}
+              />
+            </>
+          )}
+        </ScrollView>
+        {viewFloating && activeSurface === "browser" && !offlineDemo && transport !== undefined ? (
+          <View style={styles.floatingView} testID="mobile-thread-view-floating">
+            <View style={styles.floatingHeader}>
+              <Text style={styles.floatingLabel}>
+                {surfaces.find((entry) => entry.id === activeSurface)?.label ?? ""}
+              </Text>
+              <Pressable
+                accessibilityLabel="Close the browser"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => openSurface("chat")}
+                testID="mobile-thread-view-floating-close"
+              >
+                <Ionicons color={colors.textSecondary} name="close" size={15} />
+              </Pressable>
+            </View>
+            <BrowserSurfacePanel
+              compact={{ onExpand: () => setViewFloating(false) }}
+              mode={selected.mode}
+              reach={browserReach}
+              threadId={selected.threadId}
+              transport={transport}
+            />
+          </View>
+        ) : null}
+      </View>
 
       {pendingAttachments.length > 0 ? (
         <View style={styles.pendingWrap} testID="mobile-thread-pending-attachments">
@@ -465,6 +687,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           ))}
         </View>
       ) : null}
+      {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
       {selected.mode === "chat" ? (
         <>
           <FloatingComposer
@@ -507,6 +730,21 @@ export function ThreadScreen(props: ThreadScreenProps) {
           testID="mobile-thread-composer"
           value={prompt}
           voice={voice}
+        />
+      )}
+      {offlineDemo || transport === undefined ? null : (
+        <ThreadPanesSheet
+          codeThread={selected.mode === "code" ? code.thread : undefined}
+          mode={selected.mode}
+          onClose={() => setPanesOpen(false)}
+          onOpenView={(view) => {
+            openSurface(view);
+            setPanesOpen(false);
+          }}
+          views={surfaces.filter((entry) => entry.id !== "chat")}
+          threadId={selected.threadId}
+          transport={transport}
+          visible={panesOpen}
         />
       )}
       <RewindSheet {...turnActions.sheet} />

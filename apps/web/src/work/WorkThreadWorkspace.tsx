@@ -97,6 +97,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
@@ -2840,19 +2841,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 >
                   {pendingBrowserApproval.signIn !== undefined
                     ? "Continue"
-                    : pendingBrowserApproval.download !== undefined
-                      ? "Save once"
-                      : pendingBrowserApproval.upload === undefined
-                        ? "Approve once"
-                        : "Upload once"}
+                    : pendingBrowserApproval.pageTool !== undefined
+                      ? "Call once"
+                      : pendingBrowserApproval.download !== undefined
+                        ? "Save once"
+                        : pendingBrowserApproval.upload === undefined
+                          ? "Approve once"
+                          : "Upload once"}
                 </OctantButton>
                 {/*
-                  A sign-in's or a script's answer is never remembered. An upload's
+                  A sign-in's, a script's, or a page tool call's answer is never
+                  remembered. An upload's
                   or a download's is remembered for that site and this thread's
                   workspace, never for a whole profile.
                 */}
                 {pendingBrowserApproval.signIn === undefined &&
-                pendingBrowserApproval.script === undefined ? (
+                pendingBrowserApproval.script === undefined &&
+                pendingBrowserApproval.pageTool === undefined ? (
                   <>
                     <OctantButton
                       disabled={browserApprovalBusy}
@@ -2895,11 +2900,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             label={
               pendingBrowserApproval.signIn !== undefined
                 ? "Browser sign-in"
-                : pendingBrowserApproval.download !== undefined
-                  ? "Browser download approval"
-                  : pendingBrowserApproval.upload === undefined
-                    ? "Browser origin approval"
-                    : "Browser upload approval"
+                : pendingBrowserApproval.pageTool !== undefined
+                  ? "Browser page tool"
+                  : pendingBrowserApproval.download !== undefined
+                    ? "Browser download approval"
+                    : pendingBrowserApproval.upload === undefined
+                      ? "Browser origin approval"
+                      : "Browser upload approval"
             }
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
@@ -2914,6 +2921,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             : {
                 info: (
                   <ThreadInfo
+                    notes={{
+                      threadId: String(thread.id),
+                      onInsert: (note) => {
+                        const next = draftWithNote(prompt, note);
+                        composerDraft.setDraft(next, next.length);
+                      },
+                    }}
                     place={{ label: placeName, content: placeControl, tooltip: placeTooltip }}
                   >
                     <ThreadGuardrailLevel

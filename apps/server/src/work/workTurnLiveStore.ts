@@ -14,6 +14,8 @@ interface ThreadFrames {
   frames: WorkTurnStreamFrame[];
   /** Requests whose announced retry no frame has cleared yet. */
   readonly retrying: Set<string>;
+  /** Releases a settled thread's replay frames once nobody has read them for a while. */
+  release: ReturnType<typeof setTimeout> | undefined;
 }
 
 interface Subscriber {
@@ -27,6 +29,14 @@ interface Subscriber {
 const DEFAULT_MAX_FRAMES_PER_THREAD = 256;
 const MAX_SUBSCRIBERS_PER_THREAD = 8;
 const MAX_PENDING_SUBSCRIBER_FRAMES = 32;
+/**
+ * How long a settled turn's frames stay for a view that reconnects after the
+ * turn ended. Settled threads kept up to 256 frames each for the life of the
+ * process. Only the frames go: the thread's sequence stays, so a view that
+ * asks from an older position is sent back to the transcript snapshot rather
+ * than misreading a restarted sequence as continuous.
+ */
+export const SETTLED_REPLAY_RETENTION_MS = 60_000;
 
 /**
  * Bounded process-local Work response feed.
@@ -172,6 +182,7 @@ export class WorkTurnLiveStore {
         turn,
       }),
     );
+    this.#scheduleRelease(threadId);
   }
 
   /** A compaction of the thread's session ended; its receipt or failure rides the feed. */
@@ -260,12 +271,19 @@ export class WorkTurnLiveStore {
       input.signal.removeEventListener("abort", subscriber.onAbort);
       subscriber.closed = true;
       subscribers.delete(subscriber);
-      if (subscribers.size === 0) this.#subscribers.delete(input.threadId);
+      if (subscribers.size === 0) {
+        this.#subscribers.delete(input.threadId);
+        this.#scheduleRelease(input.threadId);
+      }
     }
   }
 
   close(): void {
     this.#closed = true;
+    for (const state of this.#threads.values()) {
+      if (state.release !== undefined) clearTimeout(state.release);
+      state.release = undefined;
+    }
     for (const [threadId, subscribers] of this.#subscribers) {
       for (const subscriber of subscribers) {
         subscriber.queue.length = 0;
@@ -279,13 +297,22 @@ export class WorkTurnLiveStore {
   #state(threadId: WorkThreadId): ThreadFrames {
     const existing = this.#threads.get(threadId);
     if (existing !== undefined) return existing;
-    const created: ThreadFrames = { nextSequence: 1, frames: [], retrying: new Set() };
+    const created: ThreadFrames = {
+      nextSequence: 1,
+      frames: [],
+      retrying: new Set(),
+      release: undefined,
+    };
     this.#threads.set(threadId, created);
     return created;
   }
 
   #publish(threadId: WorkThreadId, frame: WorkTurnStreamFrame): void {
     const state = this.#state(threadId);
+    if (state.release !== undefined) {
+      clearTimeout(state.release);
+      state.release = undefined;
+    }
     state.nextSequence = frame.sequence + 1;
     state.frames.push(frame);
     while (state.frames.length > this.#maxFramesPerThread) state.frames.shift();
@@ -302,6 +329,26 @@ export class WorkTurnLiveStore {
       }
       subscriber.resolve?.();
     }
+  }
+
+  #scheduleRelease(threadId: WorkThreadId): void {
+    const state = this.#threads.get(threadId);
+    if (
+      this.#closed ||
+      state === undefined ||
+      state.release !== undefined ||
+      state.frames.at(-1)?.kind !== "turn-settled" ||
+      (this.#subscribers.get(threadId)?.size ?? 0) > 0
+    )
+      return;
+    state.release = setTimeout(() => {
+      state.release = undefined;
+      if ((this.#subscribers.get(threadId)?.size ?? 0) > 0) return;
+      if (state.frames.at(-1)?.kind !== "turn-settled") return;
+      state.frames = [];
+      state.retrying.clear();
+    }, SETTLED_REPLAY_RETENTION_MS);
+    state.release.unref?.();
   }
 
   #snapshotRequired(threadId: WorkThreadId): WorkTurnStreamFrame {

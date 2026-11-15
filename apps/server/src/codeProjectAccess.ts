@@ -25,7 +25,7 @@ type Admission =
  */
 export class CodeProjectAccess {
   readonly #requests = new AsyncLocalStorage<Admission>();
-  readonly #standing = new AsyncLocalStorage<true>();
+  readonly #standing = new AsyncLocalStorage<{ readonly turnProjectId: ProjectId }>();
   readonly #options: CodeProjectAccessOptions;
 
   constructor(options: CodeProjectAccessOptions) {
@@ -72,9 +72,14 @@ export class CodeProjectAccess {
    * the call gets what the window holds now, never what a request held.
    * A window that has closed holds nothing: its persisted workspace outlives
    * it, and closing it does not stop its turns.
+   *
+   * The call reaches only the turn's own Project. A window reaching one
+   * Project made that the same thing as the window's reach, but a window that
+   * shows threads of several Projects side by side must not let one pane's
+   * turn read or drive another pane's Project.
    */
-  standingAuthority<T>(read: () => T): T {
-    return this.#requests.exit(() => this.#standing.run(true, read));
+  standingAuthority<T>(turnProjectId: ProjectId, read: () => T): T {
+    return this.#requests.exit(() => this.#standing.run({ turnProjectId }, read));
   }
 
   /**
@@ -140,8 +145,12 @@ export class CodeProjectAccess {
       if (request.context.principal.kind === "remote-device") {
         return this.#options.hasActiveCodeProject(projectId);
       }
-    } else if (this.#standing.getStore() === true && !this.#options.isWindowLive(scopeId)) {
-      return false;
+    } else {
+      const standing = this.#standing.getStore();
+      if (standing !== undefined) {
+        if (!this.#options.isWindowLive(scopeId)) return false;
+        if (String(standing.turnProjectId) !== String(projectId)) return false;
+      }
     }
     return windowCanAccessCodeProject({
       workspace: this.#options.readWorkspace(scopeId),

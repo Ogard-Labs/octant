@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { useCallback, useEffect, useState } from "react";
 import {
   hostMemoryNotices,
@@ -59,10 +60,10 @@ export function useHostMemoryNotice(
       );
     };
     read();
-    const timer = setInterval(read, HOST_MEMORY_NOTICE_POLL_MS);
+    const stopRefresh = scheduleVisibleInterval(read, HOST_MEMORY_NOTICE_POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      stopRefresh();
     };
   }, [client]);
 

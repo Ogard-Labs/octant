@@ -1,7 +1,10 @@
 import { useState, type PointerEvent } from "react";
 
 /** The card slots a hold pins to their height, in the column and list layouts. */
-const CARD_SLOTS = ".board-col-body > li, .issuelist > li";
+// A virtualized group's spacer items stand in for rows not drawn; pinning one
+// would hold the list at the height it had before the pointer scrolled it.
+const CARD_SLOTS =
+  ".board-col-body > li:not([data-board-spacer]), .issuelist > li:not([data-board-spacer])";
 
 interface HeldCard {
   readonly threadId: unknown;

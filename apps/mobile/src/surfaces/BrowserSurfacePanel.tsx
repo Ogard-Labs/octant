@@ -18,6 +18,11 @@ export interface BrowserSurfacePanelProps {
   readonly threadId: string;
   readonly mode: MobileInboxMode;
   readonly reach: RemoteThreadSurfaceReach;
+  /**
+   * Draw only the page picture, small, over the conversation; a tap expands it
+   * rather than clicking in the page, which a thumbnail is too small to aim at.
+   */
+  readonly compact?: { readonly onExpand: () => void };
 }
 
 /**
@@ -108,6 +113,12 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
           justifyContent: "center",
         },
         image: { width: "100%", aspectRatio: 0.75 },
+        compactImage: { width: "100%", aspectRatio: 0.75 },
+        compactNote: {
+          ...mobileTypography.caption,
+          color: colors.textTertiary,
+          padding: mobileSpacing.sm,
+        },
         empty: {
           ...mobileTypography.caption,
           color: colors.textTertiary,
@@ -124,6 +135,35 @@ export function BrowserSurfacePanel(props: BrowserSurfacePanelProps) {
 
   const status = view?.status ?? "waiting";
   const unavailable = status === "unavailable";
+
+  if (props.compact !== undefined) {
+    const onExpand = props.compact.onExpand;
+    return (
+      <Pressable
+        accessibilityLabel="Show the Mac's browser full size"
+        accessibilityRole="button"
+        onPress={onExpand}
+        testID="mobile-browser-surface-compact"
+      >
+        {view?.screenshotDataUrl === undefined ? (
+          <Text numberOfLines={3} style={styles.compactNote}>
+            {browserSurfaceStatusNote({
+              status,
+              stale: view?.stale ?? true,
+              ...(view?.url === undefined ? {} : { url: view.url }),
+            })}
+          </Text>
+        ) : (
+          <Image
+            accessibilityIgnoresInvertColors
+            resizeMode="cover"
+            source={{ uri: view.screenshotDataUrl }}
+            style={styles.compactImage}
+          />
+        )}
+      </Pressable>
+    );
+  }
 
   return (
     <View style={styles.panel} testID="mobile-browser-surface">

@@ -255,7 +255,9 @@ function harness() {
       readCheckout: () => checkout,
       canAccessProject: () => access.canAccessProject(windowId, source.projectId),
       currentProjectAccess: () =>
-        access.standingAuthority(() => access.canAccessProject(windowId, source.projectId)),
+        access.standingAuthority(source.projectId, () =>
+          access.canAccessProject(windowId, source.projectId),
+        ),
       resolveCheckoutRoot: async () => {
         const root = await roots.resolve(
           windowId,
@@ -289,6 +291,10 @@ function harness() {
     evidence,
     events: {
       historyForThread: (threadId) => ({
+        status: "ok",
+        frames: frames.filter((frame) => frame.threadId === threadId),
+      }),
+      summaryForThread: (threadId) => ({
         status: "ok",
         frames: frames.filter((frame) => frame.threadId === threadId),
       }),

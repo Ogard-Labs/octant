@@ -25,6 +25,7 @@ import {
   type CanvasHeatmapDomain,
   type CanvasHeatmapMatrixLayout,
 } from "@octant/domain/canvas-heatmap-layout";
+import { OctantCollapsible } from "../../ui/base/OctantCollapsible";
 
 const MATRIX_WIDTH = 420;
 const MATRIX_ROW_HEIGHT = 20;
@@ -292,8 +293,7 @@ const MatrixTable = memo(function MatrixTable({
   readonly format: CanvasNumberFormat | undefined;
 }) {
   return (
-    <details className="canvas-block__heatmap-data">
-      <summary>View heatmap data</summary>
+    <OctantCollapsible className="canvas-block__heatmap-data" summary="View heatmap data">
       <div
         aria-label="Heatmap data"
         className="canvas-block__heatmap-table"
@@ -330,7 +330,7 @@ const MatrixTable = memo(function MatrixTable({
           </tbody>
         </table>
       </div>
-    </details>
+    </OctantCollapsible>
   );
 });
 
@@ -478,8 +478,7 @@ function CalendarHeatmap({
         <ChartTooltip anchor={anchor} />
       </div>
       <HeatmapLegend block={block} domain={layout.domain} scale={scale} />
-      <details className="canvas-block__heatmap-data">
-        <summary>View heatmap data</summary>
+      <OctantCollapsible className="canvas-block__heatmap-data" summary="View heatmap data">
         <div
           aria-label="Heatmap data"
           className="canvas-block__heatmap-table"
@@ -505,7 +504,7 @@ function CalendarHeatmap({
             </tbody>
           </table>
         </div>
-      </details>
+      </OctantCollapsible>
     </>
   );
 }

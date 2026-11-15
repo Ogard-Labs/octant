@@ -26,6 +26,8 @@ import {
   browserToolWantsScreenshot,
   parseBrowserToolInput,
   askWhilePageLives,
+  admitBrowserPageToolCall,
+  browserPageToolCallArguments,
   handBrowserToPerson,
   heldForPersonAnswer,
   heldWhileQueued,
@@ -651,6 +653,50 @@ export function createBrowserAppManagedTools(
               : permission.inspect(facts, pageOrigin),
       });
       return saved.status === "saved" ? browserDownloadSavedResult(saved) : failure(saved.error);
+    }
+    if (input.operation === "page-tool-call") {
+      const declaredRead = browserToolAction({ operation: "page-tools" }, context);
+      if (declaredRead === undefined) return failure("invalid-browser-input");
+      const approvals = options.approvals;
+      const admitted = await admitBrowserPageToolCall({
+        call: input.call,
+        fullAccess,
+        readDeclared: () =>
+          options.browser.act({
+            windowId: options.windowId,
+            threadId: options.threadId,
+            request: declaredRead,
+            capturedBy: "agent",
+          }),
+        // A CLI in a terminal is not the person who would be asked.
+        ask:
+          approvals === undefined || options.profileCaller === "terminal-grant"
+            ? undefined
+            : (tool) =>
+                askWhilePageLives(pageHold, signal, (askSignal) =>
+                  approvals.request({
+                    windowId: options.windowId,
+                    threadId: String(options.threadId),
+                    authority,
+                    origin,
+                    ...(profile === undefined ? {} : { profile }),
+                    pageTool: {
+                      name: tool.name,
+                      arguments: browserPageToolCallArguments(input.call),
+                    },
+                    ...(askSignal === undefined ? {} : { signal: askSignal }),
+                  }),
+                ),
+      });
+      if (admitted.status === "refused") return admitted.answer;
+      if (signal?.aborted) return failure("tool-interrupted");
+      if (admitted.asked) {
+        const refreshed = options.resolveAuthority(options.threadId, options.mode);
+        if (refreshed === undefined || !sameToolActionAuthority(authority, refreshed)) {
+          return failure("browser-authority-stale");
+        }
+        if (!modelIsCurrent(options)) return failure("browser-model-stale");
+      }
     }
     const request = browserToolAction(input, context);
     if (request === undefined) return failure("invalid-browser-input");

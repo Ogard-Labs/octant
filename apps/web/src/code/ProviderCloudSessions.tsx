@@ -13,6 +13,7 @@ import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 type Ready = Extract<ProviderCloudResponse, { readonly status: "ready" }>;
 
@@ -120,8 +121,7 @@ export function ProviderCloudSessions(props: {
     }
   };
   return (
-    <details className="provider-cloud-sessions">
-      <summary>Provider cloud sessions</summary>
+    <OctantCollapsible className="provider-cloud-sessions" summary="Provider cloud sessions">
       <p>
         Run a separate task in this provider's remote sandbox. Your local Code thread and checkout
         stay local.
@@ -303,6 +303,6 @@ export function ProviderCloudSessions(props: {
           )}
         </article>
       ))}
-    </details>
+    </OctantCollapsible>
   );
 }

@@ -32,15 +32,15 @@ export function FloatingComposer(props: FloatingComposerProps) {
       StyleSheet.create({
         wrap: {
           paddingHorizontal: space.md,
-          paddingBottom: space.md,
+          paddingBottom: space.sm,
           paddingTop: space.xs,
           backgroundColor: "transparent",
         },
         card: {
           paddingHorizontal: space.md,
-          paddingTop: 12,
+          paddingTop: 10,
           paddingBottom: space.xs,
-          gap: space.xs,
+          gap: 2,
         },
         placeholder: {
           color: colors.textTertiary,
@@ -50,7 +50,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
         input: {
           color: colors.textPrimary,
           fontSize: typography.body.fontSize,
-          minHeight: 40,
+          minHeight: 24,
           maxHeight: 140,
           textAlignVertical: "top",
           lineHeight: 21,

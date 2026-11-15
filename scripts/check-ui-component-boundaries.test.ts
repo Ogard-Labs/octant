@@ -244,8 +244,8 @@ describe("UI component boundary check", () => {
         "apps/web/src/projects/ProjectPicker.tsx": wrappedFieldError,
         "apps/web/src/ui/base/OctantToast.tsx":
           'export function Toast() { return <div role={tone === "danger" ? "alert" : "status"} />; }',
-        "apps/web/src/shell/ShellState.tsx":
-          'export function ShellState() { return <OctantEmptyRoot role="alert" />; }',
+        "apps/web/src/ui/base/OctantEmpty.tsx":
+          'export function StateEmpty() { return <Empty role="alert" />; }',
         "apps/web/src/App.tsx":
           "if (document.querySelector(\"[role='dialog'], [role='menu']\") !== null) return;",
       }),

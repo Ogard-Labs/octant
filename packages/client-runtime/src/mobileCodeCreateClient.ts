@@ -82,6 +82,7 @@ function codeRow(hostId: string, thread: CodeThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    projectId: String(thread.projectId),
   };
 }
 

@@ -1,3 +1,4 @@
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
 import type {
@@ -105,8 +106,8 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
     view?.status.joinRead?.state === "running";
   useEffect(() => {
     if (!following) return;
-    const timer = setInterval(() => void load(), SYNC_RESTORE_POLL_MS);
-    return () => clearInterval(timer);
+    const stopRefresh = scheduleVisibleInterval(() => void load(), SYNC_RESTORE_POLL_MS);
+    return () => stopRefresh();
   }, [load, following]);
 
   const stopJoinRead = useCallback(async () => {

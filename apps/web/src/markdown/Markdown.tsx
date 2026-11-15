@@ -72,21 +72,92 @@ export const MarkdownLinkActionsContext = createContext<MarkdownLinkActions | un
  * parse as long as the caller hands it a stable `transformText`.
  */
 export const Markdown = memo(function Markdown(props: MarkdownProps) {
+  const blocks = settledMarkdownBlocks(props.body);
   return (
     <div className={props.className}>
       <TextTransform value={props.transformText}>
-        <ReactMarkdown
-          components={components}
-          skipHtml={props.skipHtml}
-          remarkPlugins={remarkPlugins}
-          urlTransform={onlyHttpUrls}
-        >
-          {props.body}
-        </ReactMarkdown>
+        {blocks.map((block, index) => (
+          // Index keys are right here: blocks only ever grow at the end while a
+          // reply streams, so an earlier index always names the same block.
+          <MarkdownBlock body={block} index={index} key={index} skipHtml={props.skipHtml} />
+        ))}
       </TextTransform>
     </div>
   );
 });
+
+/**
+ * One top-level run of the document. Memoized on its text, so while a reply
+ * streams only the trailing block parses again; every settled block above it
+ * keeps its parse and its nodes.
+ */
+const MarkdownBlock = memo(function MarkdownBlock(props: {
+  readonly body: string;
+  readonly index: number;
+  readonly skipHtml: boolean | undefined;
+}) {
+  return (
+    <>
+      {/* The single renderer separates sibling blocks with a newline text node;
+          keep it so split and whole documents produce the same DOM. */}
+      {props.index === 0 ? null : "\n"}
+      <ReactMarkdown
+        components={components}
+        skipHtml={props.skipHtml}
+        remarkPlugins={remarkPlugins}
+        urlTransform={onlyHttpUrls}
+      >
+        {props.body}
+      </ReactMarkdown>
+    </>
+  );
+});
+
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const DEFINITION = /^ {0,3}\[[^\]]+\]:/m;
+const CONTINUES_PREVIOUS_BLOCK = /^(\s|[-*+>|]|\d+[.)])/;
+
+/**
+ * Splits a document at blank lines that end a top-level block, and only where
+ * a split cannot change what the whole document renders. A chunk that starts
+ * indented, with a list or quote marker, or with a table pipe may belong to
+ * the block above (a loose list, a list item's paragraph), so it stays joined.
+ * A blank line inside a fence is code, not a boundary. Link and footnote
+ * definitions resolve across the whole document, so a document with any of
+ * them is parsed whole.
+ */
+export function settledMarkdownBlocks(body: string): ReadonlyArray<string> {
+  if (DEFINITION.test(body)) return [body];
+  const lines = body.split("\n");
+  const blocks: string[] = [];
+  let current: string[] = [];
+  let fence: string | undefined;
+  let afterBlank = false;
+  for (const line of lines) {
+    if (fence === undefined && afterBlank && line.trim() !== "") {
+      if (!CONTINUES_PREVIOUS_BLOCK.test(line) && current.some((entry) => entry.trim() !== "")) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
+      afterBlank = false;
+    }
+    current.push(line);
+    const opener = FENCE_OPEN.exec(line)?.[1];
+    if (fence === undefined) {
+      if (opener !== undefined) fence = opener;
+      else if (line.trim() === "") afterBlank = true;
+    } else if (
+      opener !== undefined &&
+      opener[0] === fence[0] &&
+      opener.length >= fence.length &&
+      line.trim() === opener
+    ) {
+      fence = undefined;
+    }
+  }
+  blocks.push(current.join("\n"));
+  return blocks;
+}
 
 const remarkPlugins = [remarkGfm];
 

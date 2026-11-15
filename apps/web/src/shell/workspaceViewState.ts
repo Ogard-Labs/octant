@@ -34,6 +34,7 @@ const Saved = Schema.Array(
   Schema.Struct({ key: Schema.String.pipe(Schema.maxLength(8192)), value: ViewState }),
 ).pipe(Schema.maxItems(64));
 const MAX_BYTES = 128 * 1024;
+const IDLE_FLUSH_MS = 300;
 
 /** Only bounded presentation references; host state and document contents never enter this store. */
 export function createWorkspaceViewStore(namespace: string) {
@@ -48,9 +49,23 @@ export function createWorkspaceViewStore(namespace: string) {
     /* Unavailable or invalid local state is a fresh view. */
   }
   let pending: ReturnType<typeof setTimeout> | undefined;
+  // Scrolling writes on every frame. Validation and serialization wait until
+  // the view has been still for a moment (or the page hides), and only the
+  // entries written since the last flush are validated.
+  const unvalidated = new Set<string>();
   const flush = () => {
     if (pending !== undefined) clearTimeout(pending);
     pending = undefined;
+    for (const entryKey of unvalidated) {
+      const value = entries.get(entryKey);
+      if (value === undefined) continue;
+      try {
+        entries.set(entryKey, Schema.decodeUnknownSync(ViewState)(value));
+      } catch {
+        entries.delete(entryKey);
+      }
+    }
+    unvalidated.clear();
     try {
       let saved = JSON.stringify([...entries].map(([key, value]) => ({ key, value })));
       while (saved.length > MAX_BYTES && entries.size > 0) {
@@ -68,20 +83,17 @@ export function createWorkspaceViewStore(namespace: string) {
     read: (key: string) => entries.get(key),
     write: (key: string, value: WorkspaceViewState) => {
       if (key.length > 8192) return;
-      let valid: WorkspaceViewState;
-      try {
-        valid = Schema.decodeUnknownSync(ViewState)(value);
-      } catch {
-        return;
-      }
       entries.delete(key);
-      entries.set(key, valid);
+      entries.set(key, value);
+      unvalidated.add(key);
       while (entries.size > 64) {
         const first = entries.keys().next().value;
         if (first === undefined) break;
         entries.delete(first);
+        unvalidated.delete(first);
       }
-      if (pending === undefined) pending = setTimeout(flush, 150);
+      if (pending !== undefined) clearTimeout(pending);
+      pending = setTimeout(flush, IDLE_FLUSH_MS);
     },
     flush,
   };

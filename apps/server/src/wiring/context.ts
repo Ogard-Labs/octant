@@ -32,6 +32,7 @@ import {
 } from "@octant/contracts";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { chatImageScopeAllowedForWindow } from "../image/imageScopeAuthority";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { IdleCompactions } from "../context/idleCompaction";
 import { TurnEndCompactions } from "../context/turnEndCompaction";
@@ -156,7 +157,15 @@ export function wireContext(deps: ContextDependencies) {
         const view = chatService.read(decodeChatThreadId(threadId));
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         return chatImageScopeAllowedForWindow({
-          chatContext: workspace?.contextByMode.chat,
+          chatAdmits:
+            workspace === undefined
+              ? undefined
+              : (projectId) =>
+                  windowAdmitsProject(
+                    workspace,
+                    "chat",
+                    projectId === null ? null : decodeProjectId(projectId),
+                  ),
           thread: view?.thread,
         });
       }
@@ -198,9 +207,11 @@ export function wireContext(deps: ContextDependencies) {
     projectId: string,
   ): Promise<boolean> => {
     try {
+      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
       return windowCanOpenProject({
         project: persistence.readProject(decodeProjectId(projectId)),
-        chatContext: persistence.readWindowWorkspace(windowId)?.workspace.contextByMode.chat,
+        chatAdmits:
+          workspace === undefined ? undefined : (id) => windowAdmitsProject(workspace, "chat", id),
         canAccessCodeProject: (id) => canAccessCodeProject(windowId, id),
       });
     } catch {

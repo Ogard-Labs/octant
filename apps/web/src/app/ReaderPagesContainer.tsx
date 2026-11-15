@@ -5,6 +5,7 @@ import { decodeCodeThreadId, type CodeThread } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId, type WorkThread } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { memo, useMemo } from "react";
+import { useMinuteTick } from "../polling/useMinuteTick";
 import { buildAutomationEditorCatalog } from "../automation/automationEditorCatalog";
 import {
   isChildPendingRequest,
@@ -17,6 +18,7 @@ import { ProjectsDirectory } from "../projects/ProjectsDirectory";
 import type { useProjectController } from "../projects/useProjectController";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { ReviewActionOutcome, ReviewPageProps } from "../review/ReviewPage";
+import type { TodosPageProps } from "../todos/TodosView";
 import type { buildReviewEntries, ReviewEntry } from "../review/reviewModel";
 import type { createReviewSource } from "../review/reviewSource";
 import type { ArchivedThreadEntry } from "../shell/ArchiveView";
@@ -115,6 +117,8 @@ export interface ReaderPagesContainerProps {
   readonly imageProfiles: WorkspaceRailLayersProps["imageProfiles"];
   readonly inboxAttentionItems: ReturnType<typeof buildInboxAttentionItems>;
   readonly inboxOpen: boolean;
+  /** Present while the To-dos page is open. */
+  readonly todosPage?: TodosPageProps;
   readonly isNarrow: boolean;
   readonly linearClient: WorkspaceRailLayersProps["linearClient"];
   readonly linearIssuesOpen: boolean;
@@ -125,7 +129,6 @@ export interface ReaderPagesContainerProps {
   >;
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly navigationRevision: number;
-  readonly now: number;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly projects: ProjectController["projects"];
   readonly projectsListOpen: boolean;
@@ -183,6 +186,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     imageProfiles,
     inboxAttentionItems,
     inboxOpen,
+    todosPage,
     isNarrow,
     linearClient,
     linearIssuesOpen,
@@ -190,7 +194,6 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     loadAssignedGithubWork,
     loadAssignedLinearIssues,
     navigationRevision,
-    now,
     projectNames,
     projects,
     projectsListOpen,
@@ -209,6 +212,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
     workThreads,
     workspace,
   } = props;
+  // Relative-time labels tick here, so the minute re-renders this subtree
+  // rather than the whole shell.
+  const now = useMinuteTick().getTime();
   const { openProjectCreate, openSelectedProject } = actions;
   const {
     agentMessageClient,
@@ -418,6 +424,7 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
         onDismissRailPlaceholder={() => actions.setRailPlaceholder(undefined)}
         inboxOpen={inboxOpen}
+        {...(todosPage === undefined ? {} : { todosPage })}
         {...(reviewPageProps === undefined ? {} : { reviewPage: reviewPageProps })}
         onCloseInbox={() => actions.setInboxOpen(false)}
         inboxAttentionItems={inboxAttentionItems}

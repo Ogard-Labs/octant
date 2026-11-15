@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { HostHealthHistory, HostHealthSample } from "@octant/contracts";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import { SurfaceSection } from "../surface/SurfaceHeader";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 interface Metric {
   readonly id: string;
@@ -128,8 +129,7 @@ export function HostHealthSection(props: {
               <MetricStrip key={metric.id} metric={metric} samples={samples} when={props.when} />
             ))}
           </div>
-          <details className="turn-diagnostics__details">
-            <summary>Show as a table</summary>
+          <OctantCollapsible className="turn-diagnostics__details" summary="Show as a table">
             <div className="usage-table-scroll">
               <table aria-label="Host health" className="usage-table">
                 <thead>
@@ -159,7 +159,7 @@ export function HostHealthSection(props: {
                 </tbody>
               </table>
             </div>
-          </details>
+          </OctantCollapsible>
         </>
       )}
     </SurfaceSection>

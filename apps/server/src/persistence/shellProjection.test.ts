@@ -198,6 +198,23 @@ describe("ShellProjection", () => {
     ).toMatchObject({ surface: projectSurface });
   });
 
+  it("restores a pane's own Project context so its thread keeps that Project's authority", () => {
+    const code = workspace.layouts.code;
+    if (code.kind !== "pane") throw new Error("fixture code layout must be a pane");
+    const context = {
+      host: "local",
+      mode: "code" as const,
+      projectId: "60000000-0000-4000-8000-000000000021",
+      boundRoot: "/home/other",
+    };
+    expect(
+      decodePersistedWindowWorkspace({
+        ...workspace,
+        layouts: { ...workspace.layouts, code: { ...code, context } },
+      }).layouts.code,
+    ).toMatchObject({ context });
+  });
+
   it("restores persisted Chat thread surfaces without downgrading them", () => {
     const chat = workspace.layouts.chat;
     if (chat.kind !== "pane") throw new Error("fixture chat layout must be a pane");

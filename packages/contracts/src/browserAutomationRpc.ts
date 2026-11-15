@@ -110,6 +110,16 @@ export const BrowserToolApproval = Schema.Struct({
   script: Schema.optional(
     Schema.Struct({ source: Schema.String.pipe(Schema.maxLength(8192)) }).annotations(strict),
   ),
+  /**
+   * One call of a tool the page declares for agents: the tool's name, as the
+   * page wrote it, and the arguments the agent chose, as JSON. Never remembered.
+   */
+  pageTool: Schema.optional(
+    Schema.Struct({
+      name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_.-]{1,64}$/)),
+      arguments: Schema.String.pipe(Schema.maxLength(4096)),
+    }).annotations(strict),
+  ),
   requestedAt: UtcTimestamp,
 }).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;

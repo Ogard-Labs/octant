@@ -14,7 +14,7 @@ export const UNNAMED_OUTSIDE_SOURCE = "Other outside content";
 const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "agent-message": "A message from another agent",
   "browser-observation": "Pages seen in the browser",
-  "browser-page": "A browser page sent as feedback",
+  "browser-page": "A browser page sent as feedback, or the tools a page declares",
   canvas: "A Canvas written by another thread",
   "chat-branch": "The thread this was branched or restored from",
   "code-fork": "The thread this was forked or restored from",

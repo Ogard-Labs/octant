@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { ArrowDown, ArrowUp, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -21,7 +22,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { ModelToolVerification } from "../providers/useProviderController";
 import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { settingId } from "../settings/registry";
-import { SurfaceEmpty } from "../surface/SurfaceHeader";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -362,7 +362,8 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
         title="Model roles"
       >
         {props.providers.length === 0 && !hasSavedRouting ? (
-          <SurfaceEmpty
+          <OctantEmpty
+            layout="line"
             action={
               props.onOpenModelEndpoints === undefined ? null : (
                 <OctantButton onClick={props.onOpenModelEndpoints} size="sm" variant="secondary">

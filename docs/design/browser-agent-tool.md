@@ -21,7 +21,8 @@ and desktop Browsers, and so is recording a call as an animated PNG. Flows
 (recording a run,
 saving it in the Project, and replaying it by name) are built in Work and Code;
 the person can list and delete a Project's flows in Settings, and runs one by
-asking the agent.
+asking the agent. Listing and calling the tools a page declares is built on
+the headless Browser ([Page-declared tools](#page-declared-tools)).
 
 ## One tool for every provider
 
@@ -50,19 +51,19 @@ already open in the thread's own Browser, or the Project's saved flows, and
 sends no request; it refuses every other one as `plan-mode-read-only` before
 the page, the workspace, or the person is reached.
 
-| Verdict in Plan   | Operations                                                                                             | Why                                                                                                                                                                                                                                                                                                          |
-| ----------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Admitted: reads   | `snapshot`, `read-page`, `screenshot`, `diagnostics`, `audit`, `tab-list`, `wait`, `flow-list`, `help` | Each reads what the open page or the Project already holds: the outline, text, pixels (kept as this thread's own capture), what the page already logged, accessibility findings or the browser's own record of the load, the tab list, a state the page reaches by itself, the saved flows, or static usage. |
-| Admitted          | `stop`                                                                                                 | It closes only this thread's own Browser.                                                                                                                                                                                                                                                                    |
-| Each step         | `steps`                                                                                                | Each step is admitted as a call of its own, so a batch of reads runs and the first step that would change something ends it.                                                                                                                                                                                 |
-| Refused           | `navigate`, `tab-open`                                                                                 | A request, a new page.                                                                                                                                                                                                                                                                                       |
-| Refused           | `click`, `type`, `press`, `select`, `drag`, `hover`                                                    | Input reaches the page; hover runs its handlers and opens menus.                                                                                                                                                                                                                                             |
-| Refused           | `scroll`, `resize`                                                                                     | The page moves or changes size and emulation, which it may answer with requests (more of the page, other images).                                                                                                                                                                                            |
-| Refused           | `tab-switch`, `tab-close`                                                                              | Which page is shown changes, or a page closes.                                                                                                                                                                                                                                                               |
-| Refused           | `upload`, `download-save`, `sign-in`, `run-script`                                                     | Files leave the workspace or enter it, the person acts on the page, or arbitrary JavaScript runs.                                                                                                                                                                                                            |
-| Refused           | `flow-save`, `flow-run`                                                                                | A save writes the Project's flows; a replay acts.                                                                                                                                                                                                                                                            |
-| Refused           | `record-start` (host-issued for `record: true`)                                                        | A recording is an artifact the thread keeps, and Plan only reads, so a `steps` with `record: true` answers `recording-refused` and runs nothing; a recorded `flow-run` is refused as a replay.                                                                                                               |
-| Admitted: cleanup | `record-stop` (host-issued)                                                                            | It ends a recording a call started before Plan began. It reaches the runtime in every posture, so the screencast never runs on to its own bound, and in Plan it keeps nothing: the answer says `recordingNotKept: plan-mode-read-only`.                                                                      |
+| Verdict in Plan   | Operations                                                                                                           | Why                                                                                                                                                                                                                                                                                                          |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Admitted: reads   | `snapshot`, `read-page`, `screenshot`, `diagnostics`, `audit`, `page-tools`, `tab-list`, `wait`, `flow-list`, `help` | Each reads what the open page or the Project already holds: the outline, text, pixels (kept as this thread's own capture), what the page already logged, accessibility findings or the browser's own record of the load, the tab list, a state the page reaches by itself, the saved flows, or static usage. |
+| Admitted          | `stop`                                                                                                               | It closes only this thread's own Browser.                                                                                                                                                                                                                                                                    |
+| Each step         | `steps`                                                                                                              | Each step is admitted as a call of its own, so a batch of reads runs and the first step that would change something ends it.                                                                                                                                                                                 |
+| Refused           | `navigate`, `tab-open`                                                                                               | A request, a new page.                                                                                                                                                                                                                                                                                       |
+| Refused           | `click`, `type`, `press`, `select`, `drag`, `hover`                                                                  | Input reaches the page; hover runs its handlers and opens menus.                                                                                                                                                                                                                                             |
+| Refused           | `scroll`, `resize`                                                                                                   | The page moves or changes size and emulation, which it may answer with requests (more of the page, other images).                                                                                                                                                                                            |
+| Refused           | `tab-switch`, `tab-close`                                                                                            | Which page is shown changes, or a page closes.                                                                                                                                                                                                                                                               |
+| Refused           | `upload`, `download-save`, `sign-in`, `run-script`, `page-tool-call`                                                 | Files leave the workspace or enter it, the person acts on the page, arbitrary JavaScript runs, or a declared form is filled and submitted.                                                                                                                                                                   |
+| Refused           | `flow-save`, `flow-run`                                                                                              | A save writes the Project's flows; a replay acts.                                                                                                                                                                                                                                                            |
+| Refused           | `record-start` (host-issued for `record: true`)                                                                      | A recording is an artifact the thread keeps, and Plan only reads, so a `steps` with `record: true` answers `recording-refused` and runs nothing; a recorded `flow-run` is refused as a replay.                                                                                                               |
+| Admitted: cleanup | `record-stop` (host-issued)                                                                                          | It ends a recording a call started before Plan began. It reaches the runtime in every posture, so the screencast never runs on to its own bound, and in Plan it keeps nothing: the answer says `recordingNotKept: plan-mode-read-only`.                                                                      |
 
 - Every other gate applies to an admitted read unchanged: the thread's
   authority and model binding, the origin approval (a page this model or
@@ -1496,19 +1497,82 @@ stale until the page is read again.
 
 ## Page-declared tools
 
-Designed, not built (maintainer decision, 2026-11-14). A page may declare tools
-of its own for agents (WebMCP). Octant reads a page's declared tools as
-outside content: their names, descriptions and schemas mark the thread as
-having read outside content and are framed as evidence, never instructions,
-and they add nothing to the thread's tool list by themselves. The agent may
-ask to call one through the Browser tool on the page that declared it, and
-each call is approval-gated: the person approves that one call, naming the
-page's origin, the tool and its arguments. At Full access it follows
-[the Full access rule](decisions.md#the-full-access-rule), so a call that pays,
-buys or sends a message as the person still asks. Its result is outside
-content. A declared tool never reaches
-another page, the host, or the person's credentials, and the site approvals
-and navigation guards of the page still apply.
+Maintainer decision, 2026-11-14. A page may declare tools of its own for
+agents (WebMCP). Partly built: on the server and the headless Browser, proven
+against a real Chromium page; the desktop Browser's path is wired through the
+same runtime port and not yet run in the app.
+
+**Which declaration is read.** Octant reads the declarative form of the WebMCP
+proposal: a `<form>` with `toolname` and `tooldescription` is one tool, each of
+its named controls is one parameter (`toolparamdescription` describes it,
+`required` makes it required; a checkbox is a boolean, a number field a
+number, a list or radio group a choice of its values, anything else text;
+hidden, file and button controls are not parameters), and `toolautosubmit`
+says the page lets an agent submit it. Only the top document is read.
+
+- Rationale: the imperative registry (`document.modelContext`, with
+  `registerTool` and `getTools`) is the standard listing surface, but Chromium
+  ships it only behind an origin trial or the `enable-webmcp-testing` flag,
+  which neither Octant Browser enables, so on Octant's pages it is absent. The
+  declarative form is plain DOM attributes, which both Browsers' fixed
+  readers already read without a new dependency. Reading the registry is a
+  follow-up once Chromium enables it by default.
+
+**Listing.** `page-tools` lists the open page's declared tools. It is a read:
+Plan admits it, it never fills or submits anything, and it leaves the
+observation revision where it was. The reader is the self-contained
+`readBrowserPageTools` in `packages/domain/src/browserPageTools.ts`, run in
+the desktop Browser's isolated world or by the headless Browser, and the
+server bounds its answer again (`boundBrowserPageTools`), because the answer
+is the page's word: at most 16 tools of at most 24 parameters, a description
+of at most 1,024 characters (a parameter's 256), at most 32 choices of 128
+characters, names that are plain identifiers of at most 64 characters (any
+other is dropped, never renamed), and `truncated` when the page declared
+more. A declared form that holds a credential field is never listed or
+called; `withheld` counts them.
+
+- A declaration is outside content. Listing one marks the thread through
+  `thread.external-content-ingested@1` under the `browser-page` source, beside
+  the page observation's own mark, and the answer frames the list as evidence
+  about the page, never instructions. A declared tool adds nothing to the
+  thread's tool list: the agent reaches it only through `page-tool-call`.
+
+**Calling.** `page-tool-call` takes `name` and `arguments` (each a declared
+parameter's name with a text, number or boolean value; at most 4,096
+characters of arguments in all). The adapter reads the declaration again
+first, through the same admitted path as `page-tools`, so a name the page no
+longer declares is refused as `page-tool-not-declared` before anyone is asked.
+The call then runs as a Browser action on the thread's own page, through the
+same runtime port, site approval, stale check, person's hold and
+credential-field rule as any other: the reader fills each named control and
+submits the form with `requestSubmit` when the page declared `toolautosubmit`;
+without it, the form is filled, its submit control focused, and the answer
+says `filled-for-person`, as the page asked. The answer is an ordinary
+action's (`changed`, `include`, dialogs, downloads) with `pageToolCall`.
+What the page does with the submission is its own; the call's result is
+outside content like every observation.
+
+- The proposal's `SubmitEvent.respondWith` result is not read: the answer is
+  the page as the action left it.
+- `page-tool-call` cannot run in `steps` or a flow, and a run that used one
+  cannot be saved as a flow, because a call may need a question of its own.
+  Only the agent tool may send either action; a route that names no caller is
+  refused.
+
+**Who is asked.** Below Full access every call asks the person: the card names
+the site, the tool as the page named it and the arguments, and its answer
+covers that call once and is never remembered. At Full access a call runs
+without asking, unless it is one [the Full access
+rule](decisions.md#the-full-access-rule)'s existing closed list covers: paying,
+buying, or sending a message as the person. That entry is recognised in what
+the page declared (the tool's name and description and its parameters' names
+and descriptions name paying, buying, an order or a card, or sending, a
+message, an email, a post, a reply or a comment) by
+`browserPageToolCallPaysBuysOrSends`, and such a call still asks. No other
+exception is added. The words are the page's own, so a page that hides a
+payment behind a bland name is not caught, as a misleadingly labelled button
+is not; the site approval of a signed-in profile and the credential-field rule
+hold either way.
 
 ## What the tool never does
 
@@ -1674,11 +1738,7 @@ during a capture invalidates the result even if it has already been released.
 
 ### Attaching a picked element to the composer
 
-Designed, not built (maintainer decision, 2026-11-14). In pointing mode the
-person may instead click an element to attach it to the thread's composer as a
-structured snapshot: a selector that finds it, its outer HTML trimmed to a
-fixed bound, and a fixed subset of its computed styles, read by the same
-host-owned top-frame reader and checks as a feedback note. The snapshot stays
-on this computer until the person sends the message it is attached to, can be
-removed from the draft before then, and is outside content that marks the
-thread as page content does. Picking sends, queues and approves nothing.
+In pointing mode the person may instead pick an element for the thread's
+composer. Its rules (what the snapshot holds, its bounds, its taint, and where
+it is offered) are owned by
+[Browser captures: Picking an element](browser-captures.md#picking-an-element).

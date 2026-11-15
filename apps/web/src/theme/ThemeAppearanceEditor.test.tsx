@@ -2,6 +2,9 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
+import { DEFAULT_DARK_TOKENS, type ThemePreset } from "@octant/theme";
+import { contributedThemePresetId } from "@octant/plugin-host/themes";
+import { PluginThemesContext } from "./pluginThemes";
 import { ThemeAppearanceEditor } from "./ThemeAppearanceEditor";
 import type { ThemeController } from "./useThemeController";
 
@@ -241,6 +244,46 @@ describe("ThemeAppearanceEditor", () => {
   });
 });
 
+describe("themes plugins contribute", () => {
+  const harborNight: ThemePreset = {
+    id: contributedThemePresetId("20000000-0000-4000-8000-00000000c0de", "harbor-night"),
+    displayName: "Harbor night",
+    description: "Harbor themes",
+    supportedModes: ["dark"],
+    tokens: { dark: DEFAULT_DARK_TOKENS },
+  };
+
+  it("offers an enabled plugin's theme in the picker for the modes it supports", async () => {
+    const user = userEvent.setup();
+    render(
+      <PluginThemesContext.Provider value={[harborNight]}>
+        <ThemeAppearanceEditor controller={controller()} />
+      </PluginThemesContext.Provider>,
+    );
+    await user.click(screen.getByLabelText("Dark preset"));
+    expect(await screen.findByRole("option", { name: "Harbor night" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByLabelText("Light preset"));
+    expect(screen.queryByRole("option", { name: "Harbor night" })).not.toBeInTheDocument();
+  });
+
+  it("shows the default once the plugin whose theme was chosen is switched off", () => {
+    const chosen = { ...DEFAULT_THEME_SETTINGS, darkPresetId: harborNight.id };
+    const { rerender } = render(
+      <PluginThemesContext.Provider value={[harborNight]}>
+        <ThemeAppearanceEditor controller={{ ...controller(), settings: chosen, draft: chosen }} />
+      </PluginThemesContext.Provider>,
+    );
+    expect(screen.getByLabelText("Dark preset")).toHaveTextContent("Harbor night");
+    rerender(
+      <PluginThemesContext.Provider value={[]}>
+        <ThemeAppearanceEditor controller={{ ...controller(), settings: chosen, draft: chosen }} />
+      </PluginThemesContext.Provider>,
+    );
+    expect(screen.getByLabelText("Dark preset")).toHaveTextContent("System");
+  });
+});
+
 describe("handing the theme to a project outside Octant", () => {
   it("fills the transfer box with design tokens and names the overrides it left out", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");
@@ -255,7 +298,7 @@ describe("handing the theme to a project outside Octant", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Export design tokens (CSS)" }));
 
-    expect(exportTokens).toHaveBeenCalledWith("css");
+    expect(exportTokens).toHaveBeenCalledWith("css", []);
     expect(screen.getByRole("textbox", { name: "Theme JSON" })).toHaveValue(
       ":root { --octant-workspace: #1e1e1e; }",
     );

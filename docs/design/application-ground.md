@@ -11,9 +11,21 @@ the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
-existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
-dithered, at a chosen pixel size and colour count; an animated picture is
-printed from its still frame. A printed picture is still unless a person sets
+existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated,
+dithered, or in ASCII, at a chosen pixel size and colour count; an animated picture is
+printed from its still frame. ASCII prints one character per cell from the
+ramp ` .:-=+*#%@`, picked by the cell's luminance, each drawn as a 5×5 bitmap
+glyph in the cell's sampled colour over that colour at half strength, so the
+picture reads as a character mosaic. The glyph table is one pure table in
+`@octant/domain`, which the desktop's canvas and the phone's shader both read,
+because a GL shader has no font and a system font would differ between the
+two. An ASCII cell is never smaller than 10 pixels (a 5×5 glyph below that
+reads as a checker pattern on a phone), and choosing ASCII at a smaller saved
+size starts it at 14; the ground at half the cell's colour keeps titles laid
+over it readable. It has no
+Colours dial. An ASCII print is always still: a wave pushing through
+characters read as flicker, so it offers no Motion. Like every print,
+increased contrast turns it off. Any other printed picture is still unless a person sets
 its Motion to Wave: then a click on a start screen pushes a ring outward
 through its cells, each cell sampled from a little further in as the ring's
 edge passes and lit toward the accent through the same dither, so the ring

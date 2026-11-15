@@ -11,6 +11,7 @@
 
 /* The page an agent's preview is screenshotted from: the workspace backdrop
    the thread draws a Canvas on, and nothing else. */
+
 .canvas-preview-page {
   background: var(--oct-bg);
 }
@@ -19,6 +20,7 @@
    whole tab's content width: in a 411px dock column the tab measured 446px
    and pushed the toolbar's More button and the drawer's Close off the edge.
    A heading breaks inside a word before it widens anything. */
+
 .canvas-view__header h1 {
   margin: 0 0 var(--oct-space-5);
   font-size: var(--oct-text-xl);
@@ -42,6 +44,7 @@
 /* The system callout is a flex row of icon and body; this aside holds a bare
    title and paragraph, so it keeps its own frame with the same anatomy:
    surface, hairline, and a 2px tone edge that never carries meaning alone. */
+
 .canvas-block__callout {
   border-radius: var(--oct-radius-md);
   border: 1px solid var(--oct-border);
@@ -110,6 +113,7 @@
    reads like a number anywhere else in the app. The track is at least a
    quarter of the row, so a wide Canvas lays out at most four tiles, and at
    least 9rem, so a narrow one keeps two. */
+
 .canvas-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(max(9rem, 25%), 1fr));
@@ -124,11 +128,13 @@
 /* Tabs: the shared surface tab strip over a hairline, so a Canvas's sections
    read like every other tab strip in the app. The selected tab is the
    reader's choice and is never written to the document. */
+
 .canvas-tabs {
   margin: 0 0 var(--oct-space-4);
 }
 
 /* The group's section already spaces it from the next block. */
+
 .canvas-block--group > .canvas-tabs,
 .canvas-block--group > .canvas-columns {
   margin-bottom: 0;
@@ -150,6 +156,7 @@
 /* Columns: two to four equal tracks that fold into one when the Canvas
    itself is narrow. The query reads the Canvas's width, not the window's,
    because a sidebar Canvas is narrow on a wide display. */
+
 .canvas-columns {
   container-type: inline-size;
   margin: 0 0 var(--oct-space-4);
@@ -191,6 +198,7 @@
 /* Forced colours paint every border in system ink, which would underline
    each tab alike; only the open tab keeps an underline, in Highlight, and the
    strip's hairline steps aside so the underline is the one mark. */
+
 @media (forced-colors: active) {
   .canvas-tabs .canvas-tabs__list {
     border-bottom-color: Canvas;
@@ -252,6 +260,7 @@
 /* A delta's tone follows the direction the block names; good and bad are the
    only two tones, and the arrow plus the signed value stay the channel a
    reader without colour relies on. */
+
 .canvas-block__metric .cmetric-delta.good {
   color: var(--oct-success);
 }
@@ -296,6 +305,7 @@
 /* Forced colours reset `accent-color`, and Chromium then paints the native
    bar with neither track nor fill. Drawing both parts in system colours keeps
    the reading, the way the bar lists and matrix meters fall back. */
+
 @media (forced-colors: active) {
   .canvas-block__progress progress {
     appearance: none;
@@ -337,6 +347,7 @@
 
 /* The plot is the positioning context for the shared tooltip, which is placed
    from the mark's own plotted coordinates rather than from the pointer. */
+
 .canvas-block__chart-plot {
   position: relative;
 }
@@ -349,6 +360,7 @@
 /* A mark transitions only when a legend toggle or a zoom changes what is drawn.
    That is a state change, not an entrance; it stays under 200ms and is off when
    the person asked for reduced motion. */
+
 .canvas-block__chart-mark {
   transition:
     opacity var(--oct-motion-fast) var(--oct-ease-standard),
@@ -361,12 +373,14 @@
 
 /* Near the top of the plot the tip flips below its mark so it stays on the
    surface rather than above the frame. */
+
 .canvas-block__chart-tip[data-placement="below"] {
   transform: translate(-50%, 10px);
 }
 
 /* A file path is read in the code font; the directory locates the file and is
    dimmed, the name identifies it and keeps full ink. */
+
 .canvas-block__path {
   font-family: var(--oct-font-mono);
 }
@@ -391,6 +405,7 @@
 
 /* The shared tooltip's listed readings keep each series key beside its name,
    the same key the legend and the marks carry. */
+
 .canvas-block__chart-tip dt {
   display: inline-flex;
   align-items: center;
@@ -401,10 +416,12 @@
   width: 8px;
   height: 8px;
 }
+
 /* Line, area, scatter, bar and distribution charts draw at the figure's
    measured width, so gridline and axis labels stay at the interface size.
    The marks follow the system chart recipe in octant.css: 1.5px lines with
    round joins, 8px points ringed in the surface, bars with a 2px top. */
+
 .canvas-chart {
   position: relative;
   min-width: 0;
@@ -412,6 +429,7 @@
 
 /* The tooltip is placed from the plot's own box, so the headline above the
    chart never shifts where the tip lands. */
+
 .canvas-chart__plot {
   position: relative;
 }
@@ -453,6 +471,7 @@
 }
 
 /* A lone line or an area fades a wash of its own colour to the floor. */
+
 .canvas-chart__wash-top {
   stop-color: var(--oct-ser, var(--oct-series-1));
   stop-opacity: 0.22;
@@ -474,6 +493,7 @@
 }
 
 /* Where a lone trend ended, and how far it moved since it began. */
+
 .canvas-chart__headline {
   display: flex;
   flex-wrap: wrap;
@@ -514,11 +534,13 @@
 
 /* A series that emphasizes a reading draws its other bars in the neutral ink,
    so the hue is left on the one the chart is about. */
+
 .canvas-chart__bar[data-muted="true"] {
   fill: color-mix(in oklab, var(--oct-fg) 24%, transparent);
 }
 
 /* The chart's own finding and what it measures, above the plot. */
+
 .canvas-chart__heading {
   display: flex;
   flex-direction: column;
@@ -538,6 +560,7 @@
 }
 
 /* An author's callout on one reading, in the text ink rather than the hue. */
+
 .canvas-chart__note {
   fill: var(--oct-fg);
   font-family: inherit;
@@ -553,6 +576,7 @@
 /* Funnel, radar, and sankey charts. A stage, an axis, or a node is named in
    text ink beside its mark, never in the mark's hue; its reading follows in
    the meta ink so the name leads. */
+
 .canvas-chart__category {
   fill: var(--oct-fg-2);
   font-family: inherit;
@@ -573,6 +597,7 @@
 
 /* The neck between two funnel stages is a faint wash of the stage hue, so the
    drop-off reads as one shape without competing with the bars. */
+
 .canvas-chart__funnel-neck {
   fill: var(--oct-ser, var(--oct-series-1));
   opacity: 0.14;
@@ -580,12 +605,14 @@
 
 /* A radar series is an outline with a faint wash, so overlapping series stay
    readable through each other. */
+
 .canvas-block__chart-mark.canvas-chart__radar-area {
   fill-opacity: 0.14;
 }
 
 /* A sankey band is a translucent wash of the node it leaves; the hovered or
    focused band, or every band through a hovered node, darkens. */
+
 .canvas-block__chart-mark.canvas-chart__flow {
   opacity: 0.34;
 }
@@ -596,6 +623,7 @@
 
 /* A sankey chain longer than the column holds draws at its own width and
    scrolls sideways rather than stacking its columns on each other. */
+
 .canvas-chart__scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -680,6 +708,7 @@
 }
 
 /* System colours and dash patterns keep series apart when the palette is replaced. */
+
 @media (forced-colors: active) {
   .canvas-block__chart-mark,
   .canvas-block__chart-slice {
@@ -919,6 +948,7 @@
 }
 
 /* System colours keep the cells legible when the palette is replaced. */
+
 @media (forced-colors: active) {
   .canvas-block__treemap-mark {
     fill: ButtonFace;
@@ -974,6 +1004,7 @@
    own width and only scales down to fit a narrower Canvas. Stretching to a
    fixed width blew a few days up into huge squares and shrank a year's labels
    to about 7px. */
+
 .canvas-block__heatmap[data-layout="calendar"] .canvas-block__heatmap-plot {
   width: fit-content;
   max-width: 100%;
@@ -1009,6 +1040,7 @@
 
 /* A coordinate the block does not list: empty with a dashed edge, so it never
    reads as the low end of the scale the way a zero does. */
+
 .canvas-block__heatmap-mark.is-missing {
   fill: none;
   stroke: var(--oct-muted);
@@ -1070,6 +1102,7 @@
 
 /* The legend's missing sample repeats the empty dashed reading of a cell; as a
    plain element it takes a border rather than the SVG mark's stroke. */
+
 .canvas-block__heatmap-swatch.is-missing {
   background: none;
   border: 1px dashed var(--oct-muted);
@@ -1102,6 +1135,7 @@
 
 /* System colours keep the cells legible when the palette is replaced; the
    dash pattern is what keeps a missing cell apart from a present one. */
+
 @media (forced-colors: active) {
   .canvas-block__heatmap-mark {
     fill: Highlight;
@@ -1168,6 +1202,7 @@
 
 /* Length is the reading; the fill is the shared ink or a scale role. A tiny
    minimum keeps a zero row visible as a present but empty bar. */
+
 .canvas-block__bar-list-bar {
   display: block;
   height: 100%;
@@ -1228,6 +1263,7 @@
    track stays a frame so an empty bar is still a bar. The fill is set inline
    from the scale, so only `!important` in an accessibility fallback can
    replace it. */
+
 @media (forced-colors: active) {
   .canvas-block__bar-list-bar {
     background: Highlight !important;
@@ -1299,6 +1335,7 @@
 
 /* The criteria column stays put while the options scroll, so every reading on
    a phone is still labelled. */
+
 .canvas-block__matrix-table .canvas-block__matrix-corner,
 .canvas-block__matrix-table .canvas-block__matrix-criterion {
   position: sticky;
@@ -1487,6 +1524,7 @@
 /* System colours replace the tints, so the recommended column keeps a frame,
    the badge keeps an outline, the meters fall to system ink on a framed
    track, and a glyph's check is cut from the system ground. */
+
 @media (forced-colors: active) {
   .canvas-block__matrix-scroll {
     --canvas-matrix-glyph-ink: Canvas;
@@ -1541,6 +1579,7 @@
 
 /* KaTeX centres display math with its own margin; the region supplies the
    room, so the formula does not push the caption away. */
+
 .canvas-block__math-display .katex-display {
   margin: 0;
 }
@@ -1691,6 +1730,7 @@
 
 /* A pin toggle sits at the end of its column's row in the Columns list; it is
    muted until pressed, and a pressed pin takes the accent ink. */
+
 .canvas-block__table-pin {
   display: inline-flex;
   align-items: center;
@@ -1714,6 +1754,7 @@
 /* The header stays put through a long scroll, which is what keeps a reading
    labelled in a narrow sidebar. Only the column header sticks: a group's
    header row scrolls with its rows. */
+
 .canvas-block__table-grid thead th {
   position: sticky;
   top: 0;
@@ -1749,6 +1790,7 @@
 
 /* An in-cell bar is the value's share of the column's largest reading; the
    number sits above its bar so the reading is always legible. */
+
 .canvas-block__table-bar-cell {
   display: inline-grid;
   gap: 2px;
@@ -1772,6 +1814,7 @@
 /* A heat tint reads through the shared sequential scale; its colour is set
    inline from the scale roles, so only an accessibility fallback replaces it.
    The value's own text stays on top in both modes. */
+
 .canvas-block__table-cell--heat {
   border-radius: 2px;
 }
@@ -1786,6 +1829,7 @@
    set inline. Like the gutter it must be opaque, so it takes the same warm
    surface and extends that frame; a hairline marks the last pinned edge. A
    pinned heat cell layers its tint over that ground. */
+
 .canvas-block__table-grid [data-pinned] {
   position: sticky;
   z-index: 1;
@@ -1811,6 +1855,7 @@
    collapsed — how many open threads its rows hold. The header's content is
    pinned to the leading edge so it stays readable while a wide table
    scrolls sideways. */
+
 .canvas-block__table-grid .canvas-block__table-group th {
   padding-block: var(--oct-space-2);
   background: var(--oct-fill-2);
@@ -1851,6 +1896,7 @@
 
 /* The value reads in the body face like the cells it heads; the count and the
    summary keep the header's mono detail type. */
+
 .canvas-block__table-group-label {
   font-family: var(--oct-font-body);
   font-size: var(--oct-text-sm);
@@ -1889,6 +1935,7 @@
    gutter. Like a block's marker it shows on hover or focus and always once
    the row holds an open thread; a row without an id has an empty gutter cell
    because nothing could keep a comment on it. */
+
 .canvas-block__table-grid .canvas-block__table-comment {
   position: sticky;
   left: 0;
@@ -1944,6 +1991,7 @@
 
 /* System colours: the bar and the tint fall to system ink, and the value text
    is the reading either way. */
+
 @media (forced-colors: active) {
   .canvas-block__table-bar-fill {
     background: Highlight !important;
@@ -2002,6 +2050,7 @@
 
 /* A plan: a head with progress and the view switch, then phases of task rows,
    a board of status columns, or the timeline. */
+
 .canvas-plan {
   display: grid;
   gap: var(--oct-space-3);
@@ -2070,6 +2119,7 @@
 
 /* The status mark doubles as its own menu trigger where the plan is editable;
    the face stays the mark, with a soft fill on hover. */
+
 .canvas-plan__status-trigger {
   display: grid;
   width: 20px;
@@ -2181,6 +2231,7 @@
 
 /* A diagram as a board: the drawing pans and zooms inside a fixed frame, so the
    surrounding document keeps its height while the picture moves. */
+
 .canvas-board {
   position: relative;
   display: grid;
@@ -2213,6 +2264,7 @@
 
 /* A conversation reads a flow from top to bottom. Match the diagram's
    proportions so a tall flow is not reduced into a widescreen thumbnail. */
+
 .canvas-view--thread .canvas-board__svg {
   aspect-ratio: var(--octant-diagram-aspect-ratio);
 }
@@ -2224,6 +2276,7 @@
 /* Every grid here takes the drawer's width rather than its content's: the
    anchor picker names a block by its heading, and an unbreakable heading
    pushed the picker, the composer and its Comment button past the drawer. */
+
 .canvas-comments {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -2308,9 +2361,11 @@
    coordinate space: a mockup reflows at the node's width, a design frame is
    scaled to it. The label sits under the screen, and a focusable screen the
    person can drag carries the keyboard's focus ring. */
+
 /* A focusable screen keeps the workspace's one neutral keyboard focus edge:
    no surface repaints it (the visual-language contract), so focus shows the
    browser's own outline, as a diagram node's does. */
+
 .canvas-flow-board__screen {
   display: grid;
   justify-items: stretch;
@@ -2354,6 +2409,7 @@
 
 /* A screen the person can drag says so with the cursor, as a diagram node
    does; a shared snapshot or paired browser keeps the reading cursor. */
+
 .canvas-flow-board[data-editable="true"] .canvas-flow-board__screen {
   cursor: move;
 }
@@ -2499,6 +2555,7 @@
 /* The click-through player keeps the design player's anatomy: a bar, a stage
    that scales the current screen to fit, and a Go to list for the
    transitions that start from the screen itself rather than a control. */
+
 .canvas-flow-player__body {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2631,6 +2688,7 @@
 /* A hotspot is the one live control in a drawing that is otherwise inert. It
    wears the OctantButton's own look: the adapter's variant is its style, and
    no surface repaints it. */
+
 .canvas-mockup__hotspot {
   justify-self: start;
 }
@@ -2644,6 +2702,7 @@
 
 /* A dashed edge reads as optional or asynchronous; the dash, not a hue, is
    what says so. */
+
 .canvas-block__diagram-edge[data-style="dashed"] {
   stroke-dasharray: 6 4;
 }
@@ -2654,6 +2713,7 @@
 
 /* Tones are theme roles, never colours an author picks. Each pairs with the
    edge's label or the group's name, so the hue is emphasis, not the message. */
+
 .canvas-block__diagram-edge[data-tone="accent"] {
   stroke: var(--oct-accent);
 }
@@ -2708,6 +2768,7 @@
 /* A process box and a terminator pill carry the stronger rule, so the
    shapes a flowchart is read by stand apart from a plain node in shape and
    weight, not in hue. */
+
 .canvas-block__diagram-node
   :is(rect, polygon):is(
     [data-shape="process"],
@@ -2728,6 +2789,7 @@
 /* An icon is an outline in the secondary ink, so it reads as a label for the
    node rather than a second colour. Its strokes are drawn on a 24-unit grid
    and scaled to 16px, so the width is set in grid units. */
+
 .canvas-block__diagram-icon {
   fill: none;
   stroke: var(--oct-fg-2);
@@ -2755,6 +2817,7 @@
 
 /* A toned group is a region: a faint wash of its tone inside a solid edge,
    so a zone map reads as areas. The name stays in the reading ink. */
+
 .canvas-block__diagram-group[data-tone] rect {
   stroke-dasharray: none;
   fill: color-mix(in oklab, var(--canvas-diagram-tone) 9%, transparent);
@@ -2813,6 +2876,7 @@
 
 /* plan: Gantt. Bars on days in the status tones the plan's marks already
    use; the status is also named in the bar's title and the hidden list. */
+
 .canvas-plan__gantt-scroll {
   max-width: 100%;
   overflow-x: auto;
@@ -2820,6 +2884,7 @@
 
 /* The chart keeps its days legible and scrolls sideways in a narrow Canvas
    rather than shrinking its labels. */
+
 .canvas-plan__gantt-svg {
   display: block;
   max-width: none;
@@ -2932,6 +2997,7 @@
    node. Each rule below is scoped under the node group so it outranks those:
    an entity, attribute, and lane label is written from its left edge, and the
    header bars, bands, and notes keep their own paint. */
+
 .canvas-block__diagram-node .canvas-block__er-frame {
   fill: var(--oct-surface);
   stroke: var(--oct-chart-axis);
@@ -2963,6 +3029,7 @@
 /* A cardinality sits beside its end of the line; the layout says which way it
    reads, so it carries no anchor of its own here. It wears the same halo as an
    edge label so a line passing under it stays readable. */
+
 .canvas-block__er-cardinality {
   fill: var(--oct-muted);
   font-size: var(--oct-text-xs);
@@ -3124,19 +3191,6 @@
   background: var(--oct-danger);
 }
 
-.canvas-view__denied {
-  border: 1px solid color-mix(in oklab, var(--oct-danger) 60%, transparent);
-  border-radius: var(--oct-radius-md);
-  padding: var(--oct-space-4) var(--oct-space-5);
-  margin: var(--oct-space-6);
-}
-
-.canvas-view__loading {
-  color: var(--oct-muted);
-  padding: var(--oct-space-4) var(--oct-space-5);
-  margin: var(--oct-space-6);
-}
-
 .canvas-workspace-tab {
   display: flex;
   flex-direction: column;
@@ -3165,6 +3219,7 @@
 }
 
 /* What Save as HTML file or Copy HTML did, on its own line under the tools. */
+
 .canvas-workspace-tab__notice {
   flex-basis: 100%;
   margin: 0;
@@ -3217,6 +3272,7 @@
    than taking a column, which in a narrow dock left half the width to the
    document. The body is the frame both sit in and does not scroll: the
    drawer is laid over the frame, so scrolling the document leaves it put. */
+
 .canvas-workspace-tab__body {
   position: relative;
   display: grid;
@@ -3230,6 +3286,7 @@
 /* Its own stacking context: a sticky table header raises itself over the rows
    it scrolls past, and without this it also rose over the drawer and covered
    its Comment button. */
+
 .canvas-workspace-tab__document {
   min-width: 0;
   min-height: 0;
@@ -3271,6 +3328,7 @@
 /* The tool rail floats over the document's left gutter, so it keeps a fill
    and an edge. The gutter is widened under it: at the document's own padding
    the rail covered the first characters of every line. */
+
 .canvas-tool-rail {
   position: absolute;
   z-index: 1;
@@ -3313,6 +3371,7 @@
 /* A tool other than Select owns the pointer over the whole document, so the
    cursor says which tool it is on every block, and a frame that would take
    the pointer into its own page lets it through to the tool. */
+
 .canvas-tool-surface:not([data-tool="select"]) {
   user-select: none;
 }
@@ -3351,6 +3410,7 @@
    browser took the gesture, cancelled the pointer, and the mark was lost.
    Every part is named because a chart sets its own panning. Hand keeps the
    browser's own touch scrolling, which already moves the page. */
+
 .canvas-tool-surface[data-tool="area"],
 .canvas-tool-surface[data-tool="area"] *,
 .canvas-tool-surface[data-tool="pen"],
@@ -3359,6 +3419,7 @@
 }
 
 /* A board's picture moves under its block, so it takes no drawn mark. */
+
 .canvas-tool-surface:is([data-tool="area"], [data-tool="pen"], [data-tool="text"]) .canvas-board,
 .canvas-tool-surface:is([data-tool="area"], [data-tool="pen"], [data-tool="text"]) .canvas-board * {
   cursor: not-allowed;
@@ -3378,6 +3439,7 @@
 }
 
 /* Over the block's own raised parts, under its sticky header. */
+
 .canvas-block__area,
 .canvas-block__stroke,
 .canvas-block__note {
@@ -3386,6 +3448,7 @@
 
 /* A line is drawn in the block's own percent, stretched to its box, so the
    stroke width is kept in screen pixels rather than stretched with it. */
+
 .canvas-tool-surface__ink,
 .canvas-block__stroke {
   position: absolute;
@@ -3411,12 +3474,14 @@
 }
 
 /* Like an area, a line waiting for its comment reads as unfinished. */
+
 .canvas-block__stroke[data-draft="true"] polyline {
   stroke-dasharray: 4 3;
 }
 
 /* A note is a dot on the point it is pinned to, with its words beside it.
    The dot is pulled back by its radius so its centre is the point. */
+
 .canvas-block__note {
   position: absolute;
   display: flex;
@@ -3441,6 +3506,7 @@
 
 /* The words float over the block, so they keep a fill and an edge. Three
    lines at most: the whole comment is in the drawer. */
+
 .canvas-block__note-text {
   display: -webkit-box;
   max-width: 240px;
@@ -3469,6 +3535,7 @@
 
 /* An area with its comment stays an outline, so the block under it reads;
    one still being marked or waiting for its comment is washed. */
+
 .canvas-tool-surface__band,
 .canvas-block__area[data-draft="true"] {
   background: var(--oct-accent-soft);
@@ -3476,16 +3543,6 @@
 
 .canvas-workspace-tab__share-dialog {
   --octant-dialog-width: 560px;
-}
-
-.canvas-workspace-tab .octant-dialog__popup,
-.octant-dialog__popup:has(
-  > .canvas-revise-form,
-  > .canvas-refresh,
-  > .canvas-share,
-  > .canvas-compare
-) {
-  padding: var(--oct-space-4);
 }
 
 .canvas-block {
@@ -3523,6 +3580,7 @@
    other cue, so keyboard focus on it was invisible. The fill is translucent
    ink because the marker overlaps the edge of a card drawn in the surface
    colour, where a surface fill does not show. */
+
 .canvas-block__comment-marker:hover,
 .canvas-block__comment-marker:focus-visible {
   background: var(--oct-fill-2);
@@ -3592,183 +3650,6 @@
   color: var(--oct-muted);
 }
 
-.canvas-revise-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-}
-
-.canvas-revise-form textarea {
-  min-height: 72px;
-  resize: vertical;
-}
-
-/* Where a new Canvas starts. Options are cards in a grid that falls to one
-   column in a narrow thread; each draws a miniature of its recipe's sections
-   so the shapes can be compared before the summary is read. */
-.canvas-start-from {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
-}
-
-.canvas-start-from__label {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-  color: var(--oct-fg);
-}
-
-.canvas-start-from__options {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
-  gap: var(--oct-space-2);
-  align-content: start;
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 2px;
-}
-
-/* The button recipe fixes a single-line height; a card grows with its text. */
-.canvas-start-from__option {
-  display: grid;
-  height: auto;
-  grid-template-columns: 28px minmax(0, 1fr);
-  align-items: start;
-  gap: var(--oct-space-2);
-  min-width: 0;
-  padding: var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
-  text-align: left;
-  white-space: normal;
-}
-
-.canvas-start-from__option:hover {
-  background: color-mix(in oklab, var(--oct-fg) 4%, var(--oct-surface));
-}
-
-/* Focus is a quiet fill, not a drawn halo, like every other ghost control. */
-.canvas-start-from__option:focus-visible {
-  background: color-mix(in oklab, var(--oct-fg) 8%, var(--oct-surface));
-}
-
-.canvas-start-from__option[aria-checked="true"] {
-  border-color: var(--oct-accent);
-  background: color-mix(in oklab, var(--oct-accent) 8%, var(--oct-surface));
-}
-
-.canvas-start-from__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.canvas-start-from__title {
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-}
-
-.canvas-start-from__summary {
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-}
-
-.canvas-start-from__preview {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 36px;
-  padding: var(--oct-space-1);
-  border: 1px solid color-mix(in oklab, var(--oct-fg) 10%, transparent);
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
-}
-
-.canvas-start-from__preview-row {
-  display: block;
-  height: 3px;
-  border-radius: 1px;
-  background: color-mix(in oklab, var(--oct-fg) 18%, transparent);
-}
-
-.canvas-start-from__preview-row[data-kind="heading"] {
-  width: 60%;
-  background: color-mix(in oklab, var(--oct-fg) 45%, transparent);
-}
-
-.canvas-start-from__note {
-  margin: 0;
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-}
-
-.canvas-start-from__ask {
-  font-size: var(--oct-text-sm);
-}
-
-/* Import HTML sits under the create form as its own small section. A long
-   address in the summary wraps rather than widening the thread column. */
-.canvas-html-import {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--oct-space-2);
-  margin-top: var(--oct-space-3);
-  min-width: 0;
-}
-
-.canvas-html-import > [data-testid="canvas-import-html-open"] {
-  align-self: flex-start;
-}
-
-.canvas-html-import__heading {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: 600;
-}
-
-.canvas-html-import__label {
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-}
-
-.canvas-html-import__paste {
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-html-import__actions {
-  display: flex;
-  gap: var(--oct-space-2);
-}
-
-.canvas-html-import__line {
-  margin: 0;
-}
-
-.canvas-html-import__drop-list {
-  margin: var(--oct-space-1) 0 0;
-  padding-left: var(--oct-space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-1);
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-html-import__drop-count {
-  font-weight: 600;
-}
-
-.canvas-html-import__drop-examples {
-  display: block;
-  color: var(--oct-muted);
-  overflow-wrap: anywhere;
-}
-
 .canvas-version-history__title {
   font-size: var(--oct-text-sm);
   margin: 0 0 var(--oct-space-2);
@@ -3786,6 +3667,7 @@
 /* Each version reads as a small system card the current one accents. A title
    wraps inside the card: on one line, a long one widened the popover's column
    past the popup, and at phone width Compare scrolled out of reach. */
+
 .canvas-version-history__item {
   display: block;
   width: 100%;
@@ -3821,6 +3703,7 @@
 /* Canvas typed actions (D3). Availability and state are conveyed with text and
    icons, never color alone, and every disabled control still reads a safe
    reason to assistive technology. */
+
 .canvas-actions {
   display: flex;
   flex-direction: column;
@@ -3918,6 +3801,7 @@
 
 /* Canvas refresh (C2) and skill provenance. Status is carried by an icon and
    words together, never color alone, and provenance is inert read-only text. */
+
 .canvas-refresh {
   display: flex;
   flex-direction: column;
@@ -4028,6 +3912,7 @@
 
 /* Canvas sharing. A share row states its lifecycle in words next to an icon,
    never by color alone, and the access log is inert read-only text. */
+
 .canvas-share {
   display: flex;
   flex-direction: column;
@@ -4083,6 +3968,7 @@
 
 /* Opened shared snapshot: a clearly labeled read-only copy, framed apart from
    the live canvas and the share controls. */
+
 .canvas-share__snapshot {
   display: flex;
   flex-direction: column;
@@ -4189,6 +4075,7 @@
 /* A mockup is a wireframe. Neutral ink only: the Default style has no hue,
    and nothing here is a live control. The styled fidelity below this section
    draws the same tree with the theme's accent and tones. */
+
 .canvas-mockup-block {
   display: grid;
   gap: var(--oct-space-3);
@@ -4256,6 +4143,7 @@
 
 /* Side by side, a variant takes its share of the row and wraps to its own
    line when that share would be narrower than a phone. */
+
 .canvas-mockup__frames:not([data-count="1"]) .canvas-mockup__variant {
   flex-basis: min(100%, 260px);
 }
@@ -4299,6 +4187,7 @@
 }
 
 /* A browser frame shows a blank address bar: the mockup names no address. */
+
 .canvas-mockup--browser .canvas-mockup__chrome-title {
   flex: 1 1 auto;
   border-radius: var(--oct-radius-sm);
@@ -4532,6 +4421,7 @@
 /* In a wireframe a tone is emphasis, not colour: the primary action is
    filled with ink, and a destructive one keeps its outline but is drawn
    heavier. The styled fidelity paints the tone. */
+
 .canvas-mockup__node[data-tone="accent"] .canvas-mockup__button {
   border-color: var(--oct-fg);
   background: var(--oct-fg);
@@ -4718,6 +4608,7 @@
 
 /* A modal covers its screen with a scrim and centres its box; a toast floats
    at the bottom of the screen. Both are drawn, not opened. */
+
 .canvas-mockup__node--modal {
   display: grid;
   position: absolute;
@@ -4759,6 +4650,7 @@
 }
 
 /* A screen with a toast keeps room for it below the last row. */
+
 .canvas-mockup__screen:has(.canvas-mockup__node--toast) {
   padding-bottom: var(--oct-space-8);
 }
@@ -4823,6 +4715,7 @@
 /* mockup: styled fidelity. The same tree drawn with the active theme: the
    accent fills the primary action, the selected tab, and an on control, and a
    tone takes its theme role. It follows light, dark, and any imported theme. */
+
 .canvas-mockup--styled .canvas-mockup__frame {
   border-radius: var(--oct-radius-md);
 }
@@ -4906,6 +4799,7 @@
 /* System colours: hairlines become the system frame, filled marks become
    system text on canvas, and a tone keeps its outline so it stays apart
    without a colour. */
+
 @media (forced-colors: active) {
   .canvas-mockup__frame,
   .canvas-mockup__node--card,
@@ -4947,290 +4841,6 @@
   .canvas-mockup__node--modal {
     background: Canvas;
   }
-}
-
-/* A design: real screens or slides drawn from the author's HTML and CSS in a
-   sandboxed frame. On the board each frame is a scaled picture that opens the
-   player through the button laid over it. */
-.canvas-design {
-  display: grid;
-  gap: var(--oct-space-3);
-  color: var(--oct-fg);
-}
-
-.canvas-design__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-3);
-}
-
-.canvas-design__heading {
-  display: grid;
-  gap: var(--oct-space-1);
-  min-width: 0;
-}
-
-.canvas-design__title {
-  margin: 0;
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-}
-
-.canvas-design__meta {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-design__board {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--oct-space-5) var(--oct-space-4);
-}
-
-/* A frame is as wide as its size allows and never wider than the board, so a
-   deck in a narrow side panel is not clipped on the right. The board measures
-   the same width to scale the page inside. */
-.canvas-design__frame {
-  display: grid;
-  gap: var(--oct-space-2);
-  margin: 0;
-  width: min(var(--canvas-design-frame-cap, 440px), 100%);
-  min-width: 0;
-  max-width: 100%;
-}
-
-.canvas-design__caption {
-  display: flex;
-  align-items: baseline;
-  gap: var(--oct-space-2);
-  min-width: 0;
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-design__index {
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.canvas-design__frame-title {
-  overflow: hidden;
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* On the board the box takes the frame's width and the page's aspect ratio, so
-   it is the right size before the page inside it loads. */
-.canvas-design__frame > .canvas-design__preview {
-  width: 100%;
-}
-
-.canvas-design__preview {
-  position: relative;
-  overflow: hidden;
-  max-width: 100%;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-}
-
-.canvas-design__preview:hover {
-  border-color: var(--oct-muted);
-}
-
-/* The button recipe fixes a control height; the cover must fill the frame. */
-.canvas-design__preview > .canvas-design__open {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  cursor: default;
-}
-
-.canvas-design__page {
-  position: absolute;
-  z-index: 1;
-  inset: 0 auto auto 0;
-  border: 0;
-  transform-origin: 0 0;
-}
-
-.canvas-design__page--beneath {
-  z-index: 0;
-}
-
-.canvas-design__cover {
-  position: absolute;
-  inset: 0;
-}
-
-/* A document is read in place: the page is as wide as the column and the
-   host sets its height from the page, so nothing scrolls inside it. A themed
-   page is transparent and sits on the Canvas surface. */
-.canvas-design__document {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-}
-
-/* A running prototype: Octant's chrome above the frame says it is running and
-   holds Stop, which the frame cannot reach or draw over. */
-.canvas-design__run {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.canvas-design__running {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--oct-success-fg);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-}
-
-.canvas-design__running-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-success);
-}
-
-.canvas-design__notice {
-  margin: 0;
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-design__errors {
-  display: grid;
-  gap: var(--oct-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--oct-danger-fg);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  overflow-wrap: anywhere;
-}
-
-.canvas-design__stage {
-  min-width: 0;
-}
-
-/* A running window played full screen: the header stays so Stop is reachable,
-   and the stage takes the rest so the window is scaled to its height too. */
-.canvas-design:fullscreen {
-  display: flex;
-  flex-direction: column;
-  padding: var(--oct-space-4);
-  background: var(--oct-surface);
-}
-
-.canvas-design:fullscreen .canvas-design__stage {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-}
-
-.octant-dialog__popup.canvas-design-player {
-  --octant-dialog-width: 96vw;
-  --octant-dialog-height: 94vh;
-  height: min(94vh, calc(100vh - 48px));
-  overflow: hidden;
-  padding: 0;
-}
-
-.canvas-design-player__body {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 100%;
-}
-
-.canvas-design-player__notes {
-  max-height: 30vh;
-  padding: var(--oct-space-3) var(--oct-space-4);
-  overflow-y: auto;
-  border-top: 1px solid var(--oct-border);
-  font-size: var(--oct-text-sm);
-}
-
-.canvas-design-player__notes p {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-.canvas-design-player__notes-empty {
-  color: var(--oct-meta);
-}
-
-.canvas-design-player__body:fullscreen {
-  background: var(--oct-surface);
-}
-
-.canvas-design-player__bar {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-2) var(--oct-space-2) var(--oct-space-2) var(--oct-space-4);
-  border-bottom: 1px solid var(--oct-border);
-}
-
-.canvas-design-player__title {
-  font-weight: var(--oct-weight-strong);
-}
-
-.canvas-design-player__position,
-.canvas-design-player__hint {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.canvas-design-player__position {
-  font-family: var(--oct-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.canvas-design-player__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-1);
-  margin-left: auto;
-}
-
-.canvas-design-player__stage {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 0;
-  padding: var(--oct-space-4);
-  overflow: hidden;
-  background: var(--oct-surface);
-}
-
-.canvas-design-player__screen {
-  position: relative;
-  flex: none;
-  overflow: hidden;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-}
-
-/* Destination export. The approval card shows the payload and the destination
-   before anything leaves. Status is words, not color alone. */
-.canvas-export {
-  display: flex;
-  flex-direction: column;
-  gap: var(--oct-space-2);
-  min-width: 0;
 }
 
 .canvas-export__title {
@@ -5293,6 +4903,7 @@
 
 /* The folder, the file, and where it goes: the person is approving a place, so
    the path is a row of the surface rather than fine print. */
+
 .canvas-export__folder {
   display: flex;
   align-items: center;
@@ -5321,117 +4932,13 @@
   color: var(--oct-muted);
 }
 
-.octant-dialog__popup:has(> .canvas-export) {
-  padding: var(--oct-space-4);
-}
-
-/* A Canvas drawn in the conversation that wrote it. It is the work the turn
-   produced, so it wears the reply's one card: the changed-files card's fill,
-   hairline and radius, with a code block's 32px header strip naming it and
-   ghost icon controls at its end. At rest the body is capped instead of
-   scrolled, so the wheel belongs to the thread; what runs past the cap fades
-   into an offer to expand it. Expanded, it grows with its content up to
-   about the thread viewport, and scrolls only after the person focuses it. */
-.thread-canvas-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--oct-space-3);
-  margin-top: var(--oct-space-3);
-}
-
-.thread-canvas {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card, var(--octant-workspace));
-}
-
-.thread-canvas__header {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-height: 32px;
-  padding: 0 var(--oct-space-1) 0 var(--oct-space-3);
-  border-bottom: 1px solid var(--oct-border-soft);
-}
-
-.thread-canvas[data-shown-as="card"] .thread-canvas__header {
-  border-bottom: 0;
-}
-
-.thread-canvas__icon {
-  flex: none;
-  color: var(--oct-meta);
-}
-
-.thread-canvas__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-canvas__actions {
-  display: flex;
-  flex: none;
-  gap: 2px;
-}
-
-/* Sized to the strip, like a code block's copy control; the ghost recipe paints it. */
-.thread-canvas__action {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
-}
-
-.thread-canvas__viewport {
-  position: relative;
-}
-
-.thread-canvas__body {
-  max-height: 560px;
-  overflow: hidden;
-}
-
-/* Tall enough to read a long document whole, short enough that the frame's
-   header and the composer stay in view around it. Never shorter than the
-   resting cap: on a short window the viewport rule alone (376px at the 600px
-   minimum height) would clip a Canvas that fit before it was expanded. */
-.thread-canvas[data-shown-as="expanded"] .thread-canvas__body {
-  max-height: max(560px, calc(100dvh - 14rem));
-}
-
-/* A focused region takes the wheel; an unfocused one is not a scroll
-   container for it, so the wheel passes through to the thread. Containment
-   stays on the focused rule only: the unfocused body is overflow: hidden, still
-   a scroll container, and Chromium 150 stops the wheel there when it is
-   contained, so the thread would not scroll. */
-.thread-canvas[data-shown-as="expanded"] .thread-canvas__body[data-wheel="canvas"] {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.thread-canvas__body[data-clipped="true"]:not([data-wheel="canvas"]) {
-  /* A mask reads only alpha, so any opaque ink draws the visible part. */
-  mask-image: linear-gradient(
-    to bottom,
-    var(--oct-fg) calc(100% - var(--oct-space-12) - var(--oct-space-6)),
-    transparent
-  );
-}
-
 .thread-canvas .canvas-view--thread {
   padding: var(--oct-space-4);
 }
 
 /* Inside the card the document drops its outer rhythm: the first block
    starts at the padding and the last one ends there. */
+
 .thread-canvas .canvas-view--thread .canvas-view__body > :first-child,
 .thread-canvas .canvas-view--thread .canvas-view__body > :first-child .canvas-block__heading {
   margin-top: 0;
@@ -5441,221 +4948,6 @@
   margin-bottom: 0;
 }
 
-.thread-canvas__more {
-  position: absolute;
-  inset: auto 0 var(--oct-space-3);
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--oct-space-2);
-  justify-content: center;
-}
-
-.thread-canvas__status {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  margin: 0;
-  padding: var(--oct-space-3);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
-}
-
-/* A Canvas the thread wrote and does not draw inline: one row on the reply's
-   card face, the document's mark in an inset tile, its title, and one line
-   of facts. The row is the open control, so its face is drawn here over the
-   button recipe's bare variant. */
-.canvas-ref-list {
-  display: grid;
-  gap: var(--oct-space-2);
-}
-
-.canvas-ref-list__error {
-  margin: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
-}
-
-.canvas-ref {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-3);
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  box-sizing: border-box;
-  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) var(--oct-space-2);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card, var(--octant-workspace));
-  color: var(--oct-fg);
-  text-align: start;
-}
-
-/* The open control lies over the whole row; the row's content sits beneath
-   it and the hover wash is drawn on the row. */
-.canvas-ref {
-  position: relative;
-}
-
-.canvas-ref__hit {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  border-radius: inherit;
-}
-
-.canvas-ref:has(.canvas-ref__hit:hover) {
-  background: color-mix(in oklab, var(--oct-fg) 3%, var(--octant-card, var(--octant-workspace)));
-}
-
-/* A live miniature of the document: the real renderer laid out at a narrow
-   page width and scaled down into a 104 × 72 tile, faded at its foot. */
-.canvas-ref__preview {
-  position: relative;
-  flex: none;
-  width: 104px;
-  height: 72px;
-  overflow: hidden;
-  border: 1px solid color-mix(in oklab, var(--oct-fg) 8%, transparent);
-  border-radius: var(--oct-radius-inset);
-  background: var(--octant-workspace, var(--oct-surface));
-  mask-image: linear-gradient(to bottom, var(--oct-fg) 70%, transparent);
-  pointer-events: none;
-}
-
-.canvas-ref__preview-page {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 320px;
-  transform: scale(0.325);
-  transform-origin: top left;
-}
-
-/* A Canvas the author asked to show inline that holds a plan, a mockup, or a
-   device-size design: the row becomes a card whose miniature spans the
-   column above its title. The page is laid out at twice the card's width and
-   drawn at half size, so it fits the column at any width without a measured
-   scale; the card's height is bounded and its foot fades like the tile's. */
-.canvas-ref[data-shown-as="preview"] {
-  flex-wrap: wrap;
-}
-
-.canvas-ref[data-shown-as="preview"] .canvas-ref__preview {
-  flex: 1 0 100%;
-  width: 100%;
-  height: auto;
-  max-height: 280px;
-  aspect-ratio: 16 / 9;
-  mask-image: linear-gradient(to bottom, var(--oct-fg) 80%, transparent);
-}
-
-/* The title shares the line under the miniature with the expand control and
-   the chevron, however long its facts run, rather than wrapping them below. */
-.canvas-ref[data-shown-as="preview"] .canvas-ref__text {
-  flex-basis: 0;
-}
-
-.canvas-ref[data-shown-as="preview"] .canvas-ref__preview-page {
-  width: 200%;
-  transform: scale(0.5);
-}
-
-.canvas-ref__progress {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  margin-top: var(--oct-space-1);
-}
-
-.canvas-ref__progress-track {
-  flex: 1 1 auto;
-  max-width: 12rem;
-  height: 4px;
-  overflow: hidden;
-  border-radius: var(--oct-radius-pill);
-  background: color-mix(in oklab, var(--oct-fg) 10%, transparent);
-}
-
-.canvas-ref__progress-fill {
-  display: block;
-  min-width: 4px;
-  height: 100%;
-  border-radius: var(--oct-radius-pill);
-  background: var(--oct-fg);
-}
-
-.canvas-ref__progress-label {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.canvas-ref__icon {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid color-mix(in oklab, var(--oct-fg) 7%, transparent);
-  border-radius: var(--oct-radius-inset);
-  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
-  color: var(--oct-muted);
-}
-
-.canvas-ref__text {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.canvas-ref__title,
-.canvas-ref__summary,
-.canvas-ref__meta {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.canvas-ref__title {
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  line-height: 1.35;
-}
-
-.canvas-ref__summary {
-  color: var(--octant-text-secondary);
-  font-size: var(--oct-text-detail);
-}
-
-.canvas-ref__meta {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-/* Above the row's open control, which covers the whole row. */
-.canvas-ref__expand {
-  position: relative;
-  z-index: 2;
-  flex: none;
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
-}
-
-.canvas-ref__chevron {
-  flex: none;
-  color: var(--oct-meta);
-}
-
-/* Forced colours: the measured chart keeps its rules, labels and points in
-   system ink, and the faint tile and row fills give way to plain borders. */
 @media (forced-colors: active) {
   .canvas-chart__grid,
   .canvas-chart__baseline,
@@ -5718,26 +5010,6 @@
   .canvas-chart__bar:focus-visible {
     outline-color: Highlight;
   }
-
-  .canvas-block__metric,
-  .canvas-ref,
-  .canvas-ref__icon,
-  .thread-canvas {
-    border-color: CanvasText;
-    background: Canvas;
-  }
-}
-
-@media (forced-colors: active) {
-  .canvas-ref__progress-fill {
-    background: CanvasText;
-  }
-
-  .canvas-ref__progress-track,
-  .canvas-chart__headline-change {
-    border: 1px solid CanvasText;
-    background: Canvas;
-  }
 }
 
 .canvas-choice__question {
@@ -5765,6 +5037,7 @@
 
 /* A choice block drawn as a decision form: a sticky header with the progress
    and its actions, then sections of questions whose answers save as made. */
+
 .decision-form {
   display: grid;
   gap: var(--oct-space-4);
@@ -5837,6 +5110,7 @@
 
 /* Forced colours drop the tint that shows an option is chosen, so the choice
    is drawn as a thick system-colour border and the header keeps its edge. */
+
 @media (forced-colors: active) {
   .decision-form .provider-question-card__choice[data-checked] {
     border: 3px solid Highlight;

@@ -245,6 +245,84 @@ describe("plugin-api manifest re-exports", () => {
     ]);
   });
 
+  describe("a theme component", () => {
+    const theme = {
+      supportedModes: ["dark"],
+      tokens: { dark: { workspace: "#101418", "text-primary": "#f2f4f8" } },
+    };
+    const themeManifest = (component: Record<string, unknown>) =>
+      manifest({
+        slug: "harbor-night",
+        compatibility: {
+          platforms: ["macos", "linux"],
+          modes: ["chat", "work", "code"],
+          providerFamilies: [],
+        },
+        components: [
+          {
+            id: "harbor-night",
+            kind: "theme",
+            displayName: "Harbor night",
+            declaredCapabilities: [],
+            theme,
+            ...component,
+          },
+        ],
+      });
+
+    it("accepts colours as data and nothing that runs", () => {
+      const decoded = decodeExtensionPackageManifest(themeManifest({}));
+      expect(decoded.components[0]?.theme?.tokens.dark?.workspace).toBe("#101418");
+    });
+
+    it("refuses a stylesheet, script or remote URL in place of a colour", () => {
+      for (const value of [
+        "url(https://example.com/x.png)",
+        "javascript:alert(1)",
+        "<script>",
+        "var(--x)",
+      ]) {
+        expect(() =>
+          decodeExtensionPackageManifest(
+            themeManifest({ theme: { ...theme, tokens: { dark: { workspace: value } } } }),
+          ),
+        ).toThrow();
+      }
+    });
+
+    it("refuses a field the theme schema does not name, such as a font, video or script", () => {
+      for (const extra of [
+        { fontUrl: "https://example.com/font.woff2" },
+        { video: "intro.mp4" },
+        { script: "theme.js" },
+      ]) {
+        expect(() =>
+          decodeExtensionPackageManifest(themeManifest({ theme: { ...theme, ...extra } })),
+        ).toThrow();
+      }
+    });
+
+    it("refuses a theme that runs code, asks for a capability, or omits its colours", () => {
+      expect(() =>
+        decodeExtensionPackageManifest(themeManifest({ entryPoint: "theme.js" })),
+      ).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(
+          manifest({
+            ...themeManifest({ declaredCapabilities: ["network"] }),
+            declaredCapabilities: ["network"],
+          }),
+        ),
+      ).toThrow();
+      expect(() => decodeExtensionPackageManifest(themeManifest({ theme: undefined }))).toThrow();
+      expect(() =>
+        decodeExtensionPackageManifest(
+          themeManifest({ theme: { supportedModes: ["light"], tokens: theme.tokens } }),
+        ),
+      ).toThrow();
+    });
+  });
+
   it("rejects an unknown contribution point through the public package", () => {
     expect(() =>
       decodeExtensionPackageManifest(

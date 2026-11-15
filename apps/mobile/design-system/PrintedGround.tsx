@@ -9,7 +9,14 @@ import {
 } from "react-native";
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
-import { clampEffect, sourceKey, type GroundEffect, type Size } from "./groundPrint";
+import { ASCII_GROUND_SHADE, ASCII_RAMP } from "@octant/domain/ascii-print";
+import {
+  asciiGlyphRows,
+  clampEffect,
+  sourceKey,
+  type GroundEffect,
+  type Size,
+} from "./groundPrint";
 
 export interface PrintedGroundProps {
   readonly source: ImageSourcePropType;
@@ -26,8 +33,12 @@ void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }
  * Mirrors `bayerThreshold` in groundPrint.ts. GLSL ES 1.0 has no bitwise
  * operators, so each bit is read with mod/floor and xor is (a + b) mod 2.
  * Rows count from the top, as the desktop's canvas does, so the dither
- * pattern and the cell grid sit on the same corner.
+ * pattern and the cell grid sit on the same corner. The ASCII print has no
+ * font to draw with, so it reads each glyph row from `uGlyphs` (the shared
+ * table in @octant/domain) and its bits with the same mod/floor; a loop picks
+ * the row because GLSL ES 1.0 only promises constant uniform indexing.
  */
+const GLYPH_ROW_COUNT = ASCII_RAMP.length * 5;
 const FRAGMENT_SHADER = `
 precision highp float;
 uniform sampler2D uPicture;
@@ -35,6 +46,9 @@ uniform vec2 uViewport;
 uniform vec2 uPictureSize;
 uniform float uCell;
 uniform float uSteps;
+uniform float uAscii;
+uniform float uGround;
+uniform float uGlyphs[${String(GLYPH_ROW_COUNT)}];
 float bit(float v, float b) { return mod(floor(v / b), 2.0); }
 float bayer(vec2 p) {
   float x = mod(p.x, 8.0);
@@ -54,6 +68,17 @@ void main() {
   if (uSteps > 0.0) {
     float shift = (bayer(cell) - 0.5) / uSteps;
     c = floor(clamp(c + shift, 0.0, 1.0) * uSteps + 0.5) / uSteps;
+  }
+  if (uAscii > 0.5) {
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float level = min(${String(ASCII_RAMP.length - 1)}.0, floor(clamp(lum, 0.0, 1.0) * ${String(ASCII_RAMP.length)}.0));
+    vec2 g = min(floor((top - cell * uCell) / uCell * 5.0), vec2(4.0));
+    float index = level * 5.0 + g.y;
+    float row = 0.0;
+    for (int i = 0; i < ${String(GLYPH_ROW_COUNT)}; i++) {
+      if (float(i) == index) row = uGlyphs[i];
+    }
+    c *= mix(uGround, 1.0, bit(row, exp2(4.0 - g.x)));
   }
   gl_FragColor = vec4(c, 1.0);
 }
@@ -200,13 +225,16 @@ function draw(
     gl.getUniformLocation(program, "uSteps"),
     effect.kind === "dither" ? effect.levels - 1 : 0,
   );
+  gl.uniform1f(gl.getUniformLocation(program, "uAscii"), effect.kind === "ascii" ? 1 : 0);
+  gl.uniform1f(gl.getUniformLocation(program, "uGround"), ASCII_GROUND_SHADE);
+  gl.uniform1fv(gl.getUniformLocation(program, "uGlyphs"), asciiGlyphRows());
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.endFrameEXP();
 }
 
 /**
  * The ground printed once through a fragment shader: the picture covers the
- * view, then is shown as it is, pixelated, or dithered like the desktop. It
+ * view, then is shown as it is, pixelated, dithered, or in characters like the desktop. It
  * redraws only when the picture, the effect or the size changes, never on a
  * loop, because nothing moves across the ground. If GL or the texture fails
  * the plain image shows instead.

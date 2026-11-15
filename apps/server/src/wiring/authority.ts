@@ -43,6 +43,9 @@ import {
 } from "../process/secretGuard";
 import { createPersonMemoryAccess } from "../personMemory/personMemoryAccess";
 import { createPersonMemoryRouteHandler } from "../personMemory/personMemoryRoutes";
+import { createTodoRouteHandler } from "../todos/todoRoutes";
+import { privateListenerHostId } from "../remote/privateListenerHostIdentity";
+import { TodoStore } from "../todos/todoStore";
 import { PersonMemoryStore } from "../personMemory/personMemoryStore";
 import { ProtectedFilesService } from "../protectedFilesService";
 import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
@@ -129,6 +132,19 @@ export function wireAuthority(deps: AuthorityDependencies) {
     uuid: randomUUID,
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
+  const todos = new TodoStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    clock: () => decodeUtcTimestamp(new Date().toISOString()),
+    // Read when the list is first read, not at start: a host that never opens
+    // To-dos provisions nothing for it.
+    hostId: () =>
+      privateListenerHostId({
+        connection: persistence.connection,
+        dataDirectory: persistence.dataDirectory,
+        identityFiles: options.serverIdentityFiles,
+      }),
   });
   const codeApprovalStore = new CodeOperationApprovalStore({
     uuid: randomUUID,
@@ -347,6 +363,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     store: personMemory,
     windowAuthorityStore,
   });
+  const todoRoutes = createTodoRouteHandler({ store: todos, windowAuthorityStore });
   const protectedFilesRoutes = createProtectedFilesRouteHandler({
     service: protectedFiles,
     windowAuthorityStore,
@@ -414,6 +431,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personMemoryRoutes,
     protectedFilesRoutes,
     simulatorInputGrants,
+    todoRoutes,
     unsubscribeMachineChanges,
     unsubscribeThreadArchivals,
     windowAuthorityStore,

@@ -46,6 +46,7 @@ function workProject(): ProjectSummary {
 
 function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
   return {
+    searchTranscript: vi.fn(),
     bootstrap:
       result === "ready"
         ? vi.fn(async () =>

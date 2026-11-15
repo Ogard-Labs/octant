@@ -1,3 +1,4 @@
+import { followSelectionWithin } from "./selectionOwner";
 import type { ProjectId } from "@octant/contracts/projects";
 import { MessageSquarePlus } from "lucide-react";
 import {
@@ -85,9 +86,7 @@ export function SelectionThreadSurface(props: { readonly children: ReactNode }) 
 
   useEffect(() => {
     if (!enabled) return;
-    const onSelectionChange = () => setOffer(selectionWithin(containerRef.current));
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
+    return followSelectionWithin(() => containerRef.current, setOffer);
   }, [enabled]);
 
   const start = useCallback(

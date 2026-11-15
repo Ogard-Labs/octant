@@ -113,6 +113,7 @@ import {
   CodeThreadActivity,
   decodeHostAnswer,
   OWNER_UNLOCK_HEADER,
+  CodeTranscriptSearch,
 } from "@octant/contracts";
 import {
   CodeLanguageApprovalResult,
@@ -181,6 +182,8 @@ export interface CodeClient {
   readonly providerCloudSessions?: ProviderCloudSessionClient;
   bootstrap(): Promise<CodeBootstrap>;
   navigation(): Promise<CodeNavigation>;
+  /** Message search over the Code threads the host lists for this window. */
+  searchTranscript(query: string): Promise<CodeTranscriptSearch>;
   thread(threadId: CodeThreadId, signal?: AbortSignal): Promise<CodeThreadView>;
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
   executeOperation(
@@ -443,6 +446,16 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         new URL("/api/code/navigation", options.baseUrl).toString(),
         { method: "GET", headers },
         decodeHostAnswer(CodeNavigation),
+      );
+    },
+    searchTranscript(query) {
+      const url = new URL("/api/code/transcript-search", options.baseUrl);
+      url.searchParams.set("q", query);
+      return request(
+        fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CodeTranscriptSearch),
       );
     },
     thread(threadId, signal) {

@@ -410,9 +410,10 @@ export interface CodeOperationRuntimeOptions {
     readonly currentProjectAccess?: CodeOperationAuthorityPort["currentProjectAccess"];
     /**
      * Runs `run` on the window's standing authority: its persisted binding,
-     * judged when each check inside runs, never a request's admission.
+     * judged when each check inside runs, never a request's admission, and
+     * reaching only the turn's own Project.
      */
-    readonly standingAuthority: <T>(run: () => T) => T;
+    readonly standingAuthority: <T>(turnProjectId: CodeThread["projectId"], run: () => T) => T;
     readonly retainProjectAccess?: CodeOperationAuthorityPort["retainProjectAccess"];
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
@@ -5146,7 +5147,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         }),
       );
       const standing = this.#options.windowAccess.standingAuthority;
-      return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
+      return {
+        ...tools,
+        execute: (input) => standing(active.thread.projectId, () => tools.execute(input)),
+      };
     }
     const supportsAppManagedTools = this.#options.supportsAppManagedTools?.(active.thread) === true;
     const supportsAcpClientCapabilities =
@@ -5437,7 +5441,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // never on any request's admission.
     const tools = combineAppManagedToolSets(...sets);
     const standing = this.#options.windowAccess.standingAuthority;
-    return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
+    return {
+      ...tools,
+      execute: (input) => standing(active.thread.projectId, () => tools.execute(input)),
+    };
   }
 
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {
@@ -6261,7 +6268,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   ): Promise<(() => boolean) | undefined> {
     const accessCurrent = this.#options.windowAccess.currentProjectAccess;
     if (!current() || accessCurrent === undefined) return undefined;
-    return this.#options.windowAccess.standingAuthority(async () => {
+    return this.#options.windowAccess.standingAuthority(active.thread.projectId, async () => {
       if (
         !(await this.#options.windowAccess.canAccessProject(
           active.windowId,
