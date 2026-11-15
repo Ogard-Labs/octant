@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { UtcTimestamp } from "./events";
+import { AggregateId, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -17,7 +17,14 @@ const BoundedText = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 export const WebSearchBackendId = brandedUuid("WebSearchBackendId");
 export type WebSearchBackendId = typeof WebSearchBackendId.Type;
 
-export const WebSearchBackendKind = Schema.Literal("searxng");
+export const WebSearchBackendKind = Schema.Literal(
+  "searxng",
+  "staan",
+  "mojeek",
+  "linkup",
+  "brave",
+  "exa",
+);
 export type WebSearchBackendKind = typeof WebSearchBackendKind.Type;
 
 export const WebSearchDataPolicy = Schema.Literal("any", "zdr-only", "eu-only", "eu-and-zdr");
@@ -31,6 +38,11 @@ export const WebSearchBackendEntry = Schema.Struct({
   kind: WebSearchBackendKind,
   /** The instance or regional host, where the kind has more than one. */
   address: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2_048))),
+  /**
+   * Where the broker keeps this entry's API key, for a kind that takes one.
+   * The host assigns it; a key is never part of the settings.
+   */
+  credentialRef: Schema.optional(Schema.UUID),
   enabled: Schema.Boolean,
   /** The person's statement: "This vendor keeps no record of my queries." */
   statesZdr: Schema.Boolean,
@@ -59,6 +71,8 @@ export type WebSearchIneligibleReason = typeof WebSearchIneligibleReason.Type;
 
 export const WebSearchBackendState = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("ready") }).annotations(strict),
+  /** No key is stored, or the vendor refused the stored one. */
+  Schema.Struct({ kind: Schema.Literal("needs-key") }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("not-eligible"),
     reason: WebSearchIneligibleReason,
@@ -104,6 +118,76 @@ export const SetWebSearchSettingsOutcome = Schema.Union(
 );
 export type SetWebSearchSettingsOutcome = typeof SetWebSearchSettingsOutcome.Type;
 
+/**
+ * A key for one entry. An absent key deletes the stored one. The key goes to
+ * the credential broker and nowhere else: not the settings, the journal, or a
+ * window.
+ */
+export const SetWebSearchKeyRequest = Schema.Struct({
+  entryId: WebSearchBackendId,
+  key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type SetWebSearchKeyRequest = typeof SetWebSearchKeyRequest.Type;
+
+export const SetWebSearchKeyOutcome = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("saved"), view: WebSearchSettingsView }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    code: Schema.Literal("unauthorized", "unknown-entry", "key-not-taken", "unavailable"),
+    message: BoundedText,
+  }).annotations(strict),
+);
+export type SetWebSearchKeyOutcome = typeof SetWebSearchKeyOutcome.Type;
+
+/**
+ * Why a backend did not answer a query. Each moves the query to the next
+ * eligible backend except `refused-query`, where the vendor answered with a
+ * refusal of the query itself, and `not-tried`, where the call's budget ran out
+ * first.
+ */
+export const WebSearchBackendFailure = Schema.Literal(
+  "network",
+  "timeout",
+  "rate-limited",
+  "server-error",
+  "key-refused",
+  "needs-key",
+  "refused-query",
+  "not-tried",
+);
+export type WebSearchBackendFailure = typeof WebSearchBackendFailure.Type;
+
+export const WEB_SEARCH_CALLS_AGGREGATE_TYPE = "web-search-calls";
+export const WEB_SEARCH_CALL_ROUTED_EVENT_NAME = "web-search.call-routed@1";
+
+/**
+ * Where one query went: the backend that answered, if any, and each one that
+ * failed or was not tried. The query itself stays with the thread's own tool
+ * call; this record names only backends, for the person to read, and the
+ * thread and tool call it belongs to, so it reads beside that call.
+ */
+export const WebSearchCallRouted = Schema.Struct({
+  kind: Schema.Literal("web-search-call-routed"),
+  /** The thread whose turn searched; absent only for a search no thread made. */
+  threadId: Schema.optional(AggregateId),
+  /** The provider's id for the tool call, as the thread's tool row carries it, when it gave one. */
+  toolCallId: Schema.optional(BoundedText),
+  answeredBy: Schema.optional(
+    Schema.Struct({ entryId: WebSearchBackendId, backend: WebSearchBackendKind }).annotations(
+      strict,
+    ),
+  ),
+  failed: Schema.Array(
+    Schema.Struct({
+      entryId: WebSearchBackendId,
+      backend: WebSearchBackendKind,
+      failure: WebSearchBackendFailure,
+    }).annotations(strict),
+  ),
+  routedAt: UtcTimestamp,
+}).annotations(strict);
+export type WebSearchCallRouted = typeof WebSearchCallRouted.Type;
+
 export const WEB_SEARCH_SETTINGS_AGGREGATE_TYPE = "web-search-settings";
 export const WEB_SEARCH_SETTINGS_EVENT_NAME = "web-search.settings-changed@1";
 
@@ -135,3 +219,12 @@ export const decodeWebSearchSettingsChanged = Schema.decodeUnknownSync(WebSearch
   onExcessProperty: "error",
 });
 export const decodeWebSearchBackendId = Schema.decodeUnknownSync(WebSearchBackendId);
+export const decodeSetWebSearchKeyRequest = Schema.decodeUnknownSync(SetWebSearchKeyRequest, {
+  onExcessProperty: "error",
+});
+export const decodeSetWebSearchKeyOutcome = Schema.decodeUnknownSync(SetWebSearchKeyOutcome, {
+  onExcessProperty: "error",
+});
+export const decodeWebSearchCallRouted = Schema.decodeUnknownSync(WebSearchCallRouted, {
+  onExcessProperty: "error",
+});

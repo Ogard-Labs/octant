@@ -24,6 +24,8 @@ export interface WebSearchBackendOffer {
   readonly index: string;
   /** Whether an entry of this kind names an address: an instance, or a vendor's regional host. */
   readonly address: "required" | "optional" | "never";
+  /** Whether a search needs the person's API key, held by the credential broker. */
+  readonly takesKey: boolean;
   readonly zdr: { readonly offered: boolean; readonly terms: string };
   readonly euProcessing: { readonly offered: boolean; readonly terms: string };
   readonly checkedOn: string;
@@ -38,6 +40,7 @@ export const WEB_SEARCH_BACKEND_OFFERS: Readonly<
     label: "SearXNG",
     index: "Metasearch over the engines it enables",
     address: "required",
+    takesKey: false,
     // A self-hosted instance keeps and sends what its operator configures,
     // so either statement can be true of one; the engines it enables are a
     // separate question Settings warns about.
@@ -45,6 +48,63 @@ export const WEB_SEARCH_BACKEND_OFFERS: Readonly<
     euProcessing: { offered: true, terms: "Self-hosted: as configured" },
     checkedOn: "2026-11-14",
     source: "https://docs.searxng.org/admin/settings/settings_search.html",
+  },
+  staan: {
+    kind: "staan",
+    label: "Staan",
+    index: "Its own European index",
+    address: "never",
+    takesKey: true,
+    // Refused until Staan publishes what it keeps of a query.
+    zdr: { offered: false, terms: "Not published" },
+    euProcessing: { offered: true, terms: "EU company and index" },
+    checkedOn: "2026-11-14",
+    source: "https://staan.ai",
+  },
+  mojeek: {
+    kind: "mojeek",
+    label: "Mojeek",
+    index: "Its own independent index",
+    address: "never",
+    takesKey: true,
+    zdr: { offered: true, terms: "By agreement" },
+    euProcessing: { offered: true, terms: "UK" },
+    checkedOn: "2026-11-14",
+    source: "https://www.mojeek.com/services/search/web-search-api/",
+  },
+  linkup: {
+    kind: "linkup",
+    label: "Linkup",
+    index: "Its own retrieval index",
+    // The EU-pinned host an agreement with Linkup names, when it names one.
+    address: "optional",
+    takesKey: true,
+    zdr: { offered: true, terms: "By agreement" },
+    euProcessing: { offered: true, terms: "By agreement (EU-pinned processing)" },
+    checkedOn: "2026-11-14",
+    source: "https://docs.linkup.so",
+  },
+  brave: {
+    kind: "brave",
+    label: "Brave Search",
+    index: "Its own index",
+    address: "never",
+    takesKey: true,
+    zdr: { offered: true, terms: "Enterprise agreement" },
+    euProcessing: { offered: false, terms: "Not offered" },
+    checkedOn: "2026-11-14",
+    source: "https://brave.com/search/api/",
+  },
+  exa: {
+    kind: "exa",
+    label: "Exa",
+    index: "Its own index",
+    address: "never",
+    takesKey: true,
+    zdr: { offered: true, terms: "Team setting or agreement" },
+    euProcessing: { offered: false, terms: "Not offered" },
+    checkedOn: "2026-11-14",
+    source: "https://docs.exa.ai",
   },
 };
 

@@ -1,8 +1,10 @@
 import { providerRunsAsItself } from "@octant/domain";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
 import {
+  combineOpenCodeSetups,
   openCodeOwnRulesAllow,
   readOpenCodeOwnSetup,
+  readOpenCodeProjectSetup,
   type OpenCodeOwnSetup,
 } from "./openCodeOwnSetup";
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
@@ -140,6 +142,8 @@ export interface OpenCodeDriverOptions {
    * refuses none beyond OpenCode's own `.env` rule.
    */
   readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** A trusted Project's own OpenCode rules and MCP servers; read from its root by default. */
+  readonly readProjectSetup?: (projectRoot: string) => OpenCodeOwnSetup;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -316,11 +320,15 @@ const capabilities = {
     webTools: "supported",
     skills: "supported",
     // The MCP servers in the person's own OpenCode configuration load into
-    // the launch's private one, and their tools follow the level. Plugins and
-    // a Project's own configuration stay out of the launch.
+    // the launch's private one, and their tools follow the level. Plugins
+    // stay out of the launch.
     toolServers: "supported",
     hooks: "unsupported",
-    projectCode: "unsupported",
+    // A trusted Project's own rules and MCP servers join the person's in the
+    // private configuration, under the level's denies; the raw Project files,
+    // and so its plugins, agents, and commands, never load
+    // (`readOpenCodeProjectSetup`).
+    projectCode: "supported",
   },
 } as const;
 
@@ -1513,12 +1521,19 @@ function makeConnection(
     const sessionsBySource = new Map<string, SessionState>();
     /**
      * The person's own rules, and their tool servers where those are on,
-     * read from their OpenCode configuration when a session starts. Nothing
+     * read from their OpenCode configuration when a session starts, then a
+     * trusted Project's own where its code is on (never in Plan). Nothing
      * loads unless the setup is on for the session.
      */
     const ownSetupFor = (setup: ProviderNativeSetup | undefined): ResolvedOwnSetup | undefined => {
       if (!providerRunsAsItself(setup) || setup === undefined) return undefined;
-      const own = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
+      const person = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
+      const own = setup.projectCode
+        ? combineOpenCodeSetups(
+            person,
+            (options.readProjectSetup ?? readOpenCodeProjectSetup)(projectRoot),
+          )
+        : person;
       return {
         rules: own.rules,
         mcp: setup.toolServers ? own.mcp : {},

@@ -176,6 +176,7 @@ import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPick
 import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
+import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
@@ -719,6 +720,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   ).length;
   // Read before the early returns below, which would otherwise change the hook
   // order. The transcript draws the inline Canvases and the card list the rest.
+  const projectTrustNotice = useProjectTrustNotice({
+    mode: "code",
+    threadId: String(props.threadId),
+    projectId: view?.thread.projectId,
+    providerInstanceId: view?.thread.providerInstanceId,
+  });
   const threadCanvases = useThreadCanvasCards({
     client: view === undefined ? undefined : props.canvasClient,
     mode: "code",
@@ -2918,6 +2925,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(attachments.message === undefined
               ? []
               : [{ key: "attachment", tone: "warning" as const, text: attachments.message }]),

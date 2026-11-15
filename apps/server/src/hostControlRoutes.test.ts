@@ -886,7 +886,8 @@ describe("web search settings route", () => {
         ? ({ kind: "saved", view: view() } as const)
         : ({ kind: "refused", code: decision.code, message: decision.message } as const);
     });
-    return { view, set, ...setup({ webSearch: { view, set } as never }) };
+    const setKey = vi.fn(async () => ({ kind: "saved" as const, view: view() }));
+    return { view, set, setKey, ...setup({ webSearch: { view, set, setKey } as never }) };
   }
 
   async function asDevice(request: Request, admittedBy: "host-person" | "hub-roster") {
@@ -982,5 +983,69 @@ describe("web search settings route", () => {
       kind: "refused",
       code: "unauthorized",
     });
+  });
+});
+
+describe("web search key route", () => {
+  const path = "/api/host-control/web-search/key";
+  const entryId = "00000000-0000-4000-8000-0000000000b1";
+
+  function keySetup() {
+    const view = {
+      settings: { policy: "any" as const, backends: [] },
+      source: "saved" as const,
+      states: [],
+    };
+    const setKey = vi.fn(async (_request: unknown, principalKind: PrincipalKind) =>
+      principalKind === "remote-device"
+        ? ({ kind: "refused", code: "unauthorized", message: "No." } as const)
+        : ({ kind: "saved", view } as const),
+    );
+    return {
+      setKey,
+      ...setup({ webSearch: { view: async () => view, set: vi.fn(), setKey } as never }),
+    };
+  }
+
+  it("hands a key to the store for a local window and never answers with it", async () => {
+    const { handler, setKey } = keySetup();
+    const response = await handler(
+      makeRequest(path, { capability, body: { entryId, key: "search-secret" } }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).not.toContain("search-secret");
+    expect(setKey).toHaveBeenCalledWith({ entryId, key: "search-secret" }, "local-window");
+  });
+
+  it("refuses a missing capability, a malformed body, and a GET without touching the store", async () => {
+    const { handler, setKey } = keySetup();
+    expect((await handler(makeRequest(path, { body: { entryId, key: "k" } })))?.status).toBe(401);
+    expect(
+      (await handler(makeRequest(path, { capability, body: { entryId: "nope", key: "k" } })))
+        ?.status,
+    ).toBe(400);
+    expect((await handler(makeRequest(path, { method: "GET", capability })))?.status).toBe(405);
+    expect(setKey).not.toHaveBeenCalled();
+  });
+
+  it("answers a refusal for a device another person introduced with 403", async () => {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { createRemoteDevicePrincipal } = await import("./clientPrincipal");
+    const { handler } = keySetup();
+    const request = makeRequest(path, { body: { entryId, key: "k" }, origin: "http://127.0.0.1" });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "00000000-0000-4000-8000-00000000c302" as never,
+        deviceId: "00000000-0000-4000-8000-00000000c301" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-00000000c303" as never,
+        admittedBy: "hub-roster",
+      }),
+      scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c301"),
+    });
+    expect((await handler(request))?.status).toBe(403);
   });
 });
