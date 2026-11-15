@@ -2095,6 +2095,7 @@ function makeConnection(
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
                   ...(ownSetup?.projectConfig === true ? { projectConfig: true as const } : {}),
+                  ...(ownSetup === undefined ? {} : { runsAsItself: true as const }),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,

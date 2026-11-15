@@ -11736,7 +11736,9 @@ that is not yet effective for the thread is refused and never reaches the model.
   confined launch reaches only the Project's skills. No launch sets
   `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
   OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
-  own: instruction files are text with no authority (built;
+  own, and running as itself OpenCode 1.x also finds the person's global
+  `AGENTS.md`, linked into its private config folder: instruction files are
+  text with no authority (built;
   [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
   `VIBE_DISABLED_SKILLS` unset, and any of the person's setup also unsets

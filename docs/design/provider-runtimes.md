@@ -82,10 +82,22 @@ servers gate `.claude` skills on either switch, which the skills switch
 still covers, and 2.0.22 reads neither switch. The 1.x
 server reads the Project's instruction files only without
 `OPENCODE_DISABLE_PROJECT_CONFIG`, so in Plan, Chat and an untrusted Project
-it reads the global file alone. Its global configuration folder is the
-launch's private one, so the person's own global `AGENTS.md` is not found
-there and `~/.claude/CLAUDE.md` is (not built yet: linking that `AGENTS.md`
-in, which OpenCode on its own would prefer). Below Full access the 1.x
+it reads the global file alone. 1.x reads the first of
+`<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
+global config folder is `$OPENCODE_CONFIG_DIR`, else
+`$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode` (opencode 1.18.21,
+`src/session/instruction.ts` and core `global.ts`). A launch sets
+`OPENCODE_CONFIG_DIR` to its private folder, so with the person's own setup
+on (OpenCode runs as itself) a 1.x launch links the person's global
+`AGENTS.md`, found where their own environment names that folder, into the
+private one, and OpenCode then prefers it over `CLAUDE.md` as it does on its
+own. With the setup off no `AGENTS.md` is linked and 1.x reads
+`~/.claude/CLAUDE.md`. Below Full access the 1.x launch's wall opens that
+one `AGENTS.md` for reading and nothing else in its folder (the person's
+`opencode.json`, plugins and agents stay out): a literal Seatbelt rule on
+macOS and a read-only bind on Linux, as for `CLAUDE.md`. A protected file, a
+link, or a file reached through a linked folder is not linked or opened. A
+2.x launch links nothing. Below Full access the 1.x
 launch's wall opens that one file for reading and nothing else in
 `~/.claude`: a literal Seatbelt rule on macOS, under the `~/.claude` denial
 that stays whole, and a read-only bind on Linux. The file is found at
