@@ -124,21 +124,17 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
             projects={props.searchProjects}
             unfiledLabel="No Project"
             listing={props.searchListing}
-            {...(props.mode === "chat"
-              ? {
-                  archivedListing: props.searchArchivedListing,
-                  onQueryChange: props.onSearchQueryChange,
-                  ...(props.searchContentHits === undefined
-                    ? {}
-                    : { contentHits: props.searchContentHits }),
-                  ...(props.searchContentListing === undefined
-                    ? {}
-                    : { contentListing: props.searchContentListing }),
-                  ...(props.searchContentTruncated === undefined
-                    ? {}
-                    : { contentTruncated: props.searchContentTruncated }),
-                }
-              : {})}
+            onQueryChange={props.onSearchQueryChange}
+            {...(props.mode === "chat" ? { archivedListing: props.searchArchivedListing } : {})}
+            {...(props.searchContentHits === undefined
+              ? {}
+              : { contentHits: props.searchContentHits })}
+            {...(props.searchContentListing === undefined
+              ? {}
+              : { contentListing: props.searchContentListing })}
+            {...(props.searchContentTruncated === undefined
+              ? {}
+              : { contentTruncated: props.searchContentTruncated })}
             onClose={props.onCloseSearch}
             {...(props.onNewSearchThread === undefined
               ? {}

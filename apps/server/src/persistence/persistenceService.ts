@@ -113,6 +113,10 @@ import {
   type ChatTranscriptSearchRows,
   type ProjectedChatSettings,
 } from "./chatProjection";
+import {
+  searchCodeTranscript,
+  type CodeTranscriptSearchRows,
+} from "./codeTranscriptSearchProjection";
 import type { PendingChatPurge, ProjectedChatContent } from "./chatPersistenceSchema";
 import type { ProjectedCodeSettings } from "./codePersistenceSchema";
 import {
@@ -264,6 +268,10 @@ export interface PersistenceService {
   /** The modes whose journaled thread answers to this id; see `readThreadIdModes`. */
   readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly searchCodeTranscript: (
+    query: string,
+    visibleThreadIds: ReadonlySet<string>,
+  ) => CodeTranscriptSearchRows;
   /** The thread a Code Project designated as its planner, if any. */
   readonly readCodePlannerThreadId: (projectId: ProjectId) => CodeThreadId | undefined;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
@@ -679,6 +687,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
       readThreadIdModes: (threadId) => readThreadIdModes(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
+      searchCodeTranscript: (query, visibleThreadIds) =>
+        searchCodeTranscript(connection, query, visibleThreadIds),
       readCodePlannerThreadId: (projectId) => {
         const designation = readCodePlannerDesignation(connection, projectId);
         return designation?.kind === "designated" ? designation.plannerThreadId : undefined;

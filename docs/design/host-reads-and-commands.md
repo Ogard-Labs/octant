@@ -176,6 +176,37 @@ between them. Row keys name the turn and never its position, which keeps the
 reader's row in place when an earlier page arrives above it. Find in page
 searches the loaded turns only, with **Load earlier messages** in view.
 
+## Message search
+
+Each mode answers message search with one GET a paired device reaches under
+the overview read grant: `/api/chat/transcript-search?q=`,
+`/api/work/transcript-search?q=`, and `/api/code/transcript-search?q=`. Any
+other query key, or another method, is refused; a host without a mode's read
+answers `unavailable`. Every answer shares the Chat bounds: a query of at most
+200 characters (trimmed; longer is refused, empty answers no hits), at most 50
+hits with `truncated` when more matched, and a snippet of at most 160 characters
+clipped around the first match. LIKE wildcards in a query are text.
+
+A read lists the threads its mode's sidebar and Archived group list, filtered
+on the host before the cap, so `truncated` counts only matches the caller may
+see: Chat leaves out deleted threads and hidden Side Chat sidecars; Work leaves
+out threads being deleted and threads whose Project is gone or not an active
+Work Project; Code lists the threads its bootstrap lists by the same browse
+rule. Each hit carries the thread, its title, `active` or `archived` (a waiting
+or interrupted Code thread reads `active`), its Project, and the turn holding
+the match: `turnId` for Chat and Work, the provider turn's `operationId` for
+Code. Work and Code answer one hit per turn, the prompt's match before the
+reply's.
+
+Work turns are searched in the rebuildable in-memory turn projection, so a turn
+a rewind removed has left its thread's order and is not found. Code text lives
+in the evidence store, one row per streamed burst, so the
+`code-transcript-search` projection keeps each turn's prompt and its reply's
+message parts joined, in order and up to the parts the conversation shows; a
+match across a burst boundary is found. It is a derived projection rebuilt from
+the operation journal, marks the turns a conversation rewind removed so they
+are not matched, and its rows are swept by a thread purge.
+
 ## Hand off
 
 Hand off is `POST /api/threads/hand-off`. The behavior rule is in
