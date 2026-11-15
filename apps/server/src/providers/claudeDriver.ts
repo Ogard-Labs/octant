@@ -2819,6 +2819,25 @@ function makeConnection(
       makeTaskId: factories.makeTaskId,
       makeToolCallId: factories.makeToolCallId,
     });
+    /**
+     * The next turn's event context on the same runtime session, numbered on
+     * from `previous`. Background tasks a turn started outlive it (a dev
+     * server, a watch, a workflow), so their lifecycle carries over: a task's
+     * progress and end must find the row its start opened, or the mapper
+     * reads them as an invalid transition and fails the turn. Everything
+     * else in the context is the turn's own; approvals, questions, pre-tool
+     * grants and the task list live on the session.
+     */
+    const continueEventContext = (
+      state: SessionState,
+      previous: ClaudeEventContext,
+      claudeSessionId: string,
+      sequence: number,
+    ): ClaudeEventContext => {
+      const next = makeEventContext(state, claudeSessionId, sequence);
+      for (const [taskId, task] of previous.taskIds) next.taskIds.set(taskId, task);
+      return next;
+    };
     const admitToolUse = (state: SessionState, toolUseId: string): boolean => {
       if (state.observedToolUseIds.has(toolUseId)) return true;
       forgetSettledToolUses(state, factories.maxTrackedToolUses);
@@ -2864,8 +2883,7 @@ function makeConnection(
         steered: false,
         usageBase: state.turnUsage,
       };
-      state.context = makeEventContext(state, previous.claudeSessionId, sequence);
-      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      state.context = continueEventContext(state, previous, previous.claudeSessionId, sequence);
       settleHeldTurn(state);
     };
     const releaseHeldTurn = (state: SessionState, held: ClaudeHeldTurn) => {
@@ -2972,8 +2990,12 @@ function makeConnection(
         closeAfterPublishedTerminal(state);
         return;
       }
-      state.context = makeEventContext(state, state.claudeSessionId, previous.sequence);
-      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      state.context = continueEventContext(
+        state,
+        previous,
+        state.claudeSessionId,
+        previous.sequence,
+      );
       state.terminalResult = deferred<void>();
       state.pendingTurns = 1;
       state.hookDeliveries.push({ viaHook: false, delivered: false });
@@ -3163,8 +3185,9 @@ function makeConnection(
           state.hookDeliveries.shift();
           if (mapped.event.kind === "completed") {
             if (state.pendingTurns > 0) {
-              state.context = makeEventContext(
+              state.context = continueEventContext(
                 state,
+                state.context,
                 state.claudeSessionId!,
                 state.context.sequence,
               );
@@ -4490,8 +4513,15 @@ function makeConnection(
         const delivery = { viaHook: message.context !== undefined, delivered: false };
         const withImages = images.length === 0 ? message : { ...message, images };
         return Effect.sync(() => {
+          // A session kept past its turn may still run background tasks the
+          // last turn started; their progress and end arrive in this turn.
           if (state.context?.terminal === true && state.pendingTurns === 0) {
-            state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
+            state.context = continueEventContext(
+              state,
+              state.context,
+              state.claudeSessionId!,
+              state.context.sequence,
+            );
           }
           if (state.pendingTurns === 0) {
             state.terminalResult = deferred<void>();
@@ -4616,7 +4646,12 @@ function makeConnection(
           // A finished turn closed its event context; the compaction's own
           // events are numbered on from it, as the next turn's would be.
           if (state.context?.terminal === true && state.claudeSessionId !== undefined) {
-            state.context = makeEventContext(state, state.claudeSessionId, state.context.sequence);
+            state.context = continueEventContext(
+              state,
+              state.context,
+              state.claudeSessionId,
+              state.context.sequence,
+            );
           } else if (state.context !== undefined) {
             state.context.compactionRequested = true;
           }

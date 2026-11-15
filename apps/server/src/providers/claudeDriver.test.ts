@@ -8411,6 +8411,51 @@ describe("Claude background work", () => {
       return { acquired, query, seen, collected, follow, watched, reported, open: f.opens[0]! };
     }
 
+    it("keeps a background task's lifecycle through the person's next turn, so its progress and end still map", async () => {
+      const { acquired, query, seen, collected, follow } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      const started = seen.find((event) => event.kind === "task-progress");
+
+      // The person sends while the dev server from the last turn still runs.
+      const next = (await follow()).done;
+      const before = seen.length;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "check the logs",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      await query.emit(state("running"));
+      await query.emit({
+        kind: "task",
+        sessionId: sdk,
+        subtype: "task_progress",
+        taskId: "bash-1",
+        description: "npm test",
+        usage: { totalTokens: 0, toolUses: 0, durationMs: 5_000 },
+      });
+      await query.emit(backgroundEnded);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await next;
+
+      const turn = seen.slice(before);
+      expect(turn.filter((event) => event.kind === "failed")).toEqual([]);
+      expect(turn.at(-1)).toMatchObject({ kind: "completed" });
+      // Both reports name the row the task's start opened.
+      const rows = turn.flatMap((event) => (event.kind === "task-progress" ? [event.taskId] : []));
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(rows)).toEqual(
+        new Set([started?.kind === "task-progress" ? started.taskId : "missing"]),
+      );
+      await acquired.close();
+    });
+
     it("answers none of a runtime-started turn's tool calls until the host attaches a turn to it", async () => {
       const { acquired, query, collected, follow, open } = await startKeptTurn("full-access");
       await query.emit(backgroundStarted);

@@ -843,7 +843,11 @@ starts makes the session's terms differ and it is not kept. A session being
 stopped stays in the way until its runtime and tasks are gone: the thread's
 next turn waits for it rather than resume the same history on a new
 connection, and a second Stop answers once it has stopped; shutdown waits for
-it too. A runtime-started turn sends nothing, so it acknowledges nothing as
+it too. A turn the person sends on a kept session carries the lifecycle of the
+background tasks the earlier turns started, as a runtime-started turn does,
+so a task's progress and end still name the row its start opened; the turn's
+own call and checklist state starts afresh, and approvals, questions and the
+task list live on the session. A runtime-started turn sends nothing, so it acknowledges nothing as
 sent: it carries no fork merged back into the thread and journals no delivery
 for one (the merge goes with the person's next turn), it leaves the
 held-context record as the session's last sent turn left it, so no standing
