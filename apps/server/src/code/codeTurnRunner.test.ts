@@ -450,6 +450,7 @@ describe("CodeTurnRunner", () => {
         sessionId,
         modelId: decodeProviderModelId("model-a"),
         executionPolicy: "approval-gated",
+        levelChanges: true,
         tools: [],
       });
       expect(events).toContainEqual(

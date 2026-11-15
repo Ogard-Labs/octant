@@ -1871,8 +1871,21 @@ const ApprovalEvent = Schema.Struct({
     "git-push",
     "pull-request-create",
     "provider-tool",
+    "level-change",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * With `level-change`: the level the agent asks the thread to move to, and
+   * the plan it asks the person to approve when it asks to leave Plan. An
+   * approval changes the thread's level from its next turn; the turn that
+   * asked ends. Absent on every other approval.
+   */
+  levelChange: Schema.optional(
+    Schema.Struct({
+      to: ProviderExecutionPolicy,
+      plan: Schema.optional(CodeEvidenceReference),
+    }).annotations(strict),
+  ),
   /**
    * Legacy mark from approvals for physical-device and distribution effects,
    * which no longer exist. Nothing sets or reads it now. It stays in the schema

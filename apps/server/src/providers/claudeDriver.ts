@@ -304,22 +304,6 @@ const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write", "NotebookEdit"]);
  */
 const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "Monitor", "TaskOutput", "TaskStop"]);
 /**
- * Claude Code's built-in tools a Work or Code session outside Plan does not
- * hold. Octant adds to Claude Code and does not take its core features away
- * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
- * built-in set except this list, and each entry is here only because it
- * would break a rule the server enforces.
- */
-const CLAUDE_WITHHELD_TOOLS = [
-  // The thread's mode is the server's. Claude switching its own permission
-  // mode would leave the posture Octant granted mid-session; Plan is a
-  // thread mode with its own read-only tool set, not a runtime switch. A Plan
-  // session holds the plan tool to hand its plan over; outside Plan there is
-  // no plan to hand over and nothing to leave.
-  "EnterPlanMode",
-  CLAUDE_PLAN_EXIT_TOOL,
-] as const;
-/**
  * Claude Code's tools that move the session's working directory into a git
  * worktree and back. They take the rule for a tool the gate has no rule of
  * its own for: each asks below Full access. A worktree outside the Project's
@@ -370,6 +354,18 @@ export function claudeWorktreeTarget(
  * that fires in a later session Octant never sees. A session without such a
  * schedule (Chat, Plan, a single-use session) does not hold them.
  */
+/**
+ * Claude Code's own plan-mode tools. The thread's level is the server's, so
+ * the runtime never switches its own mode: each call is put to the person as
+ * a level change instead (`approval-request` with `levelChange`), and the
+ * call itself is always refused with what the person decided. An approved
+ * change applies from the thread's next session, because Plan's read-only
+ * rule rests on the tool set and sandbox profile a session launches with. A
+ * session whose host does not answer level changes holds neither tool.
+ */
+export const CLAUDE_ENTER_PLAN_TOOL = "EnterPlanMode";
+export const CLAUDE_EXIT_PLAN_TOOL = CLAUDE_PLAN_EXIT_TOOL;
+const CLAUDE_LEVEL_CHANGE_TOOLS = new Set<string>([CLAUDE_ENTER_PLAN_TOOL, CLAUDE_EXIT_PLAN_TOOL]);
 const CLAUDE_WAKEUP_TOOLS = new Set<string>([
   "ScheduleWakeup",
   "CronCreate",
@@ -448,8 +444,12 @@ const CLAUDE_WEB_TOOLS = new Set<string>(["WebSearch", "WebFetch"]);
 const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skill"]);
 
 /**
- * The built-in tools a session with the full tool set does not hold: the
- * fixed list above, the person's own setup features they turned off,
+ * The built-in tools a Work or Code session outside Plan does not hold.
+ * Octant adds to Claude Code and does not take its core features away
+ * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
+ * built-in set except this list, and each entry is here only because it
+ * would break a rule the server enforces: the plan-mode tools unless the host
+ * answers level changes, the person's own setup features they turned off,
  * Claude's Artifact tool unless the session offers it, and the wake-up tools
  * unless the host keeps a schedule for the session's thread.
  */
@@ -457,9 +457,15 @@ export function claudeWithheldTools(
   setup: ProviderNativeSetup | undefined,
   offersArtifacts: boolean,
   schedulesWakeups = false,
+  levelChanges = false,
 ): readonly string[] {
   return [
-    ...CLAUDE_WITHHELD_TOOLS,
+    // The thread's mode is the server's: Claude never switches its own
+    // permission mode. Where the host answers level changes, the agent outside
+    // Plan may ask to plan; leaving Plan is asked from a Plan session, which
+    // holds `ExitPlanMode` in its read-only list either way. Elsewhere there
+    // is no plan to hand over and nothing to leave outside Plan.
+    ...(levelChanges ? [CLAUDE_EXIT_PLAN_TOOL] : [...CLAUDE_LEVEL_CHANGE_TOOLS]),
     ...(schedulesWakeups ? [] : [...CLAUDE_WAKEUP_TOOLS]),
     // A workflow starts agents, so it rides the subagent switch. Starting
     // one asks below Full access, unlike `Agent`: its script runs as
@@ -641,6 +647,7 @@ const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
   CLAUDE_ARTIFACT_TOOL,
   CLAUDE_WORKFLOW_TOOL,
   ...CLAUDE_WAKEUP_TOOLS,
+  ...CLAUDE_LEVEL_CHANGE_TOOLS,
 ]);
 
 /**
@@ -1315,6 +1322,18 @@ interface ClaudeRuntimeTurn {
   readonly waiting: Array<ProviderRuntimeEvent>;
   /** More events arrived before the host attached than are held. */
   overflowed: boolean;
+}
+
+/** What the runtime is told after the person answered its ask to change the thread's level. */
+function claudeLevelChangeAnswer(toolName: string, approved: boolean): string {
+  if (!approved) {
+    return toolName === CLAUDE_ENTER_PLAN_TOOL
+      ? "The person kept this thread at its level. Continue without planning mode."
+      : "The person kept this thread in Plan. Keep planning read-only, or revise the plan.";
+  }
+  return toolName === CLAUDE_ENTER_PLAN_TOOL
+    ? "The person approved planning first. Octant ends this turn now; the thread's next turn runs in Plan, read-only. Stop here."
+    : "The person approved the plan. Octant ends this turn now; the thread's next turn runs at its earlier level to carry the plan out. Stop here.";
 }
 
 /** Whether the runtime reports that one of its tasks ended. */
@@ -3149,6 +3168,7 @@ function makeConnection(
         readonly compactionPoint?: ProviderCompactionPoint;
         readonly wakeups?: ProviderWakeupSchedule;
         readonly outlivesTurn?: boolean;
+        readonly levelChanges?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -3317,6 +3337,12 @@ function makeConnection(
           mode,
           executionPolicy: input.executionPolicy,
         });
+        // A session whose host answers level changes puts Claude's own
+        // `EnterPlanMode` and, from Plan, `ExitPlanMode` to the person as level
+        // changes; asking changes nothing in this session. Plan holds
+        // `ExitPlanMode` in its read-only list either way.
+        const levelChanges =
+          input.levelChanges === true && input.singleUse !== true && mode !== "chat";
         const executionOptions: ClaudeExecutionOptions = offersArtifacts
           ? {
               ...baseExecutionOptions,
@@ -3328,7 +3354,7 @@ function makeConnection(
         // A single-use session starts no later turn, so it schedules none.
         const wakeups = input.singleUse === true ? undefined : input.wakeups;
         const withheldTools = executionOptions.fullToolSet
-          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined)
+          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined, levelChanges)
           : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
@@ -3425,7 +3451,9 @@ function makeConnection(
             if (refusal !== undefined) return deny(refusal);
           }
           if (
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
             // every other tool still ask, and so does a read or an edit
@@ -3644,8 +3672,10 @@ function makeConnection(
           }
           // The plan already reached the thread as the reply's text from the
           // call's transcript block. Granting the call would let Claude Code
-          // leave plan mode for one that edits, so it is always refused.
-          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL) {
+          // leave plan mode for one that edits, so it is always refused; where
+          // the host answers level changes, the person is asked first whether
+          // to leave Plan, and the call is refused with their answer below.
+          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL && !levelChanges) {
             return deny(CLAUDE_PLAN_CAPTURED_MESSAGE);
           }
           // Checked here, before any posture: Full access answers "allow" in
@@ -3771,6 +3801,9 @@ function makeConnection(
           };
           // A publish asks under every posture below Full access, which asks
           // nobody; the path checks above still refuse a file outside the Project.
+          // A level change is the person's at every level, Full access and
+          // Plan included; the call reaches `canUseTool` and is put to them.
+          if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) return askThroughGrant();
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
@@ -4242,6 +4275,7 @@ function makeConnection(
                 : { compactionPoint: input.compactionPoint }),
               ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
               ...(input.outlivesTurn === true ? { outlivesTurn: true } : {}),
+              ...(input.levelChanges === true ? { levelChanges: true } : {}),
             },
             signal,
             input.resumeCursor.value,
@@ -4622,6 +4656,15 @@ function makeConnection(
             state.pendingApprovals.delete(answer.requestId);
             freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
+            // The runtime never switches its own mode: the call is refused
+            // with what the person decided, and the host changes the level.
+            if (CLAUDE_LEVEL_CHANGE_TOOLS.has(pending.toolName)) {
+              pending.decision.resolve({
+                behavior: "deny",
+                message: claudeLevelChangeAnswer(pending.toolName, answer.approved),
+              });
+              return;
+            }
             if (answer.approved) {
               let persistence: PermissionPersistence = "project-default";
               try {

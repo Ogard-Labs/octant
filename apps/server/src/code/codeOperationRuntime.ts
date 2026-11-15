@@ -95,6 +95,7 @@ import {
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
+  type ProviderExecutionPolicy,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
@@ -880,6 +881,17 @@ export interface CodeOperationRuntimeOptions {
    * absent, or answering undefined, offers the runtime no wake-up tool.
    */
   readonly resolveThreadWakeups?: (thread: CodeThread) => ProviderWakeupSchedule | undefined;
+  /**
+   * Changes a thread's level for the window that approved the agent's ask,
+   * through the thread's ordinary access command, journaled as the person's.
+   * Answers whether it changed; absent, an approval changes nothing.
+   */
+  readonly changeThreadLevel?: (input: {
+    readonly windowId: WindowId;
+    readonly threadId: CodeThreadId;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly planReturnPolicy?: ProviderExecutionPolicy;
+  }) => Promise<boolean>;
   /**
    * Keeps a thread's provider session past its turn while the runtime runs
    * background work. Absent, every session stops when its turn ends.
@@ -3091,6 +3103,14 @@ interface ActiveTurn {
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
   /**
+   * The level each pending level-change approval would move the thread to,
+   * and the level it would return to from Plan, by approval id.
+   */
+  readonly levelChanges: Map<
+    string,
+    { readonly to: ProviderExecutionPolicy; readonly planReturnPolicy?: ProviderExecutionPolicy }
+  >;
+  /**
    * The thread's posture, as `#approvalPosture` reads it, when each pending
    * approval (provider or app-managed tool) was asked, by approval id. An
    * allow answered under a different posture is refused, and the approval
@@ -4047,6 +4067,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
+      levelChanges: new Map(),
       approvalPostures: new Map(),
       toolApprovals: new Map(),
       browserGrantKeys: new Set(),
@@ -4595,6 +4616,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       );
       return;
     }
+    // A level change is the person's alone: no reviewer answers it.
+    if (event.levelChange !== undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
@@ -5109,6 +5135,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             thread: input.thread.executionPolicy,
           });
     const toolApproval = active?.toolApprovals.get(input.approvalId);
+    const levelChange = active?.levelChanges.get(input.approvalId);
+    if (active !== undefined && providerRequestId !== undefined && levelChange !== undefined)
+      return this.#answerLevelChange(active, input, providerRequestId, levelChange);
     if (
       active !== undefined &&
       (toolApproval !== undefined || providerRequestId !== undefined) &&
@@ -5175,6 +5204,83 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     );
     if (input.decision === "approved") return answeredTurnState(active.state);
     return this.#countDeniedApproval(active);
+  }
+
+  /**
+   * The person answered the agent's ask to plan first or to leave Plan. An
+   * approval journals the level change as the person's own, through the
+   * thread's ordinary access command, and then ends the turn: Plan's
+   * read-only rule rests on the tool set and sandbox profile a session
+   * launches with, so the new level applies from the next turn's session and
+   * never inside this one. The runtime is told what was decided and never
+   * switches its own mode.
+   */
+  async #answerLevelChange(
+    active: ActiveTurn,
+    input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
+    providerRequestId: string,
+    change: {
+      readonly to: ProviderExecutionPolicy;
+      readonly planReturnPolicy?: ProviderExecutionPolicy;
+    },
+  ) {
+    const connection = active.connection;
+    if (connection === undefined) return turnState("failed");
+    const answer = (approved: boolean) =>
+      Effect.runPromise(
+        connection
+          .answerApproval({
+            sessionId: active.sessionId as never,
+            requestId: providerRequestId,
+            approved,
+            scope: "once",
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+    active.approvals.delete(input.approvalId);
+    active.approvalPostures.delete(input.approvalId);
+    active.levelChanges.delete(input.approvalId);
+    if (input.decision === "denied") {
+      await answer(false);
+      return answeredTurnState(active.state);
+    }
+    const changed =
+      input.windowId === undefined
+        ? false
+        : await (
+            this.#options.changeThreadLevel?.({
+              windowId: input.windowId,
+              threadId: active.thread.id,
+              executionPolicy: change.to,
+              ...(change.planReturnPolicy === undefined
+                ? {}
+                : { planReturnPolicy: change.planReturnPolicy }),
+            }) ?? Promise.resolve(false)
+          ).catch(() => false);
+    if (!changed) {
+      await answer(false);
+      return turnState("failed", {
+        category: "failed",
+        message: "The thread's level could not be changed. Change it from the level menu.",
+      });
+    }
+    await answer(true);
+    if (active.state !== "running" && active.state !== "waiting")
+      return answeredTurnState(active.state);
+    const lostText = this.#flushBeforeStop(active);
+    const ended =
+      change.to === "plan"
+        ? "The thread moved to Plan at the agent's request. Its next turn runs in Plan, read-only."
+        : "The plan was approved and the thread left Plan. Its next turn carries the plan out.";
+    active.interruptMessage = lostText === undefined ? ended : `${ended} ${lostText}`;
+    active.state = "interrupted";
+    this.#revokeBrowserGrants(active);
+    this.#persistRuntimeWork(active, "interrupted");
+    active.abort.abort();
+    await Effect.runPromise(
+      connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+    );
+    return turnState("interrupted");
   }
 
   /**
@@ -6998,6 +7104,30 @@ function evidenceCapacityFailure(error: unknown): CodeOperationFailure | undefin
   };
 }
 
+/**
+ * Where an agent's ask to change the level would take the thread. Entering
+ * Plan remembers the level it left, never Full access, which only the person
+ * chooses; leaving Plan returns there, or to approval-gated when the thread
+ * was put in Plan by the person.
+ */
+function levelChangeTarget(
+  thread: CodeThread,
+  kind: "enter-plan" | "exit-plan",
+): { readonly to: ProviderExecutionPolicy; readonly planReturnPolicy?: ProviderExecutionPolicy } {
+  if (kind === "enter-plan") {
+    const leaving = thread.executionPolicy;
+    return {
+      to: "plan",
+      planReturnPolicy:
+        leaving === "full-access" || leaving === "plan" ? "approval-gated" : leaving,
+    };
+  }
+  const back = thread.planReturnPolicy;
+  return {
+    to: back === undefined || back === "full-access" || back === "plan" ? "approval-gated" : back,
+  };
+}
+
 /** The key a Code thread's kept provider session is held under. */
 export function codeSessionKey(threadId: CodeThreadId): string {
   return `code:${String(threadId)}`;
@@ -7019,6 +7149,24 @@ function normalizedOperationEvent(
   if (event.category === "approval" && event.requestId !== undefined) {
     const approvalId = CodeApprovalId.make(uuid());
     active.approvals.set(String(approvalId), event.requestId);
+    if (event.levelChange !== undefined) {
+      const change = levelChangeTarget(active.thread, event.levelChange.kind);
+      active.levelChanges.set(String(approvalId), change);
+      return {
+        kind: "approval-requested",
+        approvalId,
+        action: "level-change",
+        summary:
+          boundProviderSummary(event.text ?? "The agent asks to change this thread's level.") ??
+          "The agent asks to change this thread's level.",
+        levelChange: {
+          to: change.to,
+          ...(event.levelChange.plan === undefined
+            ? {}
+            : { plan: evidence.put(event.levelChange.plan) }),
+        },
+      };
+    }
     return {
       kind: "approval-requested",
       approvalId,

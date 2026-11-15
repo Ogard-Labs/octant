@@ -1135,6 +1135,23 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         onProviderStop: async (threadId, availability, stopped) => {
           await continueWorkerOnFallback.current?.(threadId, availability, stopped);
         },
+        // The agent's ask to plan, or to leave Plan, changes the level the way
+        // the person's own level menu does, for the window that approved it.
+        changeThreadLevel: async ({ windowId, threadId, executionPolicy, planReturnPolicy }) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (thread === undefined) return false;
+          const result = await codeService.execute(windowId, {
+            kind: "change-code-thread-access",
+            threadId,
+            expectedVersion: thread.version,
+            executionPolicy,
+            permissionPersistence: thread.permissionPersistence,
+            ...(planReturnPolicy === undefined ? {} : { planReturnPolicy }),
+          });
+          return (
+            result.kind === "thread-updated" && result.thread.executionPolicy === executionPolicy
+          );
+        },
         supportsAppManagedTools: (thread) => {
           const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
           return (

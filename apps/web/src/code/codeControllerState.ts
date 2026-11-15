@@ -40,6 +40,15 @@ export type CodeProviderRequest =
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
+      /**
+       * The agent asks to change the thread's level: the level it would move
+       * to, and the plan it asks the person to approve, once read.
+       */
+      readonly levelChange?: {
+        readonly to: ProviderExecutionPolicy;
+        readonly plan?: string;
+        readonly planContentId?: CodeEvidenceContentId;
+      };
     }
   | {
       readonly kind: "input";
@@ -107,6 +116,16 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       kind: "approval",
       approvalId: event.approvalId,
       summary: event.summary,
+      ...(event.levelChange === undefined
+        ? {}
+        : {
+            levelChange: {
+              to: event.levelChange.to,
+              ...(event.levelChange.plan === undefined
+                ? {}
+                : { planContentId: event.levelChange.plan.contentId }),
+            },
+          }),
     };
   }
   // App questionnaires follow the session read so answers from another window

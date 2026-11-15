@@ -148,6 +148,14 @@ export interface ProviderSessionStart {
    * background work keeps the turn that started it open until the work ends.
    */
   readonly outlivesTurn?: boolean;
+  /**
+   * The host answers the runtime's own asks to change the thread's level
+   * (`approval-request` with `levelChange`): it changes the level from the
+   * next session when the person approves, and ends the turn. A driver offers
+   * its runtime's plan-mode tools only to a session that carries this, and
+   * never lets the runtime switch its own mode.
+   */
+  readonly levelChanges?: boolean;
 }
 
 /** One background task a session's runtime still runs, as the person may see it. */
@@ -279,6 +287,8 @@ export interface ProviderSessionResume {
   readonly wakeups?: ProviderWakeupSchedule;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly outlivesTurn?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly levelChanges?: boolean;
 }
 
 export interface ProviderSessionCompactionRequest {

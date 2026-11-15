@@ -157,6 +157,11 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  /** An approval that asks to change the thread's level rather than to run a tool. */
+  readonly levelChange?: {
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly plan?: string;
+  };
   readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
@@ -503,6 +508,8 @@ export class CodeTurnRunner {
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The host answers the runtime's own asks to plan or to leave Plan.
+        levelChanges: true,
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
@@ -1097,6 +1104,14 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+        ...(event.levelChange === undefined
+          ? {}
+          : {
+              levelChange: {
+                kind: event.levelChange.kind,
+                ...(event.levelChange.plan === undefined ? {} : { plan: event.levelChange.plan }),
+              },
+            }),
       });
     case "review-verdict":
       return Effect.succeed({

@@ -555,6 +555,18 @@ itself after background work it was running reported.` in place of a
 person's message. The rules are in
 [Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
 
+## Plan-mode asks
+
+When a Code thread's agent asks to plan first, the pending request reads
+**Plan first**: the agent's sentence, then "This turn ends; the next one
+runs in Plan, read-only.", with **Switch to Plan** and **Keep working**.
+When it asks to leave Plan, the request reads **Approve the plan**: the
+plan in a bordered monospace block under the sentence, keyboard-focusable
+and scrolling inside the card past 18rem so the buttons stay in reach, then
+"This turn ends; the next one runs at" the level it returns to, with
+**Approve plan ·** that level and **Keep planning**. The rules are in
+[Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
+
 ## Sessions started outside Octant
 
 An empty Code thread whose provider keeps sessions of its own for the

@@ -6,8 +6,12 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
+  ProviderLevelChangeRequest,
 } from "@octant/contracts";
-import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_PROVIDER_PLAN_CHARACTERS,
+  MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS,
+} from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
@@ -1956,6 +1960,23 @@ function artifactApprovalDescription(
   return `Publish ${target ?? "a Project file"} to your claude.ai account${replacing}. It leaves this computer.`;
 }
 
+/**
+ * Claude Code's own plan-mode calls, read as the level change they ask for.
+ * `ExitPlanMode` carries the plan the person is asked to approve, bounded;
+ * a plan that is not text is left out rather than refusing the ask.
+ */
+function claudeLevelChangeRequest(
+  request: ClaudeToolRequest,
+): ProviderLevelChangeRequest | undefined {
+  if (request.toolName === "EnterPlanMode") return { kind: "enter-plan" };
+  if (request.toolName !== "ExitPlanMode") return undefined;
+  const plan =
+    typeof request.input.plan === "string"
+      ? Array.from(request.input.plan.trim()).slice(0, MAX_PROVIDER_PLAN_CHARACTERS).join("")
+      : "";
+  return plan.length === 0 ? { kind: "exit-plan" } : { kind: "exit-plan", plan };
+}
+
 export function mapClaudeToolRequest(
   context: ClaudeEventContext,
   request: ClaudeToolRequest,
@@ -1978,6 +1999,30 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  const levelChange = claudeLevelChangeRequest(request);
+  if (levelChange !== undefined) {
+    return {
+      kind: "approval",
+      request: {
+        kind: "approval",
+        requestId: normalizedRequestId,
+        providerSessionId: context.claudeSessionId,
+        providerToolUseId: request.toolUseId,
+        inputDigest: digest,
+        toolName,
+        event: mappedEvent(context, {
+          kind: "approval-request",
+          requestId: normalizedRequestId,
+          action: toolName,
+          description:
+            levelChange.kind === "enter-plan"
+              ? "Claude asks to plan first: the thread moves to Plan, read-only, from its next turn."
+              : "Claude finished planning and asks to leave Plan to carry out its plan from the thread's next turn.",
+          levelChange,
+        }),
+      },
+    };
+  }
   const requestEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId: normalizedRequestId,

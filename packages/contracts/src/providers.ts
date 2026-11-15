@@ -2851,6 +2851,14 @@ export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
 export const ProviderNativeAnchor = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
 export type ProviderNativeAnchor = typeof ProviderNativeAnchor.Type;
 
+/** The most of a plan a runtime may put before the person when it asks to leave Plan. */
+export const MAX_PROVIDER_PLAN_CHARACTERS = 32_768;
+export const ProviderLevelChangeRequest = Schema.Struct({
+  kind: Schema.Literal("enter-plan", "exit-plan"),
+  plan: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_PLAN_CHARACTERS))),
+}).annotations(strict);
+export type ProviderLevelChangeRequest = typeof ProviderLevelChangeRequest.Type;
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -3154,13 +3162,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("approval-request"),
-    requestId: Schema.NonEmptyTrimmedString,
-    action: Schema.NonEmptyTrimmedString,
-    description: Schema.NonEmptyTrimmedString,
+    /**
+     * The runtime asks to change the thread's level rather than to run a
+     * tool: `enter-plan` to plan read-only first, `exit-plan` to leave Plan
+     * and carry out `plan`. Only a session started with `levelChanges` asks
+     * this; the runtime never changes its own mode, and an approval applies
+     * from the thread's next session.
+     */
+    levelChange: Schema.optional(ProviderLevelChangeRequest),
   }).annotations(strict),
   /**
    * The runtime's own reviewer answered one approval itself, so the person was

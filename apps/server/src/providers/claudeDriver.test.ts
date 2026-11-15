@@ -6676,6 +6676,105 @@ describe("Claude session copies for a fork or rewind", () => {
   });
 });
 
+describe("Claude's own plan mode as level changes", () => {
+  async function askedLevelChange(
+    executionPolicy: "full-access" | "plan",
+    toolName: "EnterPlanMode" | "ExitPlanMode",
+    input: Readonly<Record<string, unknown>>,
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, levelChanges: true }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const preTool = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName,
+      input,
+      toolUseId: "level-1",
+      signal,
+    });
+    const decision = open.canUseTool({ toolName, input, toolUseId: "level-1", signal });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    return { f, acquired, open, preTool, decision, seen, scope };
+  }
+
+  it("puts Claude's ask to plan to the person even at Full access and never lets it switch its own mode", async () => {
+    const { acquired, open, preTool, decision, seen, scope } = await askedLevelChange(
+      "full-access",
+      "EnterPlanMode",
+      {},
+    );
+    expect(open.withheldTools).not.toContain("EnterPlanMode");
+    expect(open.withheldTools).toContain("ExitPlanMode");
+    expect(preTool).toEqual({ behavior: "ask" });
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "enter-plan" } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    await expect(decision).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("next turn runs in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("offers a Plan session only the read-only tools and the ask to leave Plan, which carries the plan", async () => {
+    const plan = "1. Read the login test.\n2. Fix the race.";
+    const { acquired, open, decision, seen, scope } = await askedLevelChange(
+      "plan",
+      "ExitPlanMode",
+      { plan },
+    );
+    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "ExitPlanMode"]));
+    for (const writer of ["Edit", "Write", "NotebookEdit", "EnterPlanMode"]) {
+      expect(open.tools).not.toContain(writer);
+    }
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "exit-plan", plan } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: false,
+      }),
+    );
+    await expect(decision).resolves.toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("kept this thread in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]?.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode"]),
+    );
+    await acquired.close();
+  });
+});
+
 describe("Claude sessions started outside Octant", () => {
   const outside = "outside-session-1";
 

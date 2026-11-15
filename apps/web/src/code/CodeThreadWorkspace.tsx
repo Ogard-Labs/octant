@@ -2470,6 +2470,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })
                   }
                   summary={request.summary}
+                  {...(request.levelChange === undefined
+                    ? {}
+                    : { levelChange: request.levelChange })}
                 />
               ) : (
                 <ProviderQuestionCard

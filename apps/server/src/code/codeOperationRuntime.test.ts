@@ -51,6 +51,8 @@ import {
   decodeCodeOperationId,
   decodeCodeOperationCommand,
   decodeCodeThread,
+  type CodeApprovalId,
+  type ProviderExecutionPolicy,
   decodeCodeTerminalId,
   decodeCodeThreadId,
   decodeCodeRuntimeWorkId,
@@ -5908,6 +5910,170 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("moves the thread to Plan only from its next session when the person approves the agent's ask to plan", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const starts: Array<ProviderSessionStart> = [];
+    const connection = providerConnection(queue, starts);
+    let setThread: (next: CodeThread) => void = () => undefined;
+    const changeThreadLevel = vi.fn(
+      async (input: {
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly planReturnPolicy?: ProviderExecutionPolicy;
+      }) => {
+        setThread(
+          decodeCodeThread({
+            ...thread(),
+            executionPolicy: input.executionPolicy,
+            ...(input.planReturnPolicy === undefined
+              ? {}
+              : { planReturnPolicy: input.planReturnPolicy }),
+          }),
+        );
+        return true;
+      },
+    );
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    setThread = (next) => fixture.setThread(next);
+    const firstTurn = operationId(1386);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: firstTurn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let asked: Extract<OperationFrame["event"], { kind: "approval-requested" }> | undefined;
+      await vi.waitFor(async () => {
+        asked = (await operationEvents(fixture.runtime, firstTurn)).find(
+          (event): event is Extract<OperationFrame["event"], { kind: "approval-requested" }> =>
+            event.kind === "approval-requested",
+        );
+        expect(asked).toMatchObject({ action: "level-change", levelChange: { to: "plan" } });
+      });
+      const answered = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1387),
+        threadId,
+        checkoutId,
+        approvalId: asked!.approvalId,
+        decision: "approved",
+      });
+      expect(answered).toMatchObject({ state: "interrupted" });
+      expect(changeThreadLevel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          windowId,
+          threadId,
+          executionPolicy: "plan",
+          planReturnPolicy: thread().executionPolicy,
+        }),
+      );
+      expect(connection.answerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "plan-ask", approved: true, scope: "once" }),
+      );
+      expect(connection.interrupt).toHaveBeenCalled();
+      // The session that asked kept the level it launched with to the end.
+      expect(starts.map((start) => start.executionPolicy)).toEqual([thread().executionPolicy]);
+      await Effect.runPromise(
+        Queue.offer(queue, providerEvent({ kind: "interrupted", message: "Stopped." })),
+      );
+      await vi.waitFor(async () =>
+        expect(terminalStates(await operationEvents(fixture.runtime, firstTurn))).toEqual([
+          "interrupted",
+        ]),
+      );
+
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1388),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      // The next turn's session launches in Plan, read-only.
+      await vi.waitFor(() =>
+        expect(
+          vi
+            .mocked(connection.resume)
+            .mock.calls.map(([input]) => input.executionPolicy)
+            .at(-1),
+        ).toBe("plan"),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("keeps the thread's level and the turn running when the person declines the agent's ask to plan", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const changeThreadLevel = vi.fn(async () => true);
+    const fixture = runtimeFixture({ provider: providerDriver(connection), changeThreadLevel });
+    const turn = operationId(1389);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: turn,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "approval-request",
+            requestId: "plan-ask",
+            action: "EnterPlanMode",
+            description: "Claude asks to plan first.",
+            levelChange: { kind: "enter-plan" },
+          }),
+        ),
+      );
+      let approvalId: CodeApprovalId | undefined;
+      await vi.waitFor(async () => {
+        const asked = (await operationEvents(fixture.runtime, turn)).find(
+          (event) => event.kind === "approval-requested",
+        );
+        expect(asked?.kind).toBe("approval-requested");
+        if (asked?.kind === "approval-requested") approvalId = asked.approvalId;
+      });
+      const answered = await fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(1390),
+        threadId,
+        checkoutId,
+        approvalId: approvalId!,
+        decision: "denied",
+      });
+      expect(answered).toMatchObject({ state: "running" });
+      expect(changeThreadLevel).not.toHaveBeenCalled();
+      expect(connection.interrupt).not.toHaveBeenCalled();
+      expect(connection.answerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({ requestId: "plan-ask", approved: false }),
+      );
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
     const fixture = runtimeFixture({ projectAccess: false });
     try {
@@ -11006,6 +11172,7 @@ function runtimeFixture(options: {
   onProviderTurnRequested?: (threadId: CodeThreadId) => void;
   probeProvider?: Parameters<typeof createCodeOperationRuntime>[0]["probeProvider"];
   isRuntimeStartedTurn?: Parameters<typeof createCodeOperationRuntime>[0]["isRuntimeStartedTurn"];
+  changeThreadLevel?: Parameters<typeof createCodeOperationRuntime>[0]["changeThreadLevel"];
   outlivingSessions?: Parameters<typeof createCodeOperationRuntime>[0]["outlivingSessions"];
   readonly resolveProviderDriver?: Parameters<
     typeof createCodeOperationRuntime
@@ -11251,6 +11418,9 @@ function runtimeFixture(options: {
     ...(options.isRuntimeStartedTurn === undefined
       ? {}
       : { isRuntimeStartedTurn: options.isRuntimeStartedTurn }),
+    ...(options.changeThreadLevel === undefined
+      ? {}
+      : { changeThreadLevel: options.changeThreadLevel }),
     ...(options.outlivingSessions === undefined
       ? {}
       : { outlivingSessions: options.outlivingSessions }),
