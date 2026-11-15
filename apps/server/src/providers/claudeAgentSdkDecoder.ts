@@ -22,6 +22,7 @@ import type {
   ClaudeTaskUsage,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { claudeTaskToolOutput } from "./claudeTaskList";
 
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const API_PROVIDERS = new Set([
@@ -417,11 +418,21 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   const only = results.length === 1 ? results[0] : undefined;
   const publishedPage =
     only === undefined || only.isError ? undefined : claudePublishedPage(message.tool_use_result);
+  const taskOutput =
+    only === undefined || only.isError ? undefined : claudeTaskToolOutput(message.tool_use_result);
   return {
     kind: "tool-results",
     sessionId: message.session_id,
     results:
-      only === undefined || publishedPage === undefined ? results : [{ ...only, publishedPage }],
+      only === undefined || (publishedPage === undefined && taskOutput === undefined)
+        ? results
+        : [
+            {
+              ...only,
+              ...(publishedPage === undefined ? {} : { publishedPage }),
+              ...(taskOutput === undefined ? {} : { taskOutput }),
+            },
+          ],
   };
 }
 

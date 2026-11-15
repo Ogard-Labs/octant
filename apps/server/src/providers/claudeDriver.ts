@@ -66,6 +66,7 @@ import {
   CLAUDE_CHECKLIST_TOOL,
   CLAUDE_PLAN_EXIT_TOOL,
   CLAUDE_SUBAGENT_TOOL,
+  claudeStoredTaskListEvents,
   mapClaudeMessage,
   mapClaudeToolRequest,
   claudeToolUseStepId,
@@ -73,6 +74,7 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
+import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import { providerOwnMemoryLaunches } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
@@ -220,9 +222,15 @@ const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
  * or person is involved, so every posture runs them unasked, as Claude Code
- * does. Plan holds only the checklist of these, its task panel.
+ * does. Plan holds the checklist and the task tools of these, its task panel.
  *
- * - `TodoWrite`: the checklist, the thread's task panel.
+ * - `TodoWrite`: the checklist, the thread's task panel, where the runtime
+ *   still offers it.
+ * - `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`: the task tools that
+ *   replace the checklist by default. Each reads or writes only the session's
+ *   task list in the account's configuration directory (read from the bundled
+ *   2.1.211 binary, 2026-11-14), never the Project, and Plan already refuses
+ *   an account directory that overlaps the checkout.
  * - `ToolSearch`: loads the definitions of tools the session already holds
  *   but deferred; it calls no tool itself. Claude Code 2.1.211's own tool
  *   marks it read-only (`isReadOnly` true, read from the bundled binary,
@@ -231,7 +239,11 @@ const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
  *
  * A name joins only on such evidence; every other tool keeps asking.
  */
-const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL, "ToolSearch"]);
+const CLAUDE_SESSION_TOOLS = new Set<string>([
+  CLAUDE_CHECKLIST_TOOL,
+  ...CLAUDE_TASK_TOOLS,
+  "ToolSearch",
+]);
 /**
  * The refusal a Plan session's plan tool gets once its plan is captured.
  * Claude Code's own answer to that tool leaves plan mode for one that edits;
@@ -583,10 +595,12 @@ function claudePolicyOptions(
       return {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false,
-        // Claude Code's plan mode ends a plan by calling its plan tool; the
-        // gate captures that plan and refuses the call, so Plan never ends
-        // from inside the session.
-        tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL, CLAUDE_PLAN_EXIT_TOOL],
+        tools: [
+          ...CLAUDE_PLAN_TOOLS,
+          CLAUDE_CHECKLIST_TOOL,
+          CLAUDE_PLAN_EXIT_TOOL,
+          ...CLAUDE_TASK_TOOLS,
+        ],
         fullToolSet: false,
       };
   }
@@ -630,12 +644,18 @@ export function claudeSandboxSettings(
   };
 }
 
+/** The configuration directory the runtime launched with this environment uses. */
+function claudeConfigurationDirectory(
+  environment: Readonly<Record<string, string | undefined>>,
+): string {
+  return environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
+    ? environment.CLAUDE_CONFIG_DIR
+    : join(environment.HOME ?? homedir(), ".claude");
+}
+
 /** The account's own state, which the secret guard leaves to this runtime. */
 function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
-  const configuration =
-    environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
-      ? environment.CLAUDE_CONFIG_DIR
-      : join(environment.HOME ?? homedir(), ".claude");
+  const configuration = claudeConfigurationDirectory(environment);
   return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
     (path): path is string => path !== undefined && isAbsolute(path),
   );
@@ -995,6 +1015,8 @@ interface SessionState {
   /** The tool uses the gate has seen, oldest first; settled ones are forgotten past a bound. */
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
+  /** The task list from Claude's task tools, kept across the session's turns. */
+  readonly taskList: ClaudeTaskList;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
   collector?: Fiber.RuntimeFiber<void, never>;
@@ -2018,6 +2040,7 @@ function makeConnection(
       requestIds: new Map(),
       taskIds: new Map(),
       todoTaskIds: new Map(),
+      taskList: state.taskList,
       toolStates: new Map(),
       makeRequestId: factories.makeRequestId,
       makeTaskId: factories.makeTaskId,
@@ -2197,10 +2220,15 @@ function makeConnection(
         state.backgroundTasks.add(message.taskId);
         state.startedBackgroundWork = true;
       }
-      for (const mapped of mapClaudeMessage(
-        state.context,
-        withPublishedSnapshots(state, message),
-      )) {
+      // A resumed session's stored task list opens its first turn.
+      const storedTaskList =
+        state.pendingTurns > 0 && state.compaction === undefined
+          ? claudeStoredTaskListEvents(state.context)
+          : [];
+      for (const mapped of [
+        ...storedTaskList,
+        ...mapClaudeMessage(state.context, withPublishedSnapshots(state, message)),
+      ]) {
         if (mapped.kind === "ignored") continue;
         if (mapped.kind === "failure") {
           terminal(state, { kind: "failed", failure: mapped.failure });
@@ -2935,6 +2963,21 @@ function makeConnection(
         // The runtime initializes with the first turn, so a new session's id
         // is assigned here and the initialized message is later held to it.
         const assignedSessionId = resumeSessionId === undefined ? randomUUID() : undefined;
+        // The task tools keep their list outside the session's transcript, so
+        // a resumed session's panel starts from the list Claude stored.
+        const taskList = new ClaudeTaskList();
+        const storedTaskList = await readClaudeStoredTaskList(
+          claudeConfigurationDirectory(environment.environment),
+          resumeSessionId ?? assignedSessionId ?? "",
+        );
+        throwIfSetupCancelled(signal);
+        if (storedTaskList.status === "read") {
+          taskList.seed(storedTaskList.tasks);
+        } else {
+          console.warn(
+            `[provider] Claude's stored task list was refused: ${storedTaskList.reason}`,
+          );
+        }
         const query = await runSetupEffect(
           options.sdk
             .openQuery({
@@ -3010,6 +3053,7 @@ function makeConnection(
           publishedSnapshots: new Map(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
+          taskList,
           outputAccepted: false,
           pendingTurns: 0,
           promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
