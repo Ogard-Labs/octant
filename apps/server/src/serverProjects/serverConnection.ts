@@ -218,8 +218,9 @@ export function serverSshArguments(
 /**
  * Checks the host key against the pinned file alone, under a fixed alias.
  * A command-line option wins over the person's config, so neither their
- * known hosts, a `KnownHostsCommand`, nor a `HostKeyAlias` of theirs can
- * stand in for the pin, and
+ * known hosts, a `KnownHostsCommand`, DNS (`VerifyHostKeyDNS`), nor a
+ * `HostKeyAlias` of theirs can stand in for the pin (`UpdateHostKeys=no` is
+ * already on every connection), and
  * strict checking still refuses any key the file does not hold.
  */
 export function pinnedHostKeyOptions(pinnedKnownHosts: string | undefined): ReadonlyArray<string> {
@@ -230,6 +231,12 @@ export function pinnedHostKeyOptions(pinnedKnownHosts: string | undefined): Read
     // A command of the person's could vouch for another key; OpenSSH before
     // 8.5 rejects the option, which refuses the call rather than skip the pin.
     "KnownHostsCommand=none",
+    // With the person's VerifyHostKeyDNS=yes, OpenSSH accepts a key matching a
+    // DNSSEC-signed SSHFP record before it reads any known hosts file, so DNS
+    // could vouch for a key the pin does not hold.
+    "VerifyHostKeyDNS=no",
+    // The address is checked against known hosts files too; only the pin decides.
+    "CheckHostIP=no",
     `HostKeyAlias=${PINNED_HOST_KEY_ALIAS}`,
   ];
 }
@@ -273,11 +280,13 @@ export class ServerConnection {
    * an empty file, so strict checking refuses every key rather than fall
    * back to the person's known hosts.
    */
-  pinnedKnownHostsFile(server: ServerAddress): string | undefined {
-    const keys = this.#options.pinnedHostKeys?.(server);
-    if (keys === undefined || keys.length === 0) return undefined;
+  pinnedKnownHostsFile(
+    server: ServerAddress,
+    keys: ReadonlyArray<string> = this.#options.pinnedHostKeys?.(server) ?? [],
+  ): string | undefined {
+    if (keys.length === 0) return undefined;
     try {
-      const path = `${this.#controlSocket(server)}.known_hosts`;
+      const path = `${this.#controlPath(serverDigest(server, keys))}.known_hosts`;
       const content = keys.map((key) => `${PINNED_HOST_KEY_ALIAS} ${key}\n`).join("");
       if (this.#pinnedWritten.get(path) !== content) {
         writeFileSync(path, content, { mode: 0o600 });
@@ -334,9 +343,11 @@ export class ServerConnection {
         message: "This call is too long to send to the server. Nothing ran.",
       });
     }
+    // Read once, so the shared connection and the file it checks name one pin.
+    const pinned = this.#options.pinnedHostKeys?.(server) ?? [];
     let controlSocket: string | undefined;
     try {
-      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server);
+      if (input.freshConnection !== true) controlSocket = this.#controlSocket(server, pinned);
     } catch {
       return Promise.resolve({
         status: "unreachable",
@@ -347,7 +358,7 @@ export class ServerConnection {
       terminal,
       configFile: this.#options.configFile,
       controlSocket,
-      pinnedKnownHosts: this.pinnedKnownHostsFile(server),
+      pinnedKnownHosts: this.pinnedKnownHostsFile(server, pinned),
     });
     return new Promise((resolve) => {
       if (input.signal?.aborted === true) {
@@ -451,17 +462,20 @@ export class ServerConnection {
   }
 
   /**
-   * One socket per server and user, in a folder only this host's user can
+   * One socket per server, user and pin, in a folder only this host's user can
    * open, so a later call reuses the login instead of making its own. Every
    * confined launch is denied the folder's sockets.
    */
-  #controlSocket(server: ServerAddress): string {
+  #controlSocket(server: ServerAddress, pinned: ReadonlyArray<string>): string {
+    // The pinned keys are part of the socket's identity: a shared connection
+    // already open trusted the host under the keys of its own login, and
+    // reusing it after a pin is installed or changed would skip the new check.
+    return this.#controlPath(serverDigest(server, pinned));
+  }
+
+  #controlPath(name: string): string {
     this.#controlDirectory ??=
       this.#options.controlDirectory?.() ?? mkdtempSync(SERVER_CONTROL_SOCKET_PREFIX);
-    const name = createHash("sha256")
-      .update(`${server.user}\0${server.alias}`)
-      .digest("hex")
-      .slice(0, 16);
     return `${this.#controlDirectory}/${name}`;
   }
 
@@ -471,6 +485,13 @@ export class ServerConnection {
       this.#options.agentSocket(),
     );
   }
+}
+
+/** A short name for a server and login, and the keys pinned for it, if any; a socket path stays under 104 bytes. */
+function serverDigest(server: ServerAddress, pinned: ReadonlyArray<string> = []): string {
+  const hash = createHash("sha256").update(`${server.user}\0${server.alias}`);
+  if (pinned.length > 0) hash.update(`\0${pinned.join("\n")}`);
+  return hash.digest("hex").slice(0, 16);
 }
 
 function lastLine(text: string): string | undefined {

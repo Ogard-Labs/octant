@@ -128,6 +128,9 @@ describe("a server connection's arguments", () => {
       'UserKnownHostsFile="/tmp/octant-ssh-x/0123456789abcdef.known_hosts"',
       "GlobalKnownHostsFile=none",
       "KnownHostsCommand=none",
+      "VerifyHostKeyDNS=no",
+      "CheckHostIP=no",
+      "UpdateHostKeys=no",
       "HostKeyAlias=octant-pinned-host",
     ]) {
       expect(args).toContain(option);
@@ -308,6 +311,62 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
     });
     expect(call.status).toBe("unreachable");
     expect(existsSync(join(sshd.root, "reached-through-changed-key"))).toBe(false);
+  });
+
+  it("lets no setting of the person's (DNS, address or another known hosts file) vouch for a pinned server's key", () => {
+    const config = join(sshd.root, "vouching_config");
+    writeFileSync(
+      config,
+      [
+        "Host *",
+        "  VerifyHostKeyDNS yes",
+        "  CheckHostIP yes",
+        "  UpdateHostKeys yes",
+        `  UserKnownHostsFile ${join(sshd.root, "known_hosts")}`,
+        `  GlobalKnownHostsFile ${join(sshd.root, "known_hosts")}`,
+        "  HostKeyAlias web1",
+        "",
+      ].join("\n"),
+    );
+    const args = serverSshArguments(server(), undefined, {
+      terminal: false,
+      configFile: config,
+      pinnedKnownHosts: join(sshd.root, "pinned_known_hosts"),
+    });
+    // `ssh -G` prints the settings ssh would connect with, after every source.
+    const effective = spawnSync("ssh", ["-G", ...args], { encoding: "utf8" }).stdout;
+    expect(effective).toContain("verifyhostkeydns false");
+    expect(effective).toContain("checkhostip no");
+    expect(effective).toContain("updatehostkeys false");
+    expect(effective).toContain(`userknownhostsfile ${join(sshd.root, "pinned_known_hosts")}\n`);
+    expect(effective).toContain("globalknownhostsfile none");
+    expect(effective).toContain("hostkeyalias octant-pinned-host");
+    expect(effective).toContain("stricthostkeychecking true");
+  });
+
+  it("opens a new shared connection once a pin is installed, instead of reusing one trusted before it", async () => {
+    let pinned: ReadonlyArray<string> | undefined;
+    const shared = new ServerConnection({
+      agentSocket: () => sshd.agentSocket,
+      configFile: sshd.configFile,
+      pinnedHostKeys: () => pinned,
+    });
+    const before = await shared.run(server(), {
+      script: "printf before",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(before.status === "ran" && before.output.toString()).toBe("before");
+
+    // The machine now answers with a key the pin does not hold.
+    pinned = [publicKey("otherhostkey.pub")];
+    const after = await shared.run(server(), {
+      script: "touch reached-through-old-connection",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(after.status).toBe("unreachable");
+    expect(existsSync(join(sshd.root, "reached-through-old-connection"))).toBe(false);
   });
 
   it("is unreachable where nothing listens", async () => {

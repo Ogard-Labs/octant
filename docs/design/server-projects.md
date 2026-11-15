@@ -721,8 +721,13 @@ service stays out of scope
   and the binding's own folder check) checks the host key against those keys
   alone: the host writes them to a known hosts file in the private folder
   its shared connections use and adds `UserKnownHostsFile` (that file),
-  `GlobalKnownHostsFile=none`, `KnownHostsCommand=none` and a fixed
-  `HostKeyAlias`, with `StrictHostKeyChecking=yes` unchanged. So a
+  `GlobalKnownHostsFile=none`, `KnownHostsCommand=none`,
+  `VerifyHostKeyDNS=no`, `CheckHostIP=no` and a fixed `HostKeyAlias`, with
+  `StrictHostKeyChecking=yes` and `UpdateHostKeys=no` unchanged, so no
+  setting of the person's (DNS SSHFP records included) can vouch for another
+  key. The pinned keys are part of the shared connection's identity, so a
+  connection opened before a pin was installed or changed is never reused
+  under it. So a
   brand-new machine is accepted without a manual first login, and a machine
   that answers with any other key is refused as `server-unreachable`. The
   pin never changes after creation, whatever a later describe reports, and a
@@ -733,7 +738,8 @@ service stays out of scope
   provider reported.
 - **A suspended machine refuses by name.** While a machine's last reported
   state is `suspended`, a turn in its Project is refused before it launches,
-  and every call to its server is refused before ssh starts, with "This
+  and every call, terminal and preview stream to its server is refused
+  before ssh starts, with "This
   machine is suspended; resume it first in Settings › Permissions ›
   Servers." instead of failing as an unreachable server. The Project's row
   in Settings › Permissions › Servers says so and offers Resume there.

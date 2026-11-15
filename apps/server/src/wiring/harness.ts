@@ -279,6 +279,7 @@ export function wireHarness(deps: HarnessDependencies) {
       windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
     agentSocket: sshAgentSocket,
     pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
+    refuses: (server) => serverConnection.refusal(server),
     record: (record) => serverProjectStore.recordPreview(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
