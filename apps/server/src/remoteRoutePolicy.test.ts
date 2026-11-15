@@ -1121,7 +1121,7 @@ describe("remote route policy", () => {
       ["/api/github/authentication/commands", "POST", 4_096],
       ["/api/integrations/linear/authentication", "GET", 4_096],
       ["/api/integrations/linear/authentication/commands", "POST", 4_096],
-      ["/api/integrations/linear/operations", "POST", 96 * 1_024],
+      ["/api/integrations/linear/operations", "POST", 512 * 1_024],
     ] as const) {
       expect(
         routePolicy.inspect(

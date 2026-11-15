@@ -962,7 +962,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
-    maxResponseBytes: 96 * 1_024,
+    maxResponseBytes: 512 * 1_024,
   },
   {
     // A paired device lists and answers the MCP tool prompts its own turns

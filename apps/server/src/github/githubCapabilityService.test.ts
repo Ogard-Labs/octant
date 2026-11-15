@@ -65,6 +65,34 @@ describe("GithubCapabilityService", () => {
     expect(probeOperations).toHaveBeenCalledOnce();
   });
 
+  it("keeps ordinary account and device-flow responses within the remote budget", async () => {
+    const service = new GithubCapabilityService({
+      observe: async () => ({
+        kind: "observed",
+        accounts: [
+          {
+            login: "octocat",
+            source: "keyring",
+            scopes: ["repo", "read:org"],
+            gitProtocol: "https",
+          },
+        ],
+      }),
+      execute: async () => ({ kind: "device-flow", userCode: "ABCD-EFGH" }),
+    } as never);
+    const signal = new AbortController().signal;
+    const snapshot = await service.snapshot(signal);
+    const command = await service.execute(
+      { kind: "setup", confirmation: "confirm-github-setup" },
+      signal,
+    );
+    for (const response of [snapshot, command]) {
+      expect(new TextEncoder().encode(JSON.stringify(response)).byteLength).toBeLessThanOrEqual(
+        4_096,
+      );
+    }
+  });
+
   it("caches probe results briefly and re-probes after an authentication command", async () => {
     let clock = 0;
     const probeOperations = vi.fn(async () => ({
