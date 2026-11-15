@@ -481,8 +481,10 @@ export function createNativeHarnessComposition(
         }),
   });
   /**
-   * The turn's grant of the provider's own search, read when the turn's tools
-   * are composed: the taint it was decided on is the turn's own.
+   * The turn's grant of the provider's own search, decided each time it is
+   * read: the turn runner reads it when it sends the turn, after the turn's
+   * context is prepared and any owed outside-content mark is settled, so the
+   * taint and level it is decided on are the ones the first request carries.
    */
   const withProviderSearch = (
     tools: AppManagedToolSet,
@@ -491,19 +493,27 @@ export function createNativeHarnessComposition(
       readonly threadId: string;
       readonly research: boolean;
       readonly routing: ChatThread["researchRouting"];
-      readonly fullAccess: boolean;
+      /** Read with the grant, since a turn's level can change before it is sent. */
+      readonly fullAccess: () => boolean;
     },
   ): AppManagedToolSet => {
-    const facts = options.providerWebSearchFacts?.(input.providerInstanceId);
-    if (facts === undefined) return tools;
-    const providerWebSearch = decideHarnessProviderSearch({
-      research: input.research,
-      routing: input.routing,
-      ...facts,
-      tainted: options.readThreadTaint(input.threadId),
-      fullAccess: input.fullAccess,
-    });
-    return providerWebSearch === undefined ? tools : { ...tools, providerWebSearch };
+    if (options.providerWebSearchFacts === undefined) return tools;
+    const readFacts = options.providerWebSearchFacts;
+    return {
+      ...tools,
+      providerWebSearch: () => {
+        const facts = readFacts(input.providerInstanceId);
+        return facts === undefined
+          ? undefined
+          : decideHarnessProviderSearch({
+              research: input.research,
+              routing: input.routing,
+              ...facts,
+              tainted: options.readThreadTaint(input.threadId),
+              fullAccess: input.fullAccess(),
+            });
+      },
+    };
   };
   const compose = (input: {
     readonly threadId: string;
@@ -1113,7 +1123,7 @@ export function createNativeHarnessComposition(
             threadId,
             research: thread.researchEnabled,
             routing: thread.researchRouting,
-            fullAccess: false,
+            fullAccess: () => false,
           });
     },
     forWork: ({ thread, projectRoot, extraFolders }) => {
@@ -1161,7 +1171,7 @@ export function createNativeHarnessComposition(
         threadId,
         research: true,
         routing: "automatic",
-        fullAccess: options.readWorkExecutionPolicy?.(threadId) === "full-access",
+        fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
     forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
@@ -1221,7 +1231,7 @@ export function createNativeHarnessComposition(
         threadId,
         research: true,
         routing: "automatic",
-        fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+        fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
       });
     },
     forServerCode: ({ thread, filesystem, shell, windowId, secrets, server }) => {
@@ -1277,7 +1287,7 @@ export function createNativeHarnessComposition(
         threadId,
         research: true,
         routing: "automatic",
-        fullAccess: options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+        fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
       });
     },
     forServerWork: ({ thread, filesystem, shell, server }) => {
@@ -1324,7 +1334,7 @@ export function createNativeHarnessComposition(
         threadId,
         research: true,
         routing: "automatic",
-        fullAccess: options.readWorkExecutionPolicy?.(threadId) === "full-access",
+        fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
     forAgentRun: ({ run, authority, projectRoot }) => {

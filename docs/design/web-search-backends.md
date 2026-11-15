@@ -250,7 +250,12 @@ a provider that ignores the cap cannot search again on what it just read. Every
 built-in tool other than web search stays refused.
 
 **Tainted threads.** Below Full access, a thread that has read outside content
-is not offered the provider's own search. Within a turn the offer ends at the
+is not offered the provider's own search. The offer is decided when the turn
+runner sends the turn, after the turn's context is prepared and any owed
+outside-content mark is settled, not when the turn's tools are composed:
+reading a mentioned thread that is marked, for example, marks the reader in
+between, and a decision taken earlier would offer built-in search beside that
+content. Within a turn the offer ends at the
 turn's first search or first tool answer: the loop cannot tell which tool
 result was outside content before the host records it, so it withdraws at the
 first one, at the cost of one prompt cache miss in such a turn. A request

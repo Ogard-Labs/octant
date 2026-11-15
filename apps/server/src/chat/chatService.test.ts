@@ -1,4 +1,7 @@
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
+import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ToolActionAuthority } from "@octant/contracts";
 import { continueChatTurns, cutOffToolCallHold } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
@@ -316,15 +319,7 @@ function openFixture(options?: {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
-  }) =>
-    | {
-        readonly definitions: ReadonlyArray<{
-          readonly name: string;
-          readonly inputSchema: Record<string, unknown>;
-        }>;
-        readonly execute: () => Promise<{ readonly result: unknown }>;
-      }
-    | undefined;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
@@ -1302,6 +1297,42 @@ function genericChatStream(text: string): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
+/**
+ * The native harness composition as the host wires it for a provider whose own
+ * search Octant can name, reading each thread's taint from `tainted`.
+ */
+function providerSearchComposition(tainted: ReadonlySet<string>) {
+  const granted = {
+    hostId: "00000000-0000-4000-8000-0000000000aa",
+    mode: "chat",
+    providerInstanceId: "00000000-0000-4000-8000-0000000000ee",
+    extension: { kind: "core" },
+  } as unknown as ToolActionAuthority;
+  return createNativeHarnessComposition({
+    isChildAuthorityCurrent: () => true,
+    authority: {
+      resolve: () => granted,
+      service: new ToolCallAuthorityService({
+        resolveGrantedAuthority: () => granted,
+        resolveLiveFacts: () => ({
+          providerAppManagedTools: "supported",
+          host: { computerUseEnabled: false },
+          executionPolicy: "approval-gated",
+          approvalSatisfied: false,
+          externalContentIngested: false,
+        }),
+      }),
+    },
+    isHarnessProvider: () => true,
+    hostId: granted.hostId,
+    readThreadTaint: (threadId) => tainted.has(threadId),
+    providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+    recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+    uuid: () => "00000000-0000-4000-8000-000000000099",
+    clock: () => "2026-11-15T00:00:00.000Z",
+  });
+}
+
 describe("ChatService", () => {
   it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
     const order: Array<string> = [];
@@ -2036,7 +2067,7 @@ describe("ChatService", () => {
     const { service, fakeDriver } = openFixture({
       resolveAppManagedTools: () => ({
         definitions: [{ name: "octant_task", inputSchema: { type: "object", properties: {} } }],
-        providerWebSearch: { withdrawAfterFirstStep: true },
+        providerWebSearch: () => ({ withdrawAfterFirstStep: true }),
         execute: async () => ({ result: {} }),
       }),
     });
@@ -2057,6 +2088,51 @@ describe("ChatService", () => {
     );
     await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(1));
     expect(fakeDriver.sentTurns[0]?.providerWebSearch).toEqual({ withdrawAfterFirstStep: true });
+  });
+
+  it("does not offer the provider's own search on a turn whose mention of a marked thread marked it", async () => {
+    const tainted = new Set<string>();
+    const composition = providerSearchComposition(tainted);
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: ({ windowId, thread }) =>
+        composition.forChat({
+          thread: { ...thread, researchEnabled: true, researchRouting: "automatic" },
+          windowId: String(windowId),
+        }),
+      // The mentioned thread is marked, so reading it marks the reader, after
+      // the turn's tools were composed.
+      resolveThreadMentionContext: async (input) => {
+        tainted.add(input.readerThreadId);
+        return input.threadMentionIds.map((threadId) => ({
+          kind: "resolved" as const,
+          threadId,
+          text: "Referenced thread: Release notes (chat, Recents)\nuser: ship the notes",
+        }));
+      },
+    });
+    const windowId = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const sendIn = async (title: string, threadMentionIds?: ReadonlyArray<string>) => {
+      const created = await service.execute({ kind: "create-chat-thread", hostId: "local", title });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Compare this with #[Release notes]",
+          ...(threadMentionIds === undefined ? {} : { threadMentionIds: [...threadMentionIds] }),
+        },
+        { windowId },
+      );
+    };
+
+    await sendIn("Without a mention");
+    await sendIn("With a mention", ["release-notes-thread"]);
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(2));
+    expect(fakeDriver.sentTurns.map((turn) => turn.providerWebSearch)).toEqual([
+      { withdrawAfterFirstStep: true },
+      undefined,
+    ]);
   });
 
   it("refuses a queued send revoked during provider preparation before accepting a turn", async () => {

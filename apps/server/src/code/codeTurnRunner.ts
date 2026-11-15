@@ -49,7 +49,7 @@ import {
   type RuntimeOutsideContentMarking,
 } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
@@ -833,9 +833,7 @@ export class CodeTurnRunner {
               ...(input.context === undefined ? {} : { context: input.context }),
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
-              ...(input.appManagedTools?.providerWebSearch === undefined
-                ? {}
-                : { providerWebSearch: input.appManagedTools.providerWebSearch }),
+              ...providerWebSearchAtSend(input.appManagedTools),
             })
             .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
           const promptSent = input.onPromptSent;

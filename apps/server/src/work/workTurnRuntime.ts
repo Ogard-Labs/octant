@@ -54,7 +54,7 @@ import type {
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -800,9 +800,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   : context,
               attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
               tools: [...(input.appManagedTools?.definitions ?? [])],
-              ...(input.appManagedTools?.providerWebSearch === undefined
-                ? {}
-                : { providerWebSearch: input.appManagedTools.providerWebSearch }),
+              ...providerWebSearchAtSend(input.appManagedTools),
             })
             .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),

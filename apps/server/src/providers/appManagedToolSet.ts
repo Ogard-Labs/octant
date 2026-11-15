@@ -10,11 +10,15 @@ export interface AppManagedToolSet {
   readonly definitions: ReadonlyArray<ProviderToolDefinition>;
   /**
    * The native harness's own search grant for this turn: the provider's
-   * built-in web search the host's data policy and the thread's taint allow.
-   * Carried through every set that combines or wraps this one, and sent with
-   * the turn; absent offers none.
+   * built-in web search the research route, the thread's taint, and its level
+   * allow. It is decided when the turn is sent, not when its tools are
+   * composed: preparing the turn's context (a mention of a marked thread) or
+   * settling an owed outside-content mark can taint the thread in between,
+   * and a grant read earlier would offer built-in search beside that content.
+   * Carried through every set that combines or wraps this one; absent offers
+   * none.
    */
-  readonly providerWebSearch?: ProviderTurnInput["providerWebSearch"];
+  readonly providerWebSearch?: () => ProviderTurnInput["providerWebSearch"];
   readonly close?: () => Promise<void>;
   readonly execute: (input: {
     readonly name: string;
@@ -37,6 +41,18 @@ export interface AppManagedToolSet {
     /** Set when the call created a routine; the tool row carries what was created. */
     readonly routine?: ThreadRoutineReceipt;
   }>;
+}
+
+/**
+ * The provider-search grant a turn is sent with, decided at that moment: every
+ * turn runner reads it here, in the expression that builds its send, after
+ * the turn's context and any owed outside-content mark are settled.
+ */
+export function providerWebSearchAtSend(
+  set: AppManagedToolSet | undefined,
+): Pick<ProviderTurnInput, "providerWebSearch"> {
+  const providerWebSearch = set?.providerWebSearch?.();
+  return providerWebSearch === undefined ? {} : { providerWebSearch };
 }
 
 /**

@@ -189,34 +189,40 @@ describe("native harness composition", () => {
     };
     const atFullAccess = { withdrawAfterFirstStep: false };
     const offers = {
-      chat: composition.forChat({ thread: chatThread, windowId: "w" })?.providerWebSearch,
-      work: composition.forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" })
-        ?.providerWebSearch,
-      code: composition.forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" })
-        ?.providerWebSearch,
-      serverWork: composition.forServerWork({ thread: workThread, ...serverPorts })
-        ?.providerWebSearch,
-      serverCode: composition.forServerCode({ thread, windowId: "w", ...serverPorts })
-        ?.providerWebSearch,
-      child: composition.forAgentRun({
-        run: {
-          id: thread.id,
-          parentThreadId: "parent",
-          routingReceipt: { mode: "chat", selectedProviderInstanceId: thread.providerInstanceId },
-          workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
-        } as never,
-        authority: {
-          filesystem: false,
-          shell: false,
-          git: false,
-          network: true,
-          tools: true,
-          subagents: false,
-          executionPolicy: "full-access",
-          permissionPersistence: "current-session",
-        },
-        projectRoot: "/unused",
-      })?.providerWebSearch,
+      chat: composition.forChat({ thread: chatThread, windowId: "w" })?.providerWebSearch?.(),
+      work: composition
+        .forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch?.(),
+      code: composition
+        .forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch?.(),
+      serverWork: composition
+        .forServerWork({ thread: workThread, ...serverPorts })
+        ?.providerWebSearch?.(),
+      serverCode: composition
+        .forServerCode({ thread, windowId: "w", ...serverPorts })
+        ?.providerWebSearch?.(),
+      child: composition
+        .forAgentRun({
+          run: {
+            id: thread.id,
+            parentThreadId: "parent",
+            routingReceipt: { mode: "chat", selectedProviderInstanceId: thread.providerInstanceId },
+            workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+          } as never,
+          authority: {
+            filesystem: false,
+            shell: false,
+            git: false,
+            network: true,
+            tools: true,
+            subagents: false,
+            executionPolicy: "full-access",
+            permissionPersistence: "current-session",
+          },
+          projectRoot: "/unused",
+        })
+        ?.providerWebSearch?.(),
     };
     expect(offers).toEqual({
       // Chat is decided below Full access: it has no execution policy of its own.
@@ -226,6 +232,45 @@ describe("native harness composition", () => {
       serverWork: atFullAccess,
       serverCode: atFullAccess,
       child: undefined,
+    });
+  });
+
+  it("decides the provider's own search when the turn is sent, keeping it at Full access on a thread marked after composing", () => {
+    const tainted = new Set<string>();
+    let codePolicy: ProviderExecutionPolicy = "full-access";
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: () => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: codePolicy,
+            approvalSatisfied: codePolicy === "full-access",
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      hostId: authority.hostId,
+      readThreadTaint: (threadId) => tainted.has(threadId),
+      readCodeExecutionPolicy: () => codePolicy,
+      providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-11-15T00:00:00.000Z",
+    });
+    const code = composition.forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" });
+    // Marked after its tools were composed, as preparing its context can.
+    tainted.add(String(thread.id));
+    const atFullAccess = code?.providerWebSearch?.();
+    codePolicy = "approval-gated";
+    const belowFullAccess = code?.providerWebSearch?.();
+    expect({ atFullAccess, belowFullAccess }).toEqual({
+      atFullAccess: { withdrawAfterFirstStep: false },
+      belowFullAccess: undefined,
     });
   });
 
