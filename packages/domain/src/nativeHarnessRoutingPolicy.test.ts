@@ -167,4 +167,28 @@ describe("native harness route resolution", () => {
     });
     expect(decision).toMatchObject({ kind: "unroutable", reason: "slot-empty" });
   });
+
+  it("steps past a model the harness cannot run and records why", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "lead",
+      host: configured,
+      facts: (candidate) => ({ ready: true, harnessRunnable: candidate !== big }),
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "failure-fallback", candidate: spare });
+    expect(decision.rejected).toEqual([{ candidate: big, reasons: ["not-harness-runnable"] }]);
+  });
+
+  it("never runs a role whose every model is outside the harness", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "lead",
+      host: configured,
+      facts: () => ({ ready: true, harnessRunnable: false }),
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "unroutable", reason: "no-eligible-candidate" });
+    expect(decision.rejected.every((entry) => entry.reasons.includes("not-harness-runnable"))).toBe(
+      true,
+    );
+  });
 });

@@ -19,6 +19,8 @@ const CIRCUIT_OPEN_MS = 60_000;
 export interface NativeHarnessRouterOptions {
   readonly store: Pick<NativeHarnessRoutingStore, "host" | "projectOverride">;
   readonly isReady: (candidate: NativeHarnessSlotCandidate) => boolean;
+  /** Whether the harness itself can run the candidate (a role may list any provider's model). */
+  readonly canRunInHarness?: (candidate: NativeHarnessSlotCandidate) => boolean;
   readonly now?: () => number;
 }
 
@@ -62,6 +64,7 @@ export class NativeHarnessRouter {
       const active = cooldown !== undefined && cooldown.untilMs > nowMs;
       return {
         ready: this.#options.isReady(candidate) && (input.isEligible?.(candidate) ?? true),
+        harnessRunnable: this.#options.canRunInHarness?.(candidate) ?? true,
         ...(active
           ? {
               coolingDown: {
