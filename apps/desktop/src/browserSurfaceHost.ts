@@ -5472,10 +5472,105 @@ async function hasSensitiveDocument(
     }
     return false;
   } catch {
-    // If any frame cannot be inspected, screenshot and extracted evidence
-    // fail closed instead of risking credential disclosure.
-    return true;
+    // A frame its page sandboxed without scripts refuses the probe ("Script
+    // not run"), and news and shopping pages carry such frames for their ads:
+    // failing closed on them withheld every picture of those pages. The
+    // debugger reads the DOM whatever a frame's script settings, so the page
+    // is checked there, and any frame it cannot read still fails closed.
+    return await domHoldsCredentialField(view).catch(() => true);
   }
+}
+
+/** Frame sessions the DOM check follows before it gives up and fails closed. */
+const MAX_CREDENTIAL_CHECK_FRAME_SESSIONS = 64;
+
+/**
+ * Whether any document of the page, read from the debugger's DOM, holds a
+ * credential field. A frame on another site is its own target and is read
+ * through its own session; a frame element whose document it cannot reach
+ * counts as holding one.
+ */
+async function domHoldsCredentialField(view: BrowserSurfaceViewPort): Promise<boolean> {
+  const targets = frameTargetsOf(view.webContents.debugger);
+  return withDebugger(view, async (send) => {
+    const pending: Array<string | undefined> = [undefined];
+    const read = new Set<string>();
+    while (pending.length > 0) {
+      const sessionId = pending.pop();
+      const document = await send("DOM.getDocument", { depth: -1, pierce: true }, sessionId);
+      const scan = credentialFieldScan(document);
+      if (scan.status !== "clear") return true;
+      if (scan.remoteFrameIds.length === 0) continue;
+      const attached = await autoAttachSurfaceFrames(send, targets, sessionId);
+      for (const frameId of scan.remoteFrameIds) {
+        const remote = attached.get(frameId);
+        if (remote === undefined) return true;
+        if (read.has(remote.sessionId)) continue;
+        if (read.size >= MAX_CREDENTIAL_CHECK_FRAME_SESSIONS) return true;
+        read.add(remote.sessionId);
+        pending.push(remote.sessionId);
+      }
+    }
+    return false;
+  });
+}
+
+/**
+ * One session's DOM, as `DOM.getDocument` with `pierce` returns it: its
+ * shadow roots and the documents of frames in its own process are inside it,
+ * and a frame on another site appears only as a frame element with an id.
+ */
+function credentialFieldScan(
+  value: unknown,
+):
+  | { readonly status: "clear"; readonly remoteFrameIds: ReadonlyArray<string> }
+  | { readonly status: "holds" | "unreadable" } {
+  if (!scriptRecord(value) || !scriptRecord(value.root)) return { status: "unreadable" };
+  const pending: unknown[] = [value.root];
+  const remoteFrameIds: string[] = [];
+  let count = 0;
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (++count > 50_000 || !scriptRecord(node) || typeof node.nodeName !== "string")
+      return { status: "unreadable" };
+    const name = node.nodeName.toUpperCase();
+    const attributes = Array.isArray(node.attributes) ? node.attributes : [];
+    const attribute = (wanted: string): string | undefined => {
+      for (let index = 0; index + 1 < attributes.length; index += 2) {
+        const key: unknown = attributes[index];
+        const text: unknown = attributes[index + 1];
+        if (typeof key === "string" && key.toLowerCase() === wanted && typeof text === "string")
+          return text;
+      }
+      return undefined;
+    };
+    const editable = attribute("contenteditable") === "true";
+    if (name === "INPUT" || name === "TEXTAREA" || editable) {
+      const hint = ["type", "autocomplete", "name", "id", "aria-label"]
+        .map((key) => attribute(key) ?? "")
+        .join(" ")
+        .toLowerCase();
+      if (
+        /(?:password|passcode|one-time-code|otp|webauthn|cc-|credit|card|ssn|secret|token|api.?key)/.test(
+          hint,
+        )
+      )
+        return { status: "holds" };
+    }
+    if (scriptRecord(node.contentDocument)) pending.push(node.contentDocument);
+    else if (
+      typeof node.frameId === "string" &&
+      ["IFRAME", "FRAME", "OBJECT", "EMBED"].includes(name)
+    )
+      remoteFrameIds.push(node.frameId);
+    for (const field of ["children", "shadowRoots"]) {
+      const children = node[field];
+      if (children === undefined) continue;
+      if (!Array.isArray(children)) return { status: "unreadable" };
+      pending.push(...children);
+    }
+  }
+  return { status: "clear", remoteFrameIds };
 }
 
 function boundedText(value: string, limit: number): string {

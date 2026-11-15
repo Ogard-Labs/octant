@@ -2190,6 +2190,76 @@ describe("BrowserSurfaceHost", () => {
     expect(created.webContents.capturePage).not.toHaveBeenCalled();
   });
 
+  describe("a page with a frame sandboxed without scripts", () => {
+    // Ad frames on news pages are sandboxed without scripts, so the probe's
+    // script never runs there; the page is checked through the debugger's DOM.
+    const sandboxedPage = (frameDocument: unknown) => {
+      const created = view();
+      Object.assign(created.webContents.mainFrame, {
+        framesInSubtree: [
+          { executeJavaScript: vi.fn(async () => false) },
+          { executeJavaScript: vi.fn(async () => Promise.reject(new Error("Script not run"))) },
+        ],
+      });
+      vi.mocked(created.webContents.debugger.sendCommand).mockImplementation(async (method) =>
+        method === "DOM.getDocument"
+          ? {
+              root: {
+                nodeName: "#document",
+                children: [
+                  {
+                    nodeName: "IFRAME",
+                    frameId: "ad",
+                    attributes: ["sandbox", ""],
+                    contentDocument: frameDocument,
+                  },
+                ],
+              },
+            }
+          : undefined,
+      );
+      return created;
+    };
+    const peekOf = async (created: BrowserSurfaceViewPort) => {
+      const host = createBrowserSurfaceHost({ createView: () => created });
+      await host.createContext({
+        contextId,
+        owner: { windowId: "window-a", threadId },
+        policy: {
+          profileMode: "isolated",
+          allowedOrigins: ["https://example.com"],
+          credentialFieldProtection: true,
+          maxConcurrentTabs: 1,
+          sessionTimeoutMs: 300_000,
+        },
+      });
+      return host.peek(contextId);
+    };
+
+    it("still gives the page's picture when no document holds a credential field", async () => {
+      const created = sandboxedPage({
+        nodeName: "#document",
+        children: [{ nodeName: "INPUT", attributes: ["type", "search", "name", "q"] }],
+      });
+
+      await expect(peekOf(created)).resolves.toMatchObject({
+        screenshotDataUrl: "data:image/jpeg;base64,AQID",
+      });
+      expect(created.webContents.debugger.isAttached()).toBe(false);
+    });
+
+    it("withholds the picture when the sandboxed frame holds a credential field", async () => {
+      const created = sandboxedPage({
+        nodeName: "#document",
+        children: [{ nodeName: "INPUT", attributes: ["type", "password"] }],
+      });
+
+      const peeked = await peekOf(created);
+
+      expect(peeked.screenshotDataUrl).toBeUndefined();
+    });
+  });
+
   it("keeps the native context reusable after an agent closes its current tab", async () => {
     const created = view();
     const host = createBrowserSurfaceHost({ createView: () => created });
