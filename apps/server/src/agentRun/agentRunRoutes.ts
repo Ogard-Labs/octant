@@ -1230,6 +1230,7 @@ function serializeEntry(
     parentThreadId: entry.parentThreadId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
     ...(dependsOn.length === 0 ? {} : { dependsOn }),
+    ...(entry.compareGroup === undefined ? {} : { compareGroup: entry.compareGroup }),
     role: entry.role,
     task: entry.task,
     lifecycleStatus: entry.lifecycleStatus,

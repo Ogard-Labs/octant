@@ -484,6 +484,13 @@ export const AgentRunDependencies = Schema.Array(AgentRunId).pipe(
 );
 export type AgentRunDependencies = typeof AgentRunDependencies.Type;
 
+/**
+ * A label the parent agent may give sibling delegations so a person can
+ * compare them side by side. The host only groups by it; it ranks nothing.
+ */
+export const AgentRunCompareGroup = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+export type AgentRunCompareGroup = typeof AgentRunCompareGroup.Type;
+
 export const AgentRun = Schema.Struct({
   id: AgentRunId,
   /** Absent on legacy runs, which belong to generation 1. */
@@ -498,6 +505,8 @@ export const AgentRun = Schema.Struct({
   parentRunId: Schema.optional(AgentRunId),
   /** Optional so runs journaled before dependencies existed replay unchanged. */
   dependsOn: Schema.optional(AgentRunDependencies),
+  /** Optional so runs journaled before compare groups existed replay unchanged. */
+  compareGroup: Schema.optional(AgentRunCompareGroup),
   depth: Schema.Int.pipe(Schema.nonNegative(), Schema.lessThanOrEqualTo(2)),
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
@@ -544,6 +553,7 @@ export const AgentRunCommand = Schema.Union(
     parentThreadId: AgentRunParentThreadId,
     parentRunId: Schema.optional(AgentRunId),
     dependsOn: Schema.optional(AgentRunDependencies),
+    compareGroup: Schema.optional(AgentRunCompareGroup),
     role: AgentRunRole,
     task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
     creationPosture: AgentRunCreationPosture,

@@ -83,6 +83,8 @@ export interface AgentRunParentSummaryClientEntry {
   readonly parentRunId?: AgentRunId;
   /** The sibling runs this one waits for, under the same parent thread. */
   readonly dependsOn?: ReadonlyArray<AgentRunId>;
+  /** The parent agent's label for siblings shown side by side; the host ranks nothing. */
+  readonly compareGroup?: string;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;

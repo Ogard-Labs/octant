@@ -68,7 +68,7 @@ const MAX_WAIT_RUN_IDS = 16;
 const AGENTS_TOOL_DEFINITION = {
   name: AGENTS_TOOL_NAME,
   description:
-    "Delegate parts of this task to child agent runs the host owns and supervises; each appears in the Agents surface, where the person can watch and stop it. capabilities lists the provider models you may target, the enabled providers you may not with why (unavailableTargets), and whether delegation is open; pick a target from it rather than naming one you have not seen. delegate starts one child with a bounded, standalone task (objective, expected output, boundaries) and returns its runId; independent children run in parallel, and after names existing siblings whose results a child needs, so it starts once they all completed and receives their replies. status lists this thread's children without consuming their replies. wait blocks up to timeoutMs for one child (runId) and returns its reply once it completed, or for several (runIds) until the first settles (waitFor any) or all have (waitFor all), returning each settled reply and the ids still pending (timeoutMs 0 reads finished replies without waiting). A child's reply counts as outside content, so below Full access this thread cannot delegate again after one until a person reviews it. cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status or wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings, the thread has read outside content below Full access, or it is paused.",
+    "Delegate parts of this task to child agent runs the host owns and supervises; each appears in the Agents surface, where the person can watch and stop it. capabilities lists the provider models you may target, the enabled providers you may not with why (unavailableTargets), and whether delegation is open; pick a target from it rather than naming one you have not seen. delegate starts one child with a bounded, standalone task (objective, expected output, boundaries) and returns its runId; independent children run in parallel, and after names existing siblings whose results a child needs, so it starts once they all completed and receives their replies. compareGroup gives sibling children the same short label when a person should compare their results side by side; the host only groups them and ranks nothing. status lists this thread's children without consuming their replies. wait blocks up to timeoutMs for one child (runId) and returns its reply once it completed, or for several (runIds) until the first settles (waitFor any) or all have (waitFor all), returning each settled reply and the ids still pending (timeoutMs 0 reads finished replies without waiting). A child's reply counts as outside content, so below Full access this thread cannot delegate again after one until a person reviews it. cancel stops one of this thread's children. follow-up continues a completed child in its saved session using runId, expectedVersion from status or wait, and an explicit message (at most 4096 characters); unsupported continuity is refused. Omit providerInstanceId and modelId to use the configured role slot. Delegation is refused when subagents are off in Settings, the thread has read outside content below Full access, or it is paused.",
   inputSchema: {
     type: "object",
     properties: {
@@ -109,6 +109,13 @@ const AGENTS_TOOL_DEFINITION = {
         maxItems: MAX_AGENT_RUN_DEPENDENCIES,
         uniqueItems: true,
         description: "Existing sibling run IDs whose successful results this child needs.",
+      },
+      compareGroup: {
+        type: "string",
+        minLength: 1,
+        maxLength: 64,
+        description:
+          "Same label on sibling delegate calls whose results the person should compare side by side.",
       },
       includeParentContext: {
         type: "boolean",
@@ -199,6 +206,7 @@ interface AgentsToolInput {
   readonly contextInputPolicy?: ConversationInputPolicy;
   readonly reasoning?: string;
   readonly after?: ReadonlyArray<string>;
+  readonly compareGroup?: string;
   readonly targetMemberId?: string;
   readonly targetProjectId?: string;
   readonly runId?: string;
@@ -268,6 +276,14 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     (!Array.isArray(after) || !after.every((id): id is string => typeof id === "string"))
   )
     return undefined;
+  const compareGroup = record.compareGroup;
+  if (
+    compareGroup !== undefined &&
+    (typeof compareGroup !== "string" ||
+      compareGroup.trim().length === 0 ||
+      compareGroup.trim().length > 64)
+  )
+    return undefined;
   const includeParentContext = record.includeParentContext;
   if (includeParentContext !== undefined && typeof includeParentContext !== "boolean")
     return undefined;
@@ -327,6 +343,7 @@ function parseInput(inputJson: string): AgentsToolInput | undefined {
     ...(contextInputPolicy === undefined ? {} : { contextInputPolicy }),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(after === undefined ? {} : { after }),
+    ...(compareGroup === undefined ? {} : { compareGroup: compareGroup.trim() }),
     ...(targetMemberId === undefined ? {} : { targetMemberId }),
     ...(targetProjectId === undefined ? {} : { targetProjectId }),
     ...(runId === undefined ? {} : { runId }),
@@ -488,6 +505,7 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
                   ? {}
                   : { version: run.version, generation: run.generation ?? 1 }),
                 ...(run?.dependsOn === undefined ? {} : { after: run.dependsOn.map(String) }),
+                ...(entry.compareGroup === undefined ? {} : { compareGroup: entry.compareGroup }),
                 ...(run?.routingReceipt?.rawReasoning === undefined
                   ? {}
                   : { reasoning: run.routingReceipt.rawReasoning }),

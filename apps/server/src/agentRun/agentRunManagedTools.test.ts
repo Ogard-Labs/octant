@@ -430,6 +430,28 @@ describe("agents managed tools", () => {
     });
   });
 
+  it("carries a delegation's trimmed compare group into the admitted child and refuses an overlong one", async () => {
+    const admitted: unknown[] = [];
+    const { set } = tool({
+      admitted: {
+        admit: (command) => {
+          admitted.push(command);
+          return { kind: "run-accepted", run: queuedRun() } as never;
+        },
+      },
+    });
+    await call(set, { operation: "delegate", task: "Summarize the diff", compareGroup: " plans " });
+    expect(admitted[0]).toMatchObject({ kind: "request-agent-run", compareGroup: "plans" });
+
+    const overlong = await call(set, {
+      operation: "delegate",
+      task: "Summarize the diff",
+      compareGroup: "x".repeat(65),
+    });
+    expect(overlong.result).toMatchObject({ status: "error", error: "invalid-agents-input" });
+    expect(admitted).toHaveLength(1);
+  });
+
   it("refuses an unavailable role route instead of silently inheriting the parent", async () => {
     const { set } = tool({ noRouting: true });
     const outcome = await call(set, {

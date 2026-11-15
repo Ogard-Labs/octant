@@ -402,6 +402,7 @@ export function buildAgentRunRequestCommand(
     parentThreadId: request.parentThreadId,
     ...(request.parentRunId === undefined ? {} : { parentRunId: request.parentRunId }),
     ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
+    ...(request.compareGroup === undefined ? {} : { compareGroup: request.compareGroup }),
     role: request.role,
     task: request.task,
     creationPosture: input.creationPosture,

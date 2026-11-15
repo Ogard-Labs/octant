@@ -76,6 +76,8 @@ export interface AgentRunDelegationInput {
   readonly includeParentContext?: boolean;
   readonly contextInputPolicy?: ConversationInputPolicy;
   readonly after?: ReadonlyArray<string>;
+  /** Sibling children with the same label are shown side by side; the host ranks nothing. */
+  readonly compareGroup?: string;
   /** A roster member that runs the child on its own host instead of this one. */
   readonly targetMemberId?: string;
   /** The member's own id for the Project to run in; required with a target member. */
@@ -256,6 +258,7 @@ export async function startAgentRunDelegation(
       input.modelId !== undefined ||
       input.reasoning !== undefined ||
       input.after !== undefined ||
+      input.compareGroup !== undefined ||
       input.includeParentContext === true ||
       input.contextInputPolicy !== undefined
     )
@@ -301,6 +304,7 @@ export async function startAgentRunDelegation(
         ? {}
         : { contextInputPolicy: input.contextInputPolicy }),
       ...(input.after === undefined ? {} : { dependsOn: input.after }),
+      ...(input.compareGroup === undefined ? {} : { compareGroup: input.compareGroup }),
     });
   } catch {
     return { status: "refused", reason: "invalid-delegation" };
