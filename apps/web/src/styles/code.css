@@ -458,7 +458,7 @@ html:not([data-octant-reduced-transparency="true"])
 }
 
 .code-file-explorer__search input {
-  height: 30px;
+  height: 28px;
   padding: 0 32px 0 var(--oct-space-8);
   border-color: var(--input);
   background: var(--oct-surface);
@@ -576,7 +576,6 @@ html:not([data-octant-reduced-transparency="true"])
    edge the sidebar and dock tabs draw. */
 .code-file-explorer__entry--file[aria-selected="true"] {
   background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
   color: var(--oct-fg);
 }
 
@@ -3049,7 +3048,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-items: center;
   gap: var(--oct-space-3);
   padding: 0 var(--oct-space-3);
-  color: var(--oct-meta);
+  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
 
@@ -3063,6 +3062,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-editor-pane__crumb-note {
   flex: none;
+  margin-inline-start: auto;
   white-space: nowrap;
 }
 
@@ -3130,10 +3130,13 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-files-viewer__empty {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
   margin: 0;
   padding: var(--oct-space-3);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
 }
 
 .code-files-viewer__tree {
@@ -3153,6 +3156,18 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-files-viewer__tree .code-file-explorer-panel {
   min-height: 0;
   overflow: auto;
+}
+
+/* The tree column: 24px rows hung from a 12px inset, and a 28px filter field
+   directly under the tab bar's height with no gap above it. */
+.code-files-viewer__tree .code-file-explorer {
+  --oct-file-inset: var(--oct-space-3);
+}
+
+.code-files-viewer__tree .code-file-explorer__head {
+  min-height: 36px;
+  padding-block: var(--oct-space-1);
+  border-bottom: 0;
 }
 
 /* Too narrow for both: the tree and the editor take turns, the strip staying

@@ -357,14 +357,14 @@ describe("CodeFileExplorer", () => {
     expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
   });
 
-  it("keeps the docked head at the rail height: 4px, the 30px field, then 3px and the hairline, centred", () => {
-    // The head's minimum height is the rail's; the 30px field is centred in it,
+  it("keeps the docked head at the rail height: 4px, the 28px field, then 3px and the hairline, centred", () => {
+    // The head's minimum height is the rail's; the 28px field is centred in it,
     // and the 3px below plus the hairline keep a plain 4px from overflowing it.
     expect(systemStylesheet).toMatch(/--oct-rail-pad-end:\s*calc\(var\(--oct-space-1\) - 1px\)/);
     expect(dockStylesheet).toMatch(
       /padding:\s*4px var\(--oct-space-3\) var\(--oct-rail-pad-end\);/,
     );
-    expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*30px/);
+    expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*28px/);
   });
 
   it("keeps focus on a folder when expanding or collapsing crosses the virtualization threshold", async () => {

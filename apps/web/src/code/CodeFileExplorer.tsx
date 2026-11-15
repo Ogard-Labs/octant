@@ -522,12 +522,6 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
         )}
       </div>
 
-      {props.truncated === true ? (
-        <p className="code-file-explorer__status" role="status">
-          Octant listed part of this repository. The file tree is incomplete.
-        </p>
-      ) : null}
-
       {incomplete ? (
         <p className="code-file-explorer__status" role="status">
           Showing the first {MAX_CODE_FILE_EXPLORER_ENTRIES.toLocaleString("en")} entries. The file

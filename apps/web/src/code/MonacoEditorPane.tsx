@@ -817,7 +817,7 @@ function AvailableEditor(
         </span>
         {!writable ? <span className="code-editor-pane__crumb-note">Plan · read-only</span> : null}
         <span className="code-editor-pane__crumb-note">
-          Checkout: {props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
+          {props.checkoutLabel ?? String(checkoutId).slice(0, 8)}
         </span>
       </nav>
 

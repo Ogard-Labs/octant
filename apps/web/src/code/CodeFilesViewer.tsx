@@ -237,7 +237,10 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
         </div>
         <div className="code-files-viewer__body">
           {active === undefined || props.view === undefined ? (
-            <p className="code-files-viewer__empty">Choose a file to open it here.</p>
+            <p className="code-files-viewer__empty">
+              <File aria-hidden="true" size={16} />
+              Choose a file to open it here.
+            </p>
           ) : (
             <ActiveFile
               controller={props.controller}
