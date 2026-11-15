@@ -93,7 +93,12 @@ import {
 } from "@octant/domain";
 import { DESKTOP_IPC_CHANNELS } from "./ipcChannels";
 import { DesktopDownloadHold, type DesktopDownloadItemPort } from "./browserDownloadHold";
-import { fetchFaviconDataUrl, firstHttpIcon, type FaviconSession } from "./browserFavicon";
+import {
+  FAVICON_MIN_INTERVAL_MS,
+  fetchFaviconDataUrl,
+  firstHttpIcon,
+  type FaviconSession,
+} from "./browserFavicon";
 import {
   autoAttachSurfaceFrames,
   scriptString,
@@ -432,6 +437,13 @@ interface OwnedTab {
   favicon?:
     | { readonly url: string; readonly pageOrigin: string; readonly dataUrl: string | undefined }
     | undefined;
+  /**
+   * The icon fetch in flight and when it began. A page chooses its icon's
+   * address, so it could ask for a new one in a loop: one fetch runs per tab,
+   * a newer declaration ends the older fetch, and a declaration that arrives
+   * inside the minimum interval is not fetched.
+   */
+  faviconFetch?: { readonly controller: AbortController; readonly startedAt: number } | undefined;
   readonly view: BrowserSurfaceViewPort;
   documentRevision: number;
   /** Electron may remove the view getter before the WebContents destroyed callback. */
@@ -1613,26 +1625,49 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       const declared = args.find(Array.isArray) as readonly unknown[] | undefined;
       const iconUrl = firstHttpIcon(declared ?? []);
       if (iconUrl === undefined) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
         if (tab.favicon !== undefined) {
           tab.favicon = undefined;
           publish(contextId, owned);
         }
         return;
       }
-      if (tab.favicon?.url === iconUrl) return;
+      if (view.webContents.isDestroyed()) return;
+      const pageOrigin = originOf(view.webContents.getURL()) ?? "";
+      // The same address declared by the same site is not fetched again. A
+      // different site declaring it is a new page: its icon is fetched for it,
+      // so the earlier site's image is never kept for the tab's next page.
+      if (tab.favicon?.url === iconUrl && tab.favicon.pageOrigin === pageOrigin) return;
       const session = view.webContents.session;
-      if (
-        session.fetch === undefined ||
-        !originAllowed(iconUrl, owned.policy.allowedOrigins) ||
-        view.webContents.isDestroyed()
-      ) {
+      if (session.fetch === undefined || !originAllowed(iconUrl, owned.policy.allowedOrigins)) {
+        tab.faviconFetch?.controller.abort();
+        tab.faviconFetch = undefined;
         tab.favicon = undefined;
         return;
       }
-      const pageOrigin = originOf(view.webContents.getURL()) ?? "";
+      const now = Date.now();
+      if (
+        tab.faviconFetch !== undefined &&
+        now - tab.faviconFetch.startedAt < FAVICON_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      tab.faviconFetch?.controller.abort();
+      const controller = new AbortController();
+      tab.faviconFetch = { controller, startedAt: now };
       tab.favicon = { url: iconUrl, pageOrigin, dataUrl: undefined };
-      void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl).then((dataUrl) => {
-        if (tab.favicon?.url !== iconUrl || dataUrl === undefined) return;
+      void fetchFaviconDataUrl({ fetch: session.fetch.bind(session) }, iconUrl, {
+        signal: controller.signal,
+      }).then((dataUrl) => {
+        if (
+          controller.signal.aborted ||
+          tab.favicon?.url !== iconUrl ||
+          tab.favicon.pageOrigin !== pageOrigin ||
+          dataUrl === undefined
+        ) {
+          return;
+        }
         tab.favicon = { url: iconUrl, pageOrigin, dataUrl };
         publish(contextId, owned);
       });

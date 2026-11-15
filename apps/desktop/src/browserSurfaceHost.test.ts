@@ -423,7 +423,7 @@ describe("BrowserSurfaceHost", () => {
         if (name === "page-favicon-updated") listener({}, [icon]);
       await vi.waitFor(() => expect(fetch.mock.calls.length).toBeLessThanOrEqual(1));
       await new Promise((resolve) => setTimeout(resolve, 10));
-      return { fetch, host };
+      return { created, fetch, host };
     }
 
     it("shows the declared icon of an admitted site in the preview read, fetched once", async () => {
@@ -434,6 +434,21 @@ describe("BrowserSurfaceHost", () => {
         expect(peeked.faviconDataUrl).toBe(
           `data:image/png;base64,${Buffer.from(PNG).toString("base64")}`,
         );
+      } finally {
+        await host.closeAll();
+      }
+    });
+
+    it("starts one fetch when a page rewrites its icon's address in a loop", async () => {
+      const { created, fetch, host } = await withIcon("https://example.com/favicon.png?n=0");
+      try {
+        for (let n = 1; n <= 5; n += 1) {
+          for (const [name, listener] of vi.mocked(created.webContents.on).mock.calls)
+            if (name === "page-favicon-updated")
+              listener({}, [`https://example.com/favicon.png?n=${String(n)}`]);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        expect(fetch).toHaveBeenCalledTimes(1);
       } finally {
         await host.closeAll();
       }

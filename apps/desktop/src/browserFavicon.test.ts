@@ -93,6 +93,40 @@ describe("a page's favicon", () => {
     ).toBeUndefined();
   });
 
+  it("refuses a redirect rather than following it to an address nobody checked", async () => {
+    const own = session(async () => response(PNG));
+    await fetchFaviconDataUrl(own, "https://example.com/i.png");
+    expect(own.fetch).toHaveBeenCalledWith(
+      "https://example.com/i.png",
+      expect.objectContaining({ redirect: "error" }),
+    );
+    // What the network stack does with a redirect in that mode: the fetch fails.
+    const redirecting: FaviconSession = {
+      fetch: async () => {
+        throw new TypeError("net::ERR_FAILED");
+      },
+    };
+    expect(await fetchFaviconDataUrl(redirecting, "https://example.com/i.png")).toBeUndefined();
+    // And a response that says it was redirected anyway is not kept.
+    const followed = session(async () => ({ ...response(PNG), redirected: true }) as Response);
+    expect(await fetchFaviconDataUrl(followed, "https://example.com/i.png")).toBeUndefined();
+  });
+
+  it("stops a fetch the caller ends, as when the page declares another icon", async () => {
+    const controller = new AbortController();
+    const hung: FaviconSession = {
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    };
+    const pending = fetchFaviconDataUrl(hung, "https://example.com/i.png", {
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect(await pending).toBeUndefined();
+  });
+
   it("takes the first http or https icon the page declares", () => {
     expect(
       firstHttpIcon(["data:image/png;base64,AA", "ftp://x/i.ico", "https://a.test/i.png"]),

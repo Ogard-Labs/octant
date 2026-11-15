@@ -450,7 +450,12 @@ A Browser page's favicon is the one image the desktop host fetches for the
 person's tab strip. On the page's `page-favicon-updated` the host takes the first
 http(s) icon address and fetches it once, through the page's own session (so it
 follows the profile and network rules the page already has, without the page's
-cookies), only from a site the context admits for the page itself. The fetch has
+cookies), only from a site the context admits for the page itself. A redirect is
+refused, not followed: only the declared address is checked against the admitted
+sites, and an admitted site must not be able to send the host on to an address
+the page is kept from, such as one on this computer or its network. One fetch
+runs per tab; a newer declaration ends the older fetch, and a page that rewrites
+its icon address in a loop starts at most one fetch a second. The fetch has
 a 5 second timeout and a 64 KB cap, accepts only PNG, ICO, JPEG, GIF, WebP and SVG
 by sniffing the bytes (the declared type and the address are not trusted), and
 keeps the result as a `data:` URL in memory for the tab, refetched only when the

@@ -20,10 +20,17 @@ const IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/svg+xml",
 ]);
 
+/** A page may start at most one icon fetch per tab in this long. */
+export const FAVICON_MIN_INTERVAL_MS = 1_000;
+
 export interface FaviconSession {
   fetch(
     url: string,
-    init: { readonly signal: AbortSignal; readonly credentials: "omit" },
+    init: {
+      readonly signal: AbortSignal;
+      readonly credentials: "omit";
+      readonly redirect: "error";
+    },
   ): Promise<Response>;
 }
 
@@ -72,7 +79,11 @@ export function firstHttpIcon(favicons: readonly unknown[]): string | undefined 
 export async function fetchFaviconDataUrl(
   session: FaviconSession,
   iconUrl: string,
-  options: { readonly timeoutMs?: number } = {},
+  options: {
+    readonly timeoutMs?: number;
+    /** Ends the fetch early, as when the page declares another icon. */
+    readonly signal?: AbortSignal;
+  } = {},
 ): Promise<string | undefined> {
   let scheme: string;
   try {
@@ -83,12 +94,20 @@ export async function fetchFaviconDataUrl(
   if (scheme !== "http:" && scheme !== "https:") return undefined;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FAVICON_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  if (options.signal?.aborted === true) abort();
+  else options.signal?.addEventListener("abort", abort, { once: true });
   try {
+    // A redirect is refused, not followed: only the declared address was
+    // checked against the sites the page may reach, and an admitted site could
+    // otherwise send the host on to an address the page itself is kept from,
+    // such as one on this computer or its network.
     const response = await session.fetch(iconUrl, {
       signal: controller.signal,
       credentials: "omit",
+      redirect: "error",
     });
-    if (!response.ok || response.body === null) return undefined;
+    if (!response.ok || response.redirected || response.body === null) return undefined;
     const declared = (response.headers.get("content-type") ?? "")
       .split(";")[0]
       ?.trim()
@@ -122,5 +141,6 @@ export async function fetchFaviconDataUrl(
     return undefined;
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener("abort", abort);
   }
 }
