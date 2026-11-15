@@ -9,7 +9,7 @@
 //
 //   octant-windows-confine --container Octant.Confined.<32 hex>
 //     [--capability internetClient|privateNetworkClientServer]...
-//     [--grant-read PATH | --grant-modify PATH]... [--deny PATH]...
+//     [--grant-read PATH | --grant-modify PATH]...
 //     [--active-process-limit 1] --cwd PATH -- PROGRAM.exe [ARG]...
 //   octant-windows-confine --full-access --cwd PATH -- PROGRAM.exe [ARG]...
 //
@@ -50,7 +50,6 @@ struct Options {
   std::wstring container;
   std::vector<std::wstring> capabilities;
   std::vector<Grant> grants;
-  std::vector<std::wstring> denies;
   DWORD active_process_limit = 0;
   std::wstring cwd;
   std::vector<std::wstring> command;
@@ -102,9 +101,6 @@ bool parse(int argc, wchar_t** argv, Options& options) {
     } else if (flag == L"--grant-read" || flag == L"--grant-modify") {
       if (!drive_absolute(value)) return false;
       options.grants.push_back({value, flag == L"--grant-read" ? read_mask : modify_mask});
-    } else if (flag == L"--deny") {
-      if (!drive_absolute(value)) return false;
-      options.denies.push_back(value);
     } else if (flag == L"--active-process-limit") {
       if (value != L"1") return false;
       options.active_process_limit = 1;
@@ -120,7 +116,7 @@ bool parse(int argc, wchar_t** argv, Options& options) {
   if (options.full_access) {
     // Full access is full access: nothing confining may ride along with it.
     return options.container.empty() && options.capabilities.empty() && options.grants.empty() &&
-      options.denies.empty() && options.active_process_limit == 0;
+      options.active_process_limit == 0;
   }
   return valid_container(options.container);
 }
@@ -231,18 +227,18 @@ bool names_sid(const ACE_HEADER* header, PSID sid) {
   return false;
 }
 
-// Rewrites the object's explicit ACEs without any that name `sid`, with an
-// explicit deny for it first when `deny` is set. Measured on Windows Server
-// 2025: SetEntriesInAcl with DENY_ACCESS over an inherited grant for the same
-// SID left an allow entry with no rights and no deny, so the inherited grant
-// still read the file; and REVOKE_ACCESS leaves deny entries behind. Inherited
-// entries are left to the system, which re-merges them from the parent.
-Edit rewrite_explicit(const std::wstring& path, PSID sid, bool deny) {
+// Removes every explicit entry naming `sid` by rewriting the object's
+// explicit entries; inherited ones are left to the system, which re-merges
+// them from the parent. Measured on Windows Server 2025: REVOKE_ACCESS left
+// deny entries behind, and an explicit access-denied entry for the
+// container's SID, listed ahead of its inherited grant, did not stop the
+// container reading the file (cause not established), so the launcher writes
+// no deny entries and the host refuses such a launch instead.
+Edit remove_explicit(const std::wstring& path, PSID sid) {
   Object object;
   const Edit opened = open_object(path, object);
   if (opened != Edit::applied) return opened;
-  const bool directory = (object.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-  DWORD size = sizeof(ACL) + (deny ? sizeof(ACCESS_DENIED_ACE) - sizeof(DWORD) + GetLengthSid(sid) : 0);
+  DWORD size = sizeof(ACL);
   for (DWORD index = 0; index < object.dacl->AceCount; ++index) {
     void* raw = nullptr;
     if (!GetAce(object.dacl, index, &raw)) return Edit::failed;
@@ -252,10 +248,6 @@ Edit rewrite_explicit(const std::wstring& path, PSID sid, bool deny) {
   auto* updated = reinterpret_cast<PACL>(buffer.data());
   const DWORD revision = object.dacl->AclRevision > ACL_REVISION ? object.dacl->AclRevision : ACL_REVISION;
   if (!InitializeAcl(updated, size, revision)) return Edit::failed;
-  if (deny && !AddAccessDeniedAceEx(updated, revision,
-                directory ? static_cast<DWORD>(OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) : 0, FILE_ALL_ACCESS, sid)) {
-    return Edit::failed;
-  }
   for (DWORD index = 0; index < object.dacl->AceCount; ++index) {
     void* raw = nullptr;
     if (!GetAce(object.dacl, index, &raw)) return Edit::failed;
@@ -326,13 +318,6 @@ public:
     return edit == Edit::applied || edit == Edit::unnecessary;
   }
 
-  bool deny(const std::wstring& path) {
-    const Edit edit = rewrite_explicit(path, sid_, true);
-    if (edit == Edit::applied) edited_.push_back(path);
-    // Nothing exists there yet, so nothing is reachable through a grant.
-    return edit == Edit::applied || edit == Edit::missing;
-  }
-
   SECURITY_CAPABILITIES capabilities() {
     SECURITY_CAPABILITIES value{};
     value.AppContainerSid = sid_;
@@ -347,7 +332,7 @@ public:
   bool release() {
     bool clean = true;
     for (auto it = edited_.rbegin(); it != edited_.rend(); ++it) {
-      const Edit edit = rewrite_explicit(*it, sid_, false);
+      const Edit edit = remove_explicit(*it, sid_);
       if (edit != Edit::applied && edit != Edit::missing) {
         report(L"could not remove a grant");
         clean = false;
@@ -422,12 +407,6 @@ int run(const Options& options) {
     for (const auto& grant : options.grants) {
       if (!container.grant(grant)) {
         report(L"could not grant a folder to the container; the launch was refused");
-        return refused_exit;
-      }
-    }
-    for (const auto& path : options.denies) {
-      if (!container.deny(path)) {
-        report(L"could not deny a protected file to the container; the launch was refused");
         return refused_exit;
       }
     }

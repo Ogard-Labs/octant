@@ -141,9 +141,7 @@ describe("Windows confined launch plan", () => {
       processCreation: "denied",
       writeBoundRoot: false,
     });
-    expect(
-      windowsConfinedLauncherArguments(plan, ["D:\\tools\\git\\bin\\Cookies"], ["status", "--"]),
-    ).toEqual([
+    expect(windowsConfinedLauncherArguments(plan, ["status", "--"])).toEqual([
       "--container",
       `Octant.Confined.${LAUNCH_ID}`,
       "--capability",
@@ -156,8 +154,6 @@ describe("Windows confined launch plan", () => {
       `${HOME}\\AppData\\Local\\Temp\\octant-launch-1`,
       "--grant-read",
       "D:\\tools\\git\\bin",
-      "--deny",
-      "D:\\tools\\git\\bin\\Cookies",
       "--active-process-limit",
       "1",
       "--cwd",

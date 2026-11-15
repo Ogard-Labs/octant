@@ -18233,21 +18233,25 @@ starts the command, and removes what it added when the command ends.
   already holds, as on System32 and Program Files, writes nothing, so Octant
   never edits a folder it does not own. A grant on a junction or link is
   refused, because an entry set through it lands on what it points at.
-  Carve-outs inside a grant (isolated roots and extra denials) become
-  explicit deny entries, which Windows orders before inherited grants. The
-  launcher writes those entries, and removes its own at exit, by rewriting
-  the object's explicit entries itself: measured on Windows Server 2025, the
-  standard merge call given a deny for a SID that already held an inherited
-  grant there left an allow entry with no rights and no deny, so the file
-  stayed readable, and its revoke mode leaves deny entries behind.
+  A file is not carved out of a grant: on Windows Server 2025 the launcher
+  wrote an explicit access-denied entry (all file rights) for the container's
+  SID on a file beneath its grant, `icacls` listed it first, and the
+  container still read the file. Why is not established (the read ran in the
+  confined process, which opened the file after the entry was written), so
+  no design relies on a deny entry. So a carve-out the launch
+  asks for inside a grant (isolated roots and extra denials) refuses the
+  launch; one outside every grant needs nothing, since the container already
+  misses it. At exit the launcher removes its entries by rewriting the
+  object's explicit entries itself, because the standard revoke mode leaves
+  deny entries behind.
 - **Secret guard as an OS rule.** No grant is made at, inside or above a
   protected location; the plan refuses such a launch, so every protected file
   stays outside every grant and the container's default denial refuses it. A
   runtime's own account home is the one exception, from inside it, as on the
   other platforms. A pattern entry (browser stores under `AppData`) refuses a
   grant at or above its folder; a grant inside it with levels of the pattern
-  left is walked at launch (4,096 entries at most, or the launch is refused)
-  and each existing match gets a deny entry. A path the guard cannot spell is
+  left is walked at launch, and a match, or a walk past 4,096 entries,
+  refuses the launch. A path the guard cannot spell is
   refused: a share, device or drive-relative path, a rewritten name (`.`,
   `..`, a trailing dot or space, a stream) and an 8.3 short name, which opens
   the same folder under a spelling no entry names. A whole drive is never
@@ -18275,8 +18279,8 @@ starts the command, and removes what it added when the command ends.
   no per-launch rule is added). Writing an inheritable entry walks every
   existing file under the grant, and that cost on a large checkout is not
   measured. A pattern match created inside a grant after the launch starts
-  gets no deny entry: it can arise only in a grant inside a pattern entry's
-  folder, and a read grant cannot create one. A launcher killed outright leaves its entries and
+  is reachable: it can arise only in a grant inside a pattern entry's folder,
+  and a read grant cannot create one. A launcher killed outright leaves its entries and
   profile behind, naming a SID no later launch receives. The child inherits
   the launcher's environment, so its caller must point `TEMP` and `TMP` into
   the granted temporary directory. Interactive terminals (ConPTY) under the
@@ -18294,11 +18298,13 @@ starts the command, and removes what it added when the command ends.
   workflow builds the launcher on `windows-2025` and drives it through the
   server's own port against owned fixtures: exit-code relay, reads and writes
   inside the bound root, a read root that refuses writes, refusal of an
-  ungranted folder and of a file in the home folder, a deny entry on a
-  browser store beneath a grant, a child refused under the process limit and
-  allowed without it, no network without a capability against a reachable
-  network with one, the container's entry present while it runs and gone
-  after, and the whole tree ending when the launcher is killed. That runner
+  ungranted folder and of a file in the home folder (each by Windows'
+  access-denied answer), the port refusing a folder that holds a browser
+  store, a child refused by the job's quota under the process limit and
+  allowed without it, curl failing to resolve a host without a capability
+  and fetching the same page with one, the container's entry present while
+  it runs and gone after, and the whole tree ending when the launcher is
+  killed. That runner
   is an administrator account on Windows Server; an ordinary account, a
   desktop Windows release and a real provider remain unverified.
 

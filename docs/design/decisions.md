@@ -1998,7 +1998,7 @@ Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority,
 A confined launch on Windows runs in a fresh AppContainer with ACL grants and a kill-on-close job, applied by a fixed native launcher; the code is built dormant and every Windows launch stays refused until it has run a real provider on a person's Windows machine (maintainer decision, 2026-11-15).
 
 - The container is deny-by-default; grants name only the bound root and extra folders, the temporary directory and write roots, read roots and the program's folder, and a grant ALL APPLICATION PACKAGES already holds writes nothing.
-- The secret guard holds as an OS rule: no grant at, inside or above a protected location (a runtime's own account home excepted from inside it), deny entries on pattern matches found beneath a grant, and every path the guard cannot spell refused, 8.3 short names included.
+- The secret guard holds as an OS rule: no grant at, inside or above a protected location (a runtime's own account home excepted from inside it), a launch refused when a grant already holds a pattern match or a carve-out falls inside a grant (a deny entry measured unable to carve a file out of a grant), and every path the guard cannot spell refused, 8.3 short names included.
 - Plan and Chat get an active-process limit of one; the job ends the whole tree when the launcher ends, which is the Windows process-tree stop.
 - `none` has no capability and `allow` the client capabilities; `proxied`, the relays, read-everywhere, Seatbelt rules and a non-`.exe` program are refused as incompatible rather than dropped.
 - Full access is the job object alone, with no container or grants.

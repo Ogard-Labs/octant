@@ -71,25 +71,37 @@ describe("Windows confinement port", () => {
     ]);
   });
 
-  it("denies a browser store found beneath a grant and nothing outside the grants", () => {
-    const prepared = windowsPort({
+  it("refuses a grant that already holds a browser store, since a deny cannot carve it out", () => {
+    const port = windowsPort({
       [TOOL_BIN]: [
         { name: "profile", directory: true },
         { name: "tool.exe", directory: false },
       ],
       [`${TOOL_BIN}\\profile`]: [{ name: "Cookies", directory: false }],
-    }).prepare({
+    });
+    expect(
+      refusalOf(() => port.prepare({ ...launch, executable: `${TOOL_BIN}\\tool.exe` })),
+    ).toMatch(/holds .*profile\\Cookies/u);
+  });
+
+  it("starts a grant whose store-folder walk finds nothing", () => {
+    const prepared = windowsPort({ [TOOL_BIN]: [{ name: "tool.exe", directory: false }] }).prepare({
       ...launch,
       executable: `${TOOL_BIN}\\tool.exe`,
-      isolatedRoots: [`${HOME}\\src\\octant\\.octant-private`, "E:\\elsewhere"],
     });
-    const denies = prepared.args.flatMap((arg, index) =>
-      arg === "--deny" ? [prepared.args[index + 1]] : [],
+    expect(prepared.args).toContain(TOOL_BIN);
+  });
+
+  it("refuses a carve-out inside a grant and ignores one outside every grant", () => {
+    const port = windowsPort();
+    expect(
+      refusalOf(() =>
+        port.prepare({ ...launch, isolatedRoots: [`${HOME}\\src\\octant\\.octant-private`] }),
+      ),
+    ).toMatch(/cannot keep/u);
+    expect(refusalOf(() => port.prepare({ ...launch, isolatedRoots: ["E:\\elsewhere"] }))).toBe(
+      undefined,
     );
-    expect(denies).toEqual([
-      `${TOOL_BIN}\\profile\\Cookies`,
-      `${HOME}\\src\\octant\\.octant-private`,
-    ]);
   });
 
   it("refuses a launch whose pattern scan cannot finish", () => {

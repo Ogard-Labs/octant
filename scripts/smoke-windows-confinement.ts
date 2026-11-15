@@ -28,11 +28,12 @@ const granted = join(root, "granted");
 const readOnly = join(root, "read-only");
 const outside = join(root, "outside");
 const temporary = join(root, "tmp");
-for (const folder of [granted, join(granted, "profile"), readOnly, outside, temporary]) {
+const store = join(root, "store");
+for (const folder of [granted, join(store, "profile"), readOnly, outside, temporary]) {
   mkdirSync(folder, { recursive: true });
 }
 writeFileSync(join(granted, "inside.txt"), "inside-content");
-writeFileSync(join(granted, "profile", "Cookies"), "cookie-content");
+writeFileSync(join(store, "profile", "Cookies"), "cookie-content");
 writeFileSync(join(readOnly, "readable.txt"), "readable-content");
 writeFileSync(join(outside, "secret.txt"), "outside-secret");
 // cmd.exe does not read the backslash-escaped quotes Windows argument
@@ -138,21 +139,19 @@ try {
     homeRead,
   );
 
-  const cookiesPath = join(granted, "profile", "Cookies");
-  const cookiesLaunch = prepare(cmd, shell(`type ${cookiesPath}`));
-  const cookies = run(cmd, shell(`type ${cookiesPath}`));
-  // While a launch runs, the store's own DACL shows whether the deny landed.
-  const cookiesAcl = run(cmd, shell(`icacls ${cookiesPath}`));
+  // A deny entry cannot carve a file out of a grant (measured here: the
+  // container still read it), so the port must refuse to grant a folder that
+  // already holds a browser store, before the launcher runs at all.
+  let storeRefusal = "";
+  try {
+    prepare(cmd, shell("exit 0"), { readRoots: [readOnly, store] });
+  } catch (error) {
+    storeRefusal = error instanceof Error ? error.message : String(error);
+  }
   check(
-    "denies a browser store found beneath a grant",
-    cookies.status !== 0 && accessDenied(cookies) && !cookies.stdout.includes("cookie-content"),
-    { cookies, denies: cookiesLaunch.args.includes("--deny"), acl: cookiesAcl.stdout },
-  );
-  const cookiesAfter = spawnSync("icacls", [cookiesPath], { encoding: "utf8" });
-  check(
-    "removes the container's deny entries when the command ends",
-    cookiesAfter.status === 0 && !/S-1-15-2-\d+-\d+/u.test(cookiesAfter.stdout),
-    cookiesAfter.stdout,
+    "refuses to grant a folder that holds a browser store",
+    /holds .*Cookies/u.test(storeRefusal),
+    storeRefusal,
   );
 
   const nested = run(cmd, shell("cmd /d /c echo nested-ran"));

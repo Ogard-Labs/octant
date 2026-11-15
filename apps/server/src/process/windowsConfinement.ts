@@ -91,8 +91,11 @@ export function buildWindowsConfinedLaunch(
     throw new ProcessConfinementError("incompatible", decision.message);
   }
 
+  // A deny entry cannot carve a file out of a grant (see the plan's module
+  // comment), so a grant that already holds a protected store, or a
+  // carve-out the launch asked for inside a grant, refuses the launch.
   const readDirectory = options.readDirectory ?? listDirectory;
-  const matches = decision.patternScans.flatMap((scan) => {
+  for (const scan of decision.patternScans) {
     const found = patternMatches(scan, readDirectory);
     if (found === "truncated") {
       throw new ProcessConfinementError(
@@ -100,34 +103,39 @@ export function buildWindowsConfinedLaunch(
         `Windows confinement could not finish checking ${scan.directory} for ${scan.entry.label} (over ${String(PATTERN_SCAN_LIMIT)} entries), so the launch was refused.`,
       );
     }
-    return found;
-  });
-  // The deny-by-default container already misses everything outside its
-  // grants; a carve-out matters only where an inherited grant would reach it.
+    const [first] = found;
+    if (first !== undefined) {
+      throw new ProcessConfinementError(
+        "incompatible",
+        `Windows confinement does not grant ${scan.directory}: it holds ${first}, one of the ${scan.entry.label} the secret guard protects.`,
+      );
+    }
+  }
+  // Outside the grants the deny-by-default container already misses a path;
+  // a carve-out matters only where an inherited grant would reach it.
   const grantForms = decision.grants.map((grant) => windowsGuardPath(`${grant.path}\\`) ?? "");
-  const carveOuts = [
+  for (const path of [
     ...(input.isolatedRoots ?? []),
     ...(input.additionalDenyReadPaths ?? []),
     ...(input.additionalDenyWritePaths ?? []),
-  ].map((path) => {
-    const native = windowsNativePath(path);
-    if (native === undefined) {
+  ]) {
+    const form = windowsNativePath(path) === undefined ? undefined : windowsGuardPath(path);
+    if (form === undefined) {
       throw new ProcessConfinementError(
         "invalid-configuration",
         "Windows confinement denials must be drive-absolute paths.",
       );
     }
-    return native;
-  });
-  const denies = uniqueByGuardForm(
-    [...matches, ...carveOuts].filter((path) => {
-      const form = windowsGuardPath(path) ?? "";
-      return grantForms.some((grant) => isSameOrInside(form, grant));
-    }),
-  );
+    if (grantForms.some((grant) => isSameOrInside(form, grant))) {
+      throw new ProcessConfinementError(
+        "incompatible",
+        `Windows confinement cannot keep ${path} out of a folder it grants.`,
+      );
+    }
+  }
   return {
     command: launcher,
-    args: windowsConfinedLauncherArguments(decision, denies, input.args),
+    args: windowsConfinedLauncherArguments(decision, input.args),
   };
 }
 
@@ -197,13 +205,4 @@ function isFile(path: string): boolean {
   } catch {
     return false;
   }
-}
-
-function uniqueByGuardForm(paths: ReadonlyArray<string>): ReadonlyArray<string> {
-  const byForm = new Map<string, string>();
-  for (const path of paths) {
-    const form = windowsGuardPath(path) ?? path;
-    if (!byForm.has(form)) byForm.set(form, path);
-  }
-  return [...byForm.values()];
 }

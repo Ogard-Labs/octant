@@ -11,7 +11,10 @@ import { isSameOrInside, type ResolvedProtectedEntry, windowsGuardPath } from ".
  * names it (or ALL APPLICATION PACKAGES, which system folders carry and the
  * person's profile does not). So the secret guard holds as an OS rule by
  * never granting at, inside or above a protected location, and by an
- * explicit deny on each pattern match the host finds beneath a grant.
+ * refusing a launch whose grant already holds a pattern match. No deny entry
+ * is relied on: on Windows Server 2025 an explicit access-denied entry for
+ * the container's SID, listed ahead of its inherited grant, did not stop the
+ * container reading the file, for a reason not yet established.
  */
 
 /** `read` also lets the container list folders and run programs in them; `modify` adds write and delete. */
@@ -25,8 +28,8 @@ export interface WindowsConfinementGrant {
 
 /**
  * A pattern entry whose folder holds a grant with levels of the pattern left
- * beneath it. The host walks `directory` that many levels and denies each
- * match it finds, or refuses the launch when the walk cannot finish.
+ * beneath it. The host walks `directory` that many levels and refuses the
+ * launch when it finds a match or cannot finish the walk.
  */
 export interface WindowsConfinementPatternScan {
   readonly directory: string;
@@ -201,13 +204,9 @@ export function planWindowsConfinedLaunch(
   };
 }
 
-/**
- * The native launcher's arguments for a planned launch. `denies` are the
- * pattern matches the host found for the plan's scans.
- */
+/** The native launcher's arguments for a planned launch. */
 export function windowsConfinedLauncherArguments(
   plan: Extract<WindowsConfinementDecision, { readonly status: "planned" }>,
-  denies: ReadonlyArray<string>,
   args: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   return [
@@ -215,7 +214,6 @@ export function windowsConfinedLauncherArguments(
     plan.appContainerName,
     ...plan.capabilities.flatMap((capability) => ["--capability", capability]),
     ...plan.grants.flatMap((grant) => [`--grant-${grant.access}`, grant.path]),
-    ...denies.flatMap((path) => ["--deny", path]),
     ...(plan.activeProcessLimit === undefined
       ? []
       : ["--active-process-limit", String(plan.activeProcessLimit)]),
