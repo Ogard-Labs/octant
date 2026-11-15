@@ -364,4 +364,9 @@ describe("the shell's edges and gaps", () => {
     expect(measure(inbox, "\\.inbox-page")).toEqual(["980", "1240"]);
   });
 
+  it("keeps a Review tile's findings blocks 12px apart, as the list keeps its own blocks", () => {
+    expect(
+      rule(dock, ".right-utility-dock__tool .git-history__list--changes .code-local-review"),
+    ).toMatch(/gap:\s*var\(--oct-space-3\)/);
+  });
 });

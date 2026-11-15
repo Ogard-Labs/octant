@@ -650,6 +650,20 @@
   padding-inline: 0;
 }
 
+/* The findings block is a list's one child and holds its own blocks (the
+   refresh button, the checks line, the findings pane). They stood against each
+   other with no space, so the pane's fill met the line above it: it keeps the
+   12px the list keeps between its own blocks. */
+.right-utility-dock__tool .git-history__list--changes .code-local-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+}
+
+.right-utility-dock__tool .git-history__list--changes .code-local-review > button {
+  align-self: flex-start;
+}
+
 /* Review's three views are one segmented control. At a tile's narrowest its
    segments share the width instead of running past the tile's edge. */
 .right-utility-dock__tool .git-history {
