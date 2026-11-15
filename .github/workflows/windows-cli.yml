@@ -72,7 +72,11 @@ jobs:
         run: |
           $octantPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
           Write-Output "Administrator token: $($octantPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+      # The runner's token is elevated, and the native profile refuses a token
+      # whose default owner is Administrators. The owner reader runs the smoke
+      # with a restricted token whose default owner is the user, inside a
+      # kill-on-close job that also ends any host the smoke left running.
       - name: Resolve paths, start, reach, stop, disable and uninstall the per-user service
         run: |
-          bun scripts/windows-cli/smoke.ts
+          & "$env:RUNNER_TEMP/owner-build/Release/octant-windows-owner-reader.exe" --profile-user-owner (Get-Command bun).Source "$pwd/scripts/windows-cli/smoke.ts" "$env:RUNNER_TEMP/owner-build/Release/octant-windows-host-owner.node" octant lifecycle
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

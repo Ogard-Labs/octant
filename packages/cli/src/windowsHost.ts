@@ -83,7 +83,9 @@ export function openWindowsCliHost(input: {
       message:
         resolved.reason === "path-override"
           ? "OCTANT_DATA_DIR and OCTANT_LOGS_DIR are not supported on Windows; Octant keeps its host in your local application data folder."
-          : "Octant could not open its private Windows profile.",
+          : // The native check refuses a token whose default owner is not the
+            // user (an elevated prompt's is Administrators); it is never bypassed.
+            "Octant could not open its private Windows profile. It refuses to create or open it from an elevated (Run as administrator) prompt; run this command from an ordinary one.",
     };
   const startup = createWindowsHostStartup(native, resolved.paths);
   if (startup === undefined)

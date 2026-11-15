@@ -2,7 +2,9 @@
 // service lifecycle and asserts each step's actual effect, not only its exit
 // code. It expects the native host binding and credential helper in the
 // `native` folder beside the checkout, where the CLI and the server it starts
-// both load them from a source run.
+// both load them from a source run. It runs under the owner reader's
+// `--profile-user-owner` launch, because the native profile refuses a token
+// whose default owner is Administrators, as the hosted runner's is.
 import { execFile, spawn } from "node:child_process";
 import { win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,10 +23,11 @@ const checks: string[] = [];
 const environment: Record<string, string | undefined> = { ...process.env };
 for (const key of ["OCTANT_DATA_DIR", "OCTANT_LOGS_DIR"]) delete environment[key];
 
+const began = performance.now();
 function check(value: boolean, name: string, detail = ""): void {
   if (!value) throw new Error(`Windows CLI smoke failed: ${name}${detail ? `\n${detail}` : ""}`);
   checks.push(name);
-  console.log(`ok - ${name}`);
+  console.log(`ok - ${name} (${Math.round(performance.now() - began)} ms)`);
 }
 
 function run(

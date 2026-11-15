@@ -80,10 +80,10 @@ describe("the CLI's Windows host", () => {
         }),
       },
     });
-    expect(opened).toEqual({
-      status: "refused",
-      message: "Octant could not open its private Windows profile.",
-    });
+    expect(opened).toMatchObject({ status: "refused" });
+    expect(opened.status === "refused" && opened.message).toContain(
+      "could not open its private Windows profile",
+    );
   });
 
   it("refuses when the native binding is not installed beside the command", () => {

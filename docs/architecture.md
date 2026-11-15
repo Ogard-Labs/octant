@@ -18263,7 +18263,9 @@ refuse by name on Windows.
   exited is outside the tree `taskkill /T` ends.
 - **Evidence.** The `Windows CLI service lifecycle` workflow builds the native
   binding and credential helper beside the checkout and drives the real CLI
-  on `windows-2025`: it checks the resolved profile folders, the refused data
+  on `windows-2025`, under the owner reader's restricted token whose default
+  owner is the user (the runner's elevated token is refused by the profile
+  check, as an elevated prompt is): it checks the resolved profile folders, the refused data
   override, a ready start under the Run value with its exact command line, a
   `/health` answer with storage ready, a minted `web --no-open` link, status
   diagnostics and the service log over the pipe, a stop that leaves no
