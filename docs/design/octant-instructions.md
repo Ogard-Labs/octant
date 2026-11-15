@@ -131,7 +131,10 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
 
 - On this host only. They are not synced to a hub or spoke and travel with no
   thread, the rule person memory follows.
-- Export my data carries them: an `instructions` page with the three texts.
+- Export my data carries them: an `instructions` page with your instructions
+  and orchestration, and bounded `project-instructions` pages with each
+  Project's text that is not empty, since a host can hold more Projects than
+  one page carries.
 - Deleting a Project deletes its Project instructions. A Project is archived
   rather than removed, so this is the Project-scoped purge that already erases
   Project memory: it erases the `project-instructions` aggregate from the

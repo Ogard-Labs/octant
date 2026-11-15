@@ -129,17 +129,19 @@ const pageItems = <A, I, R>(item: Schema.Schema<A, I, R>) =>
 /** The instructions the person wrote for Octant, exactly as written. */
 export const HostExportInstructions = Schema.Struct({
   yours: PersonInstructionsText,
-  /** Each Project's instructions that are not empty. Absent in older cuts. */
-  projects: Schema.optional(
-    pageItems(
-      Schema.Struct({
-        projectId: ProjectId,
-        instructions: ProjectInstructionsText,
-      }).annotations(strict),
-    ),
-  ),
 }).annotations(strict);
 export type HostExportInstructions = typeof HostExportInstructions.Type;
+
+/**
+ * One Project's instructions, exactly as written. A host can hold more
+ * Projects than a page carries, so these travel on their own bounded pages
+ * rather than inside the one `instructions` page.
+ */
+export const HostExportProjectInstructions = Schema.Struct({
+  projectId: ProjectId,
+  instructions: ProjectInstructionsText,
+}).annotations(strict);
+export type HostExportProjectInstructions = typeof HostExportProjectInstructions.Type;
 
 export const HostExportPage = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("header"), octant: HostExportHeader }).annotations(strict),
@@ -162,6 +164,10 @@ export const HostExportPage = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("instructions"),
     instructions: HostExportInstructions,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-instructions"),
+    projectInstructions: pageItems(HostExportProjectInstructions),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("canvases"),
@@ -217,6 +223,8 @@ export const HostExportBundle = Schema.Struct({
   personMemory: Schema.optional(Schema.Array(PersonMemoryEntry)),
   /** The person's instructions for Octant. Absent in older cuts. */
   instructions: Schema.optional(HostExportInstructions),
+  /** Each Project's instructions that are not empty. Absent in older cuts. */
+  projectInstructions: Schema.optional(Schema.Array(HostExportProjectInstructions)),
   canvases: Schema.Array(HostExportCanvas),
   settings: HostExportSettingsSummary,
   usage: Schema.Array(HostExportUsageRow),
