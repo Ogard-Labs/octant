@@ -1,5 +1,6 @@
 import type { SandboxRestrictionsScope } from "@octant/contracts/sandbox-policy";
 import type { SandboxRestrictionsClient } from "@octant/client-runtime/sandbox-restrictions-client";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import { WorkspaceViewStateContext, useWorkspaceViewStore } from "./workspaceViewState";
@@ -86,7 +87,6 @@ import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMove
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
-import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
@@ -137,7 +137,9 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
 import {
+  CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
+  type CoordinatorWorker,
   type CoordinatorWorkerRequestSource,
 } from "../code/CoordinatorWorkerRequests";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -279,7 +281,8 @@ export interface WorkspaceViewProps {
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
     paneId?: PaneId,
     extensionSelections?: ReadonlyArray<import("@octant/contracts/extensions").ExtensionSelection>,
-  ) => void;
+    attachments?: ReadonlyArray<File>,
+  ) => Promise<boolean | void> | void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
     draft: string,
@@ -791,6 +794,10 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
+  const projectNamesById = useMemo(
+    () => new Map(props.projects.map((project) => [String(project.id), project.name])),
+    [props.projects],
+  );
   // Test doubles hand the view a controller with no navigation at all; the
   // header then simply shows no facts rather than refusing to render.
   const codeNavigation = props.codeController.navigation ?? [];
@@ -861,6 +868,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                 ? {}
                 : { onCloseContentTab: props.onCloseContentTab })}
               {...(contextProject === undefined ? {} : { contextLabel: contextProject.name })}
+              projectNamesById={projectNamesById}
               {...(props.environmentNames === undefined
                 ? {}
                 : { environmentNames: props.environmentNames })}
@@ -1158,10 +1166,41 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
 }
 
 /**
+ * A coordinator's workers as the window's thread list names them, with the
+ * action that opens one, or undefined for any other thread. Reading them from
+ * the window's list means a worker this window cannot see is never listed.
+ */
+function coordinatorWorkersFor(
+  threadId: string,
+  props: WorkspaceViewProps,
+):
+  | {
+      readonly workers: ReadonlyArray<CoordinatorWorker>;
+      readonly onOpenWorker: (worker: CoordinatorWorker) => void;
+    }
+  | undefined {
+  // A partial controller (tests, an early render) may hold no navigation yet.
+  const threads = props.codeController.navigation ?? [];
+  const coordinator = threads.find((thread) => String(thread.threadId) === threadId);
+  if (coordinator?.coordinator !== true) return undefined;
+  const workers = threads.filter(
+    (thread) =>
+      thread.coordinatorThreadId !== undefined && String(thread.coordinatorThreadId) === threadId,
+  );
+  if (workers.length === 0) return undefined;
+  return {
+    workers: workers.map((thread) => ({ threadId: String(thread.threadId), title: thread.title })),
+    onOpenWorker: (worker) => {
+      const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
+      if (thread !== undefined)
+        props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
+    },
+  };
+}
+
+/**
  * A coordinator's composer lists its workers' requests beside its child runs'
- * (docs/design/coordinator-threads.md#questions-and-approvals). Its workers
- * are read from the window's thread list, so a worker this window cannot see
- * is never listed.
+ * (docs/design/coordinator-threads.md#questions-and-approvals).
  */
 function coordinatorWorkerRequestsFor(
   surface: WorkspaceTab,
@@ -1169,26 +1208,35 @@ function coordinatorWorkerRequestsFor(
   props: WorkspaceViewProps,
 ): ReactNode {
   if (surface.kind !== "code-overview" || props.workerRequestSource === undefined) return null;
-  const threads = props.codeController.navigation;
-  const coordinator = threads.find((thread) => String(thread.threadId) === threadId);
-  if (coordinator?.coordinator !== true) return null;
-  const workers = threads.filter(
-    (thread) =>
-      thread.coordinatorThreadId !== undefined && String(thread.coordinatorThreadId) === threadId,
-  );
-  if (workers.length === 0) return null;
+  const coordinator = coordinatorWorkersFor(threadId, props);
+  if (coordinator === undefined) return null;
   return (
     <CoordinatorWorkerRequests
       source={props.workerRequestSource}
-      workers={workers.map((thread) => ({
-        threadId: String(thread.threadId),
-        title: thread.title,
-      }))}
-      onOpenWorker={(worker) => {
-        const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
-        if (thread !== undefined)
-          props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
-      }}
+      workers={coordinator.workers}
+      onOpenWorker={coordinator.onOpenWorker}
+    />
+  );
+}
+
+/**
+ * The same requests as rows at the end of the coordinator's transcript, each
+ * answered in place (docs/design/coordinator-threads.md#questions-and-approvals).
+ * Like the composer's list, only a thread on this window's host reads them.
+ */
+function coordinatorWorkerAsksFor(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+): ReactNode {
+  if (tab.kind !== "code-overview" || props.workerRequestSource === undefined) return undefined;
+  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
+  const coordinator = coordinatorWorkersFor(String(tab.threadId), props);
+  if (coordinator === undefined) return undefined;
+  return (
+    <CoordinatorWorkerAskRows
+      source={props.workerRequestSource}
+      workers={coordinator.workers}
+      onOpenWorker={coordinator.onOpenWorker}
     />
   );
 }
@@ -1323,7 +1371,7 @@ function CodeThreadTabSurface(props: {
   const controller = useCodeThreadController(props.controllers, props.tab.threadId as CodeThreadId);
   if (controller === undefined) {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Code workspace"
         message="Opening this thread's own Code state."
         state="loading"
@@ -1401,10 +1449,11 @@ function renderCodeTab(
   });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
+  const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
   const content = (
     <Suspense
       fallback={
-        <ShellState
+        <OctantEmpty
           eyebrow="Code workspace"
           message="Loading the selected Code surface."
           state="loading"
@@ -1427,6 +1476,7 @@ function renderCodeTab(
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
         {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
+        {...(coordinatorWorkerAsks === undefined ? {} : { coordinatorWorkerAsks })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
@@ -2007,7 +2057,7 @@ function renderNonCodeTab(
     const workThreadClient = props.workThreadClient;
     if (workThreadClient === undefined) {
       return (
-        <ShellState
+        <OctantEmpty
           eyebrow="Task"
           message="Work is unavailable in this window."
           state="warning"
@@ -2152,7 +2202,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "settings") {
     return (
-      <ShellState
+      <OctantEmpty
         {...(props.onOpenSettings === undefined
           ? {}
           : { action: { label: "Open Settings", onClick: props.onOpenSettings } })}
@@ -2166,7 +2216,9 @@ function renderNonCodeTab(
   if (tab.kind === "preview") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading preview." state="loading" title="Loading preview" />}
+        fallback={
+          <OctantEmpty message="Loading preview." state="loading" title="Loading preview" />
+        }
       >
         <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />
       </Suspense>
@@ -2175,7 +2227,7 @@ function renderNonCodeTab(
   if (tab.kind === "canvas") {
     return (
       <Suspense
-        fallback={<ShellState message="Loading canvas." state="loading" title="Loading canvas" />}
+        fallback={<OctantEmpty message="Loading canvas." state="loading" title="Loading canvas" />}
       >
         <CanvasWorkspaceTab
           key={tab.id}
@@ -2202,7 +2254,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "browser") {
     return props.browserAutomationClient === undefined ? (
-      <ShellState
+      <OctantEmpty
         eyebrow="Browser unavailable"
         message="The host browser automation client is unavailable."
         state="warning"
@@ -2255,7 +2307,7 @@ function renderNonCodeTab(
   }
   if (tab.kind === "files") {
     return (
-      <ShellState
+      <OctantEmpty
         eyebrow="Files surface"
         message="Files surfaces open inside the bound Project context."
         state="neutral"
@@ -2283,7 +2335,7 @@ function renderNonCodeTab(
     const project = props.projects.find((candidate) => candidate.id === tab.projectId);
     if (project === undefined || project.type !== tab.mode) {
       return (
-        <ShellState
+        <OctantEmpty
           eyebrow="Project unavailable"
           message="Refresh Project state or close this tab."
           state="warning"
@@ -2631,8 +2683,16 @@ function renderNonCodeTab(
           {...(props.extensionClient === undefined
             ? {}
             : { extensionClient: props.extensionClient })}
-          onCreateChat={(prompt, modelOptionValues, extensionSelections) => {
-            if (extensionSelections === undefined) {
+          onCreateChat={(prompt, modelOptionValues, extensionSelections, attachments) => {
+            if (attachments !== undefined) {
+              return props.onCreateChat(
+                prompt,
+                modelOptionValues,
+                paneId,
+                extensionSelections,
+                attachments,
+              );
+            } else if (extensionSelections === undefined) {
               props.onCreateChat(prompt, modelOptionValues, paneId);
             } else {
               props.onCreateChat(prompt, modelOptionValues, paneId, extensionSelections);
@@ -2688,7 +2748,7 @@ class CodeWorkspaceErrorBoundary extends Component<
   override render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <ShellState
+      <OctantEmpty
         action={{ label: "Reload Octant", onClick: () => globalThis.location.reload() }}
         eyebrow="Code workspace"
         message="Reload Octant to retry this Code surface."

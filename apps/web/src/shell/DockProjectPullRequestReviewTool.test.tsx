@@ -340,7 +340,7 @@ describe("DockProjectPullRequestReviewTool", () => {
     const autoFix = await screen.findByRole("switch", { name: "Auto-fix" });
     expect(autoFix).toHaveAttribute("aria-disabled", "true");
     expect(autoFix).toHaveAttribute(
-      "title",
+      "aria-description",
       "Link a Code thread to this pull request to use Auto-fix.",
     );
   });

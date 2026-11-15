@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { WindowId } from "@octant/contracts";
+import { windowAdmitsProject } from "@octant/domain/shell-policy";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { createUsageRouteHandler } from "../usageRoutes";
 import { SpendCeilingService } from "../spendCeilingService";
@@ -84,8 +85,10 @@ export function wireUsage(deps: UsageDependencies) {
       const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
       const context = workspace?.contextByMode[authority.mode];
       return (
+        workspace !== undefined &&
         context !== undefined &&
-        context.projectId === authority.projectId &&
+        authority.projectId !== undefined &&
+        windowAdmitsProject(workspace, authority.mode, authority.projectId) &&
         String(context.host) === String(authority.hostId)
       );
     },

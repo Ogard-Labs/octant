@@ -220,6 +220,7 @@ export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.T
 export const SidebarDestinationId = Schema.Literal(
   "new-thread",
   "inbox",
+  "todos",
   "board",
   "pull-requests",
   "github-issues",
@@ -1300,6 +1301,13 @@ export interface WorkspacePane {
   readonly nodeId: LayoutNodeId;
   readonly paneId: PaneId;
   readonly surface: WorkspaceTab;
+  /**
+   * The pane's own authority context when its surface belongs to another
+   * Project than the layout's lead. Absent means the lead's, so a layout of
+   * one Project carries none and decodes as it always did. Only the host
+   * writes it, from the surface it resolves; a renderer's claim is not read.
+   */
+  readonly context?: WorkspaceContextKey;
 }
 
 export interface WorkspaceSplit {
@@ -1318,6 +1326,7 @@ interface EncodedWorkspacePane {
   readonly nodeId: string;
   readonly paneId: string;
   readonly surface: typeof WorkspaceTab.Encoded;
+  readonly context?: typeof WorkspaceContextKey.Encoded;
 }
 
 interface EncodedWorkspaceSplit {
@@ -1339,6 +1348,7 @@ export const WorkspaceLayoutNode: Schema.Schema<WorkspaceLayoutNode, EncodedWork
         nodeId: LayoutNodeId,
         paneId: PaneId,
         surface: WorkspaceTab,
+        context: Schema.optionalWith(WorkspaceContextKey, { exact: true }),
       }).annotations(strict),
       Schema.Struct({
         kind: Schema.Literal("split"),

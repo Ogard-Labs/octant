@@ -113,6 +113,7 @@ export type RoutesDependencies = {
     | "scaffoldRoutes"
     | "threadCheckpointRoutes"
     | "threadMentionRoutes"
+    | "threadNotesRoutes"
     | "workspacePresetRoutes"
   > &
   Pick<
@@ -162,6 +163,7 @@ export type RoutesDependencies = {
     | "protectedFilesRoutes"
     | "sandboxRestrictionsRoutes"
     | "windowAuthorityStore"
+    | "todoRoutes"
   >;
 
 export function wireRoutes(deps: RoutesDependencies) {
@@ -235,6 +237,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     personMemoryRoutes,
     protectedFilesRoutes,
     sandboxRestrictionsRoutes,
+    todoRoutes,
     providerOAuthRoutes,
     providerRoutes,
     providerUsageLimitsRoutes,
@@ -254,6 +257,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     threadExportRoutes,
     threadHandOffRoutes,
     threadMentionRoutes,
+    threadNotesRoutes,
     threadMessageQueueRoutes,
     usageDashboardRoutes,
     usageRoutes,
@@ -362,6 +366,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await desktopPaneRoutes(request)) ??
     (await remoteServerGrantLocalRoutes(request)) ??
     (await threadMentionRoutes(request)) ??
+    (await threadNotesRoutes(request)) ??
     (await fileMentionRoutes(request)) ??
     (await spendCeilingRoutes(request)) ??
     (await protectedFilesRoutes(request)) ??
@@ -369,6 +374,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await archivedWorktreeRoutes(request)) ??
     (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??
+    (await todoRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??
     (await terminalSessionRoutes(request)) ??

@@ -3,6 +3,16 @@ import { startServerTerminal, type ServerTerminalLogin } from "../serverProjects
 
 export const MAX_TERMINAL_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1024;
+/**
+ * How many ended terminals nobody is observing keep their transcript in
+ * memory. Each holds up to 8 MiB, and an ended terminal was never released, so
+ * a long session of build and test terminals pinned hundreds of megabytes. Its
+ * output is already journaled through its observer, and this service has no
+ * store to read it back from, so the oldest ended terminal is forgotten the
+ * way a host restart forgets it: reading it answers that it does not exist,
+ * which every caller already handles.
+ */
+export const MAX_RETAINED_ENDED_TERMINALS = 16;
 
 const TRUNCATION_MARKER = "[Octant terminal output truncated]\n";
 const MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS = 64 * 1024;
@@ -137,6 +147,8 @@ interface TerminalRecord {
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
+  /** The longest credential less one: how far back a split credential can start. */
+  readonly secretOverlap: number;
   readonly observers: Set<OutputObserver>;
   /**
    * Where an observer that names no position starts, and the state it is
@@ -185,6 +197,8 @@ interface OutputObserver {
 export class TerminalService {
   readonly #options: TerminalServiceOptions;
   readonly #terminals = new Map<string, TerminalRecord>();
+  /** Ended terminals, oldest end first, so the oldest unobserved one is forgotten first. */
+  readonly #ended = new Set<string>();
 
   constructor(options: TerminalServiceOptions) {
     this.#options = options;
@@ -195,6 +209,7 @@ export class TerminalService {
         terminalId: restored.terminalId,
         transcript,
         secrets: [],
+        secretOverlap: 0,
         observers: new Set(),
         baseline: { characters: 0, status: "interrupted", exitCode: restored.exitCode },
         status: "interrupted",
@@ -202,7 +217,9 @@ export class TerminalService {
         pendingResize: undefined,
         resizeScheduled: false,
       });
+      this.#ended.add(restored.terminalId);
     }
+    this.#forgetOldestEnded();
   }
 
   async launch(request: TerminalLaunchRequest): Promise<TerminalSnapshot> {
@@ -263,6 +280,7 @@ export class TerminalService {
       transcript: new TranscriptBuffer(),
       process,
       secrets,
+      secretOverlap: secrets.reduce((widest, secret) => Math.max(widest, secret.length - 1), 0),
       observers: new Set(),
       baseline: { characters: 0, status: "running", exitCode: undefined },
       status: "running",
@@ -271,11 +289,11 @@ export class TerminalService {
     };
     for (const observer of previous?.observers ?? []) clearObserverTimer(observer);
     this.#terminals.set(request.terminalId, record);
+    this.#ended.delete(request.terminalId);
     process.onData((data) => {
       process.pause();
       try {
-        record.transcript.append(data);
-        record.transcript.redact(record.secrets);
+        record.transcript.append(data, record.secrets, record.secretOverlap);
         this.#scheduleOutput(record);
       } finally {
         process.resume();
@@ -285,12 +303,16 @@ export class TerminalService {
       record.status = "exited";
       record.exitCode = exitCode;
       this.#scheduleOutput(record, true);
+      this.#markEnded(record);
     });
     try {
       await process.receiptReady;
     } catch (error) {
       if (previous === undefined) this.#terminals.delete(request.terminalId);
-      else this.#terminals.set(request.terminalId, previous);
+      else {
+        this.#terminals.set(request.terminalId, previous);
+        this.#markEnded(previous);
+      }
       await process.close().catch(() => undefined);
       throw error;
     }
@@ -360,6 +382,7 @@ export class TerminalService {
     return () => {
       clearObserverTimer(observer);
       record.observers.delete(observer);
+      this.#forgetOldestEnded();
     };
   }
 
@@ -394,7 +417,9 @@ export class TerminalService {
       if (record.status === "running") record.status = "interrupted";
     }
     this.#publishOutput(record);
-    return this.#snapshot(record);
+    const snapshot = this.#snapshot(record);
+    this.#markEnded(record);
+    return snapshot;
   }
 
   async closeAll(): Promise<void> {
@@ -403,12 +428,39 @@ export class TerminalService {
       live.map(async (record) => {
         await record.process!.close();
         if (record.status === "running") record.status = "interrupted";
+        this.#markEnded(record);
       }),
     );
     const failure = results.find(
       (result): result is PromiseRejectedResult => result.status === "rejected",
     );
     if (failure !== undefined) throw failure.reason;
+  }
+
+  #markEnded(record: TerminalRecord): void {
+    if (record.status === "running" || this.#terminals.get(record.terminalId) !== record) return;
+    this.#ended.add(record.terminalId);
+    this.#forgetOldestEnded();
+  }
+
+  /** Forgets the oldest ended terminals nobody observes past the retention bound. */
+  #forgetOldestEnded(): void {
+    let unobserved = 0;
+    for (const terminalId of this.#ended) {
+      if (this.#terminals.get(terminalId)?.observers.size === 0) unobserved += 1;
+    }
+    for (const terminalId of this.#ended) {
+      if (unobserved <= MAX_RETAINED_ENDED_TERMINALS) return;
+      const record = this.#terminals.get(terminalId);
+      if (record === undefined) {
+        this.#ended.delete(terminalId);
+        continue;
+      }
+      if (record.observers.size > 0) continue;
+      this.#terminals.delete(terminalId);
+      this.#ended.delete(terminalId);
+      unobserved -= 1;
+    }
   }
 
   #require(terminalId: string): TerminalRecord {
@@ -525,7 +577,7 @@ function clearObserverTimer(observer: OutputObserver): void {
 function publishableEnd(record: TerminalRecord): number {
   const end = record.transcript.characters();
   if (record.secrets.length === 0) return end;
-  const longest = record.secrets.reduce((widest, secret) => Math.max(widest, secret.length - 1), 0);
+  const longest = record.secretOverlap;
   const tail = record.transcript.textBetween(
     Math.max(record.transcript.retainedFrom(), end - longest),
     end,
@@ -567,7 +619,60 @@ class TranscriptBuffer {
   #characters = 0;
   #retainedFrom = 0;
 
-  append(value: string): void {
+  /**
+   * Appends PTY output with every credential in it redacted. Only the new text
+   * and the `overlap` characters before it can hold a credential that is not
+   * yet redacted (one split across callbacks), so only that window is
+   * searched; redacting the whole transcript per callback copied up to 8 MiB
+   * on every PTY read. The unredacted text is never stored.
+   */
+  append(value: string, secrets: readonly string[] = [], overlap = 0): void {
+    if (secrets.length === 0) {
+      this.#appendRaw(value);
+      return;
+    }
+    let from = Math.max(this.characters() - overlap, this.#firstOutputOffset());
+    // Never start the window inside a surrogate pair: re-encoding its lone
+    // second half would store a replacement character.
+    const first = this.textBetween(from, from + 1).charCodeAt(0);
+    if (first >= 0xdc00 && first <= 0xdfff && from > this.#firstOutputOffset()) from -= 1;
+    const previous = this.textBetween(from, this.characters());
+    const redacted = redact(previous + value, secrets);
+    if (redacted.startsWith(previous)) {
+      this.#appendRaw(redacted.slice(previous.length));
+      return;
+    }
+    this.#truncateTo(from);
+    this.#appendRaw(redacted);
+  }
+
+  /** The offset of the first character the PTY printed, past a truncation marker. */
+  #firstOutputOffset(): number {
+    return this.#chunks[0] === TRUNCATION_MARKER
+      ? this.#retainedFrom + TRUNCATION_MARKER.length
+      : this.#retainedFrom;
+  }
+
+  /** Drops everything held from an absolute offset on. */
+  #truncateTo(offset: number): void {
+    let position = this.characters();
+    while (position > offset) {
+      const chunk = this.#chunks.pop();
+      if (chunk === undefined) break;
+      const chunkStart = position - chunk.length;
+      this.#byteLength -= Buffer.byteLength(chunk, "utf8");
+      this.#characters -= chunk.length;
+      if (chunkStart < offset) {
+        const kept = chunk.slice(0, offset - chunkStart);
+        this.#chunks.push(kept);
+        this.#byteLength += Buffer.byteLength(kept, "utf8");
+        this.#characters += kept.length;
+      }
+      position = chunkStart;
+    }
+  }
+
+  #appendRaw(value: string): void {
     for (const chunk of splitUtf8(value, MAX_TERMINAL_OUTPUT_CHUNK_BYTES)) {
       this.#chunks.push(chunk);
       this.#byteLength += Buffer.byteLength(chunk, "utf8");
@@ -617,15 +722,6 @@ class TranscriptBuffer {
       position = chunkStart;
     }
     return pieces.reverse().join("");
-  }
-
-  redact(secrets: readonly string[]): void {
-    if (secrets.length === 0) return;
-    const redacted = redact(this.#chunks.join(""), secrets);
-    this.#chunks = splitUtf8(redacted, MAX_TERMINAL_OUTPUT_CHUNK_BYTES);
-    this.#byteLength = Buffer.byteLength(redacted, "utf8");
-    this.#characters = redacted.length;
-    this.#enforceLimit();
   }
 
   #enforceLimit(): void {

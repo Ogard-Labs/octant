@@ -97,7 +97,7 @@ export interface BuildThreadSearchResultsInput {
  * Current-mode thread search.
  *
  * Title matches use only the threads the host already listed for this window.
- * When Chat supplies contentHits from transcript search, those rows join the
+ * The current mode's contentHits from the host transcript search join the
  * same live/archived groups with snippets and turn deep-links. Project,
  * `Recents`, and `Unfiled` remain folder words on a hit, never filters.
  */
@@ -116,7 +116,7 @@ export function buildThreadSearchResults(
     .sort(compareThreads);
 
   const contentMatches =
-    input.mode === "chat" && needle !== ""
+    needle !== ""
       ? (input.contentHits ?? []).filter(
           (hit) => hit.lifecycle === "active" || hit.lifecycle === "archived",
         )
@@ -128,11 +128,19 @@ export function buildThreadSearchResults(
   const archivedContent = contentMatches.filter((hit) => hit.lifecycle === "archived");
 
   const groups: ThreadSearchGroup[] = [];
-  const liveHits = mergeGroupHits(liveTitle, liveContent, projectNames, unfiledLabel, limit);
+  const liveHits = mergeGroupHits(
+    input.mode,
+    liveTitle,
+    liveContent,
+    projectNames,
+    unfiledLabel,
+    limit,
+  );
   if (liveHits.hits.length > 0) {
     groups.push({ id: "threads", label: "Threads", hits: liveHits.hits });
   }
   const archivedHits = mergeGroupHits(
+    input.mode,
     archivedTitle,
     archivedContent,
     projectNames,
@@ -160,6 +168,7 @@ export function flattenThreadSearchHits(
 }
 
 function mergeGroupHits(
+  mode: SidebarActivityMode,
   titleThreads: ReadonlyArray<ThreadSearchThread>,
   contentHits: ReadonlyArray<ThreadSearchContentHit>,
   projectNames: ReadonlyMap<string, string>,
@@ -167,7 +176,7 @@ function mergeGroupHits(
   limit: number,
 ): { readonly hits: ReadonlyArray<ThreadSearchHit>; readonly truncated: boolean } {
   const titleHits = titleThreads.map((thread) => toTitleHit(thread, projectNames, unfiledLabel));
-  const bodyHits = contentHits.map((hit) => toContentHit(hit, projectNames, unfiledLabel));
+  const bodyHits = contentHits.map((hit) => toContentHit(mode, hit, projectNames, unfiledLabel));
   // Title rows first so a known thread stays easy to open; content rows follow
   // with their snippets rather than replacing the title match.
   const merged = [...titleHits, ...bodyHits];
@@ -194,6 +203,7 @@ function toTitleHit(
 }
 
 function toContentHit(
+  mode: SidebarActivityMode,
   hit: ThreadSearchContentHit,
   projectNames: ReadonlyMap<string, string>,
   unfiledLabel: ThreadSearchUnfiledLabel,
@@ -202,7 +212,7 @@ function toContentHit(
     hit.projectId === undefined ? unfiledLabel : (projectNames.get(hit.projectId) ?? unfiledLabel);
   return {
     threadId: hit.threadId,
-    mode: "chat",
+    mode,
     title: hit.title,
     ...(hit.projectId === undefined ? {} : { projectId: hit.projectId }),
     folderLabel,

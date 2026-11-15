@@ -11,7 +11,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { ArtifactListRow } from "../artifacts/ArtifactListRow";
 import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
-import { ShellState } from "../shell/ShellState";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { OctantButton } from "../ui/base/OctantButton";
 
 const CanvasWorkspaceTab = lazy(() =>
@@ -82,9 +82,11 @@ export default function ArtifactsModule(props: Props) {
     return () => controller.abort();
   }, [projectId, props.canvasRevision, reloads, serverUrl, windowCapability]);
 
-  if (state.status === "loading") return <ShellState state="loading" title="Loading artifacts" />;
+  if (state.status === "loading") return <OctantEmpty state="loading" title="Loading artifacts" />;
   if (state.status === "unavailable") {
-    return <ShellState message={state.message} state="neutral" title="Artifacts are unavailable" />;
+    return (
+      <OctantEmpty message={state.message} state="neutral" title="Artifacts are unavailable" />
+    );
   }
 
   if (open !== undefined && open.projectId !== undefined) {
@@ -102,7 +104,7 @@ export default function ArtifactsModule(props: Props) {
           All artifacts
         </OctantButton>
         {tab.kind === "canvas" && props.canvasClient !== undefined ? (
-          <Suspense fallback={<ShellState state="loading" title="Loading canvas" />}>
+          <Suspense fallback={<OctantEmpty state="loading" title="Loading canvas" />}>
             <CanvasWorkspaceTab
               key={String(open.currentVersionId)}
               client={props.canvasClient}
@@ -113,7 +115,7 @@ export default function ArtifactsModule(props: Props) {
             />
           </Suspense>
         ) : (
-          <ShellState
+          <OctantEmpty
             message="This artifact could not be opened in the dock."
             state="neutral"
             title="Artifact is unavailable"
@@ -124,42 +126,41 @@ export default function ArtifactsModule(props: Props) {
   }
 
   const { entries, truncated } = state.listing;
-  if (entries.length === 0) {
-    return (
-      <section aria-label="Project artifacts" className="dock-canvas-tool">
+  return (
+    <section aria-label="Project artifacts" className="dock-artifacts">
+      <div className="dock-artifacts__bar">
         <OctantButton
           onClick={() => setReloads((count) => count + 1)}
+          size="sm"
           type="button"
           variant="ghost"
         >
           Refresh
         </OctantButton>
-        <ShellState
-          message="Canvas documents made in this Project appear here."
-          state="neutral"
-          title="No artifacts yet"
-        />
-      </section>
-    );
-  }
-  return (
-    <section aria-label="Project artifacts" className="dock-canvas-tool">
-      <OctantButton onClick={() => setReloads((count) => count + 1)} type="button" variant="ghost">
-        Refresh
-      </OctantButton>
-      <ul className="artifact-library__list">
-        {entries.map((entry) => (
-          <ArtifactListRow
-            key={String(entry.canvasId)}
-            entry={entry}
-            observedAt={observedAt}
-            onOpen={setOpen}
+      </div>
+      <div className="dock-artifacts__body">
+        {entries.length === 0 ? (
+          <OctantEmpty
+            message="Canvas documents made in this Project appear here."
+            state="neutral"
+            title="No artifacts yet"
           />
-        ))}
-      </ul>
-      {truncated ? (
-        <p className="dock-canvas-tool__note">Showing the most recent artifacts.</p>
-      ) : null}
+        ) : (
+          <ul className="artifact-library__list">
+            {entries.map((entry) => (
+              <ArtifactListRow
+                key={String(entry.canvasId)}
+                entry={entry}
+                observedAt={observedAt}
+                onOpen={setOpen}
+              />
+            ))}
+          </ul>
+        )}
+        {truncated ? (
+          <p className="dock-artifacts__note">Showing the most recent artifacts.</p>
+        ) : null}
+      </div>
     </section>
   );
 }

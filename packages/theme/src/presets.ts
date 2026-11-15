@@ -542,12 +542,22 @@ export function getThemePreset(id: string): ThemePreset | undefined {
   return PRESET_BY_ID.get(id);
 }
 
+/**
+ * The tokens a preset draws in one mode. `contributed` holds the presets that
+ * effective plugins add; a stored id that names neither a built-in nor one of
+ * them (a plugin since disabled or removed) draws the default theme, while the
+ * stored choice is kept for when the plugin returns.
+ */
 export function resolveThemePresetTokens(
   id: string | undefined,
   mode: ThemePresetMode,
+  contributed: ReadonlyArray<ThemePreset> = [],
 ): Readonly<Record<string, string>> {
   const fallback = mode === "light" ? DEFAULT_LIGHT_TOKENS : DEFAULT_DARK_TOKENS;
-  const preset = id === undefined ? getThemePreset("system") : getThemePreset(id);
+  const preset =
+    id === undefined
+      ? getThemePreset("system")
+      : (getThemePreset(id) ?? contributed.find((candidate) => String(candidate.id) === id));
   if (preset === undefined || !preset.supportedModes.includes(mode)) return fallback;
   if (!validateThemePreset(preset).valid) return fallback;
   return preset.tokens[mode] ?? fallback;

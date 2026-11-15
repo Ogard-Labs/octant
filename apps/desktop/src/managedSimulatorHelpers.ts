@@ -18,6 +18,7 @@ import { swipeEdge, swipePath, type ScreenEdge, type ScreenFraction } from "./sw
 const SIMULATOR_ID = /^[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$/;
 const READY_MS = 8_000;
 const FIRST_FRAME_MS = 5_000;
+const IDLE_MS = 45_000;
 const CONFIG_POLL_MS = 200;
 /** What the device helper types as key positions; it checks the guest layout first. */
 const KEY_TYPED_TEXT = /^[A-Za-z0-9 \n]+$/;
@@ -118,6 +119,8 @@ export interface ManagedSimulatorHelpersOptions {
   readonly fetch?: typeof fetch;
   readonly readyMs?: number;
   readonly firstFrameMs?: number;
+  /** How long a stream with no viewer and no action in flight keeps its serve-sim process. */
+  readonly idleMs?: number;
   /** Asks the guest whether Device Hub has taken its touch and buttons. */
   /** The host-private directory a screen capture may land in; without it Rotate cannot read the orientation. */
   readonly captureDirectory?: string;
@@ -148,6 +151,10 @@ interface StreamSession {
   closed: boolean;
   streamAbort: AbortController | undefined;
   readonly waiters: Array<(frame: Uint8Array | undefined) => void>;
+  /** Retires the session once nobody watches it and no action uses it. */
+  idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Actions being delivered through this session's serve-sim right now. */
+  actions: number;
 }
 
 /**
@@ -182,6 +189,7 @@ export function createManagedSimulatorHelpers(
   const fetchImpl = options.fetch ?? fetch;
   const readyMs = options.readyMs ?? READY_MS;
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
+  const idleMs = options.idleMs ?? IDLE_MS;
   const inputConnection = options.inputConnection ?? simctlInputConnection;
   const sitsWideOf = options.sitsWide ?? simctlSitsWideIn(options.captureDirectory);
   const openTouchChannel = options.openTouchChannel ?? openServeSimTouchChannel;
@@ -238,8 +246,11 @@ export function createManagedSimulatorHelpers(
       closed: false,
       streamAbort: undefined,
       waiters: [],
+      idleTimer: undefined,
+      actions: 0,
     };
     child.once("exit", () => {
+      holdIdle(session);
       session.closed = true;
       sessions.delete(udid);
       failWaiters(session);
@@ -249,7 +260,26 @@ export function createManagedSimulatorHelpers(
     return session;
   }
 
+  function holdIdle(session: StreamSession): void {
+    if (session.idleTimer === undefined) return;
+    clearTimeout(session.idleTimer);
+    session.idleTimer = undefined;
+  }
+
+  // Closing the last view only stopped the MJPEG read, so every serve-sim
+  // process started for a Simulator stayed alive until the desktop quit.
+  function armIdle(session: StreamSession): void {
+    holdIdle(session);
+    if (session.closed || session.viewers.size > 0 || session.actions > 0) return;
+    session.idleTimer = setTimeout(() => {
+      session.idleTimer = undefined;
+      if (session.viewers.size === 0 && session.actions === 0) retire(session);
+    }, idleMs);
+    session.idleTimer.unref?.();
+  }
+
   function retire(session: StreamSession): void {
+    holdIdle(session);
     if (session.closed) return;
     session.closed = true;
     sessions.delete(session.udid);
@@ -608,6 +638,7 @@ export function createManagedSimulatorHelpers(
         session.viewers.clear();
       }
       failWaiters(session);
+      armIdle(session);
     }
   }
 
@@ -619,6 +650,7 @@ export function createManagedSimulatorHelpers(
     const reader = session.reader;
     session.reader = undefined;
     void reader?.cancel();
+    armIdle(session);
   }
 
   return {
@@ -648,7 +680,12 @@ export function createManagedSimulatorHelpers(
       if (session === undefined || session.closed) {
         return native.send(simulatorId, request, timeoutMs, cancelled);
       }
-      const delivered = await deliver(session, request, timeoutMs, cancelled);
+      holdIdle(session);
+      session.actions += 1;
+      const delivered = await deliver(session, request, timeoutMs, cancelled).finally(() => {
+        session.actions -= 1;
+        armIdle(session);
+      });
       if (delivered === "native") return native.send(simulatorId, request, timeoutMs, cancelled);
       if ("kind" in delivered) {
         return disconnectedInput(simulatorId, request, delivered.remainingMs, cancelled);
@@ -669,6 +706,7 @@ export function createManagedSimulatorHelpers(
       if (session === undefined || session.closed) {
         return native.watch(simulatorId, watchOptions, viewer, timeoutMs);
       }
+      holdIdle(session);
       session.viewers.add(viewer);
       if (session.latest !== undefined) viewer.onFrame(session.latest);
       void ensureFrames(session);
@@ -706,6 +744,7 @@ export function createManagedSimulatorHelpers(
       for (const pending of sessions.values()) {
         void pending.then((session) => {
           if (session === undefined) return;
+          holdIdle(session);
           session.closed = true;
           failWaiters(session);
           for (const viewer of session.viewers) viewer.onEnd();

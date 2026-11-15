@@ -1,11 +1,11 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { OctantMode } from "@octant/contracts/modes";
 import { Archive } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Surface, SurfaceEmpty, SurfaceHeader } from "../surface/SurfaceHeader";
+import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { ShellState } from "./ShellState";
 
 export interface ArchivedThreadEntry {
   readonly mode: OctantMode;
@@ -121,13 +121,14 @@ export function ArchiveView(props: ArchiveViewProps) {
       )}
 
       {chatArchive.kind === "loading" && props.entries.length === 0 ? (
-        <ShellState
+        <OctantEmpty
           message="Loading archived threads from this host."
           state="loading"
           title="Loading archive"
         />
       ) : entries.length === 0 ? (
-        <SurfaceEmpty
+        <OctantEmpty
+          layout="line"
           icon={<Archive size={20} />}
           detail={
             projectFilter === ALL_PROJECTS

@@ -534,6 +534,23 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("answers a paired device's message search in every mode under the overview read grant, and never as a write", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    for (const mode of ["chat", "work", "code"] as const) {
+      const path = `/api/${mode}/transcript-search?q=release`;
+      expect(classifyProductAction(new Request(`https://octant.example${path}`))).toBe(
+        "project.overview.read",
+      );
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).not.toBe("project.overview.read");
+      expect((await product(handoff(path)))?.status).toBe(200);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(3);
+  });
+
   it("refuses a paired device an HTML import exactly as it refuses creating a Canvas", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

@@ -51,6 +51,8 @@ import {
 import { runMcpCliCommand } from "./mcpCommand";
 import { AGENT_MCP_HELP, runAgentMcpServer } from "./agentMcpServer";
 import { runAgentMcpBridge } from "./agentAccessBridge";
+import { agentLoopbackFetch, type AgentListenerFetch } from "./agentAccessTransport";
+import { readHostInfoFile } from "./bridgeSecretFile";
 import {
   AGENT_ACCESS_SWITCHES,
   resolveAgentAccessCliCommand,
@@ -373,9 +375,14 @@ export async function runCli(
       process.stdout.write(AGENT_MCP_HELP);
       return 0;
     }
-    if (Object.keys(args.flags).length === 1 && typeof args.flags.connection === "string") {
+    const local = args.flags.local === true;
+    if (
+      Object.keys(args.flags).length === (local ? 2 : 1) &&
+      typeof args.flags.connection === "string"
+    ) {
       // An outside agent's machine: no host here, only the connection file
-      // `octant agent-access join` wrote.
+      // `octant agent-access join` wrote. With `--local`, the client is on the
+      // host's own computer and reaches it over loopback with the same key.
       let connection;
       try {
         connection = decodeAgentConnectionFile(
@@ -387,8 +394,24 @@ export async function runCli(
         );
         return 1;
       }
+      let loopback: AgentListenerFetch | undefined;
+      if (local) {
+        const info = await readHostInfoFile({
+          env: context.environment,
+          platform: process.platform,
+          home: homedir(),
+        });
+        if (info === undefined) {
+          process.stderr.write(
+            `${context.identity.productName} is not running on this computer, so --local has no host to reach. Start it first.\n`,
+          );
+          return 1;
+        }
+        loopback = agentLoopbackFetch(info.url);
+      }
       return await runAgentMcpBridge({
         connection,
+        ...(loopback === undefined ? {} : { fetch: loopback }),
         input: process.stdin,
         stdout: process.stdout,
         stderr: process.stderr,
@@ -854,7 +877,10 @@ const USAGE: ReadonlyArray<{ readonly octant: string; readonly nightly?: string 
       "agent [<prompt>] [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--access ask-first|accept-edits|auto|plan|full-access] [--sandbox] [--detach] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
   },
   { octant: "agent status <thread-id> [--json]" },
-  { octant: "agent mcp --connection <file>  (on another machine, after agent-access join)" },
+  {
+    octant:
+      "agent mcp --connection <file> [--local]  (after agent-access join; --local for an MCP client on this computer)",
+  },
   {
     octant:
       "agent-access create <name> --project <name>[,<name>] [--mode chat,work,code] [--access ask-first|accept-edits|auto|plan|full-access] [--threads own|project] [--allow-answers] [--models <id>,…] [--days <n>] [--direct] [--turns-per-day <n>] [--running-turns <n>] [--requests-per-minute <n>] [--json]",

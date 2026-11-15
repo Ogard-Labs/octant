@@ -10805,7 +10805,9 @@ function runtimeFixture(options: {
       currentProjectAccess: (scope, project) => {
         if (options.hunkCurrent !== undefined) return options.hunkCurrent();
         if (hostAccess !== undefined)
-          return hostAccess.standingAuthority(() => hostAccess.canAccessProject(scope, project));
+          return hostAccess.standingAuthority(project, () =>
+            hostAccess.canAccessProject(scope, project),
+          );
         if (options.projectAccessCurrent !== undefined) return options.projectAccessCurrent();
         const granted =
           typeof options.projectAccess === "function"
@@ -10815,8 +10817,8 @@ function runtimeFixture(options: {
         void granted.catch(() => {});
         return false;
       },
-      standingAuthority: (run) =>
-        hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
+      standingAuthority: (project, run) =>
+        hostAccess === undefined ? run() : hostAccess.standingAuthority(project, run),
     },
     ...(options.acpTerminalConfinement === undefined
       ? {}
@@ -14000,7 +14002,9 @@ it.each([
       }
       // Same active Project/window/thread/checkout IDs still pass this real production access check.
       expect(
-        access.standingAuthority(() => access.canAccessProject(windowId, source.projectId)),
+        access.standingAuthority(source.projectId, () =>
+          access.canAccessProject(windowId, source.projectId),
+        ),
       ).toBe(true);
       held.resolve();
       if (change.endsWith("during final root stat")) {

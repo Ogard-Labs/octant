@@ -302,8 +302,11 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
           </span>
         )}
       </summary>
+      {/* A closed disclosure shows no body, so it does not parse one: long
+          reasoning was re-parsed as Markdown on every streamed delta. The raw
+          text stays in place so find-in-page and the opened state still have it. */}
       <div className="turn-activity__thinking-body">
-        <ChatRichText body={activity.reasoning} />
+        {thinkingOpen ? <ChatRichText body={activity.reasoning} /> : activity.reasoning}
       </div>
     </details>
   ) : null;

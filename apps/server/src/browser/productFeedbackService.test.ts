@@ -310,6 +310,95 @@ describe("pointing at the running product", () => {
   });
 });
 
+describe("picking a Browser element for the composer", () => {
+  it("answers with a bounded snapshot marked as outside content, its cut markup marked truncated, and keeps nothing", async () => {
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["browser-page"] },
+    }));
+    const { service, journal, describePoint } = harness({
+      recordExternalContentIngestion,
+      observation: {
+        ...described,
+        element: {
+          ...described.element,
+          context: {
+            captureId: "b".repeat(64),
+            viewport: { width: 1280, height: 720 },
+            tag: "button",
+            ancestors: ["main"],
+            children: [],
+            styles: [
+              { property: "display", value: "inline-block" },
+              { property: "padding", value: "4px" },
+              { property: "color", value: "rgb(10, 20, 30)" },
+            ],
+            omissions: ["form-values-excluded"],
+          },
+        },
+        markup: { html: `<button class="save">${"x".repeat(4_000)}`, truncated: true },
+      },
+    });
+
+    const result = await service.execute(
+      windowId,
+      {
+        kind: "pick-browser-element",
+        threadId: ids.thread,
+        contextId: ids.context,
+        selectionId: ids.operation,
+        point: capture.point,
+      },
+      { admissionCurrent: () => true },
+    );
+
+    if (result.kind !== "browser-element-picked") throw Error(`Not picked: ${result.kind}`);
+    expect(result.snapshot).toMatchObject({
+      selector: described.element.selector,
+      tag: "button",
+      url: described.url,
+      markup: { truncated: true },
+      // Only the reported subset: box size, colours, font, display and position.
+      styles: [
+        { property: "display", value: "inline-block" },
+        { property: "color", value: "rgb(10, 20, 30)" },
+      ],
+      provenance: { origin: "external-content", sourceLabel: "browser-page" },
+    });
+    expect(result.snapshot.markup?.html.length).toBeLessThanOrEqual(4_096);
+    // Only the picker's read asks the host for markup.
+    expect(describePoint).toHaveBeenCalledWith(expect.objectContaining({ withMarkup: true }));
+    expect(recordExternalContentIngestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "browser-page" },
+        authorized: true,
+      }),
+    );
+    expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("withholds the snapshot when the thread cannot be marked as holding outside content", async () => {
+    const { service } = harness({
+      recordExternalContentIngestion: () => ({ kind: "refused", reason: "contended" }),
+    });
+
+    expect(
+      await service.execute(
+        windowId,
+        {
+          kind: "pick-browser-element",
+          threadId: ids.thread,
+          contextId: ids.context,
+          selectionId: ids.operation,
+          point: capture.point,
+        },
+        { admissionCurrent: () => true },
+      ),
+    ).toEqual({ kind: "feedback-refused", reason: "capture-unavailable" });
+  });
+});
+
 describe("handing a thread's notes to the turn about to run", () => {
   it("keeps feedback pending when continuation inputs leave no room for its captured picture", () => {
     const note = storedNote({

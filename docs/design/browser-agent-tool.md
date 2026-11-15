@@ -1494,6 +1494,22 @@ callbacks or erase values already received by the website. After a script
 attempt with possible effects, old refs are dropped and its observation is
 stale until the page is read again.
 
+## Page-declared tools
+
+Designed, not built (maintainer decision, 2026-11-14). A page may declare tools
+of its own for agents (WebMCP). Octant reads a page's declared tools as
+outside content: their names, descriptions and schemas mark the thread as
+having read outside content and are framed as evidence, never instructions,
+and they add nothing to the thread's tool list by themselves. The agent may
+ask to call one through the Browser tool on the page that declared it, and
+each call is approval-gated: the person approves that one call, naming the
+page's origin, the tool and its arguments. At Full access it follows
+[the Full access rule](decisions.md#the-full-access-rule), so a call that pays,
+buys or sends a message as the person still asks. Its result is outside
+content. A declared tool never reaches
+another page, the host, or the person's credentials, and the site approvals
+and navigation guards of the page still apply.
+
 ## What the tool never does
 
 - Fixed actions and broker APIs never return or type an agent-supplied password. The person signs in
@@ -1655,3 +1671,10 @@ the domain package retains the fixed element-reading description and pure
 policies. Native element feedback obeys the same credential-fill, page-script
 and owner-control observation holds as other Browser reads. A hold acquired
 during a capture invalidates the result even if it has already been released.
+
+### Attaching a picked element to the composer
+
+In pointing mode the person may instead pick an element for the thread's
+composer. Its rules (what the snapshot holds, its bounds, its taint, and where
+it is offered) are owned by
+[Browser captures: Picking an element](browser-captures.md#picking-an-element).

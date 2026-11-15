@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeUsageDashboardResponse,
+  decodeWindowId,
   type UsageDashboardResponse,
-  type WindowWorkspace,
 } from "@octant/contracts";
+import { defaultWindowWorkspace } from "@octant/domain/shell-policy";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
 import { resolveWindowProjectScope, type UsageProjectScope } from "./usageProjectScope";
 import { Journal } from "./persistence/journal";
@@ -460,13 +461,7 @@ describe("usage dashboard route Project scope", () => {
     ["no persisted workspace", undefined],
     [
       "every mode context unbound",
-      {
-        contextByMode: {
-          chat: { projectId: null },
-          work: { projectId: null },
-          code: { projectId: null },
-        },
-      } as unknown as WindowWorkspace,
+      defaultWindowWorkspace(decodeWindowId("00000000-0000-4000-8000-0000000000f1")),
     ],
   ] as const) {
     it(`gives a window with ${label} only unfiled usage`, async () => {

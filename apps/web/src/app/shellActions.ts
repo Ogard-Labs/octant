@@ -15,6 +15,7 @@ import type {
   WorkThreadCommand,
 } from "@octant/contracts";
 import type { ChatThreadId } from "@octant/contracts/chat";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
@@ -90,6 +91,8 @@ export type ShellActions = {
     prompt?: string,
     modelOptionValues?: ProviderModelOptionValues,
     paneId?: PaneId,
+    extensionSelections?: ReadonlyArray<ExtensionSelection>,
+    attachments?: ReadonlyArray<File>,
   ) => void;
   readonly createProject: ProjectController["create"];
   readonly dismissCrossContextOffer: ShellController["dismissCrossContextOffer"];
@@ -159,6 +162,7 @@ export type ShellActions = {
   /** Puts the active pane back on its mode's start screen. */
   readonly openHome: () => void;
   readonly openInbox: () => void;
+  readonly openTodos: () => void;
   readonly openLinearIssues: () => void;
   readonly openLinkInApp: (
     request: Parameters<NonNullable<WorkspaceViewProps["onOpenLink"]>>[0],
@@ -282,6 +286,7 @@ export type ShellActions = {
   readonly setGithubIssuesOpen: Dispatch<SetStateAction<boolean>>;
   readonly setImageLibraryOpen: Dispatch<SetStateAction<boolean>>;
   readonly setInboxOpen: Dispatch<SetStateAction<boolean>>;
+  readonly setTodosOpen: Dispatch<SetStateAction<boolean>>;
   readonly setLinearIssuesOpen: Dispatch<SetStateAction<boolean>>;
   readonly setPendingDraftBranch: Dispatch<SetStateAction<string | undefined>>;
   readonly setPendingDraftPrompt: Dispatch<SetStateAction<string | undefined>>;

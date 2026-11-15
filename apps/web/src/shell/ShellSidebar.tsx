@@ -34,6 +34,7 @@ import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigat
 import {
   layoutSidebarDestinations,
   sidebarNavigationDescriptor,
+  type SidebarNavigationDescriptorId,
   type SidebarNavigationInput,
 } from "./navigationModel";
 
@@ -106,6 +107,8 @@ export interface ShellSidebarProps {
   readonly githubIssuesReadAvailable?: boolean;
   /** Threads waiting on the user right now; mirrors the dock badge count. */
   readonly inboxCount?: number;
+  /** Open to-dos not yet started, for the To-dos row's badge. */
+  readonly todosCount?: number;
   /**
    * The current mode's counts for the Running, To review, and Done today
    * tiles, with where each one goes. Absent leaves those tiles out.
@@ -216,6 +219,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const navigationInput: SidebarNavigationInput = {
     activeMode,
     inbox: navigationActions.inbox === undefined ? "unavailable" : "available",
+    todos: navigationActions.todos === undefined ? "unavailable" : "available",
     artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
     imageLibrary: props.imageLibraryAvailable === true ? "available" : "unavailable",
     automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
@@ -248,6 +252,17 @@ export function ShellSidebar(props: ShellSidebarProps) {
         ? "available"
         : "unavailable",
   };
+  const navigationCounts: Partial<Record<SidebarNavigationDescriptorId, number>> | undefined =
+    (props.inboxCount ?? 0) === 0 && (props.todosCount ?? 0) === 0
+      ? undefined
+      : {
+          ...(props.inboxCount === undefined || props.inboxCount === 0
+            ? {}
+            : { inbox: props.inboxCount }),
+          ...(props.todosCount === undefined || props.todosCount === 0
+            ? {}
+            : { todos: props.todosCount }),
+        };
   const destinationLayout = layoutSidebarDestinations({
     activeMode,
     customization: props.settings.sidebarDestinations,
@@ -321,6 +336,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
             label: sidebarNavigationDescriptor(id).label,
             onSelect: action,
             active: props.activeDestination === id,
+            ...(navigationCounts?.[id] === undefined ? {} : { count: navigationCounts[id] }),
           },
         ];
   });
@@ -396,6 +412,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                   label: sidebarNavigationDescriptor(id).label,
                   onSelect: action,
                   active: props.activeDestination === id,
+                  ...(navigationCounts?.[id] === undefined ? {} : { count: navigationCounts[id] }),
                 },
               ];
         })}
@@ -581,9 +598,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 ? {}
                 : { activeDestination: props.activeDestination })}
               actions={navigationActions}
-              {...(props.inboxCount === undefined || props.inboxCount === 0
-                ? {}
-                : { counts: { inbox: props.inboxCount } })}
+              {...(navigationCounts === undefined ? {} : { counts: navigationCounts })}
               input={navigationInput}
               {...(moreActions.length === 0 || besideRail !== null
                 ? {}

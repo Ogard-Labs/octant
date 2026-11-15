@@ -371,6 +371,28 @@ describe("CodeThreadControllerSlots", () => {
     expect(announced).toHaveBeenCalled();
   });
 
+  it("wakes a thread's readers only when that thread's controller moves", async () => {
+    const registry = createCodeThreadControllers();
+    const readsA = vi.fn();
+    const readsB = vi.fn();
+    registry.subscribeThread(threadA, readsA);
+    registry.subscribeThread(threadB, readsB);
+
+    render(
+      <CodeThreadControllerSlots
+        navigationBootstrap={bootstrap()}
+        client={client()}
+        readCursorStore={createCodeReadCursorStore()}
+        registry={registry}
+        threadIds={[threadA]}
+      />,
+    );
+
+    await waitFor(() => expect(registry.get(threadA)?.activeView).toBeDefined());
+    expect(readsA).toHaveBeenCalled();
+    expect(readsB).not.toHaveBeenCalled();
+  });
+
   it("returns the same provider-request snapshot when nothing changed", () => {
     const registry = createCodeThreadControllers();
     const snapshots: unknown[] = [];

@@ -78,7 +78,7 @@ describe("SidebarDestinationSettings", () => {
 
     await user.click(screen.getByRole("button", { name: "Move Inbox down" }));
     expect(onChange).toHaveBeenLastCalledWith({
-      order: ["new-thread", "board", "inbox"],
+      order: ["new-thread", "todos", "inbox"],
       visibility: [],
     });
   });

@@ -6,6 +6,7 @@ import type {
   ZenGradientStyle,
   ZenGroundEffect,
 } from "@octant/contracts/zen";
+import { ZEN_FILL_SEED_FROM, ZEN_FILL_SEED_TO } from "../theme/zenFillSeeds";
 import { DEFAULT_ZEN_GROUND_EFFECT, ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { ImagePlus, Monitor } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -13,6 +14,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 
 export interface ZenAppearancePanelProps {
   readonly appearance: ZenAppearance;
@@ -64,13 +66,13 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
   const fill: ZenBackgroundFill = picture ? (background.fill ?? "cover") : "cover";
 
   const [solidColor, setSolidColor] = useState(
-    background.kind === "solid" ? background.color : "#1a1a2e",
+    background.kind === "solid" ? background.color : ZEN_FILL_SEED_FROM,
   );
   const [gradientFrom, setGradientFrom] = useState(
-    background.kind === "gradient" ? background.from : "#1a1a2e",
+    background.kind === "gradient" ? background.from : ZEN_FILL_SEED_FROM,
   );
   const [gradientTo, setGradientTo] = useState(
-    background.kind === "gradient" ? background.to : "#16213e",
+    background.kind === "gradient" ? background.to : ZEN_FILL_SEED_TO,
   );
   const [gradientStyle, setGradientStyle] = useState<ZenGradientStyle>(
     background.kind === "gradient" ? (background.style ?? "linear") : "linear",
@@ -313,15 +315,14 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         {/* Controls that only matter to someone mixing their own colour.
             Open they doubled the sheet's height and pushed the built-in
             pictures off the bottom of it. */}
-        <details className="zen-appearance__custom">
-          <summary>Custom fill</summary>
+        <OctantCollapsible className="zen-appearance__custom" summary="Custom fill">
           <label>
             Solid color
             <OctantInput
               aria-label="Solid color"
               onChange={(event) => setSolidColor(event.currentTarget.value)}
               type="color"
-              value={HEX.test(solidColor) ? solidColor : "#1a1a2e"}
+              value={HEX.test(solidColor) ? solidColor : ZEN_FILL_SEED_FROM}
             />
           </label>
           <OctantButton
@@ -353,7 +354,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
               aria-label="Gradient start"
               onChange={(event) => setGradientFrom(event.currentTarget.value)}
               type="color"
-              value={HEX.test(gradientFrom) ? gradientFrom : "#1a1a2e"}
+              value={HEX.test(gradientFrom) ? gradientFrom : ZEN_FILL_SEED_FROM}
             />
           </label>
           <label>
@@ -362,7 +363,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
               aria-label="Gradient end"
               onChange={(event) => setGradientTo(event.currentTarget.value)}
               type="color"
-              value={HEX.test(gradientTo) ? gradientTo : "#16213e"}
+              value={HEX.test(gradientTo) ? gradientTo : ZEN_FILL_SEED_TO}
             />
           </label>
           <label>
@@ -391,7 +392,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
           >
             Apply custom gradient
           </OctantButton>
-        </details>
+        </OctantCollapsible>
       </Section>
     </div>
   );

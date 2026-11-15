@@ -101,6 +101,8 @@ export interface CodeOperationApprovalViewPort {
   };
   readonly setBounds: (bounds: CodeOperationApprovalBounds) => void;
   readonly setVisible: (visible: boolean) => void;
+  /** Moves keyboard focus into the view, so Escape and the focused Cancel reach it. */
+  readonly focus: () => void;
 }
 
 export interface CodeOperationApprovalViewHost<TWindow> {
@@ -242,6 +244,10 @@ export function createCodeOperationApprovalViewController<TWindow>(
   const pendingByWindow = new Map<string, PendingApproval<TWindow>>();
   const anchorByWindow = new Map<string, CodeOperationApprovalAnchor>();
   const queuedByWindow = new Map<string, Array<PendingApproval<TWindow>>>();
+  // Windows whose renderer reports a dialog, sheet, palette, or menu above the
+  // composer. A native view always paints above the renderer, so the approval
+  // leaves the window until the overlay closes, as Browser surfaces do.
+  const obscuredWindows = new Set<string>();
   const token = options.token ?? randomToken;
   const expiryMs = options.expiryMs ?? DEFAULT_EXPIRY_MS;
   const anchorWaitMs = options.anchorWaitMs ?? DEFAULT_ANCHOR_WAIT_MS;
@@ -389,7 +395,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
       pending.view = view;
       options.host.attach(pending.window, view);
       view.setBounds(bounds);
-      view.setVisible(true);
+      view.setVisible(!obscuredWindows.has(pending.windowId));
       await view.webContents.loadURL(
         "data:text/html;charset=utf-8," +
           encodeURIComponent(approvalViewHtml(options.host.approvalPalette?.(pending.windowId))),
@@ -397,6 +403,7 @@ export function createCodeOperationApprovalViewController<TWindow>(
       if (pending.finished) return;
       view.webContents.send(CODE_OPERATION_APPROVAL_VIEW_CHANNELS.challenge, challenge);
       showQueueCount(pending.windowId);
+      if (!obscuredWindows.has(pending.windowId)) view.focus();
     } catch {
       finish(pending, undefined);
     } finally {
@@ -527,7 +534,9 @@ export function createCodeOperationApprovalViewController<TWindow>(
         pending.token !== input.token ||
         pending.challenge?.challengeId !== input.challengeId ||
         pending.decisionStarted ||
-        pending.finished
+        pending.finished ||
+        // A hidden view may keep keyboard focus; it can still cancel but never allow.
+        (input.decision === "approve" && obscuredWindows.has(pending.windowId))
       ) {
         return undefined;
       }
@@ -591,8 +600,17 @@ export function createCodeOperationApprovalViewController<TWindow>(
       }
     },
     cancel,
+    setObscured: (windowId: string, obscured: boolean): void => {
+      if (obscured) obscuredWindows.add(windowId);
+      else obscuredWindows.delete(windowId);
+      const view = pendingByWindow.get(windowId)?.view;
+      if (view === undefined) return;
+      view.setVisible(!obscured);
+      if (!obscured) view.focus();
+    },
     closeWindow: (windowId: string): void => {
       anchorByWindow.delete(windowId);
+      obscuredWindows.delete(windowId);
       cancel(windowId);
     },
     viewDestroyed: (senderId: number): void => {
@@ -621,8 +639,8 @@ export function approvalViewHtml(palette?: CodeOperationApprovalPalette): string
 ${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
-body{color:var(--approval-fg);font:13px/1.45 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
-main{height:100%;display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--approval-border);border-radius:12px;background:var(--approval-bg);box-shadow:0 12px 32px -16px rgb(0 0 0 / 40%);overflow:hidden}
+body{color:var(--approval-fg);font:13px/1.45 -apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',sans-serif}
+main{height:100%;display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--approval-border);border-radius:12px;background:var(--approval-bg);box-shadow:0 12px 32px -16px rgb(0 0 0 / 40%);overflow:hidden}main:focus{outline:none}
 .content{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto;flex:1}
 .heading{display:flex;align-items:flex-start;gap:10px}
 .heading-icon{flex:none;display:grid;place-items:center;width:24px;height:24px;border:1px solid var(--approval-border);border-radius:8px;color:var(--approval-muted);font-size:16px;line-height:1}
@@ -634,8 +652,8 @@ details{color:var(--approval-muted);font-size:12px}summary{cursor:pointer}
 #identity,#digests{padding-top:8px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
 #queue:not([hidden]){display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}#queue-count{color:var(--approval-muted);font-size:12px}
 .actions{display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;margin-top:auto;padding-top:10px;border-top:1px solid var(--approval-border)}
-button{border:1px solid var(--approval-border);border-radius:8px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:2px solid var(--approval-primary);outline-offset:2px}button:disabled{opacity:.5;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
-</style></head><body><main id="approval" role="alertdialog" aria-labelledby="message" aria-describedby="detail" aria-live="polite"><div class="content"><div class="heading"><span class="heading-icon" aria-hidden="true">◉</span><div class="heading-text"><div class="eyebrow">Permission requested</div><h1 id="message">Preparing approval…</h1></div></div><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
+button{border:1px solid var(--approval-border);border-radius:4px;padding:6px 12px;min-height:32px;background:var(--approval-control);color:inherit;font:inherit;cursor:pointer}button:hover{background:var(--approval-hover)}:focus-visible{outline:2px solid var(--approval-primary);outline-offset:2px}button:disabled{opacity:.75;cursor:default}#approve{border-color:transparent;background:var(--approval-primary);color:var(--approval-primary-fg)}
+</style></head><body><main id="approval" role="alertdialog" tabindex="-1" aria-labelledby="message" aria-describedby="detail" aria-live="polite"><div class="content"><div class="heading"><span class="heading-icon" aria-hidden="true">◉</span><div class="heading-text"><div class="eyebrow">Permission requested</div><h1 id="message">Preparing approval…</h1></div></div><p id="detail">Waiting for the host to describe this action.</p><details><summary>Show authority details</summary><p id="identity"></p><p id="digests"></p></details></div><nav id="queue" aria-label="Pending approvals" hidden><button id="previous" type="button">Previous</button><span id="queue-count" role="status"></span><button id="next" type="button">Next</button></nav><div class="actions"><button id="cancel" type="button">Cancel</button><button id="approve" type="button" disabled>Allow</button></div></main></body></html>`;
 }
 
 /** The window an approval view is placed in, in content coordinates. */

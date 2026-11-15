@@ -2648,6 +2648,55 @@ CREATE INDEX validation_evidence_authority_idx
         ON code_file_projection(content_id);
     `,
   },
+  {
+    version: 105,
+    name: "record_agent_access_loopback_use",
+    // An agent grant's key may now be used by an MCP client on this computer
+    // over loopback, so its last use may come from there. A store, not a
+    // projection: the bearer hashes are in no event, so the rows are copied.
+    sql: `
+      ALTER TABLE agent_access_credential_store RENAME TO agent_access_credential_before_loopback;
+      CREATE TABLE agent_access_credential_store (
+        grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 36),
+        salt TEXT CHECK(salt IS NULL OR length(salt) = 32),
+        hash TEXT CHECK(hash IS NULL OR length(hash) = 64),
+        last_used_at TEXT,
+        last_source_class TEXT CHECK(
+          last_source_class IS NULL OR
+          last_source_class IN ('loopback', 'lan-private', 'tailscale')
+        )
+      ) STRICT;
+      INSERT INTO agent_access_credential_store
+        (grant_id, salt, hash, last_used_at, last_source_class)
+        SELECT grant_id, salt, hash, last_used_at, last_source_class
+        FROM agent_access_credential_before_loopback;
+      DROP TABLE agent_access_credential_before_loopback;
+    `,
+  },
+  {
+    version: 106,
+    name: "create_code_transcript_search_projection",
+    // Code message search. A projection under a new name, so it has no
+    // checkpoint and the first start after this migration replays the whole
+    // journal into it; no backfill is written here. `thread_id` puts its rows
+    // in a thread purge's sweep.
+    sql: `
+      CREATE TABLE code_transcript_search_projection (
+        operation_id TEXT NOT NULL CHECK(length(trim(operation_id)) > 0),
+        content_role TEXT NOT NULL CHECK(content_role IN ('user', 'assistant')),
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        start_sequence INTEGER NOT NULL CHECK(start_sequence > 0),
+        part_count INTEGER NOT NULL CHECK(part_count >= 0),
+        rewound INTEGER NOT NULL CHECK(rewound IN (0, 1)),
+        body_text TEXT NOT NULL,
+        search_text TEXT NOT NULL,
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (operation_id, content_role)
+      ) STRICT;
+      CREATE INDEX code_transcript_search_thread_idx
+        ON code_transcript_search_projection(thread_id, start_sequence);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

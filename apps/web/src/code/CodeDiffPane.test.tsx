@@ -248,13 +248,16 @@ describe("CodeDiffPane", () => {
       expect(fixture.options?.modelUriBase).toContain(encodeURIComponent("src/index.ts")),
     );
     fixture.options?.onSelectLine?.({ side: "original", line: 1 });
-    expect(selected).toHaveBeenLastCalledWith({
-      reviewOperationId: ids.operation,
-      captureCursor: 30,
-      path: "src/index.ts",
-      side: "original",
-      line: 12,
-    });
+    expect(selected).toHaveBeenLastCalledWith(
+      {
+        reviewOperationId: ids.operation,
+        captureCursor: 30,
+        path: "src/index.ts",
+        side: "original",
+        line: 12,
+      },
+      "const answer = 41;",
+    );
     expect(code.operationContent).not.toHaveBeenCalled();
   });
 
@@ -763,6 +766,7 @@ function available(
 
 function client(options: { readonly bytes?: Uint8Array } = {}): CodeClient {
   return {
+    searchTranscript: vi.fn(),
     bootstrap: vi.fn(),
     navigation: vi.fn(),
     queryBoard: vi.fn(),

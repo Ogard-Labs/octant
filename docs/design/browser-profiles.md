@@ -502,6 +502,24 @@ packaged last-window-close/reopen, host restart and explicit-Quit acceptance
 still require the separately approved native test Space; fixture passes do not
 claim that evidence.
 
+A background execution page hibernates when nothing uses it: after five minutes
+with no queued or direct action in flight, no agent control, recording, page
+script hold or owner-control hold, and its lease still current, its tabs' native
+views close. At most four execution contexts stay live; past that, the least
+recently used one that meets the same conditions hibernates. Hibernation keeps
+the context, its lease, its profile partition (so cookies and storage), its
+diagnostics and each tab's id, address and title; Browser state reads report
+those without reopening anything. The next action or read reopens each tab at
+its last address through the ordinary navigation guard, so an address the policy
+no longer admits leaves that tab blank. In-page state, back/forward history and
+earlier snapshot refs do not survive, so the agent reads the page again before
+acting on it. Window-owned contexts never hibernate.
+
+Rationale: each live page holds a Chromium renderer of roughly 100–300 MB, and
+up to 64 reservations can each hold several tabs for as long as their grant
+lasts, so an idle fleet held gigabytes. A page an agent is driving is never
+closed under it; the cost is a reload on return to an idle one.
+
 If permission, caller or owner ends during an operation, the result withholds
 both new and cached observations. An already dispatched site action may have
 happened, so its effect is reported as unknown and is never automatically
@@ -666,8 +684,10 @@ work without it, and takes no extension-support package:
   anchored to the button, loaded in the page's profile. The popover is a
   sandboxed native view in that profile's session: it cannot open windows, is
   refused every permission, and cannot navigate away from its extension. At most
-  one is open per window; clicking another, pressing Escape, or the window
-  going away closes it. Only an extension the profile's session has loaded can
+  one is open per window; clicking another, pressing Escape, clicking outside
+  it, focus leaving it, its window moving or resizing, a dialog, sheet, palette
+  or menu opening in the window, or the window or its renderer going away
+  closes it. Only an extension the profile's session has loaded can
   be shown, so a disabled or removed one has no page to open.
 - An extension without a popup page is listed and can be chosen. If its manifest
   has an `action`, the click fires `chrome.action.onClicked` in its background

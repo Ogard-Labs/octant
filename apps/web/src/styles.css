@@ -17,6 +17,7 @@
 @import "./styles/github.css";
 @import "./styles/work-list.css";
 @import "./styles/inbox.css";
+@import "./styles/todos.css";
 @import "./styles/review.css";
 @import "./styles/apple.css";
 @import "./styles/device.css";
@@ -25,7 +26,7 @@
 @import "./styles/vitals.css";
 @import "./styles/preview.css";
 @import "./styles/zen.css";
-@import "./styles/canvas.css";
+@import "./styles/canvas-inline.css";
 @import "./styles/canvas-dashboard.css";
 @import "./styles/remote-pairing.css";
 @import "./styles/remote-shell.css";
@@ -1741,6 +1742,31 @@ html[data-octant-native-host="true"]
   }
 }
 
+/* A window showing several Projects keeps each pane's Project at every width,
+   so a person never types or approves into the wrong one. The Project keeps a
+   short cap and its full name in the tooltip, and does not shrink below it: in
+   the top-right pane, whose header leaves room for the window's own controls,
+   sharing the room left the Project at two letters. The title gives way and
+   stays whole in its tooltip and the pane's accessible name. The "/" between
+   them stays hidden: the chip's meta colour and size already set it apart, and
+   the narrow header has no room to spare. */
+@media (max-width: 680px) {
+  .workspace-pane__header[data-mixed-projects="true"] .workspace-pane__context {
+    display: inline;
+    flex-shrink: 0;
+    max-width: 10ch;
+  }
+}
+
+@container pane-header (max-width: 520px) {
+  .workspace-pane__header[data-mixed-projects="true"]:has(.workspace-pane__title)
+    .workspace-pane__context {
+    display: inline;
+    flex-shrink: 0;
+    max-width: 10ch;
+  }
+}
+
 /* A turn is executing. The chip keeps its width while the chips shrink, so
    the state stays readable in a narrow pane. */
 .workspace-pane__status {
@@ -1933,10 +1959,17 @@ html[data-octant-native-host="true"]
   display: none;
 }
 
+/* The strip scrolls its tabs without drawing a scrollbar: an overlay bar
+   covered the tab labels and the hairline under the strip. */
 .workspace-content-tabs {
   min-width: 0;
   flex: 1;
   overflow: auto;
+  scrollbar-width: none;
+}
+
+.workspace-content-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 /* The row takes the strip's width so the chips share it, shrinking toward
@@ -1955,8 +1988,11 @@ html[data-octant-native-host="true"]
   align-items: center;
 }
 
-.workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__window-drag-space {
-  flex: 0 0 12px;
+/* Many tabs must still leave somewhere to grab the window by. */
+.workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__window-drag-space,
+.workspace-pane__header:has(.workspace-content-tabs) .window-chrome__drag-space {
+  flex: 0 0 24px;
+  min-width: 24px;
 }
 
 .workspace-content-tabs__entry [role="tab"] {
@@ -3870,7 +3906,7 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 
 .folder-picker__item-select:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .folder-picker__status {
@@ -5759,7 +5795,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .scaffolds__entry-button:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .scaffolds__entry-name {
@@ -6318,7 +6354,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 .composer-pool-control__trigger:disabled {
-  opacity: 0.55;
+  opacity: var(--oct-disabled-opacity);
   cursor: default;
 }
 
@@ -7065,17 +7101,9 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-size: var(--oct-text-detail);
 }
 
-.code-board__card-details summary::-webkit-details-marker {
-  display: none;
-}
-
 .code-board__card-details summary:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-}
-
-.code-board__card-details[open] summary svg {
-  transform: rotate(180deg);
 }
 
 .code-board__view-popover {

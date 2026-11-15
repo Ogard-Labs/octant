@@ -46,6 +46,12 @@ const MODE_LABELS: Readonly<Record<AgentGrantMode, string>> = {
   work: "Work",
   code: "Code",
 };
+const LAST_SOURCE_LABELS: Readonly<Record<NonNullable<AgentGrantView["lastSourceClass"]>, string>> =
+  {
+    loopback: "on this computer",
+    "lan-private": "over your LAN",
+    tailscale: "over Tailscale",
+  };
 
 type Answer = AgentAccessResult;
 type Message = { readonly kind: "success" | "error"; readonly text: string };
@@ -637,7 +643,7 @@ function grantSummary(view: AgentGrantView, projectNames: ReadonlyMap<string, st
   const lastUse =
     view.lastUsedAt === undefined
       ? "never used"
-      : `last used ${new Date(view.lastUsedAt).toLocaleString()} over ${view.lastSourceClass === "tailscale" ? "Tailscale" : "your LAN"}`;
+      : `last used ${new Date(view.lastUsedAt).toLocaleString()} ${LAST_SOURCE_LABELS[view.lastSourceClass ?? "lan-private"]}`;
   return [
     `${grant.scope.modes.map((mode) => MODE_LABELS[mode]).join(", ")}${projects.length === 0 ? "" : ` in ${projects.join(", ")}`}`,
     `up to ${LEVEL_LABELS[grant.scope.highestLevel]}`,

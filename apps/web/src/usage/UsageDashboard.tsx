@@ -1,3 +1,4 @@
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { UsageName } from "./UsageName";
 import type {
   UsageExportFormat,
@@ -21,7 +22,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SurfaceEmpty, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
+import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -334,7 +335,8 @@ export function UsageDashboard(props: UsageDashboardProps) {
 
       {isEmpty ? (
         data.turnMetrics === undefined || data.turnMetrics.turns.length === 0 ? (
-          <SurfaceEmpty
+          <OctantEmpty
+            layout="line"
             {...(hasFilter
               ? {
                   action: (

@@ -32,6 +32,8 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   browserSurfaceDetach: "replaced",
   browserSurfaceOpenExternal: "local",
   browserSurfaceState: "replaced",
+  // Nightly presents pages in its own renderer, so app shortcuts reach it directly.
+  browserAppShortcut: "replaced",
   browserSurfaceTab: "local",
   browserSurfacePoint: "brokered",
   browserExtensionPopupOpen: "brokered",
@@ -95,6 +97,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   requestCodeOperationApproval: "local",
   updateCodeOperationApprovalAnchor: "local",
   cancelCodeOperationApproval: "local",
+  setRendererOverlayOpen: "local",
   startNewAgent: "local",
   providerCredentialStatus: "local",
   resetBounds: "local",
@@ -117,6 +120,7 @@ export const NIGHTLY_CLIENT_CHANNELS = {
   moveProviderApiKey: "local",
   hostCapabilities: "local",
   resolvedMaterial: "local",
+  windowFullScreen: "local",
   resolvedSidebarVibrancy: "local",
   sidebarMaterialPreference: "local",
   sidebarVibrancyMode: "local",
@@ -172,6 +176,7 @@ export const NIGHTLY_CLIENT_PUSH_CHANNELS: ReadonlySet<string> = new Set([
   DESKTOP_IPC_CHANNELS.startNewAgent,
   DESKTOP_IPC_CHANNELS.codeDeepLink,
   DESKTOP_IPC_CHANNELS.resolvedMaterial,
+  DESKTOP_IPC_CHANNELS.windowFullScreen,
   DESKTOP_IPC_CHANNELS.resolvedSidebarVibrancy,
 ]);
 
