@@ -149,6 +149,13 @@ export class WebSearchSettingsService {
    * memory: after a restart the next search learns it again.
    */
   readonly #refusedKeys = new Set<string>();
+  /**
+   * Credential references the broker last said hold a key. A keyed entry
+   * counts toward offering `web-search` only while its key is here: offering
+   * a tool whose every backend would answer Needs key promises a search that
+   * cannot run. Learned when the host starts and on every read of the page.
+   */
+  readonly #storedKeys = new Set<string>();
 
   constructor(options: WebSearchSettingsServiceOptions) {
     this.#connection = options.connection;
@@ -159,6 +166,13 @@ export class WebSearchSettingsService {
     this.#keys = options.keys;
     this.#fetch = options.fetch;
     this.#log = options.log ?? ((line) => console.warn(line));
+    if (this.#keys !== undefined) void this.view().catch(() => undefined);
+  }
+
+  /** Whether the entry can search now: it takes no key, or its key is stored. */
+  #keyReady(entry: WebSearchBackendEntry): boolean {
+    if (!WEB_SEARCH_BACKEND_OFFERS[entry.kind].takesKey) return true;
+    return entry.credentialRef !== undefined && this.#storedKeys.has(entry.credentialRef);
   }
 
   #oneAtATime<T>(change: () => Promise<T>): Promise<T> {
@@ -214,12 +228,16 @@ export class WebSearchSettingsService {
     const present =
       entry.credentialRef !== undefined &&
       (await this.#keys?.has(entry.credentialRef).catch(() => false)) === true;
+    if (entry.credentialRef !== undefined) {
+      if (present) this.#storedKeys.add(entry.credentialRef);
+      else this.#storedKeys.delete(entry.credentialRef);
+    }
     return present ? { kind: "ready" } : { kind: "needs-key" };
   }
 
   /** The entries a query may go to now, in the person's order. */
   eligible(): ReadonlyArray<WebSearchBackendEntry> {
-    return eligibleWebSearchBackends(this.read().settings);
+    return eligibleWebSearchBackends(this.read().settings).filter((entry) => this.#keyReady(entry));
   }
 
   /**
@@ -231,7 +249,7 @@ export class WebSearchSettingsService {
     const saved = readSavedWebSearchSettings(this.#connection);
     const settings =
       saved ?? webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID);
-    return eligibleWebSearchBackends(settings).length > 0;
+    return eligibleWebSearchBackends(settings).some((entry) => this.#keyReady(entry));
   }
 
   /**
@@ -247,10 +265,14 @@ export class WebSearchSettingsService {
       ...(keys === undefined
         ? {}
         : {
-            resolveKey: async (entry) =>
-              entry.credentialRef === undefined || !(await keys.has(entry.credentialRef))
-                ? undefined
-                : await keys.resolve(entry.credentialRef),
+            resolveKey: async (entry) => {
+              if (entry.credentialRef === undefined) return undefined;
+              if (!(await keys.has(entry.credentialRef))) {
+                this.#storedKeys.delete(entry.credentialRef);
+                return undefined;
+              }
+              return await keys.resolve(entry.credentialRef);
+            },
           }),
       ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
       onRouted: (routed) => {
@@ -397,7 +419,10 @@ export class WebSearchSettingsService {
         },
       ],
     });
-    for (const credentialRef of staleKeys) await this.#deleteKey(credentialRef);
+    for (const credentialRef of staleKeys) {
+      this.#storedKeys.delete(credentialRef);
+      await this.#deleteKey(credentialRef);
+    }
     return { kind: "saved", view: await this.view() };
   }
 
@@ -454,7 +479,10 @@ export class WebSearchSettingsService {
     const current = this.read().settings.backends.find(
       (candidate) => String(candidate.id) === String(request.entryId),
     );
+    if (request.key === undefined) this.#storedKeys.delete(entry.credentialRef);
+    else this.#storedKeys.add(entry.credentialRef);
     if (request.key !== undefined && current?.credentialRef !== entry.credentialRef) {
+      this.#storedKeys.delete(entry.credentialRef);
       await this.#deleteKey(entry.credentialRef);
       return {
         kind: "refused",

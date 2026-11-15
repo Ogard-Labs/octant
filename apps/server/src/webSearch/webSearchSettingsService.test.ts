@@ -342,6 +342,29 @@ describe("web search keys", () => {
     expect((await service.view()).states[0]?.state).toEqual({ kind: "needs-key" });
   });
 
+  it("offers search through a keyed vendor only while its key is stored, and learns stored keys after a restart", async () => {
+    const { keys } = memoryKeys();
+    const { service, connection, journal, clock } = openHarness({ value: undefined }, { keys });
+    await service.set({ settings: { policy: "any", backends: [braveEntry] } }, "local-window");
+    expect(service.eligible()).toEqual([]);
+    await service.setKey({ entryId: braveEntry.id, key: "brave-secret" }, "local-window");
+    expect(service.eligible().map((entry) => entry.id)).toEqual([braveEntry.id]);
+
+    const restarted = new WebSearchSettingsService({
+      connection,
+      journal,
+      clock,
+      uuid: randomUUID,
+      readChatSearxngBaseUrl: () => undefined,
+      keys,
+    });
+    await restarted.view();
+    expect(restarted.eligible().map((entry) => entry.id)).toEqual([braveEntry.id]);
+
+    await service.setKey({ entryId: braveEntry.id }, "local-window");
+    expect(service.eligible()).toEqual([]);
+  });
+
   it("logs a stored key it could not delete without the key itself", async () => {
     const { keys } = memoryKeys();
     const lines: string[] = [];

@@ -115,7 +115,10 @@ Eligibility is a pure policy in `packages/domain`: it takes the list, the
 policy, and each kind's offer, and returns the eligible entries in the
 person's order. With no eligible entry, `web-search` is not offered at all,
 the rule SearXNG follows today: no request leaves the host without a backend
-the person set up.
+the person set up. An eligible entry whose kind takes a key counts toward
+offering `web-search` only while the credential broker holds its key, which
+the host learns when it starts, when Settings reads the list, and when a key is
+saved, deleted, or found missing.
 
 The policy is the host's, not a thread's: a thread cannot loosen it, and an
 agent cannot read or change it. The policy, the list, and the statements change
