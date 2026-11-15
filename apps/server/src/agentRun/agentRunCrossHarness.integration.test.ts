@@ -502,6 +502,22 @@ function fixture(
           modelId: target.modelId,
         }),
       }),
+    delegateTo: (task: string, harness: Harness) =>
+      tools.execute({
+        name: "octant_agents",
+        inputJson: JSON.stringify({
+          operation: "delegate",
+          role: "research",
+          task,
+          providerInstanceId: candidates[harness].providerInstanceId,
+          modelId: candidates[harness].modelId,
+        }),
+      }),
+    waitAll: (runIds: ReadonlyArray<string>) =>
+      tools.execute({
+        name: "octant_agents",
+        inputJson: JSON.stringify({ operation: "wait", runIds, waitFor: "all", timeoutMs: 5_000 }),
+      }),
     followUp: (runId: string, expectedVersion: number, message: string) =>
       tools.execute({
         name: "octant_agents",
@@ -529,6 +545,41 @@ function fixture(
 }
 
 describe("cross-harness delegation with fixture provider transports", () => {
+  it("fans one thread's helpers out to two providers and waits on both together", async () => {
+    const subject = fixture("provider harness", "provider harness");
+    try {
+      const runIds: string[] = [];
+      for (const [task, harness] of [
+        ["Check with the direct endpoint", "Octant Harness"],
+        ["Check with the provider runtime", "provider harness"],
+      ] as const) {
+        const outcome = await subject.delegateTo(task, harness);
+        expect(outcome.result).toMatchObject({
+          status: "accepted",
+          target: { providerInstanceId: candidates[harness].providerInstanceId },
+        });
+        runIds.push((outcome.result as { runId: string }).runId);
+      }
+      await expect.poll(() => subject.direct.started.length).toBe(1);
+      await expect.poll(() => subject.provider.started.length).toBe(1);
+      subject.release();
+      const waited = await subject.waitAll(runIds);
+      expect(waited.result).toMatchObject({ status: "settled", waitFor: "all", pending: [] });
+      const settled = (waited.result as { settled: ReadonlyArray<{ text?: string }> }).settled;
+      expect(settled.map((entry) => entry.text?.split(":")[0])).toEqual([
+        "Fixture direct reply",
+        "Fixture provider reply",
+      ]);
+      expect(
+        subject.persistence
+          .parentSummary(ids.thread)
+          .map((entry) => String(entry.route.executionProviderInstanceId)),
+      ).toEqual(expect.arrayContaining([String(ids.octant), String(ids.provider)]));
+    } finally {
+      await subject.close();
+    }
+  });
+
   it.each([
     ["Octant Harness", "Octant Harness"],
     ["Octant Harness", "provider harness"],
