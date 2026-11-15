@@ -2772,9 +2772,26 @@ export class ChatService {
           : { modelOptionValues: command.modelOptionValues }),
       });
       const omissions = this.#historicalAttachmentOmissions(current, targetProbe, command.modelId);
-      const { handoffWarning: _previousWarning, ...withoutPreviousWarning } = changed;
+      const {
+        handoffWarning: _previousWarning,
+        releasedStopId: _previousRelease,
+        ...withoutPreviousWarning
+      } = changed;
+      // A change while the latest attempt is parked on its account's usage
+      // limit releases that attempt; see `parkedStopReleased`.
+      const parked = activeChatTurns(this.#persistence.readChatThreadView(threadId)?.turns ?? [])
+        .at(-1)
+        ?.attempts.at(-1);
+      const releasedStopId =
+        parked !== undefined &&
+        parked.outcome === "waiting" &&
+        parked.usageLimit !== undefined &&
+        String(changed.providerInstanceId) !== String(current.providerInstanceId)
+          ? String(parked.id)
+          : undefined;
       next = decodeChatThread({
         ...withoutPreviousWarning,
+        ...(releasedStopId === undefined ? {} : { releasedStopId }),
         ...(omissions.length === 0
           ? {}
           : {

@@ -496,6 +496,13 @@ export const ChatThread = Schema.Struct({
    */
   usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
   /**
+   * The attempt the latest provider change released: it had stopped on the
+   * old account's usage limit, and moving off that account means it no longer
+   * holds the thread. It keeps its limit in history; the queue and the
+   * composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  /**
    * Set when a person turned off **Continue after restart** for this thread:
    * an answer a host restart cuts off waits for them instead of continuing by
    * itself. Absent, the Chat setting decides.

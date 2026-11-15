@@ -1104,3 +1104,72 @@ describe("a turn parked on a usage limit after the thread moved to another accou
     });
   });
 });
+
+describe("a Chat attempt parked on a usage limit after the thread moved to another account", () => {
+  it("lets the next Chat message dispatch once the hand-off released the parked attempt", async () => {
+    const { deps } = setup();
+    const now = thread.createdAt;
+    const turnId = "92000000-0000-4000-8000-000000000030";
+    const attemptId = "92000000-0000-4000-8000-000000000031";
+    const reference = { contentId: turnId, digest: "c".repeat(64), byteLength: 4 };
+    const view = (current: typeof thread) =>
+      decodeChatThreadView({
+        thread: current,
+        turns: [
+          {
+            id: turnId,
+            threadId,
+            sequence: 1,
+            userMessageRef: reference,
+            attachmentIds: [],
+            attempts: [
+              {
+                id: attemptId,
+                turnId,
+                threadId,
+                providerInstanceId: thread.providerInstanceId,
+                providerSessionId: "92000000-0000-4000-8000-000000000032",
+                modelId: thread.modelId,
+                contextManifestId: "92000000-0000-4000-8000-000000000033",
+                outcome: "waiting",
+                responseRefs: [],
+                citationIds: [],
+                usageLimit: { kind: "exhausted" },
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        contents: [],
+        attachments: [],
+        citations: [],
+        workItems: [],
+        workListVersion: 0,
+        followUpVersion: 0,
+        lastSequence: 3,
+      });
+    let current = thread;
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      persistence: {
+        ...deps.persistence,
+        readChatThread: () => current,
+        readChatThreadView: () => view(current),
+      },
+    });
+    const input = { scope: { mode: "chat", threadId }, windowId, intent: "dispatch" } as const;
+
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    current = decodeChatThread({
+      ...thread,
+      providerInstanceId: "92000000-0000-4000-8000-000000000021",
+      releasedStopId: attemptId,
+    });
+    expect(await port.inspect(input)).toMatchObject({
+      status: "ready",
+      tail: { id: attemptId, status: "failed", ordinaryFailure: true },
+    });
+  });
+});

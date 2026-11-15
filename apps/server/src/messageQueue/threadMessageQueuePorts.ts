@@ -154,7 +154,13 @@ function readFacts(
         personalityInstructions: thread.personalityInstructions,
         multiModelPool: thread.multiModelPool,
       },
-      ...(attempt === undefined ? {} : { tail: tailOf(String(attempt.id), attempt.outcome) }),
+      ...(attempt === undefined
+        ? {}
+        : {
+            tail: parkedStopReleased(thread, String(attempt.id))
+              ? releasedTail(String(attempt.id))
+              : tailOf(String(attempt.id), attempt.outcome),
+          }),
     };
   }
   if (scope.mode === "work") {
@@ -294,7 +300,10 @@ export function createThreadMessageQueuePort(
         (candidate) => String(candidate.submissionId) === String(messageId),
       );
       if (turn === undefined) return { status: "not-admitted" };
-      return settledAs(turn.attempts.at(-1)?.outcome ?? "queued");
+      const attempt = turn.attempts.at(-1);
+      if (attempt !== undefined && parkedStopReleased(view.thread, String(attempt.id)))
+        return { status: "failed", ordinaryFailure: true };
+      return settledAs(attempt?.outcome ?? "queued");
     }
     if (scope.mode === "work") {
       const id = decodeWorkThreadId(scope.threadId);

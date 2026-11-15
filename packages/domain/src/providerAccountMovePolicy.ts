@@ -230,13 +230,13 @@ export function withUsageLimitHandoffOutcome<T extends WithUsageLimitHandoff>(
  */
 export function parkedStopReleased(
   thread: {
+    /** Work and Code record it on the provider handoff. */
     readonly providerHandoff?: { readonly releasedStopId?: string | undefined } | undefined;
+    /** Chat, which keeps no handoff record on the thread, records it here. */
+    readonly releasedStopId?: string | undefined;
   },
   stopId: string | undefined,
 ): boolean {
-  return (
-    stopId !== undefined &&
-    thread.providerHandoff?.releasedStopId !== undefined &&
-    thread.providerHandoff.releasedStopId === stopId
-  );
+  const released = thread.providerHandoff?.releasedStopId ?? thread.releasedStopId;
+  return stopId !== undefined && released !== undefined && released === stopId;
 }

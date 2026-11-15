@@ -42,6 +42,7 @@ import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import {
+  parkedStopReleased,
   providerAccountMoveTargets,
   startedConversationPickerGroups,
   type PickerGroup,
@@ -652,13 +653,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     attemptCanForceStop(props.providerSnapshot, activeAttempt);
   // The host would refuse to clear a thread's outside-content mark in any of
   // these states; a paused queue with nothing waiting does not stop it.
-  const threadBusy =
-    isSending ||
-    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
-    (messageQueue.snapshot?.items.length ?? 0) > 0;
+  // An attempt parked on a usage limit stops holding the thread once it has
+  // moved off that account: the host records the released attempt on the
+  // move, and the queue reads the same record.
+  const tailAttempt = view.turns.at(-1)?.attempts.at(-1);
+  const tailWaiting =
+    tailAttempt?.outcome === "waiting" && !parkedStopReleased(view.thread, String(tailAttempt.id));
+  const threadBusy = isSending || tailWaiting || (messageQueue.snapshot?.items.length ?? 0) > 0;
   const queueFollowUp =
     isSending ||
-    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
+    tailWaiting ||
     messageQueue.busy ||
     messageQueue.uncertain ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||

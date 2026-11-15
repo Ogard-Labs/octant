@@ -11850,6 +11850,8 @@ describe("handing a Chat conversation to a new provider session", () => {
       expect(fixture.service.read(threadId).thread).toMatchObject({
         providerInstanceId: otherNative,
         modelId: "model-a",
+        // The parked attempt no longer holds the thread; its limit stays in history.
+        releasedStopId: String(limitedAttempt?.id),
         usageLimitHandoff: {
           providerInstanceId: otherNative,
           last: {
