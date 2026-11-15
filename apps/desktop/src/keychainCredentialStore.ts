@@ -61,7 +61,8 @@ export type KeychainCredentialNamespace =
   | "mcp-server-credential"
   | "desktop-provider-credential"
   | "push-platform-credential"
-  | "ssh-key";
+  | "ssh-key"
+  | "web-search-credential";
 
 /** The request field that names an item in a namespace of its own. */
 const NAMESPACE_ID_FIELD = {
@@ -72,6 +73,7 @@ const NAMESPACE_ID_FIELD = {
   "desktop-provider-credential": "credentialRef",
   "push-platform-credential": "credentialRef",
   "ssh-key": "credentialRef",
+  "web-search-credential": "credentialRef",
 } as const;
 
 /**

@@ -166,6 +166,8 @@ export async function runWindowsForeground(
         store("push-platform-credential"),
         undefined,
         store("ssh-key"),
+        undefined,
+        store("web-search-credential"),
       );
       phase = "imports";
       // Server/native persistence imports follow the actual native owner claim.

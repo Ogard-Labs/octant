@@ -3749,6 +3749,10 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The Project controller makes a new setter each render; the thread's trust
+  // prompt reads the latest through this ref so the services stay stable.
+  const setProjectNativeProvidersRef = useRef(projectController.setNativeProviders);
+  setProjectNativeProvidersRef.current = projectController.setNativeProviders;
   const threadNativeSetupServices = useMemo(
     () =>
       providerController.threadNativeSetup === undefined
@@ -3756,8 +3760,17 @@ function LaunchedShell(
         : {
             instances: providerController.instances,
             ...providerController.threadNativeSetup,
+            projects: projectController.projects,
+            setProjectNativeProviders: (
+              projectId: ProjectId,
+              providers: Parameters<typeof projectController.setNativeProviders>[1],
+            ) => setProjectNativeProvidersRef.current(projectId, providers),
           },
-    [providerController.instances, providerController.threadNativeSetup],
+    [
+      providerController.instances,
+      providerController.threadNativeSetup,
+      projectController.projects,
+    ],
   );
   // Built once per client and provider list: a new element on every render
   // re-rendered the whole memoized sidebar for each streamed event.

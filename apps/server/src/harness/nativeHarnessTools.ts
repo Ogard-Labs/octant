@@ -154,6 +154,9 @@ export interface NativeHarnessToolPorts {
     readonly query: string;
     readonly limit: number;
     readonly signal?: AbortSignal;
+    /** The thread and the provider's id for the call, so where it went is journaled with it. */
+    readonly threadId?: string;
+    readonly toolCallId?: string;
   }) => Promise<ReadonlyArray<NativeHarnessWebSearchResult>>;
   readonly webFetch?: (input: {
     readonly url: string;
@@ -272,9 +275,9 @@ export function createNativeHarnessTools(
   const clock = options.clock ?? (() => new Date().toISOString());
   return {
     definitions: offered,
-    execute: async ({ name, inputJson, signal }) => {
+    execute: async ({ name, inputJson, signal, toolCallId }) => {
       const startedAt = Date.now();
-      const outcome = await run({ name, inputJson, signal });
+      const outcome = await run({ name, inputJson, signal, toolCallId });
       const toolName = NATIVE_HARNESS_TOOL_NAMES.find((candidate) => candidate === name);
       if (options.observe !== undefined && toolName !== undefined) {
         let summary: string = toolName;
@@ -310,10 +313,12 @@ export function createNativeHarnessTools(
     name,
     inputJson,
     signal,
+    toolCallId,
   }: {
     readonly name: string;
     readonly inputJson: string;
     readonly signal?: AbortSignal | undefined;
+    readonly toolCallId?: string | undefined;
   }): Promise<{
     readonly result: unknown;
     readonly isError?: boolean;
@@ -381,7 +386,10 @@ export function createNativeHarnessTools(
               signal,
               String(request.actionId),
             )
-          : await execute(name, args, options.ports, signal, String(request.actionId));
+          : await execute(name, args, options.ports, signal, String(request.actionId), {
+              threadId: options.threadId,
+              toolCallId,
+            });
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
     } finally {
@@ -462,6 +470,7 @@ async function execute(
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
   callId: string,
+  call: { readonly threadId: string; readonly toolCallId: string | undefined },
 ): Promise<{
   readonly result: unknown;
   readonly isError?: boolean;
@@ -550,6 +559,8 @@ async function execute(
         query: input.query,
         limit: input.limit ?? DEFAULT_WEB_SEARCH_RESULTS,
         ...(signal === undefined ? {} : { signal }),
+        threadId: call.threadId,
+        ...(call.toolCallId === undefined ? {} : { toolCallId: call.toolCallId }),
       });
       return ok({ query: input.query, results });
     }

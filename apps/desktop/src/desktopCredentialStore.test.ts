@@ -32,6 +32,7 @@ describe("resolveDesktopCredentialBackend", () => {
       desktopProviderCredentials: expect.any(Object),
       pushPlatformCredentials: expect.any(Object),
       sshKeys: expect.any(Object),
+      webSearchCredentials: expect.any(Object),
     });
     expect(backend.purgeStore).toBeUndefined();
   });
@@ -53,6 +54,7 @@ describe("resolveDesktopCredentialBackend", () => {
       desktopProviderCredentials: expect.any(Object),
       pushPlatformCredentials: expect.any(Object),
       sshKeys: expect.any(Object),
+      webSearchCredentials: expect.any(Object),
     });
   });
 });

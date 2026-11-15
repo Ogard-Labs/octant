@@ -263,6 +263,8 @@ import {
   HostMemoryLimitsChanged,
   WEB_SEARCH_SETTINGS_EVENT_NAME,
   WebSearchSettingsChanged,
+  WEB_SEARCH_CALL_ROUTED_EVENT_NAME,
+  WebSearchCallRouted,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -856,6 +858,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
     .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
     .register(WEB_SEARCH_SETTINGS_EVENT_NAME, 1, WebSearchSettingsChanged)
+    .register(WEB_SEARCH_CALL_ROUTED_EVENT_NAME, 1, WebSearchCallRouted)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)

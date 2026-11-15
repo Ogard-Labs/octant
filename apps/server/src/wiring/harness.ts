@@ -34,8 +34,8 @@ import {
 import { Schema } from "effect";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ResearchRouter } from "../chat/research/researchRouter";
-import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
 import { WebSearchSettingsService } from "../webSearch/webSearchSettingsService";
+import { makeWebSearchCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ThreadWorkService } from "../chat/threadWorkService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
@@ -371,13 +371,18 @@ export function wireHarness(deps: HarnessDependencies) {
     clock: () => new Date().toISOString(),
     uuid: randomUUID,
     readChatSearxngBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+    // Search keys sit in the broker's own namespace; a host with no broker
+    // has none, and keyed vendors read as Needs key.
+    ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? {}
+      : {
+          keys: makeWebSearchCredentialBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+        }),
   });
-  const researchRouter = new ResearchRouter({
-    webSearch: {
-      search: (input) =>
-        searchWebSearchBackends({ backends: webSearchSettings.eligible(), search: input }),
-    },
-  });
+  const researchRouter = new ResearchRouter({ webSearch: webSearchSettings });
   const threadWork = new ThreadWorkService({
     persistence,
     uuid: randomUUID,
@@ -1108,7 +1113,11 @@ export function wireHarness(deps: HarnessDependencies) {
       const stored = workThreadProjection.read(threadId as never)?.fullAccessSandbox === true;
       return stored || runningWorkTurnSandbox(threadId) === true;
     },
-    resolveWebSearch: () => harnessWebSearch({ readEligible: () => webSearchSettings.eligible() }),
+    resolveWebSearch: () =>
+      harnessWebSearch({
+        readEligible: () => webSearchSettings.eligible(),
+        search: (input) => webSearchSettings.search(input),
+      }),
     webFetch: async (input) => {
       try {
         return await fetchPublicUrl(input);
