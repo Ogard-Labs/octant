@@ -2903,6 +2903,34 @@ describe("mapClaudeMessage", () => {
     );
   });
 
+  it("names the turn's last assistant message as the point a fork or rewind cuts the session at", () => {
+    const ctx = context();
+    for (const uuid of ["transcript-message-1", "transcript-message-2"]) {
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: `message-${uuid}`,
+        uuid,
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+    }
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+    expect(completed.at(-1)).toMatchObject({
+      kind: "event",
+      event: { kind: "completed", nativeAnchor: "transcript-message-2" },
+    });
+  });
+
   it("reports how much of the window the last request filled, and where the runtime compacts", () => {
     const ctx = context({ autoCompactThreshold: 167_000 });
     const result = {

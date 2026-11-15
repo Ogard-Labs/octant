@@ -20,7 +20,8 @@ export type OctantCommandGroup =
   | "Projects"
   | "Actions"
   | "Workspace"
-  | "Settings";
+  | "Settings"
+  | "Provider commands";
 
 /**
  * `run` invokes the callback the equivalent visible control already uses.

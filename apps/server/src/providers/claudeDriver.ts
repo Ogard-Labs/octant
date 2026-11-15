@@ -23,8 +23,10 @@ import {
   type ProviderModel,
   type ProviderModelId,
   type ProviderModelOptionValues,
+  type ProviderResumeCursor,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ThreadPublishedSnapshot,
   type UtcTimestamp,
   type ProviderApprovalCall,
@@ -37,6 +39,7 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionCompaction,
+  ProviderSessionForkRequest,
   ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
@@ -1019,6 +1022,10 @@ const availableCapabilities: ProviderCapabilities = {
   // Claude's reviewer reports a refusal and nothing for a call it approved.
   reviewVerdicts: { allow: "unsupported", deny: "supported" },
   modelSwitch: "supported",
+  // The bundled Agent SDK copies a session through a message (`forkSession`
+  // with `upToMessageId`); a turn journaled before its anchor was recorded
+  // still goes back with a text handoff.
+  sessionRollback: "supported",
   nativeSetup: {
     subagents: "supported",
     webTools: "supported",
@@ -1796,6 +1803,8 @@ function observation(
     readonly models?: readonly ProviderModel[];
     /** The runtime announced `compact` when the probe opened it. */
     readonly compactAnnounced?: boolean;
+    /** The runtime's own slash commands, as it announced them when the probe opened it. */
+    readonly commands?: ReadonlyArray<ProviderSlashCommand>;
     /** The probe's launch carried the host's own non-essential traffic switch. */
     readonly hostTrafficDisabled?: boolean;
     readonly credentialStatus?: "stored" | "missing" | "unavailable";
@@ -1825,6 +1834,9 @@ function observation(
     detectedVersion: input.version,
     ...(input.credentialStatus === undefined ? {} : { credentialStatus: input.credentialStatus }),
     models: input.models ?? [],
+    ...(input.readiness !== "ready" || input.commands === undefined || input.commands.length === 0
+      ? {}
+      : { commands: input.commands }),
     capabilities:
       input.readiness === "ready"
         ? {
@@ -1922,7 +1934,11 @@ function probeSdk(
   environmentFactory: ClaudeEnvironmentFactory,
   environmentOptions: ClaudeEnvironmentScopeOptions,
 ): Effect.Effect<
-  { readonly models: readonly ProviderModel[]; readonly compactAnnounced: boolean },
+  {
+    readonly models: readonly ProviderModel[];
+    readonly compactAnnounced: boolean;
+    readonly commands: ReadonlyArray<ProviderSlashCommand>;
+  },
   ProviderFailure,
   Scope.Scope
 > {
@@ -1967,7 +1983,11 @@ function probeSdk(
     if (models.length === 0) {
       return yield* Effect.fail(failure("protocol", "Claude returned no usable models."));
     }
-    return { models, compactAnnounced: query.initialization.compactAnnounced };
+    return {
+      models,
+      compactAnnounced: query.initialization.compactAnnounced,
+      commands: query.initialization.commands ?? [],
+    };
   });
 }
 
@@ -2093,6 +2113,7 @@ function makeProbe(
           version,
           models: sdkResult.models,
           compactAnnounced: sdkResult.compactAnnounced,
+          commands: sdkResult.commands,
           hostTrafficDisabled,
           ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
         },
@@ -2163,6 +2184,85 @@ function makeClaudeContextFacts(
   };
 }
 
+/**
+ * Copies a Claude session through a turn's last assistant message with the
+ * SDK's own `forkSession`, records the copy's identity for the session that
+ * resumes it, and returns its cursor. The SDK keeps a session under its
+ * Project's folder in the account's directory and resume looks for it there,
+ * so a copy is made only for the source's own folder, mode and sign-in; any
+ * other fork reads its source as text. The source session is not touched.
+ */
+function forkClaudeSession(
+  options: ClaudeDriverOptions,
+  input: ProviderSessionForkRequest,
+): Effect.Effect<ProviderResumeCursor | undefined, ProviderFailure> {
+  const copySession = options.sdk.forkSession;
+  const binding = input.source.binding;
+  if (
+    copySession === undefined ||
+    String(input.instanceId) !== String(options.instanceId) ||
+    input.source.driverKind !== "claude" ||
+    binding === undefined ||
+    String(binding.instanceId) !== String(options.instanceId) ||
+    binding.projectRoot !== input.projectRoot ||
+    binding.mode !== input.mode
+  ) {
+    return Effect.succeed(undefined);
+  }
+  const signal = new AbortController().signal;
+  return Effect.gen(function* () {
+    const source = yield* Effect.tryPromise({
+      try: () =>
+        options.resumeIdentityPort.lookup(
+          { providerInstanceId: options.instanceId, sdkSessionId: input.source.value },
+          signal,
+        ),
+      catch: () => failure("stale-resume", "Claude session identity is unavailable for a copy."),
+    });
+    if (
+      source === undefined ||
+      source.projectRoot !== input.projectRoot ||
+      source.authentication !== options.authentication
+    ) {
+      return undefined;
+    }
+    const copied = yield* copySession({
+      sessionId: input.source.value,
+      projectRoot: input.projectRoot,
+      upToMessageId: input.anchor,
+      ...(options.configDirectory === undefined
+        ? {}
+        : { configDirectory: options.configDirectory }),
+    });
+    yield* Effect.tryPromise({
+      try: () =>
+        options.resumeIdentityPort.put(
+          {
+            providerInstanceId: options.instanceId,
+            octantSessionId: input.sessionId,
+            sdkSessionId: copied,
+            projectRoot: input.projectRoot,
+            modelId: input.modelId,
+            authentication: options.authentication,
+          },
+          signal,
+        ),
+      catch: () => failure("provider-failed", "The copied Claude session could not be recorded."),
+    });
+    return {
+      driverKind: "claude" as const,
+      value: copied,
+      binding: providerResumeBinding({
+        instanceId: options.instanceId,
+        sessionId: input.sessionId,
+        projectRoot: input.projectRoot,
+        mode: input.mode,
+        modelId: input.modelId,
+      }),
+    };
+  });
+}
+
 export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
   const factories: ConnectionFactories = {
@@ -2194,6 +2294,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         : undefined,
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
+    forkSession: (input) => forkClaudeSession(options, input),
     acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -2613,6 +2714,9 @@ function makeConnection(
             ...(message.postTokens === undefined ? {} : { tokensAfter: message.postTokens }),
           };
         }
+      }
+      if (message.kind === "commands-changed") {
+        options.runtimeRegistry.setObservedCommands(options.instanceId, message.commands);
       }
       if (message.kind === "session-state") {
         state.reportsSessionState = true;
@@ -3686,6 +3790,12 @@ function makeConnection(
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
+        // A Work or Code session opens in its Project, so its list holds the
+        // Project's own commands and skills that the probe's folder lacks.
+        const announced = query.initialization.commands;
+        if (mode !== "chat" && announced !== undefined && announced.length > 0) {
+          options.runtimeRegistry.setObservedCommands(options.instanceId, announced);
+        }
         options.runtimeRegistry.setActiveSessionCount(
           options.instanceId,
           options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,

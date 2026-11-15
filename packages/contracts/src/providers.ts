@@ -1594,6 +1594,22 @@ export const ProviderCapabilities = Schema.Struct({
    */
   sessionRollback: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Where this host lets the runtime run turns, when that is narrower than
+   * every mode: `chat` for Chat, `plan` for Plan in Work and Code, `work` and
+   * `code` for those modes at any other level. `unsupportedReason` says why a
+   * mode reads unsupported. Absent means every mode the other capabilities
+   * allow.
+   */
+  turnModes: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      plan: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+      unsupportedReason: Schema.optional(Schema.Literal("host-confinement")),
+    }).annotations(strict),
+  ),
+  /**
    * Whether one session's runtime process can be killed on its own, through
    * the connection's `forceStop`. A runtime that serves several threads from
    * one process reports `unsupported`, since killing it would end the others.
@@ -2052,6 +2068,20 @@ export const ProviderModelToolCheck = Schema.Struct({
 }).annotations(strict);
 export type ProviderModelToolCheck = typeof ProviderModelToolCheck.Type;
 
+/**
+ * One of the provider's own slash commands, as its runtime listed it: Claude
+ * Code's commands and skills, an ACP agent's `available_commands_update`,
+ * OpenCode's commands. Choosing it in a composer sends `/name` to the
+ * runtime as the prompt.
+ */
+export const ProviderSlashCommand = Schema.Struct({
+  name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
+  description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  argumentHint: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
+export const MAX_PROVIDER_SLASH_COMMANDS = 256;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -2067,6 +2097,14 @@ export const ProviderObservedState = Schema.Struct({
   directoryBinding: Schema.optional(ProviderObservedDirectoryBinding),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
+  /**
+   * The provider's own slash commands its runtime last listed, by the probe
+   * or by a session that reported a change. Absent when it lists none or
+   * cannot say.
+   */
+  commands: Schema.optional(
+    Schema.Array(ProviderSlashCommand).pipe(Schema.maxItems(MAX_PROVIDER_SLASH_COMMANDS)),
+  ),
   // Models a person explicitly verified for tool support through the
   // verify-model-tools command, on any endpoint profile (OpenAI-compatible,
   // Anthropic-compatible, Azure AI Foundry). The sender gates tool requests
@@ -2809,6 +2847,10 @@ export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;
 /** The most of a runtime tool's result the Watcher is handed. */
 export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
 
+/** A point in a runtime's own session, as the runtime names it. */
+export const ProviderNativeAnchor = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
+export type ProviderNativeAnchor = typeof ProviderNativeAnchor.Type;
+
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -3209,6 +3251,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     resumeCursor: Schema.optional(ProviderResumeCursor),
     /** Present only when the runtime said why this reply stopped. */
     stopReason: Schema.optional(ProviderOutputStopReason),
+    /**
+     * Where this turn ends in the runtime's own session, in the runtime's own
+     * terms (Claude's last assistant message id, a Codex turn id), so a fork
+     * or rewind can ask the runtime to cut its session there. Absent when the
+     * runtime names no such point.
+     */
+    nativeAnchor: Schema.optional(ProviderNativeAnchor),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;

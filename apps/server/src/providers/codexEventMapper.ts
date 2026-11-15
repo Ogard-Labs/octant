@@ -1022,6 +1022,8 @@ function mapTerminal(
     event(context, {
       kind: "completed",
       resumeCursor: { driverKind: "codex", value: context.threadId },
+      // `thread/fork` takes it as `lastTurnId` (app-server v2, rust-v0.162.1).
+      ...(turn.id.trim().length === 0 ? {} : { nativeAnchor: turn.id }),
     }),
   ];
 }

@@ -21,6 +21,7 @@ import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
+  OPENCODE_LINUX_CHAT_PLAN_REFUSAL,
   openCodeServerArgs,
   projectOpenCodeRuntimeConfig,
   probeOpenCodeBinary,
@@ -801,35 +802,69 @@ describe("OpenCodeProcessPort", () => {
     expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
   });
 
-  it("keeps fork and exec denied for a 2.x Chat launch on Linux", async () => {
+  it("refuses a 2.x Chat or Plan launch on Linux before anything starts", async () => {
     const fixture = probeWrapper("v2-ready");
-    let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
-    const confinement: ProcessConfinementPort = {
-      prepare: (input) => {
-        captured = input;
-        return { command: input.executable, args: input.args };
-      },
-    };
-    const observed = await Effect.runPromise(
-      Effect.scoped(
-        makeOpenCodeProcessLive({
-          confinement,
-          platform: "linux",
-          runtimeConfigResolver: async () => undefined,
-          startupTimeoutMs: 2_000,
-        }).start({
-          binaryPath: fixture.binaryPath,
-          cwd: fixture.root,
-          mode: "chat",
-          executionPolicy: "plan",
-        }),
-      ),
-    );
-    expect(observed.runtime).toBe("beta");
-    expect(captured?.allowProcessFork).toBe(false);
-    expect(captured?.allowProcessExec).toBe(false);
-    const rules = captured?.extraRules ?? [];
-    expect(rules.some((rule) => rule.includes("process-exec"))).toBe(false);
+    for (const launch of [
+      { mode: "chat", executionPolicy: "plan" },
+      { mode: "chat", executionPolicy: "full-access" },
+      { mode: "code", executionPolicy: "plan" },
+      { mode: "work", executionPolicy: "plan" },
+    ] as const) {
+      let servePrepared = false;
+      const confinement: ProcessConfinementPort = {
+        prepare: (input) => {
+          if (input.args.includes("serve")) servePrepared = true;
+          return { command: input.executable, args: input.args };
+        },
+      };
+      const refused = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              confinement,
+              platform: "linux",
+              runtimeConfigResolver: async () => undefined,
+              startupTimeoutMs: 2_000,
+            }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+          ),
+        ),
+      );
+      expect(refused).toMatchObject({
+        category: "unsupported",
+        message: OPENCODE_LINUX_CHAT_PLAN_REFUSAL,
+      });
+      expect(servePrepared).toBe(false);
+    }
+  });
+
+  it("lets a 2.x Work or Code launch outside Plan fork and exec on Linux", async () => {
+    const fixture = probeWrapper("v2-ready");
+    for (const launch of [
+      { mode: "work", executionPolicy: "approval-gated" },
+      { mode: "code", executionPolicy: "auto-accept-edits" },
+    ] as const) {
+      let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+      const confinement: ProcessConfinementPort = {
+        prepare: (input) => {
+          captured = input;
+          return { command: input.executable, args: input.args };
+        },
+      };
+      const observed = await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement,
+            platform: "linux",
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+          }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+        ),
+      );
+      expect(observed.runtime).toBe("beta");
+      expect(captured?.allowProcessFork).toBe(true);
+      expect(captured?.allowProcessExec).toBe(true);
+      expect(captured?.extraRules).toBeUndefined();
+    }
   });
 
   it("denies fork and exec for a 1.x Chat or Plan launch without the stand-in", async () => {

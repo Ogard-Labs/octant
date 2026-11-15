@@ -874,6 +874,24 @@ gate, and a `remote_agent` task stays an unsupported frame. Rationale: a
 workflow is a batch of subagents, so the subagent switch, display, and gate
 cover it unchanged, and the held turn covers its background lifetime.
 
+#### Fork and rewind
+
+A Code fork or rewind continues a copy of Claude's own session rather than a
+text handoff where it can (maintainer principle, 2026-11-14). Each completed
+turn reports the transcript id of its last assistant message (the
+`SDKAssistantMessage.uuid` the Agent SDK documents for `resumeSessionAt`),
+which the host journals as the turn's native anchor. The driver's
+`forkSession` calls the SDK's own `forkSession(sessionId, { dir,
+upToMessageId })` under the account's directory, which copies the
+transcript through that message with fresh ids and leaves the source alone,
+records the copy's resume identity for the new Octant session, and returns
+its cursor; the turn then resumes it as any session. Claude keeps a session
+under its folder and resume looks there, so a copy is made only for the
+source's own folder, mode and sign-in: a fork onto its own worktree, a turn
+with no anchor, or a failed copy goes back with the text handoff
+([Architecture: native session anchors](../architecture.md#native-session-anchors)).
+`rewindFiles` is not used; files go back through Octant's checkpoints.
+
 #### Wake-ups the model schedules
 
 `ScheduleWakeup` (a delay, held to one minute to one hour), `CronCreate` (a
@@ -1009,8 +1027,15 @@ its tools. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
 launches get the failing `git` stand-in described under
 [Security and authority](../architecture.md#security-and-authority), so 2.x offers turns in
-every mode there; on Linux the probe fails closed and the runtime is listed
-without turns. 2.0.22 names its turn events without the `session.next.`
+every mode there. On Linux (maintainer decision, 2026-11-14) 2.x runs turns
+in Work and Code outside Plan, at Ask first, Auto, Accept edits and Full
+access, where the launch already allows a shell; a Chat or Plan launch is
+refused before it starts with a sentence naming why, and the probe attests
+the Code jail at Ask first and reports `turnModes` with Chat and Plan
+unsupported (`host-confinement`), which the provider's Settings page shows
+as where it runs turns. Rationale: Linux confinement can only deny
+fork outright, so it cannot give Chat and Plan the one `git` exec the
+stand-in needs, while Work and Code outside Plan launch with a shell anyway. 2.0.22 names its turn events without the `session.next.`
 prefix earlier 2.x builds used (`session.text.*`, `session.reasoning.*`,
 `session.tool.*`, `session.step.*`, `session.execution.*`), identifies a
 tool call by `id`, and names the tool only on `session.tool.input.started`;
@@ -1135,6 +1160,40 @@ be trusted unseen. The summary and token figures were read only as event
 shapes, never from a model run, so no before-and-after figure is reported.
 A session carried on to another of the instance's models needs no further
 work: every prompt names the thread's model (`modelSwitch`).
+
+OpenCode's own slash commands are listed and run from 2.0.22, the first
+release whose server was read for them (read again at 2.2.0). `GET
+/api/command` (with `location[directory]` set to the Project root) answers
+`{location, data}`, each entry `{name, description?}`: the built-in `init` and
+`review`, commands from the launch's configuration, and each MCP prompt as
+`server:prompt`. The probe lists them into the observation's `commands`, and a
+Work or Code session replaces that list when it starts or resumes, as Claude
+Code's and an ACP agent's are ([Architecture: the composer's `@` and
+`/`](../architecture.md#person-memory)). The answer is untrusted: a body over
+256 KiB lists none, and an entry whose name Octant cannot send as `/name` is
+dropped. The observation is the instance's, so it holds the list of
+whichever Project's session started last; a turn whose prompt opens with
+`/name` is routed by its own Project's list, read again before anything is
+queued, so a command another Project lists, or one removed since, is
+refused rather than run or sent to the model as text. A turn whose prompt
+opens with a name listed there goes to `POST
+/api/session/{id}/command` with `{name, text, files?}`, the text being what
+follows the name, after the model switch every prompt makes; the turn's Octant
+context goes first as a prompt with `resume: false`, which OpenCode admits
+without starting a run, so the command's own text stays only its arguments.
+The route answers 204 once the command's input is admitted, and the run
+reports through the same events as a prompt. A command route that fails
+after the context was admitted leaves that context queued in the session,
+where the next run would read it stale beside the next turn's own; the turn
+fails as `stale-resume` and the driver never resumes that session again (in
+this host process), so the thread starts on a new session. The host refuses such a turn in
+Plan and in Chat, and the driver refuses it again. A command may run a shell
+before the model sees it: a configured command's template expands
+`` !`…` `` through OpenCode's shell, which asks no approval, inside the
+launch's own confinement; only Work and Code outside Plan run one, as
+OpenCode's own client does. 1.x lists none: its `POST /session/{id}/command`
+answers only once the whole run has ended (1.18.21), so no turn can start
+from it, and it has no asynchronous form.
 
 Every OpenCode prompt names its model, so a resumed session runs on the
 thread's model, the one its cursor's binding records. The session record is

@@ -23,6 +23,8 @@ import {
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
+  CHAT_PROVIDER_COMMAND_REFUSAL,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
@@ -1176,6 +1178,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
+    provider: composerProviderCommands(
+      props.providerGroups,
+      props.selectedProviderInstanceId,
+      props.mode === "chat" ? CHAT_PROVIDER_COMMAND_REFUSAL : undefined,
+    ),
   });
   const draftProviderFamily = providerFamilyForThread(
     props.providerGroups,

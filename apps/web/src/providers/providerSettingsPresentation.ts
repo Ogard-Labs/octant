@@ -17,7 +17,12 @@ export const capabilityLabels: ReadonlyArray<
   readonly [
     Exclude<
       keyof ProviderObservedState["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts" | "sessionRollback"
+      | "sessionCompaction"
+      | "nativeArtifacts"
+      | "nativeSetup"
+      | "reviewVerdicts"
+      | "sessionRollback"
+      | "turnModes"
     >,
     string,
   ]
@@ -60,6 +65,29 @@ export function reviewVerdictsLabel(
  * said for every provider: one that cannot is not hidden, because the person
  * should know a rewind then starts a fresh session from the kept turns as text.
  */
+/**
+ * Where the runtime runs turns on this host, said only when that is narrower
+ * than every mode, so a person reads why Chat or Plan does not offer it.
+ */
+export function turnModesLabel(
+  capabilities: ProviderObservedState["capabilities"],
+): string | undefined {
+  const modes = capabilities.turnModes;
+  if (modes === undefined) return undefined;
+  const offered = [
+    modes.chat === "supported" ? "Chat" : undefined,
+    modes.work === "supported" ? "Work" : undefined,
+    modes.code === "supported" ? "Code" : undefined,
+  ].filter((mode) => mode !== undefined);
+  const where =
+    offered.length === 0
+      ? "No mode on this computer"
+      : `${offered.join(" and ")}${modes.plan === "supported" ? "" : " outside Plan"}`;
+  return modes.unsupportedReason === "host-confinement"
+    ? `${where}. This computer's sandbox cannot confine it in the other modes.`
+    : `${where}.`;
+}
+
 export function sessionRollbackLabel(capabilities: ProviderObservedState["capabilities"]): string {
   return capabilities.sessionRollback === "supported"
     ? "Supported. A rewound thread continues its own session from the kept turns."

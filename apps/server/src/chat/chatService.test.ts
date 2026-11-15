@@ -1466,6 +1466,49 @@ describe("ChatService", () => {
     expect(await toolsSent(verified)).toContain("octant_canvas");
   });
 
+  it("refuses a provider's slash command in Chat before it reaches the runtime, listed or not", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000016");
+    const probe = probeFixture();
+    const providerRuntimeRegistry = new ProviderRuntimeRegistry();
+    providerRuntimeRegistry.setObservedState({ ...probe, commands: [{ name: "review" }] });
+    const { service, fakeDriver } = openFixture({ probe, providerRuntimeRegistry });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Commands",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    for (const prompt of ["/review src", "/deploy now"]) {
+      await expect(
+        service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId: created.thread.id,
+            expectedVersion: created.thread.version,
+            prompt,
+          },
+          { windowId: window },
+        ),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "unsupported",
+          message: expect.stringContaining("Chat runs none: it keeps no folder and no shell"),
+        },
+      });
+    }
+    // A path is ordinary text and is sent.
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "/usr/bin is on PATH",
+      },
+      { windowId: window },
+    );
+    expect(fakeDriver.sentTurns.map((turn) => turn.prompt)).toEqual(["/usr/bin is on PATH"]);
+  });
+
   it("restores a model's Verify tools record from the catalogue after a restart, never from an invalidated one", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000015");
     const unclaimed = probeFixture({

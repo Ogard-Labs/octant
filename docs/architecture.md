@@ -2543,9 +2543,12 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Rewind to here** on a person's message removes that turn and every later
   one; on a reply it removes the turns after it. The person chooses
   conversation, files, or both, and is asked once, in a dialog that reads
-  `preview-code-rewind` first and shows how many turns leave and which files
-  differ from the checkpoint the files would come back from. Nothing changes
-  until they answer.
+  `preview-code-rewind` first and shows how many turns leave, which files
+  differ from the checkpoint the files would come back from, and whether the
+  provider continues a copy of its own session or a text handoff. A runtime
+  that copies its session at an anchor is promised a copy only when the last
+  kept turn journaled one ([native session anchors](#native-session-anchors)).
+  Nothing changes until they answer.
 - **Files** come back from Octant's own checkpoints: the checkpoint the first
   removed turn captured before it ran, or, past Plan turns that wrote nothing,
   the next one a writing turn captured. A writing turn without a capture
@@ -2577,11 +2580,16 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Removed turns stop reaching the model.** A session recorded before the
   rewind still holds them, so it is never resumed as it stands. A provider
   that reports `sessionRollback` continues a copy of its own session cut back
-  at the last kept turn (`rewind-native-session`); today that is the Octant
-  Harness, whose transcript copy is the one a harness fork makes. Every other
-  provider reports it unsupported in its capability report, and the next turn
-  starts a fresh session with a disclosed text handoff of the kept turns
-  (`rewind`), journaled before the prompt is sent, as a provider switch's is.
+  at the last kept turn (`rewind-native-session`): the Octant Harness, whose
+  transcript copy is the one a harness fork makes, and Claude Code, whose
+  Agent SDK copies a session through a message (`forkSession` with
+  `upToMessageId`) at the anchor the kept turn's completion journaled (see
+  [native session anchors](#native-session-anchors)). Every other provider
+  reports it unsupported in its capability report, and the next turn starts a
+  fresh session with a disclosed text handoff of the kept turns (`rewind`),
+  journaled before the prompt is sent, as a provider switch's is. A provider
+  that reports it still goes back with the handoff when the kept turn has no
+  anchor (a turn journaled before anchors were recorded) or the copy fails.
   A host that rebuilds the conversation itself each turn rebuilds it from the
   kept turns. With no turn kept the thread starts again as it did at first,
   and a fork's first turn carries its source's conversation again.
@@ -2663,12 +2671,20 @@ now also move back in place. Chat's differences are under **Chat** below.
   and leaves `sessionRollback` to Work and Code.
 
 Rationale: provider-owned runtimes (Claude Code, Codex, OpenCode, ACP agents)
-each have their own way back in a session, but Octant could not prove any of
-them cuts at exactly the kept turn without a paid live turn, and a wrong cut
-would hand the model a turn the person removed while the transcript says it is
-gone. A fresh session with a disclosed handoff is the one path whose content
-the host chooses and journals, so those providers report `sessionRollback`
-unsupported until a driver proves its own rollback. Rewinding only the
+each have their own way back in a session, and a wrong cut would hand the
+model a turn the person removed while the transcript says it is gone. Octant
+therefore cuts only at an id the runtime itself reported for the end of a
+turn, never at a guessed position: Claude Code's copy ends at the last
+assistant message the kept turn reported, which its SDK copies inclusively
+with fresh ids, leaving the source untouched (maintainer principle,
+2026-11-14: a workflow that works in the provider's own app works in
+Octant). Codex reports its turn ids and Octant journals them, but stays on
+the handoff: its `thread/fork` (with `lastTurnId`, app-server v2 from
+rust-v0.162.1) leaves the copy loaded in the app-server that made it, and a
+thread loaded there is refused by another app-server's resume until that
+process ends, so the copy would have to be made on the lease that resumes
+it, inside the resume, after the host can still fall back to a text
+handoff. OpenCode and ACP agents report no anchor and keep the handoff. Rewinding only the
 conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
@@ -4252,8 +4268,35 @@ picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), plus the thread's files in Work and Code. Choosing a
 row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists commands only,
-and `$skill` stays a typed alias. Side Chat is a Chat-mode sidecar about
+never installs, trusts, enables, or elevates anything. `/` lists Octant's
+commands and, beside them, the thread's provider's own slash commands,
+labelled as the provider's (maintainer principle, 2026-11-14: a workflow
+that works in the provider's own app works in Octant); `$skill` stays a
+typed alias. A runtime reports its commands on the provider's observation
+(`commands`): Claude Code's initialization list and its `commands_changed`
+push, an ACP agent's `available_commands_update`, and OpenCode 2's
+`GET /api/command`, read at the probe and replaced whenever a session reports
+a change (OpenCode's when a Work or Code session starts or resumes). Choosing one writes `/name `
+into the draft, and the message goes to the runtime as its prompt, as the
+provider's own app sends it; it runs as a command when it leads the
+runtime's message, which holds whenever the turn carries no other context
+or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
+its own command route rather than as text, with the turn's context admitted
+first as input that starts no run (detail in
+[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
+reaches any driver, a turn whose prompt opens with a command-shaped `/name`
+in Plan, which stays read-only, and in Chat, which keeps no folder and no
+shell, whenever the provider lists commands at all, whether or not the list
+the host holds names it: that list is the one a session last wrote for the
+provider, which may be another Project's. The refusal is the existing turn
+refusal, so a remote client meets it too; those composers still list the
+commands and say why they cannot run. An ACP agent with a reviewed command
+inventory (Kimi Code) keeps its probe check, refuses every leading slash in
+Plan and Chat, and elsewhere runs only a reviewed command its session
+listed. Codex lists none: its app-server
+(rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
+and its slash commands are its terminal client's own. OpenCode 1.x lists
+none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
 source. A person may explicitly choose a finished reply’s **Use in source draft**
@@ -9095,8 +9138,10 @@ handoff.
 **Fork handoff (Code).** A fork's first session (no session recorded on the
 fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
-source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
-below), the fork resumes that copy and is sent no text. Otherwise, including
+source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
+below; Claude Code when the fork works in the source's own folder, since its
+sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
 bounded `throughOperationId`): the source's accepted prompts and completed
@@ -9115,6 +9160,24 @@ sent, with the fork origin and the fork's provider and model: reason `fork`
 with the counts, taint and a content reference to the exact blocks sent, and
 fixed `false` native-session and hidden-reasoning values; or reason
 `fork-native-session` with `nativeSessionTransferred: true` and no content.
+
+<a id="native-session-anchors"></a>**Native session anchors.** A runtime's
+`completed` event may name where the turn ends in its own session
+(`nativeAnchor`): Claude Code reports the transcript id of the turn's last
+assistant message, Codex its turn id. The host journals it on the turn's
+completed `operation-state` (an additive field, absent from older turns).
+A driver that copies its own session offers `forkSession` in the provider
+SDK; the host asks it, for a fork's first session or a rewound thread's next
+one, with the kept turn's recorded session and anchor, and resumes the copy
+it returns. The driver returns nothing when the copy cannot be exact: Claude
+Code copies only for the source's own folder, mode and sign-in, because
+resume looks for a session under its folder in the account's directory. The
+copy is made before the prompt is sent, so any refusal or failure falls back
+to the text handoff, and the journal, file checkpoints and transcript are
+the same either way: the rewind's own record still removes the turns, and
+files go back only through Octant's checkpoints (the SDK's own
+`rewindFiles` is not used, since a second restore beside the checkpoint's
+would disagree with the journal).
 A recovered start reads that record back like a provider switch's: a text
 record is sent again without reading the source, and a native record whose
 copy cannot be taken up again refuses rather than sending text it did not
@@ -14669,8 +14732,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person types it, as in the runtime's own terminal (the model cannot invoke
-  one, and Octant sends none but `/compact`); a plugin's background `command`
+  person sends it from a Work or Code composer outside Plan, as in the
+  runtime's own terminal (the model cannot invoke one, and Octant itself
+  sends none but `/compact`); a plugin's background `command`
   runs only where the person's own setup loads it: with that setup off the
   query is opened with no setting sources, plugins, skills, agents, or MCP
   servers, so no plugin is loaded (with it on, under
@@ -14944,9 +15008,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
   that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
-  and exec denied. The probe fails closed and the runtime stays listing-only
-  there until Linux confinement can express the narrow per-path exec grant.
+  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
+  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
+  access, whose launches allow fork and exec as they do on macOS; a Chat or
+  Plan launch is refused before it starts, naming that reason (maintainer
+  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
+  and the capability report says so per mode (`turnModes`: Chat and Plan
+  unsupported, `host-confinement`). App-managed tools stay macOS only and
+  pinned to the measured releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is
@@ -15075,6 +15144,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `reasoning`                   | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                                                       | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                                          | `unavailable` until a response carries reasoning                                             | `supported`                           |
   | `usage`                       | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                                                                | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
   | `toolActivity`                | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `turnModes`                   | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`; a 2.x probe off macOS reports Chat and Plan `unsupported` (`host-confinement`), Work and Code `supported`                               | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `cloudSessions`               | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
   | `fileChanges`                 | `supported`                                                                                                                        | `supported`                                                                                              | `unsupported`; `supported` from 2.2.0                                                                                                             | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
   | `diffs`                       | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
@@ -15086,7 +15156,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `appManagedToolsAtFullAccess` | `absent`                                                                                                                           | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `acpClientCapabilities`       | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                         | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
-  | `sessionRollback`             | `absent`; a rewind starts a fresh session with a text handoff                                                                      | `absent`; same                                                                                           | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
+  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
   | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
   | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |

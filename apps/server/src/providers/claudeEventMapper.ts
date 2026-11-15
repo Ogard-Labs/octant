@@ -191,6 +191,12 @@ export interface ClaudeEventContext {
   compactionRequested?: boolean;
   /** When the last liveness event went out, in epoch milliseconds. */
   lastLivenessAt?: number;
+  /**
+   * The transcript id of the newest assistant message this turn, which the
+   * turn's completion reports as its native anchor so a fork or rewind can
+   * cut the session there.
+   */
+  lastAssistantUuid?: string;
   /** Where the agent's own text stands in this turn; unset until it writes any. */
   agentText?: { toolStepSince: boolean; endsWithNewline: boolean };
   /**
@@ -912,6 +918,7 @@ function mapAssistant(
   if (!usageIsSafe(message.usage)) {
     return [failure("Claude returned invalid usage metadata.")];
   }
+  if (message.uuid !== undefined) context.lastAssistantUuid = message.uuid;
   const messageToolNames = new Map<string, string>();
   const fileChanges = new Map<string, ClaudeFileChange>();
   for (const content of message.content) {
@@ -1516,6 +1523,9 @@ function mapResult(
         kind: "completed",
         resumeCursor: { driverKind: "claude", value: context.claudeSessionId },
         ...(stop === undefined ? {} : { stopReason: stop }),
+        ...(context.lastAssistantUuid === undefined
+          ? {}
+          : { nativeAnchor: context.lastAssistantUuid }),
       }),
     );
     return results;
@@ -1705,6 +1715,9 @@ export function mapClaudeMessage(
           ]
         : [{ kind: "ignored" }];
     case "status":
+      return [{ kind: "ignored" }];
+    // The driver records the list on the provider's observation.
+    case "commands-changed":
       return [{ kind: "ignored" }];
     case "compaction":
       // A compacted session keeps a summary and, at most, the messages the

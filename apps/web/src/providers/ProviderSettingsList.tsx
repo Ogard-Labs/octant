@@ -67,6 +67,7 @@ import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor"
 import { ProviderLinkedKeyEditor } from "./ProviderLinkedKeyEditor";
 import {
   capabilityLabels,
+  turnModesLabel,
   driverLabel,
   outsideDriverHoldGuidance,
   providerRefusalGuidance,
@@ -1940,6 +1941,12 @@ function ProviderRow(props: ProviderRowProps) {
                         <dt>Session rollback</dt>
                         <dd>{sessionRollbackLabel(props.observed.capabilities)}</dd>
                       </div>
+                      {turnModesLabel(props.observed.capabilities) === undefined ? null : (
+                        <div>
+                          <dt>Runs turns in</dt>
+                          <dd>{turnModesLabel(props.observed.capabilities)}</dd>
+                        </div>
+                      )}
                       {ownReviewerLabel(props.instance.driverKind, props.observed.capabilities) ===
                       undefined ? null : (
                         <div>

@@ -16,6 +16,7 @@ export * from "./computerUsePolicy";
 export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
 export * from "./providerDiscoveryPolicy";
+export * from "./providerCommandPolicy";
 export * from "./appleToolchainPolicy";
 export * from "./androidToolchainPolicy";
 export * from "./appleSimulatorLiveFrame";
