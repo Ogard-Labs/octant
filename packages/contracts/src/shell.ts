@@ -21,7 +21,9 @@ import {
 } from "./browserCapture";
 import { StoredBrowserProfile } from "./browserProfiles";
 import {
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+  MAX_RUNTIME_TURNS_PER_TURN_SETTING,
   MAX_THREAD_TOOL_STEPS_SETTING,
 } from "./threadToolSteps";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -563,6 +565,23 @@ export const ProviderToolCallPauseLimitMinutes = Schema.Int.pipe(
 );
 export type ProviderToolCallPauseLimitMinutes = typeof ProviderToolCallPauseLimitMinutes.Type;
 export const DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES: ProviderToolCallPauseLimitMinutes = 120;
+
+/**
+ * How long a provider session may run only background work (a dev server, a
+ * watch) after its turn, with no turn in the thread, before the host stops it
+ * and its tasks. The floor matches the stalled-turn limit's; the ceiling is
+ * one day.
+ */
+export const MIN_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES = 5;
+export const MAX_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES = 1440;
+export const BackgroundSessionIdleLimitMinutes = Schema.Int.pipe(
+  Schema.between(
+    MIN_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
+    MAX_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
+  ),
+);
+export type BackgroundSessionIdleLimitMinutes = typeof BackgroundSessionIdleLimitMinutes.Type;
+export const DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES: BackgroundSessionIdleLimitMinutes = 120;
 export const DEFAULT_AUTO_COMPACT_OCTANT_WINDOW_PERCENT: AutoCompactWindowPercent = 85;
 
 /**
@@ -845,6 +864,17 @@ export const ShellSettings = Schema.Struct({
     { default: () => DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES },
   ),
   /**
+   * How long a session left running only background work after its turn is
+   * kept with no turn in its thread, in minutes, before the host stops it.
+   * `null` means no bound: the session stops when its tasks end, the person
+   * stops the thread, or the host quits. A store persisted before the
+   * setting existed decodes to the default.
+   */
+  backgroundSessionIdleLimitMinutes: Schema.optionalWith(
+    Schema.NullOr(BackgroundSessionIdleLimitMinutes),
+    { default: () => DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES },
+  ),
+  /**
    * The release ring to follow, once someone has chosen one.
    *
    * Deliberately without a default. A build already knows its own ring from
@@ -1023,6 +1053,17 @@ export const ShellSettings = Schema.Struct({
   fullAccessToolStepsPerTurn: Schema.optionalWith(
     Schema.Int.pipe(Schema.between(0, MAX_THREAD_TOOL_STEPS_SETTING)),
     { default: () => 0 },
+  ),
+  /**
+   * How many turns a runtime may start by itself inside one person's turn
+   * below Full access (a background command's end, a watch's line). Past it
+   * the person's turn completes and the session is stopped. At Full access
+   * there is no such count. A store persisted before this shipped decodes to
+   * the default.
+   */
+  runtimeTurnsPerTurn: Schema.optionalWith(
+    Schema.Int.pipe(Schema.between(1, MAX_RUNTIME_TURNS_PER_TURN_SETTING)),
+    { default: () => DEFAULT_RUNTIME_TURNS_PER_TURN },
   ),
   /**
    * The largest file, in megabytes, an agent may upload through a page or have

@@ -409,6 +409,13 @@ export const CodeThread = Schema.Struct({
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
   /**
+   * The level the thread returns to when its agent asks to leave Plan and the
+   * person approves. Recorded only when the thread entered Plan at its
+   * agent's request (`EnterPlanMode`) and dropped when it leaves Plan; never
+   * Full access, which only the person chooses. Absent on every other thread.
+   */
+  planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
    * The profile this thread runs under, recorded so the thread can say which
    * working mode produced its posture. Optional so a journal written before
    * profiles bound threads replays as "no profile" rather than being rejected.
@@ -498,6 +505,16 @@ export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 /** How Review shows a checkout diff: stacked files, or one file beside its pair. */
 export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
 export type CodeDiffLayout = typeof CodeDiffLayout.Type;
+
+/**
+ * The shell a Code or Project terminal opens on a Windows host. Windows has no
+ * login shell to read, and guessing a POSIX shell there opened nothing, so the
+ * person names one: Windows PowerShell (`powershell`, the default, which every
+ * Windows install carries), PowerShell 7 (`pwsh`), or Command Prompt (`cmd`).
+ * macOS and Linux hosts keep the login shell and ignore this.
+ */
+export const WindowsTerminalShell = Schema.Literal("powershell", "pwsh", "cmd");
+export type WindowsTerminalShell = typeof WindowsTerminalShell.Type;
 
 /**
  * Threads without a Project once had their own Code switch beside the Git
@@ -599,6 +616,12 @@ export const CodeSettings = Schema.Struct({
    * store persisted before the switch existed reads as.
    */
   restartContinuation: Schema.optional(Schema.Boolean),
+  /**
+   * Settings › Code › Terminal shell on a Windows host. Absent is Windows
+   * PowerShell, which is also what a store persisted before the choice existed
+   * reads as.
+   */
+  windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -838,6 +861,8 @@ export const CodeCommand = Schema.Union(
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
     /** Absent keeps the stored choice. */
     restartContinuation: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -957,6 +982,12 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
+    /**
+     * Set only with `executionPolicy: "plan"` when the person approved the
+     * agent's own ask to plan: the level the thread returns to when the
+     * person later approves its plan. The host refuses Full access here.
+     */
+    planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
     /**

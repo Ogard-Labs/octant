@@ -6,18 +6,25 @@ import {
   type PermissionPersistence,
   type ProviderContextBlock,
   type ProviderFailure,
+  type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effect";
 import {
   renderProviderContextSections,
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
+import type {
+  ProviderBackgroundWork,
+  ProviderWakeup,
+  ProviderWakeupRequest,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -32,7 +39,9 @@ import type {
 import {
   CLAUDE_PLAN_CAPTURED_MESSAGE,
   claudeExecutionOptions,
+  claudeSandboxSettings,
   claudeFileToolSecretRefusal,
+  claudeOwnRulesDecide,
   claudeSearchesRunUnguarded,
   makeClaudeDriver,
 } from "./claudeDriver";
@@ -225,6 +234,8 @@ function harness(
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
+    readonly runtimeTurnsPerTurn?: () => number;
+    readonly gitIdentity?: (checkoutRoot: string) => Promise<{ name?: string; email?: string }>;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -267,6 +278,16 @@ function harness(
       Effect.succeed(
         sessions.get(sdkSessionId)?.projectRoot === root ? sessions.get(sdkSessionId) : undefined,
       ),
+    ),
+    forkSession: vi.fn(({ sessionId: sdkSessionId, projectRoot: root, upToMessageId }) =>
+      Effect.sync(() => {
+        const copied = `${sdkSessionId}-through-${upToMessageId}`;
+        sessions.set(copied, { sessionId: copied, projectRoot: root, lastModified: 11 });
+        return copied;
+      }),
+    ),
+    listSessions: vi.fn(({ projectRoot: root }) =>
+      Effect.succeed([...sessions.values()].filter((session) => session.projectRoot === root)),
     ),
   };
   const process: ClaudeProcessPort = {
@@ -354,6 +375,9 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -361,6 +385,7 @@ function harness(
         ? {}
         : { artifactDelivery: options.artifactDelivery }),
       ...(options.ownMemory === undefined ? {} : { ownMemory: options.ownMemory }),
+      ...(options.gitIdentity === undefined ? {} : { gitIdentity: options.gitIdentity }),
       ...(options.runtimeNetwork === undefined ? {} : { runtimeNetwork: options.runtimeNetwork }),
       ...(options.authorityNow === undefined ? {} : { authorityNow: options.authorityNow }),
       ...(options.maxTrackedToolUses === undefined
@@ -822,17 +847,13 @@ describe("Claude execution policy", () => {
         await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
         const open = f.opens[0]!;
         expect(open.withheldTools).toEqual(
-          expect.arrayContaining([
-            "EnterPlanMode",
-            "EnterWorktree",
-            "Workflow",
-            "CronCreate",
-            "ScheduleWakeup",
-            "REPL",
-          ]),
+          expect.arrayContaining(["EnterPlanMode", "Workflow", "CronCreate", "ScheduleWakeup"]),
         );
         // A background command or a command watch is held inside its turn.
         expect(open.withheldTools).not.toContain("Monitor");
+        for (const lifted of ["EnterWorktree", "ExitWorktree", "REPL"]) {
+          expect(open.withheldTools).not.toContain(lifted);
+        }
         // With the person's setup off, its features stay withheld too.
         expect(open.withheldTools).toEqual(
           expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill", "Artifact"]),
@@ -847,7 +868,7 @@ describe("Claude execution policy", () => {
             toolUseId,
             signal,
           });
-        const asked = executionPolicy === "full-access" ? "allow" : "ask";
+        const asked = executionPolicy === "full-access" ? "allow" : "own-rules";
         for (const service of ["RemoteTrigger", "PushNotification", "Projects", "ClaudeDesign"]) {
           expect(open.withheldTools).not.toContain(service);
         }
@@ -874,7 +895,7 @@ describe("Claude execution policy", () => {
         // A notebook edit is a file edit inside the Project, and nothing more.
         const notebook = { notebook_path: `${projectRoot}/analysis.ipynb`, new_source: "1" };
         await expect(tool("NotebookEdit", notebook, "notebook")).resolves.toEqual({
-          behavior: executionPolicy === "approval-gated" ? "ask" : "allow",
+          behavior: executionPolicy === "approval-gated" ? "own-rules" : "allow",
         });
         await expect(
           tool(
@@ -883,10 +904,17 @@ describe("Claude execution policy", () => {
             "outside-notebook",
           ),
         ).resolves.toMatchObject({
-          behavior: executionPolicy === "full-access" ? "allow" : "deny",
+          behavior: executionPolicy === "full-access" ? "allow" : "ask",
         });
-        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toMatchObject({
-          behavior: "deny",
+        // A worktree switch and in-process code take the shell's rules.
+        await expect(tool("EnterWorktree", { name: "x" }, "worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("ExitWorktree", { action: "keep" }, "exit-worktree")).resolves.toEqual({
+          behavior: asked,
+        });
+        await expect(tool("REPL", { code: "1 + 1" }, "repl")).resolves.toEqual({
+          behavior: asked,
         });
       } finally {
         await acquired.close();
@@ -900,20 +928,113 @@ describe("Claude execution policy", () => {
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
       const open = plan.opens[0]!;
-      // Plan keeps its own read-only list and nothing beyond it.
+      // Plan keeps its own read-only list and nothing beyond it: no worktree
+      // switch and no in-process code.
       expect(open.withheldTools).toBeUndefined();
-      await expect(
-        open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "FutureTool",
-          input: {},
-          toolUseId: "plan-future",
-          signal: new AbortController().signal,
-        }),
-      ).resolves.toMatchObject({ behavior: "deny" });
+      for (const [toolName, input] of [
+        ["FutureTool", {}],
+        ["EnterWorktree", { name: "x" }],
+        ["ExitWorktree", { action: "keep" }],
+        ["REPL", { code: "1 + 1" }],
+      ] as const) {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId: `plan-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
     } finally {
       await acquired.close();
+    }
+  });
+
+  it("follows Claude into a worktree outside the Project only once the switch is allowed", async () => {
+    const worktree = "/tmp/octant-claude-worktrees/feature";
+    for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const tool = (
+          toolName: string,
+          input: Record<string, unknown>,
+          toolUseId: string,
+          cwd = projectRoot,
+        ) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot: cwd,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const readThere = { file_path: `${worktree}/src/a.ts` };
+        // Before any switch, a call from that folder is outside the Project.
+        await expect(tool("Read", readThere, "early", worktree)).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        if (executionPolicy === "approval-gated") {
+          // A worktree outside the Project's folders asks below Full access,
+          // and asking grants nothing yet.
+          await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+            behavior: "ask",
+          });
+          await expect(tool("Read", readThere, "unanswered", worktree)).resolves.toMatchObject({
+            behavior: "deny",
+          });
+          continue;
+        }
+        await expect(tool("EnterWorktree", { path: worktree }, "enter")).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(tool("Read", readThere, "after", worktree)).resolves.toEqual({
+          behavior: "allow",
+        });
+        await expect(
+          tool("Bash", { command: "git status" }, "shell-after", worktree),
+        ).resolves.toEqual({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("drops the secret refusals at Full access and keeps them at every posture below it", async () => {
+    const protectedFile = join(homedir(), ".aws", "credentials");
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const answer = await open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: protectedFile },
+          toolUseId: `secret-${executionPolicy}`,
+          signal: new AbortController().signal,
+        });
+        if (executionPolicy === "full-access") {
+          // Full access reads any file, outside the Project and protected ones too.
+          expect(answer).toEqual({ behavior: "allow" });
+        } else {
+          expect(answer).toMatchObject({ behavior: "deny" });
+          expect(answer.behavior === "deny" ? answer.message : "").toContain(
+            "Cloud command-line credentials",
+          );
+        }
+      } finally {
+        await acquired.close();
+      }
     }
   });
 
@@ -1034,6 +1155,22 @@ describe("Claude execution policy", () => {
     },
   );
 
+  it("lets a command out of Claude's sandbox only at Guarded and Reviewed, never in Plan or a Full access sandbox", () => {
+    expect(claudeSandboxSettings("approval-gated", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(claudeSandboxSettings("auto-accept-edits", projectRoot)?.allowUnsandboxedCommands).toBe(
+      true,
+    );
+    expect(
+      claudeSandboxSettings("full-access", projectRoot, [], undefined, true)
+        ?.allowUnsandboxedCommands,
+    ).toBe(false);
+    // Plan's commands run inside Octant's own profile, with no escape of Claude's to allow.
+    expect(claudeSandboxSettings("plan", projectRoot)).toBeUndefined();
+    expect(claudeSandboxSettings("plan", projectRoot, [], undefined, true)).toBeUndefined();
+  });
+
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {
     for (const executionPolicy of ["full-access", "approval-gated", "plan"] as const) {
       const f = harness();
@@ -1045,13 +1182,15 @@ describe("Claude execution policy", () => {
           ? {
               enabled: true,
               failIfUnavailable: true,
-              allowUnsandboxedCommands: false,
+              allowUnsandboxedCommands: true,
               autoAllowBashIfSandboxed: false,
               filesystem: {
                 denyRead: ["/"],
                 allowRead: [projectRoot],
                 allowWrite: [projectRoot],
               },
+              // No egress proxy routes this host, so no host is limited.
+              network: { allowedDomains: ["*"] },
             }
           : undefined,
       );
@@ -1162,12 +1301,220 @@ describe("Claude execution policy", () => {
       await expect(read(`${extraFolder}/today.md`, "extra")).resolves.toEqual({
         behavior: "allow",
       });
-      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toMatchObject({
-        behavior: "deny",
+      // A folder beside it is outside the Project's folders, so it asks.
+      await expect(read("/tmp/octant-claude-elsewhere/a.md", "sibling")).resolves.toEqual({
+        behavior: "ask",
       });
     } finally {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     }
+  });
+
+  it("leaves a call Octant would ask about to the person's own permission rules while every Octant refusal still refuses", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const call = (toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    // No decision: Claude Code's own allow, ask, and deny rules run first.
+    await expect(call("Bash", { command: "bun run test" }, "rules-bash")).resolves.toEqual({
+      behavior: "own-rules",
+    });
+    const edit = { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" };
+    await expect(call("Edit", edit, "rules-edit")).resolves.toEqual({ behavior: "own-rules" });
+    // A path outside the Project's folders keeps Octant's own ask.
+    await expect(
+      call("Edit", { ...edit, file_path: "/tmp/octant-claude-elsewhere/a.ts" }, "outside"),
+    ).resolves.toEqual({ behavior: "ask" });
+    // Octant's refusals answer before the person's rules could allow the call.
+    await expect(
+      call("Bash", { command: "ls", cwd: "/tmp/octant-claude-elsewhere" }, "outside-shell"),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    // A question needs the person's answer, so Octant still asks it.
+    const question = {
+      questions: [
+        {
+          question: "Go?",
+          header: "Go",
+          options: [{ label: "Yes" }, { label: "No" }],
+          multiSelect: false,
+        },
+      ],
+    };
+    await expect(call("AskUserQuestion", question, "question")).resolves.toEqual({
+      behavior: "ask",
+    });
+    // A rule-allowed call never reaches the permission callback; its result
+    // releases its grant, so twenty of them leave no grant behind.
+    for (let index = 0; index < 20; index += 1) {
+      const toolUseId = `rule-allowed-${index}`;
+      await f.queries[0]!.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId,
+            toolName: "Bash",
+            input: { command: `echo ${index}` },
+          },
+        },
+      });
+      await expect(call("Bash", { command: `echo ${index}` }, toolUseId)).resolves.toEqual({
+        behavior: "own-rules",
+      });
+      await f.queries[0]!.emit({
+        kind: "tool-results",
+        sessionId: "sdk-session-1",
+        results: [{ toolUseId, isError: false }],
+      });
+    }
+    // A call the person's rules leave to ask reaches `canUseTool` with its grant.
+    const asked = open.canUseTool({
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "rules-bash",
+      signal,
+    });
+    await vi.waitFor(() =>
+      expect(observed.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    expect(observed.some((event) => event.kind === "failed")).toBe(false);
+    await acquired.close();
+    await expect(asked).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+    // Plan, a question, and a wake-up keep Octant's own ask.
+    expect(claudeOwnRulesDecide("plan", "Bash")).toBe(false);
+    expect(claudeOwnRulesDecide("approval-gated", "AskUserQuestion")).toBe(false);
+    expect(claudeOwnRulesDecide("auto-accept-edits", "ScheduleWakeup")).toBe(false);
+    expect(claudeOwnRulesDecide("auto-accept-edits", "Bash")).toBe(true);
+  });
+
+  it("asks before a push retried outside the sandbox at Guarded and carries the person's git identity into sandboxed commits", async () => {
+    const f = harness("subscription", "current-session", {
+      gitIdentity: async () => ({ name: "Ada Lovelace", email: "ada@example.com" }),
+    });
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    expect(open.sandbox?.allowUnsandboxedCommands).toBe(true);
+    expect(open.authEnvironment).toMatchObject({
+      GIT_AUTHOR_NAME: "Ada Lovelace",
+      GIT_AUTHOR_EMAIL: "ada@example.com",
+      GIT_COMMITTER_NAME: "Ada Lovelace",
+      GIT_COMMITTER_EMAIL: "ada@example.com",
+    });
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "push it", attachments: [], tools: [] }),
+    );
+    const push = { command: "git push origin feature/x", dangerouslyDisableSandbox: true };
+    // Whatever the person's own rules allow, Octant asks about the retry
+    // outside the sandbox itself.
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: push,
+        toolUseId: "push",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    const decision = open.canUseTool({ toolName: "Bash", input: push, toolUseId: "push", signal });
+    await vi.waitFor(() =>
+      expect(observed).toContainEqual(
+        expect.objectContaining({
+          kind: "approval-request",
+          description: "Bash outside the sandbox · git push origin feature/x",
+        }),
+      ),
+    );
+    await acquired.close();
+    await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
+
+    // Full access with its sandbox keeps every command inside it.
+    const sandboxed = harness();
+    const fullAccess = await acquire(sandboxed.driver);
+    await Effect.runPromise(
+      fullAccess.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "full-access",
+        fullAccessSandbox: true,
+      }),
+    );
+    expect(sandboxed.opens[0]?.sandbox?.allowUnsandboxedCommands).toBe(false);
+    expect(sandboxed.opens[0]?.authEnvironment.GIT_AUTHOR_NAME).toBeUndefined();
+    await fullAccess.close();
+  });
+
+  it("passes the gate for calls made after a cd into a subfolder and refuses a cd out of the Project", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const call = (workingDirectory: string, toolName: string, input: object, toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot: workingDirectory,
+        toolName,
+        input,
+        toolUseId,
+        signal,
+      });
+    const subfolder = `${projectRoot}/apps/web`;
+    await expect(
+      call(subfolder, "Read", { file_path: `${subfolder}/index.ts` }, "read-after-cd"),
+    ).resolves.toEqual({ behavior: "allow" });
+    await expect(call(subfolder, "Grep", { pattern: "x" }, "grep-after-cd")).resolves.toEqual({
+      behavior: "allow",
+    });
+    await expect(
+      call(subfolder, "Bash", { command: "ls" }, "bash-after-cd"),
+    ).resolves.not.toMatchObject({ behavior: "deny" });
+    await expect(
+      call("/tmp/octant-claude-elsewhere", "Bash", { command: "ls" }, "bash-outside"),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    await acquired.close();
   });
 
   it("runs the pre-tool gate before Full-access callbacks without fabricating approvals", async () => {
@@ -1318,7 +1665,7 @@ describe("Claude execution policy", () => {
         toolUseId: "missing-callback",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
 
     elapsedMs += 30_001;
     wallClock.mockReturnValue(1_000);
@@ -1331,7 +1678,7 @@ describe("Claude execution policy", () => {
         toolUseId: "next-tool",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     // The expired grant is tombstoned, so its tool-use ID never asks again.
     await expect(
       open.preToolUse({
@@ -1456,7 +1803,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("terminal-fails once when unmatched pre-tool grants exhaust their hard cap", async () => {
+  it("queues calls past the grant and approval caps so twenty waiting calls and five parallel approvals all complete", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1472,51 +1819,133 @@ describe("Claude execution policy", () => {
         }),
       ),
     );
-    await Promise.resolve();
-    const edit = (name: string) => ({
-      file_path: `${projectRoot}/${name}.txt`,
-      old_string: "before",
-      new_string: "after",
-    });
-    for (let index = 0; index < 16; index += 1) {
-      await expect(
-        open.preToolUse({
-          sessionId: "sdk-session-1",
-          projectRoot,
-          toolName: "Edit",
-          input: edit(String(index)),
-          toolUseId: `missing-${index}`,
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const command = (index: number) => ({ command: `bun run job-${index}` });
+    // Twenty parallel subagent calls reach the hook before any reaches the
+    // permission callback; the four past the grant cap wait in line.
+    const hooks = Array.from({ length: 20 }, (_, index) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input: command(index),
+        toolUseId: `parallel-${index}`,
+        signal,
+      }),
+    );
+    const decisions: Promise<unknown>[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      await expect(hooks[index]).resolves.toEqual({ behavior: "own-rules" });
+      // Each call then reaches `canUseTool`, freeing its grant; past four
+      // pending approvals the rest wait in line rather than ending the turn.
+      decisions.push(
+        open.canUseTool({
+          toolName: "Bash",
+          input: command(index),
+          toolUseId: `parallel-${index}`,
           signal,
         }),
-      ).resolves.toEqual({ behavior: "ask" });
+      );
     }
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Edit",
-        input: edit("overflow"),
-        toolUseId: "missing-overflow",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-
-    await vi.waitFor(() => expect(observed.some((event) => event.kind === "failed")).toBe(true));
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
-    await expect(
-      open.preToolUse({
-        sessionId: "sdk-session-1",
-        projectRoot,
-        toolName: "Edit",
-        input: edit("late"),
-        toolUseId: "late-after-overflow",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
+    const approvalRequests = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "approval-request" }> =>
+          event.kind === "approval-request",
+      );
+    let answered = 0;
+    while (answered < 20) {
+      await vi.waitFor(() => expect(approvalRequests().length).toBeGreaterThan(answered));
+      // Never more than four approvals are put to the person at once.
+      expect(approvalRequests().length - answered).toBeLessThanOrEqual(4);
+      const next = approvalRequests()[answered]!;
+      await Effect.runPromise(
+        acquired.connection.answerApproval({
+          sessionId,
+          requestId: next.requestId,
+          approved: true,
+        }),
+      );
+      answered += 1;
+    }
+    for (const decision of decisions) {
+      await expect(decision).resolves.toEqual({ behavior: "allow" });
+    }
+    expect(observed.some((event) => event.kind === "failed")).toBe(false);
     await acquired.close();
     await Effect.runPromise(Fiber.join(subscriber));
-    expect(observed.filter((event) => event.kind === "failed")).toHaveLength(1);
-    expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
+  });
+
+  it("runs a call that waited in line under an answer the person gave meanwhile", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const call = async (command: string, toolUseId: string) => {
+      const input = { command };
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input,
+        toolUseId,
+        signal,
+      });
+      return open.canUseTool({ toolName: "Bash", input, toolUseId, signal });
+    };
+    const approvalRequests = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "approval-request" }> =>
+          event.kind === "approval-request",
+      );
+    // Four approvals fill the cap; the same command as the first waits in line.
+    const asked = ["bun run test", "bun run a", "bun run b", "bun run c"].map((command, index) =>
+      call(command, `asked-${index}`),
+    );
+    await vi.waitFor(() => expect(approvalRequests()).toHaveLength(4));
+    await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "waiting",
+      signal,
+    });
+    const waiting = open.canUseTool({
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "waiting",
+      signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: approvalRequests()[0]!.requestId,
+        approved: true,
+      }),
+    );
+    await expect(asked[0]).resolves.toEqual({ behavior: "allow" });
+    // The answer covers the same call, so the waiting one runs unasked.
+    await expect(waiting).resolves.toEqual({ behavior: "allow" });
+    expect(approvalRequests()).toHaveLength(4);
+    await acquired.close();
+    await Effect.runPromise(Fiber.join(subscriber));
   });
 
   it("completes a turn that makes far more than 64 tool calls", async () => {
@@ -1576,14 +2005,14 @@ describe("Claude execution policy", () => {
         toolUseId: name,
         signal,
       });
-    await expect(preEdit("pending")).resolves.toEqual({ behavior: "ask" });
+    await expect(preEdit("pending")).resolves.toEqual({ behavior: "own-rules" });
     const pending = open.canUseTool({
       toolName: "Edit",
       input: edit("pending"),
       toolUseId: "pending",
       signal,
     });
-    await expect(preEdit("granted")).resolves.toEqual({ behavior: "ask" });
+    await expect(preEdit("granted")).resolves.toEqual({ behavior: "own-rules" });
     for (let index = 0; index < 300; index += 1) {
       await expect(
         open.preToolUse({
@@ -1654,7 +2083,7 @@ describe("Claude execution policy", () => {
       }),
     ).resolves.toEqual({ behavior: "allow" });
     for (const name of ["held-0", "held-1", "held-2"]) {
-      await expect(preEdit(name)).resolves.toEqual({ behavior: "ask" });
+      await expect(preEdit(name)).resolves.toEqual({ behavior: "own-rules" });
     }
     await expect(preEdit("held-overflow")).resolves.toMatchObject({ behavior: "deny" });
     await expect(terminalEvent).resolves.toMatchObject({
@@ -1731,7 +2160,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("terminal-fails and settles every callback when pending approvals exceed their cap", async () => {
+  it("holds a fifth approval in line and settles every waiting call when the session ends", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -1782,11 +2211,12 @@ describe("Claude execution policy", () => {
       new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
     ]);
 
-    expect(immediate).toMatchObject({ behavior: "deny" });
-    await expect(Promise.all(pending)).resolves.toEqual(
-      Array.from({ length: 4 }, () => expect.objectContaining({ behavior: "deny" })),
+    expect(immediate).toBe("pending");
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
+    await acquired.close();
+    await expect(Promise.all([...pending, overflow])).resolves.toEqual(
+      Array.from({ length: 5 }, () => expect.objectContaining({ behavior: "deny" })),
     );
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
     const late = await Effect.runPromise(
       Effect.exit(
         acquired.connection.answerApproval({
@@ -1797,7 +2227,6 @@ describe("Claude execution policy", () => {
       ),
     );
     expect(String(late)).toContain("protocol");
-    await acquired.close();
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
   });
 
@@ -1892,7 +2321,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-inside",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     await expect(
       gatedOpen.preToolUse({
         sessionId: "sdk-session-1",
@@ -1902,7 +2331,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-outside",
         signal,
       }),
-    ).resolves.toMatchObject({ behavior: "deny" });
+    ).resolves.toEqual({ behavior: "ask" });
     await gatedConnection.close();
   });
 
@@ -1978,7 +2407,7 @@ describe("Claude execution policy", () => {
         toolUseId: "edit-gated",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({ toolName: "Edit", input, toolUseId: "edit-gated", signal });
     const first = await Promise.race([
       approvalEvent.then((event) => ({ kind: "approval" as const, event })),
@@ -2028,7 +2457,7 @@ describe("Claude execution policy", () => {
         toolUseId: "bash-no-cwd",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({ toolName: "Bash", input, toolUseId: "bash-no-cwd", signal });
     const first = await Promise.race([
       approvalEvent.then((event) => ({ kind: "approval" as const, event })),
@@ -2040,6 +2469,164 @@ describe("Claude execution policy", () => {
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
     await acquired.close();
+  });
+
+  it("asks before a file outside the Project below Full access, runs it at Full access, and refuses it in Plan", async () => {
+    const outside = { file_path: "/tmp/octant-claude-outside/notes.md" };
+    const protectedOutside = { file_path: join(homedir(), ".ssh", "id_ed25519") };
+    for (const executionPolicy of [
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+      "plan",
+    ] as const) {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      try {
+        await Effect.runPromise(acquired.connection.start({ sessionId, modelId, executionPolicy }));
+        const open = f.opens[0]!;
+        const signal = new AbortController().signal;
+        const pre = (toolName: string, input: Record<string, unknown>, toolUseId: string) =>
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input,
+            toolUseId,
+            signal,
+          });
+        const read = await pre("Read", outside, "outside-read");
+        if (executionPolicy === "full-access") {
+          expect(read).toEqual({ behavior: "allow" });
+          continue;
+        }
+        if (executionPolicy === "plan") {
+          expect(read).toMatchObject({ behavior: "deny" });
+          continue;
+        }
+        expect(read).toEqual({ behavior: "ask" });
+        const approvalEvent = Effect.runPromise(
+          Stream.runHead(
+            Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+              Stream.filter((event) => event.kind === "approval-request"),
+            ),
+          ),
+        );
+        // A protected file outside the Project is still refused, not asked.
+        await expect(pre("Read", protectedOutside, "outside-secret")).resolves.toMatchObject({
+          behavior: "deny",
+        });
+        // A shell command's folder stays the command sandbox's to hold.
+        await expect(
+          pre("Bash", { command: "ls", cwd: "/tmp/octant-claude-outside" }, "outside-shell"),
+        ).resolves.toMatchObject({ behavior: "deny" });
+        // The read raises a card rather than running unasked, as a read inside
+        // the Project would, at Accept edits too.
+        const callback = open.canUseTool({
+          toolName: "Read",
+          input: outside,
+          toolUseId: "outside-read",
+          signal,
+        });
+        const first = await Promise.race([
+          approvalEvent.then((event) => ({ kind: "approval" as const, event })),
+          callback.then(() => ({ kind: "decision" as const })),
+        ]);
+        expect(first.kind).toBe("approval");
+        const raised = first.kind === "approval" ? Option.getOrUndefined(first.event) : undefined;
+        if (raised?.kind !== "approval-request") throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      } finally {
+        await acquired.close();
+      }
+    }
+  });
+
+  it("asks about every command that leaves Claude's sandbox below Full access and refuses one in Plan", async () => {
+    const escaped = { command: "ls ~/Documents", dangerouslyDisableSandbox: true };
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "auto-accept-edits" }),
+      );
+      const open = f.opens[0]!;
+      // Ordinary commands stay in the sandbox; the runtime may let one out.
+      expect(open.sandbox).toMatchObject({
+        enabled: true,
+        allowUnsandboxedCommands: true,
+        filesystem: { denyRead: ["/"], allowRead: [projectRoot], allowWrite: [projectRoot] },
+      });
+      const signal = new AbortController().signal;
+      const approvals: Array<{ readonly requestId: string }> = [];
+      const watched = Effect.runFork(
+        Stream.runForEach(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+          (event) =>
+            Effect.sync(() => {
+              if (event.kind === "approval-request") approvals.push(event);
+            }),
+        ),
+      );
+      const run = async (toolUseId: string) => {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName: "Bash",
+            input: escaped,
+            toolUseId,
+            signal,
+          }),
+        ).resolves.toEqual({ behavior: "ask" });
+        const callback = open.canUseTool({ toolName: "Bash", input: escaped, toolUseId, signal });
+        await vi.waitFor(() => expect(approvals.length).toBeGreaterThan(0));
+        const raised = approvals.shift();
+        if (raised === undefined) throw new Error("Expected an approval card");
+        await Effect.runPromise(
+          acquired.connection.answerApproval({
+            sessionId,
+            requestId: raised.requestId,
+            approved: true,
+          }),
+        );
+        await expect(callback).resolves.toMatchObject({ behavior: "allow" });
+      };
+      await run("escape-1");
+      // A remembered answer never carries over to a command that leaves the sandbox.
+      await run("escape-2");
+      await Effect.runPromise(Fiber.interrupt(watched));
+    } finally {
+      await acquired.close();
+    }
+    const plan = harness();
+    const planConnection = await acquire(plan.driver, "code");
+    try {
+      await Effect.runPromise(
+        planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      await expect(
+        plan.opens[0]!.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Bash",
+          input: escaped,
+          toolUseId: "plan-escape",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      await planConnection.close();
+    }
   });
 
   it.each([
@@ -2135,7 +2722,7 @@ describe("Claude execution policy", () => {
         toolUseId: "bash-escape",
         signal,
       }),
-    ).resolves.toEqual({ behavior: "ask" });
+    ).resolves.toEqual({ behavior: "own-rules" });
     const callback = open.canUseTool({
       toolName: "Bash",
       input,
@@ -2151,7 +2738,7 @@ describe("Claude execution policy", () => {
     expect(open.sandbox).toMatchObject({
       enabled: true,
       failIfUnavailable: true,
-      allowUnsandboxedCommands: false,
+      allowUnsandboxedCommands: true,
       autoAllowBashIfSandboxed: false,
     });
     await Effect.runPromise(
@@ -2738,7 +3325,7 @@ describe("Claude execution policy", () => {
     },
   );
 
-  it("terminal-fails and settles the active question when a second becomes pending", async () => {
+  it("holds a second question until the first is answered, then puts it to the person", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -2746,59 +3333,62 @@ describe("Claude execution policy", () => {
     );
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
-    const questionInput = (question: string) => ({
-      questions: [{ question, options: [{ label: "Yes" }], multiSelect: false }],
-    });
-    const firstInput = questionInput("First?");
-    await open.preToolUse({
-      sessionId: "sdk-session-1",
-      projectRoot,
-      toolName: "AskUserQuestion",
-      input: firstInput,
-      toolUseId: "question-cap-1",
-      signal,
-    });
-    const first = open.canUseTool({
-      toolName: "AskUserQuestion",
-      input: firstInput,
-      toolUseId: "question-cap-1",
-      signal,
-    });
-    const secondInput = questionInput("Second?");
-    await open.preToolUse({
-      sessionId: "sdk-session-1",
-      projectRoot,
-      toolName: "AskUserQuestion",
-      input: secondInput,
-      toolUseId: "question-cap-2",
-      signal,
-    });
-    await expect(
-      open.canUseTool({
-        toolName: "AskUserQuestion",
-        input: secondInput,
-        toolUseId: "question-cap-2",
-        signal,
-      }),
-    ).resolves.toMatchObject({ behavior: "deny" });
-    const firstOutcome = await Promise.race([
-      first,
-      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
-    ]);
-
-    expect(firstOutcome).toMatchObject({ behavior: "deny" });
-    await vi.waitFor(() => expect(f.queries[0]?.close).toHaveBeenCalledOnce());
-    const late = await Effect.runPromise(
-      Effect.exit(
-        acquired.connection.answerUserInput({
-          sessionId,
-          requestId: "request-1",
-          answer: "Yes",
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
         }),
       ),
     );
-    expect(String(late)).toContain("protocol");
+    const questions = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "user-input-request" }> =>
+          event.kind === "user-input-request",
+      );
+    const questionInput = (question: string) => ({
+      questions: [{ question, options: [{ label: "Yes" }], multiSelect: false }],
+    });
+    const ask = async (input: ReturnType<typeof questionInput>, toolUseId: string) => {
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "AskUserQuestion",
+        input,
+        toolUseId,
+        signal,
+      });
+      return open.canUseTool({ toolName: "AskUserQuestion", input, toolUseId, signal });
+    };
+    const firstInput = questionInput("First?");
+    const first = ask(firstInput, "question-cap-1");
+    await vi.waitFor(() => expect(questions()).toHaveLength(1));
+    const secondInput = questionInput("Second?");
+    const second = ask(secondInput, "question-cap-2");
+    const secondOutcome = await Promise.race([
+      second,
+      new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
+    ]);
+    // Only one question set is put to the person at a time.
+    expect(secondOutcome).toBe("pending");
+    expect(questions()).toHaveLength(1);
+    expect(questions()[0]).toMatchObject({ prompt: "First?" });
+
+    await Effect.runPromise(
+      acquired.connection.answerUserInput({
+        sessionId,
+        requestId: questions()[0]!.requestId,
+        answer: "Yes",
+      }),
+    );
+    await expect(first).resolves.toMatchObject({ behavior: "allow" });
+    // Once the first is answered, the second is published for an answer.
+    await vi.waitFor(() => expect(questions()).toHaveLength(2));
+    expect(questions()[1]).toMatchObject({ prompt: "Second?" });
+    expect(f.queries[0]?.close).not.toHaveBeenCalled();
     await acquired.close();
+    await expect(second).resolves.toMatchObject({ behavior: "deny" });
+    await Effect.runPromise(Fiber.join(subscriber));
   });
 
   it("keeps user questions interactive in Full access without creating an approval", async () => {
@@ -3448,7 +4038,7 @@ describe("Claude execution policy", () => {
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
     await expect(open.preToolUse({ ...request, toolUseId: "next-turn" })).resolves.toEqual({
-      behavior: "ask",
+      behavior: "own-rules",
     });
     await acquired.close();
     expect(f.queries[0]?.close).toHaveBeenCalledOnce();
@@ -4022,9 +4612,8 @@ describe("Claude artifact delivery", () => {
       expect(open.tools).toEqual(
         expect.arrayContaining(["Agent", "WebSearch", "WebFetch", "Skill"]),
       );
-      // The account's own MCP servers cannot start without a Project's, so
-      // the driver leaves them off rather than claim them.
-      expect(open.nativeSetup).toEqual({ ...ownSetup, toolServers: false });
+      // The account's own MCP servers start in an untrusted Project too.
+      expect(open.nativeSetup).toEqual(ownSetup);
       // Only the guard that kept Claude Code's own subagents off goes.
       expect(open.authEnvironment).not.toHaveProperty("CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS");
       const { CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: _subagentsOff, ...channelGuards } =
@@ -4048,15 +4637,23 @@ describe("Claude artifact delivery", () => {
       await expect(ask("Skill", { skill: "pdf" }, "skill-1")).resolves.toEqual({
         behavior: "allow",
       });
+      // A workflow rides the same switch, but its script runs as JavaScript
+      // in the runtime process, so starting one keeps Octant's own ask below
+      // Full access, whatever the person's own rules allow.
+      expect(open.withheldTools).not.toContain("Workflow");
+      await expect(ask("Workflow", { script: "export const meta = {}" }, "wf-1")).resolves.toEqual({
+        behavior: "ask",
+      });
       // A web read asks at Guarded, as Claude Code itself does.
       await expect(ask("WebFetch", { url: "https://example.invalid" }, "fetch-1")).resolves.toEqual(
         {
-          behavior: "ask",
+          behavior: "own-rules",
         },
       );
-      // An MCP server's tool is not held without the trusted Project's code.
-      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toMatchObject({
-        behavior: "deny",
+      // The account's own MCP server's tool is left to the person's own rules
+      // at Guarded, which ask unless they allow it.
+      await expect(ask("mcp__linear__search", { query: "x" }, "mcp-1")).resolves.toEqual({
+        behavior: "own-rules",
       });
     } finally {
       await acquired.close();
@@ -4141,7 +4738,7 @@ describe("Claude artifact delivery", () => {
             toolUseId,
             signal,
           });
-        const expected = executionPolicy === "full-access" ? "allow" : "ask";
+        const expected = executionPolicy === "full-access" ? "allow" : "own-rules";
         await expect(answer("WebSearch", `search-${executionPolicy}`)).resolves.toEqual({
           behavior: expected,
         });
@@ -4547,6 +5144,49 @@ describe("Claude driver probe", () => {
     }
   });
 
+  it("sends an attached image to Claude as an image block, and refuses an image type Claude does not take", async () => {
+    const f = harness("subscription");
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const png = {
+      attachmentId: "attachment-1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    } as const;
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "what is this?",
+        attachments: [png] as never,
+        tools: [],
+      }),
+    );
+    expect(f.queries.at(-1)?.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "what is this?",
+        images: [
+          { mediaType: "image/png", data: Buffer.from([137, 80, 78, 71]).toString("base64") },
+        ],
+      }),
+    );
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "and this?",
+          attachments: [{ ...png, mediaType: "image/heic" }] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "unsupported" });
+    await acquired.close();
+  });
+
   it("uses only provider-native auth for subscription and releases the probe query scope", async () => {
     const f = harness("subscription");
     const result = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
@@ -4570,7 +5210,8 @@ describe("Claude driver probe", () => {
         streaming: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
-        nativeAttachments: "unsupported",
+        // Every model Claude Code offers takes images.
+        nativeAttachments: "supported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",
         citations: "unsupported",
@@ -6021,6 +6662,348 @@ describe("Claude single-use sessions", () => {
   });
 });
 
+describe("Claude session copies for a fork or rewind", () => {
+  it("copies the session through the anchor and resumes the copy under the new session", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const source = started.resumeCursor;
+    if (source === undefined) throw new Error("The session reported no cursor.");
+
+    const copied = await Effect.runPromise(
+      f.driver.forkSession!({
+        instanceId,
+        sessionId: otherSessionId,
+        source,
+        anchor: "assistant-message-7",
+        projectRoot,
+        mode: "code",
+        modelId,
+      }),
+    );
+    expect(f.sdk.forkSession).toHaveBeenCalledWith({
+      sessionId: source.value,
+      projectRoot,
+      upToMessageId: "assistant-message-7",
+    });
+    expect(copied).toEqual({
+      driverKind: "claude",
+      value: `${source.value}-through-assistant-message-7`,
+      binding: { instanceId, sessionId: otherSessionId, projectRoot, mode: "code", modelId },
+    });
+    if (copied === undefined) throw new Error("No copy was made.");
+
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId: otherSessionId,
+        resumeCursor: copied,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)).toMatchObject({ resumeSessionId: copied.value });
+    await Effect.runPromise(acquired.connection.stop(otherSessionId));
+    await acquired.close();
+  });
+
+  it("makes no copy for another account, folder or mode, so the fork reads its source as text", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    const started = await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await acquired.close();
+    const source = started.resumeCursor;
+    if (source === undefined) throw new Error("The session reported no cursor.");
+    const request = {
+      instanceId,
+      sessionId: otherSessionId,
+      source,
+      anchor: "assistant-message-7",
+      projectRoot,
+      mode: "code" as const,
+      modelId,
+    };
+
+    for (const differing of [
+      { instanceId: otherInstanceId },
+      { projectRoot: "/tmp/octant-claude-fork-worktree" },
+      { mode: "work" as const },
+      { source: { driverKind: "codex" as const, value: source.value } },
+    ]) {
+      expect(
+        await Effect.runPromise(f.driver.forkSession!({ ...request, ...differing })),
+      ).toBeUndefined();
+    }
+    expect(f.sdk.forkSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("Claude's own plan mode as level changes", () => {
+  async function askedLevelChange(
+    executionPolicy: "full-access" | "plan",
+    toolName: "EnterPlanMode" | "ExitPlanMode",
+    input: Readonly<Record<string, unknown>>,
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, levelChanges: true }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const preTool = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName,
+      input,
+      toolUseId: "level-1",
+      signal,
+    });
+    const decision = open.canUseTool({ toolName, input, toolUseId: "level-1", signal });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    return { f, acquired, open, preTool, decision, seen, scope };
+  }
+
+  it("puts Claude's ask to plan to the person even at Full access and never lets it switch its own mode", async () => {
+    const { acquired, open, preTool, decision, seen, scope } = await askedLevelChange(
+      "full-access",
+      "EnterPlanMode",
+      {},
+    );
+    expect(open.withheldTools).not.toContain("EnterPlanMode");
+    expect(open.withheldTools).toContain("ExitPlanMode");
+    expect(preTool).toEqual({ behavior: "ask" });
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "enter-plan" } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    await expect(decision).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("next turn runs in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("offers a Plan session only the read-only tools and the ask to leave Plan, which carries the plan", async () => {
+    const plan = "1. Read the login test.\n2. Fix the race.";
+    const { acquired, open, decision, seen, scope } = await askedLevelChange(
+      "plan",
+      "ExitPlanMode",
+      { plan },
+    );
+    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "ExitPlanMode"]));
+    for (const writer of ["Edit", "Write", "NotebookEdit", "EnterPlanMode"]) {
+      expect(open.tools).not.toContain(writer);
+    }
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "exit-plan", plan } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: false,
+      }),
+    );
+    await expect(decision).resolves.toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("kept this thread in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]?.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode"]),
+    );
+    await acquired.close();
+  });
+});
+
+describe("Claude sessions started outside Octant", () => {
+  const outside = "outside-session-1";
+
+  it("lists this folder's sessions an Octant thread does not hold, newest first", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    f.sessions.set(outside, {
+      sessionId: outside,
+      projectRoot,
+      lastModified: 50,
+      title: "Fix the login test",
+    });
+    f.sessions.set("older-outside", { sessionId: "older-outside", projectRoot, lastModified: 20 });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 90,
+    });
+
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    // The session Octant started (sdk-session-1) is left out.
+    expect(listed).toEqual([
+      { nativeSessionId: outside, lastModified: 50, title: "Fix the login test" },
+      { nativeSessionId: "older-outside", lastModified: 20 },
+    ]);
+    await acquired.close();
+  });
+
+  it("takes up a session begun outside Octant so the thread's next turn resumes it", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const cursor = await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    expect(cursor).toMatchObject({
+      driverKind: "claude",
+      value: outside,
+      binding: { sessionId, projectRoot, mode: "code" },
+    });
+    expect(f.resumeIdentities.get(outside)).toMatchObject({
+      octantSessionId: sessionId,
+      sdkSessionId: outside,
+      projectRoot,
+      authentication: "subscription",
+    });
+
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: cursor,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)?.resumeSessionId).toBe(outside);
+    await acquired.close();
+  });
+
+  it("refuses a session another Octant thread holds, or one from another folder", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const adopt = (nativeSessionId: string) =>
+      Effect.runPromise(
+        Effect.flip(
+          f.driver.nativeSessions!.adopt({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"),
+            nativeSessionId,
+            modelId,
+          }),
+        ),
+      );
+    await expect(adopt("sdk-session-1")).resolves.toMatchObject({
+      message: "That Claude session already belongs to an Octant thread.",
+    });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 1,
+    });
+    await expect(adopt("elsewhere")).resolves.toMatchObject({ category: "stale-resume" });
+    expect(f.resumeIdentities.get("sdk-session-1")?.octantSessionId).toBe(sessionId);
+    await acquired.close();
+  });
+
+  it("lets only one of two threads adopting the same session at once take it up", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const adopt = (threadSession: string) =>
+      Effect.runPromiseExit(
+        f.driver.nativeSessions!.adopt({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          sessionId: decodeProviderSessionId(threadSession),
+          nativeSessionId: outside,
+          modelId,
+        }),
+      );
+    const [first, second] = await Promise.all([
+      adopt("80000000-0000-4000-8000-000000000801"),
+      adopt("80000000-0000-4000-8000-000000000802"),
+    ]);
+    expect([first, second].filter(Exit.isSuccess)).toHaveLength(1);
+    expect(f.resumeIdentityPort.put).toHaveBeenCalledTimes(1);
+    expect(String(f.resumeIdentities.get(outside)?.octantSessionId)).toBe(
+      "80000000-0000-4000-8000-000000000801",
+    );
+  });
+
+  it("offers a session again once an adoption the host could not record is released, and never releases another thread's", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    // Another Octant session's release leaves this claim where it is.
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({
+        instanceId,
+        nativeSessionId: outside,
+        sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000803"),
+      }),
+    );
+    expect(f.resumeIdentities.get(outside)?.octantSessionId).toBe(sessionId);
+
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({ instanceId, nativeSessionId: outside, sessionId }),
+    );
+    expect(f.resumeIdentities.get(outside)).toBeUndefined();
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
+  });
+});
+
 describe("Claude exact resume", () => {
   it("cancels and joins a resume held before SDK initialization", async () => {
     const f = harness();
@@ -7103,11 +8086,26 @@ describe("Claude background work", () => {
     event: { kind: "text-delta", index: 0, text: value },
   });
 
-  async function startTurn() {
-    const f = harness();
+  async function startTurn(
+    options: {
+      readonly executionPolicy?: "approval-gated" | "full-access";
+      readonly runtimeTurnsPerTurn?: () => number;
+    } = {},
+  ) {
+    const f = harness(
+      "subscription",
+      "current-session",
+      options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn },
+    );
     const acquired = await acquire(f.driver, "code");
     await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: options.executionPolicy ?? "approval-gated",
+      }),
     );
     const seen: ProviderRuntimeEvent[] = [];
     const collected = Effect.runPromise(
@@ -7157,13 +8155,6 @@ describe("Claude background work", () => {
     await query.emit(state("idle"));
     // The command still runs, so the person's turn is not over.
     expect(seen.some((event) => event.kind === "completed")).toBe(false);
-    await expect(
-      Effect.runPromise(
-        Effect.flip(
-          acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
-        ),
-      ),
-    ).resolves.toMatchObject({ category: "unavailable" });
 
     await query.emit(backgroundEnded);
     await query.emit(state("running"));
@@ -7190,6 +8181,85 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
+  it("holds the person's turn while a workflow runs and shows its agents as child runs under the Workflow call", async () => {
+    const { acquired, query, seen, collected } = await startTurn();
+    await query.emit({
+      kind: "stream-event",
+      sessionId: sdk,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "toolu-workflow",
+          toolName: "Workflow",
+          input: { script: "export const meta = { name: 'review' }" },
+        },
+      },
+    });
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_started",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      background: true,
+      workflow: { name: "review" },
+      description: "Review the change",
+    });
+    await query.emit({
+      kind: "tool-results",
+      sessionId: sdk,
+      results: [{ toolUseId: "toolu-workflow", isError: false }],
+    });
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_progress",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      description: "Review the change",
+      usage: { totalTokens: 10, toolUses: 1, durationMs: 5 },
+      workflow: { agents: [{ index: 0, label: "read the diff", state: "done" }] },
+    });
+    await query.emit({
+      kind: "task",
+      sessionId: sdk,
+      subtype: "task_notification",
+      taskId: "workflow-1",
+      toolUseId: "toolu-workflow",
+      status: "completed",
+      summary: "Dynamic workflow completed",
+    });
+    await query.emit(state("running"));
+    await query.emit(text("The review is done."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    const children = seen.filter((event) => event.kind === "child-agent-activity");
+    const workflowCall = seen.find((event) => event.kind === "tool-start");
+    if (workflowCall?.kind !== "tool-start") throw new Error("Expected the Workflow call");
+    expect(children).toEqual([
+      expect.objectContaining({ childAgentId: workflowCall.toolCallId, status: "starting" }),
+      expect.objectContaining({
+        childAgentId: `${workflowCall.toolCallId}:agent-0`,
+        parentChildAgentId: workflowCall.toolCallId,
+        status: "completed",
+      }),
+      expect.objectContaining({ childAgentId: workflowCall.toolCallId, status: "completed" }),
+    ]);
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "background-task",
+    });
+    await acquired.close();
+  });
+
   it("stops the runtime's turns and its background work when the person stops the held turn", async () => {
     const { acquired, query, seen, collected } = await startTurn();
     await query.emit(backgroundStarted);
@@ -7208,8 +8278,110 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
-  it("ends the person's turn once the runtime has started as many turns of its own as it may", async () => {
+  it("steers a message the person sends into the held turn and waits for its answer", async () => {
     const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "also lint", attachments: [], tools: [] }),
+    );
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    expect(query.sent).toEqual(["run the tests", "also lint", "and format"]);
+    // The steered message keeps the turn held even once the command ends.
+    await query.emit(backgroundEnded);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(state("running"));
+    await query.emit(text("Linted."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "person-message",
+    });
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
+  it("refuses a message with images while the turn is held, rather than dropping its images", async () => {
+    const { acquired, query } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "what is this?",
+          attachments: [
+            {
+              attachmentId: "attachment-1",
+              displayName: "screen.png",
+              mediaType: "image/png",
+              bytes: new Uint8Array([137, 80, 78, 71]),
+            },
+          ] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({
+      category: "unavailable",
+      message: expect.stringContaining("Send the images once the turn ends"),
+    });
+    expect(query.sent).toEqual(["run the tests"]);
+    await acquired.close();
+  });
+
+  it("labels and counts a turn background work starts after the person steered into a runtime turn already open", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 2 });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(text("Reading the results."));
+    // The runtime's own turn is open when the person's message arrives.
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    await query.emit({ ...backgroundStarted, taskId: "bash-2" });
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit({ ...backgroundEnded, taskId: "bash-2" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    // A third wake would pass the limit of two, so the turn ends there.
+    await query.emit({ ...backgroundStarted, taskId: "bash-3" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await collected;
+
+    expect(
+      seen
+        .filter((event) => event.kind === "runtime-turn-started")
+        .map((event) => (event.kind === "runtime-turn-started" ? event.trigger : undefined)),
+    ).toEqual(["background-task", "background-task"]);
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
+  it("refuses to steer when no turn is held, so the message queue keeps it", async () => {
+    const { acquired } = await startTurn();
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "later" })),
+    ).toBe("unsupported");
+    await acquired.close();
+  });
+
+  it("ends the person's turn once the runtime has started as many turns of its own as the person allows", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 3 });
     await query.emit(backgroundStarted);
     await query.emit(completed(sdk));
     await query.emit(state("idle"));
@@ -7221,9 +8393,31 @@ describe("Claude background work", () => {
     }
     await collected;
 
-    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(16);
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(3);
     expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     expect(query.close).toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("counts no runtime turns at Full access", async () => {
+    const { acquired, query, seen, collected } = await startTurn({
+      executionPolicy: "full-access",
+      runtimeTurnsPerTurn: () => 3,
+    });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    for (let line = 0; line < 20; line += 1) {
+      await query.emit(state("running"));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+    }
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(20);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(backgroundEnded);
+    await query.emit(state("idle"));
+    await collected;
+    expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     await acquired.close();
   });
 
@@ -7233,5 +8427,426 @@ describe("Claude background work", () => {
     await collected;
     expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
     await acquired.close();
+  });
+
+  describe("in a session the host keeps past its turn", () => {
+    async function startKeptTurn(executionPolicy: ProviderExecutionPolicy = "approval-gated") {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy,
+          outlivesTurn: true,
+        }),
+      );
+      const seen: ProviderRuntimeEvent[] = [];
+      // Subscribes before it returns, as a turn runner does before it sends.
+      const follow = async () => {
+        const scope = Effect.runSync(Scope.make());
+        const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+        const done = Effect.runPromise(
+          Stream.runForEach(
+            events.pipe(
+              Stream.filter((event) => event.sessionId === sessionId),
+              Stream.takeUntil((event) =>
+                ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+              ),
+            ),
+            (event) => Effect.sync(() => seen.push(event)),
+          ).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
+        );
+        return { done };
+      };
+      const collected = (await follow()).done;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "start the dev server",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      const query = f.queries[0]!;
+      await query.emit(state("running"));
+      const watched = acquired.connection.backgroundWork?.(sessionId);
+      const reported: ProviderBackgroundWork[] = [];
+      watched?.watch((work) => reported.push(work));
+      return { acquired, query, seen, collected, follow, watched, reported, open: f.opens[0]! };
+    }
+
+    it("keeps a background task's lifecycle through the person's next turn, so its progress and end still map", async () => {
+      const { acquired, query, seen, collected, follow } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      const started = seen.find((event) => event.kind === "task-progress");
+
+      // The person sends while the dev server from the last turn still runs.
+      const next = (await follow()).done;
+      const before = seen.length;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "check the logs",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      await query.emit(state("running"));
+      await query.emit({
+        kind: "task",
+        sessionId: sdk,
+        subtype: "task_progress",
+        taskId: "bash-1",
+        description: "npm test",
+        usage: { totalTokens: 0, toolUses: 0, durationMs: 5_000 },
+      });
+      await query.emit(backgroundEnded);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await next;
+
+      const turn = seen.slice(before);
+      expect(turn.filter((event) => event.kind === "failed")).toEqual([]);
+      expect(turn.at(-1)).toMatchObject({ kind: "completed" });
+      // Both reports name the row the task's start opened.
+      const rows = turn.flatMap((event) => (event.kind === "task-progress" ? [event.taskId] : []));
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(rows)).toEqual(
+        new Set([started?.kind === "task-progress" ? started.taskId : "missing"]),
+      );
+      await acquired.close();
+    });
+
+    it("answers none of a runtime-started turn's tool calls until the host attaches a turn to it", async () => {
+      const { acquired, query, collected, follow, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      let answered = false;
+      const decision = open
+        .preToolUse({
+          sessionId: sdk,
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "rm -rf build" },
+          toolUseId: "runtime-bash",
+          signal: new AbortController().signal,
+        })
+        .then((value) => {
+          answered = true;
+          return value;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Full access would allow it unasked, but the host has not admitted the turn.
+      expect(answered).toBe(false);
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "allow" });
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      await acquired.close();
+    });
+
+    it("refuses a held runtime-turn tool call when the session is stopped before the host attaches", async () => {
+      const { acquired, query, collected, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      const decision = open.preToolUse({
+        sessionId: sdk,
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "npm start" },
+        toolUseId: "runtime-start",
+        signal: new AbortController().signal,
+      });
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+      await acquired.close();
+    });
+
+    it("keeps a runtime-started turn that finishes before the host attaches, and reads it whole on attach", async () => {
+      const { acquired, query, seen, collected, follow, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      // Still waiting for the host, so the keeper opens a turn rather than stop it.
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: true, ended: false });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: false });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("completes the person's turn when the reply is done while its background command keeps running", async () => {
+      const { acquired, query, seen, collected, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      expect(seen.at(-1)).toMatchObject({ kind: "completed" });
+      expect(watched?.current()).toMatchObject({
+        tasks: [{ taskId: "bash-1", description: "npm test" }],
+        runtimeTurnWaiting: false,
+        ended: false,
+      });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("holds a turn the runtime starts by itself until the host attaches one, then reads it from its start", async () => {
+      const { acquired, query, seen, collected, follow, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      expect(watched?.current()).toMatchObject({ tasks: [], runtimeTurnWaiting: true });
+      expect(reported.some((work) => work.runtimeTurnWaiting)).toBe(true);
+      // The person cannot send into a turn the runtime is running unseen.
+      await expect(
+        Effect.runPromise(
+          Effect.flip(
+            acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
+          ),
+        ),
+      ).resolves.toMatchObject({ category: "unavailable" });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      const sequences = seen.map((event) => event.sequence);
+      expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+      await expect(
+        Effect.runPromise(Effect.flip(acquired.connection.attachRuntimeTurn!(sessionId))),
+      ).resolves.toMatchObject({ category: "protocol" });
+      await acquired.close();
+    });
+
+    it("stops the background command with the session when the person stops the thread", async () => {
+      const { acquired, query, collected, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      expect(query.close).toHaveBeenCalled();
+      expect(reported.at(-1)).toMatchObject({ ended: true });
+      expect(watched?.current().ended).toBe(true);
+      await acquired.close();
+    });
+  });
+});
+
+describe("Claude wake-ups", () => {
+  function schedule(): ProviderWakeupSchedule & {
+    readonly requests: ProviderWakeupRequest[];
+  } {
+    const requests: ProviderWakeupRequest[] = [];
+    const waiting: ProviderWakeup[] = [];
+    return {
+      requests,
+      schedule: async (request) => {
+        requests.push(request);
+        const wakeup: ProviderWakeup = {
+          id: `wakeup-${requests.length}`,
+          schedule:
+            request.kind === "delay"
+              ? { kind: "delay" }
+              : { kind: "cron", cron: request.cron, recurring: request.recurring },
+          prompt: request.prompt,
+          humanSchedule: "Once at 2026-11-14T12:05:00.000Z",
+          nextFireAt: "2026-11-14T12:05:00.000Z",
+          status: "pending",
+        };
+        waiting.push(wakeup);
+        return { status: "scheduled", wakeup, clampedDelaySeconds: 300, wasClamped: false };
+      },
+      list: async () => waiting,
+      cancel: async (id) =>
+        waiting.some((wakeup) => wakeup.id === id)
+          ? { status: "cancelled" }
+          : { status: "refused", reason: `No wake-up with id '${id}' waits in this thread.` },
+      cancelDelayed: async () => 0,
+    };
+  }
+
+  it("withholds the wake-up tools from a session the host keeps no schedule for", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]!.withheldTools).toEqual(
+      expect.arrayContaining(["ScheduleWakeup", "CronCreate", "CronList", "CronDelete"]),
+    );
+    await acquired.close();
+  });
+
+  it("asks before a wake-up below Full access and then answers it from the thread's schedule, not the runtime's", async () => {
+    const wakeups = schedule();
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        wakeups,
+      }),
+    );
+    const open = f.opens[0]!;
+    for (const tool of ["ScheduleWakeup", "CronCreate", "CronList", "CronDelete"]) {
+      expect(open.withheldTools).not.toContain(tool);
+    }
+    const signal = new AbortController().signal;
+    const input = {
+      delaySeconds: 300,
+      reason: "The build runs five minutes.",
+      prompt: "Check it.",
+    };
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "ScheduleWakeup",
+        input,
+        toolUseId: "wake-1",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    expect(wakeups.requests).toEqual([]);
+    const decision = open.canUseTool({
+      toolName: "ScheduleWakeup",
+      input,
+      toolUseId: "wake-1",
+      signal,
+    });
+    await new Promise((done) => setTimeout(done, 20));
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    const answered = await decision;
+    // The runtime runs nothing: its scheduler never holds the wake-up.
+    expect(answered.behavior).toBe("deny");
+    expect(answered.behavior === "deny" ? answered.message : "").toContain(
+      `"scheduledFor":${Date.parse("2026-11-14T12:05:00.000Z")}`,
+    );
+    expect(wakeups.requests).toEqual([
+      {
+        kind: "delay",
+        providerToolName: "ScheduleWakeup",
+        delaySeconds: 300,
+        prompt: "Check it.",
+        reason: "The build runs five minutes.",
+      },
+    ]);
+
+    // Listing and deleting the thread's own wake-ups asks nobody.
+    const listed = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronList",
+      input: {},
+      toolUseId: "list-1",
+      signal,
+    });
+    expect(listed.behavior === "deny" ? listed.message : "").toContain('"id":"wakeup-1"');
+    const deleted = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronDelete",
+      input: { id: "wakeup-1" },
+      toolUseId: "delete-1",
+      signal,
+    });
+    expect(deleted.behavior === "deny" ? deleted.message : "").toContain(
+      "Cancelled wake-up wakeup-1",
+    );
+    await acquired.close();
+  });
+
+  it("answers a wake-up at Full access without asking, and never offers one in Plan", async () => {
+    const wakeups = schedule();
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "full-access", wakeups }),
+    );
+    const signal = new AbortController().signal;
+    const created = await f.opens[0]!.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "CronCreate",
+      input: { cron: "*/30 * * * *", prompt: "Look at the queue.", durable: true },
+      toolUseId: "cron-1",
+      signal,
+    });
+    expect(created.behavior === "deny" ? created.message : "").toContain('"recurring":true');
+    expect(wakeups.requests).toMatchObject([
+      { kind: "cron", cron: "*/30 * * * *", recurring: true, prompt: "Look at the queue." },
+    ]);
+    await acquired.close();
+
+    const planWakeups = schedule();
+    const plan = harness();
+    const planAcquired = await acquire(plan.driver, "code");
+    await Effect.runPromise(
+      planAcquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "plan",
+        wakeups: planWakeups,
+      }),
+    );
+    const planOpen = plan.opens[0]!;
+    expect(planOpen.withheldTools).toBeUndefined();
+    expect(planOpen.tools).not.toContain("ScheduleWakeup");
+    await expect(
+      planOpen.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "ScheduleWakeup",
+        input: { delaySeconds: 300, prompt: "Later." },
+        toolUseId: "plan-wake",
+        signal,
+      }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+    expect(planWakeups.requests).toEqual([]);
+    await planAcquired.close();
   });
 });

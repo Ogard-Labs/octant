@@ -2,6 +2,8 @@ import type {
   ProviderFailure,
   ProviderInstanceId,
   ProviderModelId,
+  ProviderSessionId,
+  ProviderToolDefinition,
   ProviderTurnInput,
 } from "@octant/contracts";
 import type {
@@ -98,4 +100,33 @@ export interface NativeHarnessLeadFallback {
     readonly failure: ProviderFailure;
     readonly turn: ProviderTurnInput;
   }) => Promise<NativeHarnessLeadFallbackOutcome>;
+}
+
+/**
+ * The provider-search grant of the turn a session is running, as the host
+ * decides it now. A turn is sent with the grant decided at that moment, but
+ * its level can drop and its thread can be marked from outside while it runs,
+ * so the loop asks again before each request and withdraws the provider's own
+ * search for the rest of the turn once the answer says so. `untracked` means
+ * the host decided nothing for the session, and the grant it was sent with
+ * stands.
+ */
+export interface NativeHarnessProviderSearchDecisions {
+  /** The grant for a request of the session's turn sent to the named endpoint. */
+  readonly now: (
+    sessionId: ProviderSessionId,
+    providerInstanceId: ProviderInstanceId,
+  ) =>
+    | { readonly status: "untracked" }
+    | {
+        readonly status: "decided";
+        readonly grant: ProviderTurnInput["providerWebSearch"];
+        /**
+         * The turn's own `web-search`, when it has one: what a request that
+         * loses the provider's search offers in its place.
+         */
+        readonly webSearchTool: ProviderToolDefinition | undefined;
+      };
+  /** The session ended; nothing is decided for it any more. */
+  readonly release: (sessionId: ProviderSessionId) => void;
 }

@@ -15,6 +15,7 @@ import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelecti
 import {
   useComposerSlashCommands,
   ComposerSlashTypeahead,
+  composerProviderCommands,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -51,6 +52,7 @@ import { WelcomeHeading } from "../../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../../voice/ComposerVoiceButton";
 import { appendTranscript } from "../../voice/appendTranscript";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
+import { useSeesImages } from "../../harness/useSeesImages";
 import { WorkImageAttachmentChips } from "./WorkImageAttachmentChips";
 import {
   ThreadMentionChips,
@@ -145,6 +147,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+    provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
   const atMenu = useComposerAtMenu({
     textarea: () => textareaRef.current,
@@ -200,12 +203,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const trimmed = prompt.trim();
   const hasFolder = props.projectId !== undefined;
   const [projectRequired, setProjectRequired] = useState(false);
-  const imageSupport = selectedModelReadsImages(props.providerGroups, {
-    ...(props.selectedProviderInstanceId === undefined
-      ? {}
-      : { providerInstanceId: props.selectedProviderInstanceId }),
-    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(props.providerGroups, {
+      ...(props.selectedProviderInstanceId === undefined
+        ? {}
+        : { providerInstanceId: props.selectedProviderInstanceId }),
+      ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: props.projectId === undefined ? undefined : String(props.projectId),
+    providerInstanceId:
+      props.selectedProviderInstanceId === undefined
+        ? undefined
+        : String(props.selectedProviderInstanceId),
+    modelId: props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
+  }).takesImages;
   const [submitting, setSubmitting] = useState(false);
   // A send refused before the host saw it explains itself beside the composer,
   // since no thread exists to carry a reason.

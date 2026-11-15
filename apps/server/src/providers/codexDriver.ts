@@ -144,7 +144,6 @@ export interface CodexThreadConfig {
   readonly "features.view_image"?: false;
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
-  readonly project_doc_max_bytes?: 0;
   /**
    * The person's compaction point for this thread, in tokens: Codex compacts
    * once the context passes it, mid-turn too. Passed in the thread's own
@@ -178,25 +177,6 @@ export interface CodexThreadResumeInput {
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
-} as const satisfies CodexThreadConfig;
-
-/**
- * A Work turn does not read an agent brief already in the Project's folder.
- * Codex loads every `AGENTS.md` (and `AGENTS.override.md` or a configured
- * fallback name) from the repository root down to `cwd` into the model's
- * instructions by itself; a project doc budget of zero bytes skips that
- * discovery and leaves the user's own `$CODEX_HOME/AGENTS.md` in place.
- * Measured against codex-cli 0.162.1 with turns sent to a local stand-in
- * endpoint: a thread started in a Project holding an `AGENTS.md` sent its
- * contents with the first turn, the same thread started or resumed with
- * `project_doc_max_bytes = 0` did not, and a resume without the override sent
- * them again, so it is stated on every resume like the shell overrides. Read
- * at the Codex source tags, a zero budget has skipped discovery since 0.24.0
- * and `thread/start` has applied its `config` since it arrived in 0.56.0, so
- * every release with this protocol honors it.
- */
-const CODEX_WORK_CONFIG = {
-  project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -403,7 +383,7 @@ export interface CodexTurnStartInput {
     | { readonly type: "dangerFullAccess" }
     | { readonly type: "workspaceWrite" }
     | { readonly type: "readOnly" }
-    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" };
+    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -889,16 +869,22 @@ export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
+  networkOpen?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
   // Below Full access the process already runs in Octant's profile, which is
-  // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
-  // keeps Codex from telling the model it has open network. A sandboxed Full
-  // access thread takes the same external sandbox, with `never`.
+  // the boundary; Codex's own Seatbelt cannot start inside it. A sandboxed
+  // Full access thread takes the same external sandbox, with `never`. The
+  // network claim follows the launch: `enabled` when the process launched
+  // without Octant's egress proxy (Network limits off, the default), so
+  // Codex tells the model what it really has; `restricted` behind the proxy.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
-      : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
+      : ({
+          type: "externalSandbox",
+          networkAccess: networkOpen === true ? "enabled" : "restricted",
+        } as const);
   return { ...rest, sandboxPolicy };
 }
 
@@ -1305,6 +1291,8 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+  /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
+  readonly networkOpen: boolean;
 }
 
 /** The root and mode a thread lease key names, or undefined for any other lease. */
@@ -1359,6 +1347,7 @@ function acquireRuntime(
             client: clientFactory(connection),
             version: connection.version,
             exited: connection.exited,
+            networkOpen: connection.networkOpen === true,
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -1625,6 +1614,7 @@ function makeConnection(
     let leasedPolicy: ProviderExecutionPolicy | undefined;
     let leasedOwnSubagents = false;
     let leasedFullAccessSandbox = false;
+    let leasedNetworkOpen = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -1683,9 +1673,7 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : mode === "work"
-              ? CODEX_WORK_CONFIG
-              : {};
+            : {};
         const webConfig =
           nativeSetup?.webTools === true
             ? modeConfig
@@ -2159,6 +2147,7 @@ function makeConnection(
               leasedPolicy = executionPolicy;
               leasedOwnSubagents = ownSubagents;
               leasedFullAccessSandbox = fullAccessSandbox;
+              leasedNetworkOpen = runtime.networkOpen;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -2503,6 +2492,7 @@ function makeConnection(
                         state.executionPolicy,
                         state.autoApprove,
                         state.fullAccessSandbox,
+                        leasedNetworkOpen,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined

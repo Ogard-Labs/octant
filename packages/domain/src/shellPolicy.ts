@@ -11,6 +11,7 @@ import {
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   DEFAULT_SIDEBAR_ROW_PROPERTIES,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+  DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
   DEFAULT_STALLED_TURN_LIMIT_MINUTES,
   LOCAL_HOST_ID,
   MAX_CONTEXT_SIDEBAR_WIDTH,
@@ -50,7 +51,10 @@ import {
   type WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { DEFAULT_BROWSER_CAPTURES_PER_THREAD } from "@octant/contracts/browser-capture";
-import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN } from "@octant/contracts/thread-tool-steps";
+import {
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
+} from "@octant/contracts/thread-tool-steps";
 import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/user-profile";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -191,6 +195,7 @@ export function defaultShellSettings(): ShellSettings {
     autoCompactLimitPercent: null,
     stalledTurnLimitMinutes: DEFAULT_STALLED_TURN_LIMIT_MINUTES,
     providerToolCallPauseLimitMinutes: DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MINUTES,
+    backgroundSessionIdleLimitMinutes: DEFAULT_BACKGROUND_SESSION_IDLE_LIMIT_MINUTES,
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
@@ -217,6 +222,7 @@ export function defaultShellSettings(): ShellSettings {
     keepToolCallRecords: true,
     toolStepsPerTurn: DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
     fullAccessToolStepsPerTurn: 0,
+    runtimeTurnsPerTurn: DEFAULT_RUNTIME_TURNS_PER_TURN,
     browserTransferFileLimitMegabytes: DEFAULT_BROWSER_TRANSFER_FILE_LIMIT_MEGABYTES,
     browserHeldDownloadLimit: MAX_BROWSER_HELD_DOWNLOADS,
     browserUploadFileCountLimit: MAX_BROWSER_UPLOAD_FILES,

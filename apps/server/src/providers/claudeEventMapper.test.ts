@@ -26,6 +26,7 @@ import type {
   ClaudeJsonValue,
   ClaudeToolRequest,
   ClaudeUsage,
+  ClaudeWorkflowAgent,
 } from "./claudeAgentSdkPort";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000091");
@@ -971,6 +972,153 @@ describe("mapClaudeMessage", () => {
     ).toMatchObject([{ kind: "failure" }]);
   });
 
+  it("shows a workflow as a child run under its Workflow call and each agent it starts as a child of the workflow", () => {
+    const ctx = context();
+    const started = mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-workflow",
+          toolName: "Workflow",
+          input: { script: "private script" },
+        },
+      },
+    });
+    expect(eventValues(started)).toMatchObject([{ kind: "tool-start", toolName: "Workflow" }]);
+    const call = eventValues(started)[0];
+    if (call?.kind !== "tool-start") throw new Error("Expected the Workflow call");
+    // The call returns at once; the workflow runs on as a background task.
+    mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [{ toolUseId: "sdk-workflow", isError: false }],
+    });
+
+    const opened = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_started",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      background: true,
+      workflow: { name: "review" },
+      description: "Review the change",
+    });
+    expect(eventValues(opened)).toMatchObject([
+      { kind: "task-progress", status: "in-progress" },
+      {
+        kind: "child-agent-activity",
+        childAgentId: call.toolCallId,
+        task: "review",
+        status: "starting",
+      },
+    ]);
+
+    const progress = (agents: ClaudeWorkflowAgent[]) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "task",
+          sessionId: claudeSessionId,
+          subtype: "task_progress",
+          taskId: "sdk-workflow-task",
+          toolUseId: "sdk-workflow",
+          description: "Review the change",
+          usage: { totalTokens: 10, toolUses: 1, durationMs: 5 },
+          workflow: { agents },
+        }),
+      ).filter((next) => next.kind === "child-agent-activity");
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "progress", lastToolName: "Read" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([
+      {
+        childAgentId: `${call.toolCallId}:agent-0`,
+        parentChildAgentId: call.toolCallId,
+        task: "read the diff",
+        status: "running",
+        summary: "The workflow agent is using Read.",
+      },
+      { childAgentId: `${call.toolCallId}:agent-1`, status: "running" },
+    ]);
+    // The runtime restates the whole list; only an agent that moved is shown again.
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "done" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([{ childAgentId: `${call.toolCallId}:agent-0`, status: "completed" }]);
+
+    const ended = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_notification",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      status: "completed",
+      summary: "Dynamic workflow completed",
+    });
+    expect(eventValues(ended)).toMatchObject([
+      { kind: "task-progress", status: "completed" },
+      { kind: "child-agent-activity", childAgentId: call.toolCallId, status: "completed" },
+    ]);
+    expect(JSON.stringify([started, opened, ended])).not.toContain("private script");
+
+    // A workflow task that names no Workflow call of this session is not one Octant opened.
+    expect(
+      mapped(context(), {
+        kind: "task",
+        sessionId: claudeSessionId,
+        subtype: "task_started",
+        taskId: "sdk-other",
+        toolUseId: "sdk-unknown",
+        background: true,
+        workflow: {},
+        description: "Unknown",
+      }),
+    ).toMatchObject([{ kind: "failure" }]);
+  });
+
+  it("shows a wake-up call Octant answered in place of the runtime as done, not failed", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-wake",
+          toolName: "ScheduleWakeup",
+          input: { delaySeconds: 300, prompt: "Check it." },
+        },
+      },
+    });
+    const call = ctx.toolStates.get("sdk-wake");
+    if (call === undefined) throw new Error("Expected the call's state");
+    call.answeredByOctant = true;
+    const answered = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-wake", isError: true }],
+      }),
+    );
+    expect(answered.map((next) => next.kind)).not.toContain("tool-failure");
+    expect(answered).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "Octant answered from this thread's wake-ups.",
+      }),
+    );
+  });
+
   it("marks the answer of each claude.ai service tool as outside content", () => {
     for (const [toolName, input] of [
       ["Projects", { method: "project_read", path: "notes.md" }],
@@ -1906,36 +2054,115 @@ describe("mapClaudeMessage", () => {
     },
   );
 
-  it("fails closed without exposing an outside-root file path", () => {
-    const outsidePath = "/private/outside-root-secret.ts";
-    const results = mapped(context(), {
+  it("journals a write outside the checkout as a tool step with no file change, leaving its authority to the gate", () => {
+    // Below Full access the gate asks before such a write; the mapper only
+    // records what ran, at every level.
+    const ctx = context();
+    const started = mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
-      messageId: "sdk-message-private",
+      messageId: "sdk-message-outside",
       content: [
         {
           kind: "tool-use",
-          toolUseId: "sdk-write-private",
+          toolUseId: "sdk-write-outside",
           toolName: "Write",
-          input: { file_path: outsidePath, content: "private content" },
+          input: { file_path: "/elsewhere/notes.md", content: "notes" },
         },
       ],
       usage,
     });
-
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
+    expect(started.some((next) => next.kind === "failure")).toBe(false);
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-outside", isError: false }],
+      }),
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
     ]);
-    expect(JSON.stringify(results)).not.toContain(outsidePath);
   });
 
-  it("fails closed when Project authority denies a lexically confined file path", () => {
+  it("marks a streamed command unsandboxed once its whole input arrives, under its one start", () => {
+    const ctx = context();
+    const streamed = eventValues(
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: "sdk-bash-1", toolName: "Bash", input: {} },
+        },
+      }),
+    );
+    const whole = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-bash",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-bash-1",
+            toolName: "Bash",
+            input: { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+          },
+        ],
+        usage,
+      }),
+    );
+    const events = [...streamed, ...whole];
+    expect(events.filter((next) => next.kind === "tool-start")).toHaveLength(1);
+    expect(events.filter((next) => next.kind === "tool-progress")).toEqual([
+      expect.objectContaining({
+        message: expect.stringMatching(/^Unsandboxed: this command runs outside/),
+      }),
+    ]);
+  });
+
+  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code and an escaped command unsandboxed", () => {
+    for (const [toolName, input, notice] of [
+      [
+        "EnterWorktree",
+        { name: "feature" },
+        /worktree \(feature\)\. The thread's file views and diffs stay on its original checkout/,
+      ],
+      ["ExitWorktree", { action: "keep" }, /back to the thread's checkout/],
+      ["REPL", { code: "1 + 1" }, /^Unsandboxed: runs code in Claude's own process/],
+      [
+        "Bash",
+        { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+        /^Unsandboxed: this command runs outside Claude's command sandbox/,
+      ],
+    ] as const) {
+      const started = eventValues(
+        mapped(context(), {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `sdk-message-${toolName}`,
+          content: [{ kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input }],
+          usage,
+        }),
+      );
+      expect(started).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "tool-start", toolName }),
+          expect.objectContaining({
+            kind: "tool-progress",
+            message: expect.stringMatching(notice),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("reports no file change for a lexically confined path Project authority denies", () => {
     const checkedPaths: string[] = [];
     const ctx = context({
       isProjectConfinedPath: (absolutePath) => {
@@ -1943,10 +2170,9 @@ describe("mapClaudeMessage", () => {
         return false;
       },
     });
-    const sequenceBefore = ctx.sequence;
     const deniedPath = "src/symlink/private.ts";
 
-    const results = mapped(ctx, {
+    mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
       messageId: "sdk-message-private",
@@ -1960,20 +2186,24 @@ describe("mapClaudeMessage", () => {
       ],
       usage,
     });
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-private", isError: false }],
+      }),
+    );
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
-    ]);
     expect(checkedPaths).toEqual(["/repo/src/symlink/private.ts"]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.toolStates).toHaveLength(0);
-    expect(JSON.stringify(results)).not.toContain(deniedPath);
+    expect(completed.some((next) => next.kind === "file-change" || next.kind === "diff")).toBe(
+      false,
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
+    ]);
   });
 
   it("fails closed on contradictory tool correlation without emitting partial events", () => {
@@ -2744,6 +2974,34 @@ describe("mapClaudeMessage", () => {
     expect(finishedEvent?.kind === "event" ? finishedEvent.event : undefined).not.toHaveProperty(
       "stopReason",
     );
+  });
+
+  it("names the turn's last assistant message as the point a fork or rewind cuts the session at", () => {
+    const ctx = context();
+    for (const uuid of ["transcript-message-1", "transcript-message-2"]) {
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: `message-${uuid}`,
+        uuid,
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+    }
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+    expect(completed.at(-1)).toMatchObject({
+      kind: "event",
+      event: { kind: "completed", nativeAnchor: "transcript-message-2" },
+    });
   });
 
   it("reports how much of the window the last request filled, and where the runtime compacts", () => {

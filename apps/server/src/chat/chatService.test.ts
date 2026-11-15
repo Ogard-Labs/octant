@@ -1,4 +1,7 @@
 import { decodeChatThreadId, decodeEventActor } from "@octant/contracts";
+import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ToolActionAuthority } from "@octant/contracts";
 import { continueChatTurns, cutOffToolCallHold } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
@@ -282,6 +285,7 @@ function openFixture(options?: {
     readonly modelId: string;
   }>;
   readonly chatEnabled?: { current: boolean };
+  readonly describeImages?: ChatServiceOptions["describeImages"];
   /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
   readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
@@ -315,15 +319,7 @@ function openFixture(options?: {
   readonly resolveAppManagedTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
-  }) =>
-    | {
-        readonly definitions: ReadonlyArray<{
-          readonly name: string;
-          readonly inputSchema: Record<string, unknown>;
-        }>;
-        readonly execute: () => Promise<{ readonly result: unknown }>;
-      }
-    | undefined;
+  }) => import("../providers/appManagedToolSet").AppManagedToolSet | undefined;
   readonly resolveComputerUseTools?: (input: {
     readonly windowId: WindowId;
     readonly thread: ChatThread;
@@ -411,6 +407,7 @@ function openFixture(options?: {
         readonly displayName: string;
       }>;
       readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
     }>;
     readonly driver: ProviderDriver;
     readonly queue: Queue.Queue<never>;
@@ -571,6 +568,7 @@ function openFixture(options?: {
       readonly displayName: string;
     }>;
     readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+    readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
   }> = [];
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
@@ -611,6 +609,7 @@ function openFixture(options?: {
         readonly displayName: string;
       }>;
       readonly tools: ReadonlyArray<{ readonly name: string; readonly description?: string }>;
+      readonly providerWebSearch?: { readonly withdrawAfterFirstStep: boolean };
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
@@ -731,6 +730,7 @@ function openFixture(options?: {
     actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
   });
   const service = new ChatService({
+    ...(options?.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     ...(options?.verifyModelToolsOnFirstUse === undefined
       ? {}
       : { verifyModelToolsOnFirstUse: options.verifyModelToolsOnFirstUse }),
@@ -1297,6 +1297,42 @@ function genericChatStream(text: string): Response {
   return new Response(body, { headers: { "content-type": "text/event-stream" } });
 }
 
+/**
+ * The native harness composition as the host wires it for a provider whose own
+ * search Octant can name, reading each thread's taint from `tainted`.
+ */
+function providerSearchComposition(tainted: ReadonlySet<string>) {
+  const granted = {
+    hostId: "00000000-0000-4000-8000-0000000000aa",
+    mode: "chat",
+    providerInstanceId: "00000000-0000-4000-8000-0000000000ee",
+    extension: { kind: "core" },
+  } as unknown as ToolActionAuthority;
+  return createNativeHarnessComposition({
+    isChildAuthorityCurrent: () => true,
+    authority: {
+      resolve: () => granted,
+      service: new ToolCallAuthorityService({
+        resolveGrantedAuthority: () => granted,
+        resolveLiveFacts: () => ({
+          providerAppManagedTools: "supported",
+          host: { computerUseEnabled: false },
+          executionPolicy: "approval-gated",
+          approvalSatisfied: false,
+          externalContentIngested: false,
+        }),
+      }),
+    },
+    isHarnessProvider: () => true,
+    hostId: granted.hostId,
+    readThreadTaint: (threadId) => tainted.has(threadId),
+    providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+    recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+    uuid: () => "00000000-0000-4000-8000-000000000099",
+    clock: () => "2026-11-15T00:00:00.000Z",
+  });
+}
+
 describe("ChatService", () => {
   it("checks the thread's model for tools by itself before each sent turn, and sends the turn when the check fails", async () => {
     const order: Array<string> = [];
@@ -1428,6 +1464,49 @@ describe("ChatService", () => {
     verified.setObservedState(claimed);
     verified.setVerifiedToolModels(claimed.instanceId, [decodeProviderModelId("model-a")]);
     expect(await toolsSent(verified)).toContain("octant_canvas");
+  });
+
+  it("refuses a provider's slash command in Chat before it reaches the runtime, listed or not", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000016");
+    const probe = probeFixture();
+    const providerRuntimeRegistry = new ProviderRuntimeRegistry();
+    providerRuntimeRegistry.setObservedState({ ...probe, commands: [{ name: "review" }] });
+    const { service, fakeDriver } = openFixture({ probe, providerRuntimeRegistry });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Commands",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    for (const prompt of ["/review src", "/deploy now"]) {
+      await expect(
+        service.execute(
+          {
+            kind: "send-chat-turn",
+            threadId: created.thread.id,
+            expectedVersion: created.thread.version,
+            prompt,
+          },
+          { windowId: window },
+        ),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "unsupported",
+          message: expect.stringContaining("Chat runs none: it keeps no folder and no shell"),
+        },
+      });
+    }
+    // A path is ordinary text and is sent.
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "/usr/bin is on PATH",
+      },
+      { windowId: window },
+    );
+    expect(fakeDriver.sentTurns.map((turn) => turn.prompt)).toEqual(["/usr/bin is on PATH"]);
   });
 
   it("restores a model's Verify tools record from the catalogue after a restart, never from an invalidated one", async () => {
@@ -2025,6 +2104,78 @@ describe("ChatService", () => {
     expect(
       (fakeDriver.sentTurns[1]?.context ?? []).map((block) => block.text).join("\n"),
     ).toContain("ship the notes");
+  });
+
+  it("sends the provider's own search the turn's tools were granted, through the merge with extension tools", async () => {
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: () => ({
+        definitions: [{ name: "octant_task", inputSchema: { type: "object", properties: {} } }],
+        providerWebSearch: () => ({ withdrawAfterFirstStep: true }),
+        execute: async () => ({ result: {} }),
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Provider search",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    await service.execute(
+      {
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "What shipped?",
+      },
+      { windowId: decodeWindowId("84000000-0000-4000-8000-000000000011") },
+    );
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(1));
+    expect(fakeDriver.sentTurns[0]?.providerWebSearch).toEqual({ withdrawAfterFirstStep: true });
+  });
+
+  it("does not offer the provider's own search on a turn whose mention of a marked thread marked it", async () => {
+    const tainted = new Set<string>();
+    const composition = providerSearchComposition(tainted);
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: ({ windowId, thread }) =>
+        composition.forChat({
+          thread: { ...thread, researchEnabled: true, researchRouting: "automatic" },
+          windowId: String(windowId),
+        }),
+      // The mentioned thread is marked, so reading it marks the reader, after
+      // the turn's tools were composed.
+      resolveThreadMentionContext: async (input) => {
+        tainted.add(input.readerThreadId);
+        return input.threadMentionIds.map((threadId) => ({
+          kind: "resolved" as const,
+          threadId,
+          text: "Referenced thread: Release notes (chat, Recents)\nuser: ship the notes",
+        }));
+      },
+    });
+    const windowId = decodeWindowId("84000000-0000-4000-8000-000000000011");
+    const sendIn = async (title: string, threadMentionIds?: ReadonlyArray<string>) => {
+      const created = await service.execute({ kind: "create-chat-thread", hostId: "local", title });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Compare this with #[Release notes]",
+          ...(threadMentionIds === undefined ? {} : { threadMentionIds: [...threadMentionIds] }),
+        },
+        { windowId },
+      );
+    };
+
+    await sendIn("Without a mention");
+    await sendIn("With a mention", ["release-notes-thread"]);
+    await vi.waitFor(() => expect(fakeDriver.sentTurns).toHaveLength(2));
+    expect(fakeDriver.sentTurns.map((turn) => turn.providerWebSearch)).toEqual([
+      { withdrawAfterFirstStep: true },
+      undefined,
+    ]);
   });
 
   it("refuses a queued send revoked during provider preparation before accepting a turn", async () => {
@@ -2999,6 +3150,116 @@ describe("ChatService", () => {
         { kind: "project-memory", text: "Remember the launch date." },
       ]),
     );
+  });
+
+  it("gives a model that cannot read images the words Sees images wrote, and keeps them for later history", async () => {
+    const textOnly = probeFixture({
+      capabilities: {
+        ...searxngResearchProbe().capabilities,
+        nativeAttachments: "unsupported",
+      },
+    });
+    const describeImages = vi.fn(
+      async (input: {
+        readonly images: ReadonlyArray<{ attachmentId: string; name: string }>;
+      }) => ({
+        status: "described" as const,
+        images: input.images.map((image) => ({
+          attachmentId: image.attachmentId,
+          name: image.name,
+          describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+          text: "A sign-in form with a red error.",
+        })),
+      }),
+    );
+    const { service, fakeDriver } = openFixture({ probe: textOnly, describeImages });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Images",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    });
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "What is wrong?",
+      attachmentIds: [upload.id],
+    });
+    expect(sent.kind).toBe("turn-created");
+    expect(describeImages).toHaveBeenCalledOnce();
+    expect(fakeDriver.sentTurns[0]?.attachments).toEqual([]);
+    const words = `[Image login.png (attachment ${String(upload.id)}), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.`;
+    expect(JSON.stringify(fakeDriver.sentTurns[0])).toContain(JSON.stringify(words).slice(1, -1));
+    const attempt = service.read(created.thread.id).turns[0]?.attempts[0];
+    expect(attempt?.describedImages?.[0]).toMatchObject({
+      attachmentId: upload.id,
+      name: "login.png",
+      describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+    });
+
+    // The next turn's history carries the words with the person's message.
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "And now?",
+    });
+    expect(JSON.stringify(fakeDriver.sentTurns.at(-1))).toContain(
+      "A sign-in form with a red error.",
+    );
+    // A compaction summarizes the words with the message too.
+    expect(service.sessionCompactionConversation(created.thread.id)[0]?.content).toContain(
+      "A sign-in form with a red error.",
+    );
+  });
+
+  it("refuses an image Sees images cannot describe, with its reason, before any turn is journaled", async () => {
+    const textOnly = probeFixture({
+      capabilities: { ...searxngResearchProbe().capabilities, nativeAttachments: "unsupported" },
+    });
+    const { service, fakeDriver } = openFixture({
+      probe: textOnly,
+      describeImages: async () => ({
+        status: "refused",
+        reason: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Images",
+      projectId: ids.project,
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const upload = await service.uploadAttachment({
+      threadId: created.thread.id,
+      attachmentId: decodeChatAttachmentId(ids.attachment),
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    });
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "What is wrong?",
+        attachmentIds: [upload.id],
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Luna can't read images. Set a model that sees images in Model roles." },
+    });
+    expect(service.read(created.thread.id).turns).toEqual([]);
+    expect(fakeDriver.sentTurns).toEqual([]);
   });
 
   it("purges an unsent attachment but refuses to discard durable turn evidence", async () => {

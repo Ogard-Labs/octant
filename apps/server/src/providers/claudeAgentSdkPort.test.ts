@@ -135,7 +135,7 @@ function makeHarness(
 ) {
   const query = new FakeQuery(output);
   let invocation: ClaudeAgentSdkQueryInvocation | undefined;
-  const listSessions = vi.fn(async () => [
+  const listSessions = vi.fn<ClaudeAgentSdkBridge["listSessions"]>(async () => [
     {
       sessionId: "session-1",
       summary: "private prompt summary",
@@ -188,7 +188,7 @@ const openInput = {
   sandbox: {
     enabled: true,
     failIfUnavailable: true,
-    allowUnsandboxedCommands: false,
+    allowUnsandboxedCommands: true,
     autoAllowBashIfSandboxed: false,
     filesystem: {
       denyRead: ["/"],
@@ -511,8 +511,49 @@ describe("Claude Agent SDK port", () => {
     expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
   });
 
+  test("keeps Claude Code's own system prompt on every launch, with nothing appended by default", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(openInput))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+    });
+  });
+
+  test("appends the instruction files Octant read to Claude Code's own system prompt", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(harness.port.openQuery({ ...openInput, instructions: "Project: use tabs." })),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "Project: use tabs.",
+    });
+  });
+
+  test("lets the sandbox reach every host when Network limits are off", async () => {
+    const harness = makeHarness();
+    const open = {
+      ...openInput,
+      sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } },
+    } as const;
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(open))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: { network: { allowedDomains: ["*"] } },
+    });
+  });
+
   test("keeps the sandbox when Full access explicitly asks for it", async () => {
     const harness = makeHarness();
+    // A Full access thread that kept its sandbox lets no command out of it.
+    const sandbox = { ...openInput.sandbox, allowUnsandboxedCommands: false };
     await expect(
       Effect.runPromise(
         Effect.scoped(
@@ -520,12 +561,13 @@ describe("Claude Agent SDK port", () => {
             ...openInput,
             executionPolicy: "full-access",
             fullAccessSandbox: true,
+            sandbox,
           }),
         ),
       ),
     ).resolves.toBeDefined();
     expect(harness.invocation?.options).toMatchObject({
-      sandbox: openInput.sandbox,
+      sandbox,
       permissionMode: "bypassPermissions",
     });
   });
@@ -535,6 +577,7 @@ describe("Claude Agent SDK port", () => {
     const roots = [openInput.projectRoot, "/extra-folder"] as const;
     const sandbox = {
       ...openInput.sandbox,
+      allowUnsandboxedCommands: false,
       filesystem: { denyRead: ["/"] as ["/"], allowRead: roots, allowWrite: roots },
     };
     await expect(
@@ -574,6 +617,14 @@ describe("Claude Agent SDK port", () => {
     ],
     ["a sandbox on Plan", { ...openInput, executionPolicy: "plan", sandbox: openInput.sandbox }],
     [
+      "a Plan sandbox that lets no command out",
+      {
+        ...openInput,
+        executionPolicy: "plan",
+        sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false },
+      },
+    ],
+    [
       "a sandbox rooted elsewhere",
       {
         ...openInput,
@@ -584,12 +635,19 @@ describe("Claude Agent SDK port", () => {
       },
     ],
     [
-      "an unsandboxed-command escape",
-      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: true } },
+      "an unsandboxed-command escape in a Full access sandbox",
+      { ...openInput, executionPolicy: "full-access", fullAccessSandbox: true },
     ],
     [
-      "an unsupported sandbox surface",
-      { ...openInput, sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } } },
+      "a guarded sandbox without the runtime's own escape",
+      { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false } },
+    ],
+    [
+      "a sandbox domain list narrower than every host",
+      {
+        ...openInput,
+        sandbox: { ...openInput.sandbox, network: { allowedDomains: ["example.com"] } },
+      },
     ],
     [
       "a network setting beside the proxy port",
@@ -757,6 +815,39 @@ describe("Claude Agent SDK port", () => {
             done: false,
             value: { message: { content: "second" } },
           });
+        }),
+      ),
+    );
+  });
+
+  test("sends attached images as image content blocks after the message text", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({
+            text: "what is this?",
+            images: [{ mediaType: "image/png", data: "iVBORw0KGgo=" }],
+          });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({
+            message: {
+              role: "user",
+              content: [
+                { type: "text", text: "what is this?" },
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+                },
+              ],
+            },
+          });
+          yield* query.send({ text: "plain" });
+          const plain = yield* Effect.promise(() => iterator.next());
+          expect(plain.value).toMatchObject({ message: { role: "user", content: "plain" } });
         }),
       ),
     );
@@ -1114,6 +1205,35 @@ describe("Claude Agent SDK port", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("lists this folder's sessions with their titles for the person to pick one, and never on a resume lookup", async () => {
+    const harness = makeHarness();
+    harness.listSessions.mockImplementation(async () => [
+      {
+        sessionId: "session-1",
+        summary: "Fix the login test",
+        customTitle: "",
+        gitBranch: "fix/login",
+        lastModified: 123,
+        cwd: "/repo",
+      },
+      { sessionId: "session-2", summary: "Elsewhere", lastModified: 1, cwd: "/other" },
+    ]);
+    await expect(
+      Effect.runPromise(harness.port.listSessions!({ projectRoot: "/repo" })),
+    ).resolves.toEqual([
+      {
+        sessionId: "session-1",
+        projectRoot: "/repo",
+        lastModified: 123,
+        title: "Fix the login test",
+        gitBranch: "fix/login",
+      },
+    ]);
+    await expect(
+      Effect.runPromise(harness.port.findSession({ sessionId: "session-1", projectRoot: "/repo" })),
+    ).resolves.toEqual({ sessionId: "session-1", projectRoot: "/repo", lastModified: 123 });
+  });
+
   test("looks up an isolated account's sessions under that account directory", async () => {
     const harness = makeHarness();
     harness.listSessions.mockImplementation(async () => {
@@ -1289,6 +1409,51 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test("hands a call made after a cd into a subfolder to the driver with that folder", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "deny" as const, message: "denied" }));
+    const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) {
+            throw new Error("Expected injected pre-tool hook.");
+          }
+          const signal = new AbortController().signal;
+          const hook = (cwd: string, toolUseId: string) =>
+            Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd,
+                  tool_name: "Read",
+                  tool_input: { file_path: "/repo/apps/web/index.ts" },
+                  tool_use_id: toolUseId,
+                },
+                toolUseId,
+                { signal },
+              ),
+            );
+          expect(yield* hook("/repo/apps/web", "tool-1")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "allow" },
+          });
+          expect(preToolUse).toHaveBeenCalledWith(
+            expect.objectContaining({ projectRoot: "/repo/apps/web", toolUseId: "tool-1" }),
+          );
+          expect(yield* hook("apps/web", "tool-2")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "deny" },
+          });
+          expect(preToolUse).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+
   test("denies subagent-marked permission and pre-tool callbacks before delegation", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
@@ -1359,7 +1524,7 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
-  test("lets background commands reach the gate and refuses a watch Octant cannot hold", async () => {
+  test("lets background commands reach the gate and refuses a watch or a remote workflow Octant cannot hold", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
     const tools = ["Read", "Grep", "Glob", "Bash"] as const;
@@ -1393,15 +1558,22 @@ describe("Claude Agent SDK port", () => {
           );
           expect(canUseTool).toHaveBeenCalledOnce();
 
-          for (const [index, [watch, reason]] of (
+          for (const [index, [toolName, watch, reason]] of (
             [
               [
+                "Monitor",
                 { ws: { url: "wss://example.test" } },
                 "Claude's Monitor may watch a command, not a WebSocket.",
               ],
               [
+                "Monitor",
                 { persistent: true },
                 "Claude's Monitor may not keep a watch for the whole session.",
+              ],
+              [
+                "Workflow",
+                { remote: true },
+                "Claude's Workflow runs on this host; a remote run is unavailable.",
               ],
             ] as const
           ).entries()) {
@@ -1409,7 +1581,7 @@ describe("Claude Agent SDK port", () => {
             const toolInput = { description: "watch", timeout_ms: 60_000, ...watch };
             expect(
               yield* Effect.promise(() =>
-                permission("Monitor", toolInput, {
+                permission(toolName, toolInput, {
                   signal,
                   toolUseID: toolUseId,
                   requestId: `request-watch-${index}`,
@@ -1423,7 +1595,7 @@ describe("Claude Agent SDK port", () => {
                     hook_event_name: "PreToolUse",
                     session_id: "session-1",
                     cwd: "/repo",
-                    tool_name: "Monitor",
+                    tool_name: toolName,
                     tool_input: toolInput,
                     tool_use_id: toolUseId,
                   },
@@ -3100,7 +3272,7 @@ describe("Claude Agent SDK port", () => {
 });
 
 describe("Claude's full built-in tool set", () => {
-  const withheldTools = ["EnterWorktree", "Workflow"];
+  const withheldTools = ["EnterWorktree", "REPL"];
 
   test("launches with Claude Code's own tool preset less the withheld tools and holds a built-in tool Octant never named", async () => {
     const harness = makeHarness([
@@ -3124,7 +3296,7 @@ describe("Claude's full built-in tool set", () => {
 
   test("refuses a runtime that holds a withheld tool", async () => {
     const harness = makeHarness([
-      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "Workflow"] },
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "REPL"] },
     ]);
     const failed = await failureOf(
       Effect.scoped(
@@ -3176,7 +3348,7 @@ describe("Claude's full built-in tool set", () => {
           expect(yield* call("FutureTool", "future")).toEqual({
             hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
           });
-          expect(yield* call("Workflow", "workflow")).toMatchObject({
+          expect(yield* call("REPL", "repl")).toMatchObject({
             hookSpecificOutput: { permissionDecision: "deny" },
           });
           expect(preToolUse).toHaveBeenCalledOnce();
@@ -3219,6 +3391,41 @@ describe("Claude running as itself", () => {
       settingSources: ["user", "project", "local"],
       strictMcpConfig: false,
     });
+  });
+
+  test("starts the account's own MCP servers in an untrusted Project and holds the Project's .mcp.json", () => {
+    // Claude Code reads `.mcp.json` only with the `project` source on, so an
+    // untrusted Project's servers stay held while the account's start.
+    expect(claudeNativeQueryOptions({ ...ownSetup, toolServers: true })).toMatchObject({
+      settingSources: ["user"],
+      strictMcpConfig: false,
+    });
+    // With the tool servers off, home settings still load and no server but
+    // Octant's starts, a plugin's included.
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: false }),
+    ).toEqual({ settingSources: [], skills: [], strictMcpConfig: true, settings: {} });
+    expect(
+      claudeNativeQueryOptions({ ...ownSetup, skills: false, hooks: false, toolServers: true }),
+    ).toEqual({
+      settingSources: ["user"],
+      skills: [],
+      strictMcpConfig: false,
+      settings: { disableAllHooks: true, autoMemoryEnabled: false },
+    });
+  });
+
+  test("loads the person's enabled plugins with home settings and runs none of their hooks with hooks off", () => {
+    // Enabled plugins load through the `user` source; the empty `plugins`
+    // option adds no session plugin folder of Octant's.
+    const chat = claudeNativeQueryOptions({ ...ownSetup, hooks: false });
+    expect(chat.settingSources).toContain("user");
+    expect(chat.settings).toMatchObject({ disableAllHooks: true });
+    // A plugin's MCP servers follow the tool-server switch.
+    expect(chat.strictMcpConfig).toBe(true);
+    const work = claudeNativeQueryOptions({ ...ownSetup, toolServers: true });
+    expect(work.settings).not.toHaveProperty("disableAllHooks");
+    expect(work.strictMcpConfig).toBe(false);
   });
 
   test("keeps Claude's own memory working for an account that turned it on while its home settings load", () => {
@@ -3451,6 +3658,99 @@ describe("Claude running as itself", () => {
       "task_notification",
     ]);
     expect(JSON.stringify(messages)).not.toContain("private subagent prompt");
+
+    const refused = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery(openInput);
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "protocol" });
+  });
+
+  test("reads a workflow's task and where each of its agents stands only when subagents are on, keeping its script out", async () => {
+    const lifecycle = [
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        description: "Review the change",
+        task_type: "local_workflow",
+        workflow_name: "review",
+        prompt: "export const meta = { name: 'private script' }",
+        uuid: "00000000-0000-4000-8000-0000000000c1",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        description: "Find: read the diff",
+        usage: { total_tokens: 900, tool_uses: 1, duration_ms: 400 },
+        workflow_progress: [
+          { type: "workflow_phase", index: 0, title: "Find" },
+          {
+            type: "workflow_agent",
+            index: 0,
+            label: "read the diff",
+            state: "progress",
+            lastToolName: "Read",
+            promptPreview: "private agent prompt",
+          },
+          { type: "workflow_agent", index: 1, label: "check the tests", state: "done" },
+        ],
+        uuid: "00000000-0000-4000-8000-0000000000c2",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "workflow-1",
+        tool_use_id: "toolu-workflow",
+        status: "completed",
+        output_file: "/tmp/workflow-output",
+        summary: 'Dynamic workflow "review" completed',
+        uuid: "00000000-0000-4000-8000-0000000000c3",
+        session_id: "session-1",
+      },
+    ];
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* makeHarness(lifecycle).port.openQuery({
+            ...openInput,
+            tools: [...openInput.tools, "Agent"],
+            nativeSetup: ownSetup,
+          });
+          return Chunk.toReadonlyArray(yield* Stream.runCollect(query.messages));
+        }),
+      ),
+    );
+    expect(messages.slice(1)).toEqual([
+      expect.objectContaining({
+        kind: "task",
+        subtype: "task_started",
+        background: true,
+        workflow: { name: "review" },
+      }),
+      expect.objectContaining({
+        kind: "task",
+        subtype: "task_progress",
+        workflow: {
+          agents: [
+            { index: 0, label: "read the diff", state: "progress", lastToolName: "Read" },
+            { index: 1, label: "check the tests", state: "done" },
+          ],
+        },
+      }),
+      expect.objectContaining({ kind: "task", subtype: "task_notification" }),
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("private");
 
     const refused = await failureOf(
       Effect.scoped(

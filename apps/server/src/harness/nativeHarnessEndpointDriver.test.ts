@@ -302,6 +302,60 @@ describe("native harness endpoint port", () => {
     expect(requests).toHaveLength(2);
   });
 
+  it("withdraws the provider's own search from a retry once the turn's grant was revoked during the backoff", async () => {
+    const { driver, requests } = portDriver([
+      { category: "unavailable", message: "The endpoint is warming up." },
+      { text: "Searched without it.", toolCalls: [] },
+    ]);
+    const webSearch: ProviderToolDefinition = {
+      name: "web-search",
+      inputSchema: { type: "object", properties: {} },
+    };
+    let grant: { readonly withdrawAfterFirstStep: boolean } | undefined = {
+      withdrawAfterFirstStep: false,
+    };
+    const endpoints = new NativeHarnessEndpointRegistry();
+    runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints),
+      harness: {
+        endpoints,
+        retry: {
+          // The turn's level drops below Full access while the retry waits.
+          sleep: async () => {
+            grant = undefined;
+          },
+          random: () => 0.5,
+        },
+        providerSearch: {
+          now: () => ({ status: "decided", grant, webSearchTool: webSearch }),
+          release: () => undefined,
+        },
+      },
+    });
+    const session = await endpoints.get(instanceId)?.open(modelId);
+    await session?.send(
+      {
+        sessionId,
+        modelId,
+        system: undefined,
+        history: [{ role: "user", text: "go" }],
+        tools: [readTool],
+        providerWebSearch: true,
+      },
+      { signal: new AbortController().signal, onEvent: () => undefined },
+    );
+
+    expect(
+      requests.map((request) => ({
+        providerWebSearch: request.providerWebSearch,
+        tools: request.tools.map((tool) => tool.name),
+      })),
+    ).toEqual([
+      { providerWebSearch: true, tools: ["read"] },
+      { providerWebSearch: undefined, tools: ["read", "web-search"] },
+    ]);
+  });
+
   it("keeps what a port endpoint's requests teach about its model's window and the model it served", async () => {
     const { driver } = portDriver([
       {

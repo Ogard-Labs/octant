@@ -9,6 +9,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
+import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
   AgentResultsSteeredIntoTurn,
   AgentRunId,
@@ -319,6 +320,22 @@ export const ChatAttempt = Schema.Struct({
   contextManifestId: ContextManifestId,
   inputReceipt: Schema.optional(ConversationInputReceipt),
   sideChatSourceReceipt: Schema.optional(SideChatSourceReceipt),
+  /**
+   * The turn's images Sees images described because the attempt's model
+   * cannot read images: who described each, and the words in the thread's
+   * content store, so a later turn's history and a compaction read them
+   * and a purge erases them with the thread.
+   */
+  describedImages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        attachmentId: ChatAttachmentId,
+        name: DescribedImageName,
+        describedBy: ImageDescribedBy,
+        description: ChatContentReference,
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+  ),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
   researchRef: Schema.optional(ChatContentReference),

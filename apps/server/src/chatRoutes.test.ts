@@ -7,7 +7,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { MachineChangeFeed } from "./machineChangeFeed";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
-import { createChatRouteHandler } from "./chatRoutes";
+import { createChatRouteHandler, imagesCurrentFor } from "./chatRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { ChatServiceError } from "./chat/chatService";
@@ -707,3 +707,18 @@ function routeFixture(
     ...dependencies,
   });
 }
+
+describe("a Chat send's image check", () => {
+  it("holds while a local window's authority stands and fails once it is revoked", () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const check = imagesCurrentFor(
+      request("/api/chat/commands", { method: "POST" }),
+      store,
+      () => 1,
+    );
+    expect(check.imagesCurrent?.()).toBe(true);
+    store.revoke(windowId);
+    expect(check.imagesCurrent?.()).toBe(false);
+  });
+});

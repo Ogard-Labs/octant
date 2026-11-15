@@ -109,6 +109,7 @@ export * from "./remoteServerGrants";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./nativeHarnessRouting";
+export * from "./imageDescription";
 export * from "./harnessRetry";
 export * from "./nativeHarness";
 export * from "./nativeHarnessTranscript";
@@ -215,6 +216,8 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadWakeups";
+export * from "./codeSessions";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

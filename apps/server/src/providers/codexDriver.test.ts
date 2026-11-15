@@ -1790,9 +1790,8 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+  it("lets a Work thread read the Project's AGENTS.md and keep Codex's shell, as Code does, on start and every resume", async () => {
     const workOff = {
-      project_doc_max_bytes: 0,
       web_search: "disabled",
       skills: { config: [] },
     };
@@ -1818,6 +1817,13 @@ describe("Codex thread and turn lifecycle", () => {
       "config",
       "features.shell_tool",
     ]);
+    // Codex finds the Project's AGENTS.md by itself; no zero budget hides it.
+    for (const method of ["thread/start", "thread/resume"]) {
+      expect(f.calls.find((call) => call.method === method)?.input).not.toHaveProperty([
+        "config",
+        "project_doc_max_bytes",
+      ]);
+    }
     await work.close();
 
     const code = fixture();
@@ -2842,6 +2848,18 @@ describe("Codex execution authority and approvals", () => {
         networkAccess: "restricted",
       });
     }
+  });
+
+  it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
+    // Network limits are off by default, so the process keeps open network;
+    // `restricted` would tell the model it has none.
+    expect(codexTurnExecutionSettings("approval-gated", false, false, true).sandboxPolicy).toEqual({
+      type: "externalSandbox",
+      networkAccess: "enabled",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", false, false, false).sandboxPolicy).toEqual(
+      { type: "externalSandbox", networkAccess: "restricted" },
+    );
   });
 
   it("carries the posture into a turn on a thread created under an older one", async () => {

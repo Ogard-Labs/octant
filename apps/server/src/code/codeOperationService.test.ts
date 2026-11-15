@@ -2300,6 +2300,119 @@ describe("CodeOperationService", () => {
     expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
   });
 
+  it("describes images for a model that cannot read them before the start, and sends those words", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000021",
+      displayName: "login.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [reference] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    };
+    const stored = new Map<string, string>();
+    const evidence = {
+      put: vi.fn((content: string) => {
+        const contentId = `50000000-0000-4000-8000-${String(stored.size + 1).padStart(12, "0")}`;
+        stored.set(contentId, content);
+        return { contentId, digest: "d".repeat(64), byteLength: content.length } as never;
+      }),
+      read: vi.fn(async (ref: { readonly contentId: string }) =>
+        ref.contentId === undefined
+          ? "Fix the form"
+          : (stored.get(ref.contentId) ?? "Fix the form"),
+      ),
+    };
+    const describeImages = vi.fn(async () => ({
+      status: "described" as const,
+      images: [
+        {
+          attachmentId: reference.attachmentId,
+          name: "login.png",
+          describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+          text: "A sign-in form with a red error.",
+        },
+      ],
+    }));
+    const { service, turns, events } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => false,
+      describeImages,
+      evidence: evidence as never,
+      recordEvents: true,
+    });
+    await expect(
+      service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000021"),
+        attachmentIds: [reference.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    const started = events.append.mock.calls
+      .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+      .find((event) => event.kind === "conversation-turn-started");
+    // The image stays on the turn; the start names who described it.
+    expect(started).toMatchObject({
+      attachments: [reference],
+      describedImages: [
+        {
+          attachmentId: reference.attachmentId,
+          name: "login.png",
+          describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+        },
+      ],
+    });
+    const sent = turns.start.mock.calls[0]?.[0];
+    expect(sent?.attachments).toBeUndefined();
+    expect(sent?.context?.map((block) => block.text)).toContain(
+      "[Image login.png (attachment 40000000-0000-4000-8000-000000000021), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
+    );
+  });
+
+  it("refuses an image Sees images cannot describe with its reason, before the start is journaled", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000022",
+      displayName: "login.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: [reference] }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+    };
+    const { service, turns, events } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => false,
+      describeImages: async () => ({
+        status: "refused",
+        reason: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    });
+    await expect(
+      service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000022"),
+        attachmentIds: [reference.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { message: "Luna can't read images. Set a model that sees images in Model roles." },
+    });
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(
+      events.append.mock.calls.some(
+        ([entry]) =>
+          (entry as { readonly event: { readonly kind: string } }).event.kind ===
+          "conversation-turn-started",
+      ),
+    ).toBe(false);
+  });
+
   it("does not start a provider while required worktree preparation is refused", async () => {
     const prepareWorktree = vi.fn(async () => "Worktree setup failed. Retry or Skip setup first.");
     const fixture = providerTurnFixture({ prepareWorktree });
@@ -3426,6 +3539,7 @@ function providerTurnFixture(
       | "resolveSelectedExtensions"
       | "attachments"
       | "supportsAttachments"
+      | "describeImages"
       | "git"
       | "isProviderModelAllowed"
       | "agentRuns"

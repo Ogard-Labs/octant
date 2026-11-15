@@ -490,6 +490,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   host's reason>", or "chosen: <the coordinator's why>" for an override, or
   "chosen by you" after a person changed it
   ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A running worker the host moved on to its role's next model shows
+  "fallback: <old model> (<account>) at usage limit; continued on <new model>
+  (<account>)", or "unavailable" for an outage
+  ([Coordinator threads: Running workers](coordinator-threads.md#running-workers)).
   A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
@@ -1931,13 +1935,18 @@ hidden reasoning and injected tool text, marks the new thread with outside
 content before it exists, and journals the framed read-only history on that
 thread ([details](host-reads-and-commands.md#terminal-sessions)). Its first
 admitted turn reads this snapshot once. The receipt and UI distinguish that new
-session from native adoption. Native adoption is refused while the adapter
-cannot prove historical account binding, runtime compatibility and exclusive
-session ownership: a folder, filename or current provider login is not proof of
-the account that created an external session. The current adapters cannot
-supply that proof and offer only the labeled text handoff. They never resume
-an unverified native session or clone its writer. Nothing is uploaded or written
-back to the command-line tool's files.
+session from native adoption. Native adoption is a separate path: an empty
+Code thread on Claude Code continues a session of the same account and folder
+from its own row ([Thread view: Sessions started outside
+Octant](thread-view.md#sessions-started-outside-octant)), because the driver
+lists only sessions stored under that account's configuration folder for the
+thread's folder and refuses one another Octant thread already resumes. This
+tab never adopts natively: a folder, filename or current provider login here
+is not proof of the account that created an external session, so it offers
+only the labeled text handoff, and it never resumes an unverified native
+session or clones its writer. Native adoption for Work threads and for Codex
+is not built yet. Nothing is uploaded or written back to the command-line
+tool's files.
 
 ## Context and usage
 

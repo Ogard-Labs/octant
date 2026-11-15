@@ -105,13 +105,11 @@ describe("driver runtime registries", () => {
 
 describe("makeProviderDriver", () => {
   it.each(["opencode", "codex", "claude", "pi", "kilo", "devin"] as const)(
-    "refuses a Windows %s process before a catalog probe or session can be constructed",
+    "builds a Windows %s driver, leaving each confined launch to refuse on its own",
     (kind) => {
       vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
       try {
-        expect(() => makeProviderDriver(provider(kind), factoryFixture().options)).toThrow(
-          /Windows.*confinement/,
-        );
+        expect(() => makeProviderDriver(provider(kind), factoryFixture().options)).not.toThrow();
       } finally {
         vi.unstubAllGlobals();
       }

@@ -86,7 +86,7 @@ export type RoutesDependencies = {
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes" | "nativeBrowserPresentationRoutes"> &
-  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes" | "codeSessionRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
@@ -123,6 +123,7 @@ export type RoutesDependencies = {
     | "threadExportRoutes"
     | "threadHandOffRoutes"
     | "threadMessageQueueRoutes"
+    | "threadWakeupRoutes"
   > &
   Pick<
     ZenWiring,
@@ -181,6 +182,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
+    codeSessionRoutes,
     appleToolchainRoutes,
     artifactLibraryRoutes,
     artifactMirrorRoutes,
@@ -260,6 +262,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     threadMentionRoutes,
     threadNotesRoutes,
     threadMessageQueueRoutes,
+    threadWakeupRoutes,
     usageDashboardRoutes,
     usageRoutes,
     validationEvidenceRoutes,
@@ -334,6 +337,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await discoveryRoutes(request)) ??
     (await chatRoutes(request)) ??
     (await threadMessageQueueRoutes(request)) ??
+    (await threadWakeupRoutes(request)) ??
+    (await codeSessionRoutes(request)) ??
     (await threadCheckpointRoutes(request)) ??
     (await scaffoldRoutes(request)) ??
     (await workspacePresetRoutes(request)) ??

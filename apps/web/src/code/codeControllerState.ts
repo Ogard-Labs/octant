@@ -40,6 +40,15 @@ export type CodeProviderRequest =
       readonly kind: "approval";
       readonly approvalId: CodeApprovalId;
       readonly summary: string;
+      /**
+       * The agent asks to change the thread's level: the level it would move
+       * to, and the plan it asks the person to approve, once read.
+       */
+      readonly levelChange?: {
+        readonly to: ProviderExecutionPolicy;
+        readonly plan?: string;
+        readonly planContentId?: CodeEvidenceContentId;
+      };
     }
   | {
       readonly kind: "input";
@@ -68,6 +77,8 @@ export interface CodeConversationMessage {
   readonly at?: string;
   /** Images this message carried, as the turn's start event recorded them. */
   readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
+  /** The images a Sees images model described for this message, and which model. */
+  readonly describedImages?: CodeConversationTurn["describedImages"];
   /**
    * The checkout as it stood before this turn ran. Present on a user message
    * whose turn the host managed to checkpoint, and what the transcript's
@@ -107,6 +118,16 @@ function providerRequestFromEvent(event: CodeOperationEvent): CodeProviderReques
       kind: "approval",
       approvalId: event.approvalId,
       summary: event.summary,
+      ...(event.levelChange === undefined
+        ? {}
+        : {
+            levelChange: {
+              to: event.levelChange.to,
+              ...(event.levelChange.plan === undefined
+                ? {}
+                : { planContentId: event.levelChange.plan.contentId }),
+            },
+          }),
     };
   }
   // App questionnaires follow the session read so answers from another window
@@ -538,6 +559,7 @@ async function projectConversationTurns(
       ...(turn.attachments === undefined || turn.attachments.length === 0
         ? {}
         : { attachments: turn.attachments }),
+      ...(turn.describedImages === undefined ? {} : { describedImages: turn.describedImages }),
       ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
       ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
     });

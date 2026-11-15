@@ -41,15 +41,26 @@ apps gives nobody a reason to use it.
    (maintainer decision, 2026-10-31). Full access means what it means in the
    providers' own apps: no sandbox and no prompts. Outside content is only
    recorded there, and every hard line holds.
-4. **Key providers run as themselves.** Claude Code, Codex, Mistral Vibe, and
-   OpenCode keep their native tools, subagents, skills, hooks, and sandboxes
-   inside Octant. Octant adds; it does not amputate
+4. **Key providers run as themselves; Octant supplements them.** Claude Code,
+   Codex, Mistral Vibe, OpenCode, and every other ACP agent keep their native
+   tools, subagents, skills, hooks, and sandboxes inside Octant. Octant
+   supplements a provider and never replaces it: any workflow that works in
+   the provider's own app (Claude Code first) works in Octant, and Octant adds
+   its journal, views, approvals, and guardrails on top (maintainer decision,
+   2026-11-14). Where Octant cannot yet carry a provider's workflow, that is a
+   recorded gap to close, not a rule; a specification states it as "not built
+   yet" with its reason, never as a refusal Octant chose
    ([Key providers run as themselves](#providers)).
 5. **Honesty never softens.** Octant always says what a provider or tool can
    and cannot do, and records what happened.
 6. **Never stricter than the native app.** Anything a person can allow in a
    key provider's own app, they can allow in Octant, with the same or fewer
-   steps. Rationale (compared 2026-10-31): Claude Code offers a bypass mode,
+   steps, and a workflow the provider's own app carries is a workflow Octant
+   carries (principle 4). Octant holds back what a native app would allow
+   only for the hard lines below, the first-run rule that a new thread never
+   starts at Full access (principle 3), the protected provider-account
+   credentials ([Security and authority](#security-and-authority)), and Chat, a mode of Octant's
+   own with no folder and no shell. Rationale (compared 2026-10-31): Claude Code offers a bypass mode,
    an automatic mode whose classifier reviews each call, its sandbox off by
    default, and merge-when-ready in its desktop app; Codex offers no
    approvals with full access, an automatic approval reviewer, and its own
@@ -219,8 +230,11 @@ The design rests on a small set of invariants that every package obeys:
 - **Work and Code share one capability set.** Chat Projects are virtual,
   memory-scoped containers with no implicit filesystem or shell authority.
   Work binds one project root and Code binds one directory (each with any extra
-  folders the person adds, granted the same access), each meant to be
-  OS-confined, and both run under the same guardrail levels: shell, local
+  folders the person adds, granted the same access). Each binds its root:
+  commands run OS-confined to it by default, and reaching outside its folders
+  asks below Full access, is allowed at Full access, and is refused in Plan
+  (maintainer decision, 2026-11-14; see
+  [Approvals](#security-and-authority)). Both run under the same guardrail levels: shell, local
   command-line tools, SSH to the person's own machines, file reads and
   writes, Git, provider-native tools, subagents, routines, and Full access
   are governed identically in both. Work is for documents,
@@ -1698,8 +1712,8 @@ starts a Code session at the same level, and a Work turn journals `shell` and
 - **Codex:** Work threads start and resume with the shell features on and the
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
-  thread still starts with a project-doc budget of zero, so it does not read
-  the folder's agent brief.
+  thread reads the folder's `AGENTS.md` as Code does (maintainer decision,
+  2026-11-14).
 - **OpenCode:** the session rules no longer deny `bash` and `task` in Work;
   the posture's rules apply as in Code.
 - **Pi:** the Work session starts with its shell tool.
@@ -1782,11 +1796,13 @@ which Chat's no-filesystem rule does not cover, and the switch says so. Octant-m
 Canvas) are unaffected; they run on the host, not in the provider's
 environment.
 
-Provider-owned memory stays off in every mode unless the person turns it on
-for that key provider account, a setting that is off by default (maintainer
-request, 2026-11-12). A provider's global memory
-follows its own rules into every Project, outside Octant's controls: with the
-setting off Codex runs
+Provider-owned memory is on by default in Work and Code outside Plan, as in
+the provider's own app, and the person turns it off per key provider account
+(maintainer decision, 2026-11-14: Octant adds capabilities and never takes a
+provider's core features away; it replaces the earlier off-by-default rule of
+2026-11-12). A provider's global memory
+follows its own rules into every Project, outside Octant's controls, which
+the setting says: with the setting off Codex runs
 with `features.memories` off, which also keeps its memory folder out of its
 sandbox's readable roots, and Claude runs with its auto-memory guard and no
 setting sources. Octant keeps
@@ -1795,11 +1811,16 @@ person memory below.
 
 The setting is **Use <provider>'s own memory** in Settings › Providers, beside
 Run as itself (built for Claude Code and Codex). It is `ownMemory` on the
-provider account, changed only by `set-provider-own-memory` from a local
+provider account: absent is on, `false` is the person's off, and a `true`
+an older record carries reads as on. It is changed only by `set-provider-own-memory` from a local
 window or a paired device (maintainer decision, 2026-11-12; not built yet:
 today a paired device is refused) and journaled as
 `provider.instance-own-memory-changed@1`. Run as itself, a trusted Project,
-and Full access never turn it on. Each driver reads it when it launches a
+and Full access never turn it back on once the person turned it off. Before
+this default, turning the setting off left no stored value, so on upgrade
+memory reads as on for every Claude Code and Codex account, including an
+account the person had turned off; the person turns it off again if they
+want (maintainer decision, 2026-11-14). Each driver reads it when it launches a
 process: a Claude Code launch goes without `CLAUDE_CODE_DISABLE_AUTO_MEMORY`
 and keeps every other guard, and a Codex process is leased without the
 `features.memories=false` override, so Codex's own configuration decides and
@@ -1809,9 +1830,9 @@ outside Plan. A Plan launch keeps memory off at every setting: Plan may write
 nothing a later session would load, and the runtime's memory folder is exactly
 that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
 OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
-sets, so their accounts carry no setting. Not built yet: Chat, where a
-provider's memory stays off at every setting, because no confined Chat launch
-has been run with it on. Live check owed: no real Claude Code or Codex turn
+sets, so their accounts carry no setting. Chat keeps a provider's memory off
+at every setting, as Plan does (maintainer decision, 2026-11-14), because no
+confined Chat launch has been run with it on. Live check owed: no real Claude Code or Codex turn
 has yet run with the setting on.
 
 ### Project memory
@@ -2146,8 +2167,7 @@ keyed standing context; Canvas designs draw with its tokens, which take the
 place of the brand kit when present, and a Canvas that follows it (Canvas
 schema version 28) draws its typed blocks' colours from it. A local window or a device the host's own person paired lists, reads, creates, or saves one (maintainer decision, 2026-11-12), a save replaces only the revision it was opened at, and no read or
 write follows a link. This is product context, not an agent brief: the rule
-below that Octant writes no agent brief and a Work turn reads no `AGENTS.md`
-is unchanged. See [Project design systems](design/design-systems.md).
+below that Octant writes no agent brief is unchanged. See [Project design systems](design/design-systems.md).
 
 A Work Project may opt into a **status file**: `STATUS.md` at the top of its
 folder, where the work stands, with dated follow-ups and deadlines. The setting
@@ -2176,12 +2196,15 @@ read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
-`CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
-existing one: Claude Work turns load no project settings or instruction files,
-and Codex Work threads start and resume with `project_doc_max_bytes = 0`, which
-skips the `AGENTS.md` discovery Codex otherwise runs from the repository root
-down to the Project root. This narrows the always-on
-behavior the status file had at first.
+`CLAUDE.md`, or similar) into a user folder. Claude Work turns read the
+person's global and the Project's `CLAUDE.md` as text with no authority,
+while the Project's settings and code still follow trust (maintainer
+decision, 2026-11-14; [Provider runtimes](design/provider-runtimes.md)).
+Codex Work threads read the Project's `AGENTS.md` as Code threads do, by
+Codex's own discovery from the repository root down to the Project root
+(maintainer decision, 2026-11-14, replacing the zero `project_doc_max_bytes`
+budget Work threads had). This narrows the always-on behavior the status file
+had at first.
 
 Work never silently becomes Code. When coding work is detected in a Work
 thread, the server records a **promotion proposal**: an offer to continue in
@@ -2531,9 +2554,12 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Rewind to here** on a person's message removes that turn and every later
   one; on a reply it removes the turns after it. The person chooses
   conversation, files, or both, and is asked once, in a dialog that reads
-  `preview-code-rewind` first and shows how many turns leave and which files
-  differ from the checkpoint the files would come back from. Nothing changes
-  until they answer.
+  `preview-code-rewind` first and shows how many turns leave, which files
+  differ from the checkpoint the files would come back from, and whether the
+  provider continues a copy of its own session or a text handoff. A runtime
+  that copies its session at an anchor is promised a copy only when the last
+  kept turn journaled one ([native session anchors](#native-session-anchors)).
+  Nothing changes until they answer.
 - **Files** come back from Octant's own checkpoints: the checkpoint the first
   removed turn captured before it ran, or, past Plan turns that wrote nothing,
   the next one a writing turn captured. A writing turn without a capture
@@ -2565,11 +2591,16 @@ now also move back in place. Chat's differences are under **Chat** below.
 - **Removed turns stop reaching the model.** A session recorded before the
   rewind still holds them, so it is never resumed as it stands. A provider
   that reports `sessionRollback` continues a copy of its own session cut back
-  at the last kept turn (`rewind-native-session`); today that is the Octant
-  Harness, whose transcript copy is the one a harness fork makes. Every other
-  provider reports it unsupported in its capability report, and the next turn
-  starts a fresh session with a disclosed text handoff of the kept turns
-  (`rewind`), journaled before the prompt is sent, as a provider switch's is.
+  at the last kept turn (`rewind-native-session`): the Octant Harness, whose
+  transcript copy is the one a harness fork makes, and Claude Code, whose
+  Agent SDK copies a session through a message (`forkSession` with
+  `upToMessageId`) at the anchor the kept turn's completion journaled (see
+  [native session anchors](#native-session-anchors)). Every other provider
+  reports it unsupported in its capability report, and the next turn starts a
+  fresh session with a disclosed text handoff of the kept turns (`rewind`),
+  journaled before the prompt is sent, as a provider switch's is. A provider
+  that reports it still goes back with the handoff when the kept turn has no
+  anchor (a turn journaled before anchors were recorded) or the copy fails.
   A host that rebuilds the conversation itself each turn rebuilds it from the
   kept turns. With no turn kept the thread starts again as it did at first,
   and a fork's first turn carries its source's conversation again.
@@ -2651,12 +2682,20 @@ now also move back in place. Chat's differences are under **Chat** below.
   and leaves `sessionRollback` to Work and Code.
 
 Rationale: provider-owned runtimes (Claude Code, Codex, OpenCode, ACP agents)
-each have their own way back in a session, but Octant could not prove any of
-them cuts at exactly the kept turn without a paid live turn, and a wrong cut
-would hand the model a turn the person removed while the transcript says it is
-gone. A fresh session with a disclosed handoff is the one path whose content
-the host chooses and journals, so those providers report `sessionRollback`
-unsupported until a driver proves its own rollback. Rewinding only the
+each have their own way back in a session, and a wrong cut would hand the
+model a turn the person removed while the transcript says it is gone. Octant
+therefore cuts only at an id the runtime itself reported for the end of a
+turn, never at a guessed position: Claude Code's copy ends at the last
+assistant message the kept turn reported, which its SDK copies inclusively
+with fresh ids, leaving the source untouched (maintainer principle,
+2026-11-14: a workflow that works in the provider's own app works in
+Octant). Codex reports its turn ids and Octant journals them, but stays on
+the handoff: its `thread/fork` (with `lastTurnId`, app-server v2 from
+rust-v0.162.1) leaves the copy loaded in the app-server that made it, and a
+thread loaded there is refused by another app-server's resume until that
+process ends, so the copy would have to be made on the lease that resumes
+it, inside the resume, after the host can still fall back to a text
+handoff. OpenCode and ACP agents report no anchor and keep the handoff. Rewinding only the
 conversation changes nothing but the thread's own record, so it is gated as a
 read (it runs in Plan and asks for no approval); any rewind that puts files
 back is gated as the in-place restore it performs.
@@ -3216,18 +3255,30 @@ hold for every action in it:
 Which path reaches the forge depends on the thread's
 [guardrail level](#security-and-authority):
 
-- **Guarded and Reviewed.** Pull-request changes go through the
-  pull-request tool, which is the only sanctioned path. Octant refuses a
-  recognizable push or pull-request write before its Harness shell runs it,
-  and before answering a provider approval request that includes the pending
-  command. A generic shell approval or a Judge allow cannot authorize that
-  write: the agent must use the structured tool, whose repository, branch,
-  revision, consent, required-check and live-authority checks still apply.
-  A refused provider approval is recorded as a failed tool row, not as a
-  Shield or provider-reviewer verdict. This refusal applies with or without
-  Shield. A provider reviewer that
-  answers internally never sends Octant that pending command; enforcement
-  on that path is unsupported, as detailed below.
+- **Guarded and Reviewed.** A provider runtime's own `git push` and `gh`
+  writes are an ordinary ask, as they are in the runtime on its own
+  (maintainer decision, 2026-11-14): at Guarded and Accept edits the person
+  approves the pending command, and at Reviewed Shield decides it, its forge
+  hard lines included, or hands it to the person. Octant's structured
+  pull-request tools, with their repository, branch, revision, consent,
+  required-check and live-authority checks, stay an option the agent may
+  use, not a requirement. The Octant Harness, whose shell is Octant's own,
+  still refuses a recognizable push or pull-request write before its shell
+  runs it and sends the agent to those tools. Claude Code runs its commands
+  in its own sandbox below Full access, which cannot read `~/.ssh`,
+  `~/.gitconfig` or `~/.config/gh`; a push or `gh` call the sandbox stopped
+  is retried outside it (`dangerouslyDisableSandbox`), and Octant always
+  asks about that retry itself, whatever the person's own permission rules
+  allow, naming it as a command outside the sandbox, so once approved git
+  and `gh` read their own credentials and config. The `user.name` and
+  `user.email` git resolves in the checkout (every scope, `include` and
+  `includeIf` files included) are carried into sandboxed commands as
+  `GIT_AUTHOR_*` and `GIT_COMMITTER_*`. A provider reviewer that answers internally never sends Octant
+  that pending command; the change is still journaled when it starts.
+  _Rationale:_ refusing a push the person would approve in the runtime on its
+  own broke the plain workflow of committing, pushing and opening a pull
+  request below Full access, and the forge journal and Shield's hard lines
+  keep the record and the brakes.
 - **Full access.** The provider's own `git` and forge command-line tool
   are the person's choice, as they would be outside Octant. Octant journals
   each push or pull-request change it observes (a shell command whose
@@ -3266,19 +3317,26 @@ Which path reaches the forge depends on the thread's
   there.
 
 At Guarded and Reviewed a known gap remains: a Code agent's shell can
-reach forge credentials today. (At Full access no runtime is sandboxed,
+reach forge credentials today, and an approved command outside Claude's
+sandbox does so by design. (At Full access no runtime is sandboxed,
 so a command can use the host's forge command-line login and Git credential
 helper; that reach is the person's choice at that level, as above.) Under
 Codex's prompting postures, a shell command the person approves escalates out of
 Codex's `read-only` sandbox with the same reach. Claude's prompting postures
-run inside the runtime's own sandbox, which denies reads outside the project
-root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
+run each command inside the runtime's own sandbox, which denies reads outside
+the project root (so `~/.config/gh` and `~/.ssh` are out of reach); whether a
 Keychain-backed credential helper is reachable there has not been measured.
+A command may leave that sandbox the way Claude Code lets it on its own
+(`dangerouslyDisableSandbox`), and every such command asks first at Guarded
+and Accept edits and goes to the reviewer at Reviewed, is journaled as
+unsandboxed, and is refused in Plan (maintainer decision, 2026-11-14); once
+allowed it has the same reach as an approved Codex escalation.
 A push or pull-request change made through that gap is journaled as a
 forge change where Octant sees the command (above), but none of the rules
 above can be enforced after it starts. The pre-action refusals above cover
 only recognizable commands Octant executes or receives as pending approval
-calls. Provider-reviewer decisions and Full access tool-start observations
+calls, and below Full access they are now asks rather than refusals for a
+provider runtime. Provider-reviewer decisions and Full access tool-start observations
 are records, not consent or pre-action enforcement. Arbitrary scripts,
 aliases, expansions and commands that a runtime does not report cannot be
 classified reliably by this command reader. Complete confinement of those
@@ -3667,7 +3725,10 @@ into a proposal. With no roles set up, a worker starts on the coordinator's
 own model as before. Availability marks (5 minutes after an availability
 failure, or until a usage limit's reset) are host memory fed by the shared
 runtime-event tap, and a worker whose first request failed before any work
-starts again on the next model; a running worker keeps its model
+starts again on the next model. A running worker whose model stops on a usage
+limit or an outage continues on its role's next model under the role's
+**Continue on the fallback** setting
+([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers))
 (maintainer decision, 2026-11-15). The rules are in
 [Coordinator threads](design/coordinator-threads.md).
 
@@ -4267,8 +4328,35 @@ picker in every composer: it lists the effective snapshot's available skills,
 effective plugin MCP servers, and connectors the person added (a disabled or
 untrusted item is absent), plus the thread's files in Work and Code. Choosing a
 row makes a structured selection chip that the host re-resolves at send; it
-never installs, trusts, enables, or elevates anything. `/` lists commands only,
-and `$skill` stays a typed alias. Side Chat is a Chat-mode sidecar about
+never installs, trusts, enables, or elevates anything. `/` lists Octant's
+commands and, beside them, the thread's provider's own slash commands,
+labelled as the provider's (maintainer principle, 2026-11-14: a workflow
+that works in the provider's own app works in Octant); `$skill` stays a
+typed alias. A runtime reports its commands on the provider's observation
+(`commands`): Claude Code's initialization list and its `commands_changed`
+push, an ACP agent's `available_commands_update`, and OpenCode 2's
+`GET /api/command`, read at the probe and replaced whenever a session reports
+a change (OpenCode's when a Work or Code session starts or resumes). Choosing one writes `/name `
+into the draft, and the message goes to the runtime as its prompt, as the
+provider's own app sends it; it runs as a command when it leads the
+runtime's message, which holds whenever the turn carries no other context
+or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
+its own command route rather than as text, with the turn's context admitted
+first as input that starts no run (detail in
+[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
+reaches any driver, a turn whose prompt opens with a command-shaped `/name`
+in Plan, which stays read-only, and in Chat, which keeps no folder and no
+shell, whenever the provider lists commands at all, whether or not the list
+the host holds names it: that list is the one a session last wrote for the
+provider, which may be another Project's. The refusal is the existing turn
+refusal, so a remote client meets it too; those composers still list the
+commands and say why they cannot run. An ACP agent with a reviewed command
+inventory (Kimi Code) keeps its probe check, refuses every leading slash in
+Plan and Chat, and elsewhere runs only a reviewed command its session
+listed. Codex lists none: its app-server
+(rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
+and its slash commands are its terminal client's own. OpenCode 1.x lists
+none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
 source. A person may explicitly choose a finished reply’s **Use in source draft**
@@ -4380,6 +4468,45 @@ beyond the host's own running process, and no billing automation. A host that wa
 rescans `status = scheduled` rows on return and dispatches the still-valid
 ones; a record that cannot be re-validated settles `invalidated` and never
 re-arms.
+
+**Wake-ups a thread's agent schedules.** A provider runtime that can wake
+its model later (Claude Code's `ScheduleWakeup` and `CronCreate`) keeps no
+schedule of its own in Octant: its driver hands each wake-up to the host
+through the session's `ProviderWakeupSchedule`, and the runtime's scheduler
+never holds it (maintainer decision, 2026-11-14;
+[provider detail](design/provider-runtimes.md#wake-ups-the-model-schedules)).
+The host journals each one on its own `thread-wakeup` aggregate
+(`thread-wakeup.changed@1`, the whole state each time, so a replay rebuilds
+it) and the thread shows it above its composer with its next fire time and
+Cancel ([Thread view](design/thread-view.md#scheduled-wake-ups)). At its
+time the host starts a turn in that thread with the wake-up's prompt under
+the heading `Wake-up you scheduled earlier in this thread:`, as the host
+under the routine host scope, through the mode's ordinary turn admission at
+the thread's own level, the way a message wake starts one; a thread whose
+turn is running or waiting on the person holds it until that turn ends. A
+wake-up the host could not fire on time, because the host was down or asleep
+at its due time or its timer ran more than two minutes late, is journaled as
+**missed** and never fired later on its own: the thread shows it as missed
+with **Run now** and Cancel, and only the person's Run now starts its turn.
+Bounds: at most 8 waiting wake-ups a thread, a first fire at least a minute
+away (a delayed one held to one minute to one hour, the runtime's own
+range), a recurring one at most every 5 minutes across its life, refused
+when its first fire is past it, and ending on its own after 7 days, before
+any turn a busy thread held back past that time, and a thread archived or
+deleted ends every wake-up it had. A purge takes the thread's wake-ups with
+the rest of its journal (each `thread-wakeup` event names its thread) and
+journals nothing new for them, so no event naming the purged thread is left
+behind.
+The agent may list and delete only its own thread's. Work and Code outside
+Plan take them; Chat runs Claude in Plan, so a Chat thread is never offered
+the tools, and Plan and single-use sessions are not either. Only a local
+window that can open the thread lists, cancels, or runs one (not built yet
+for a paired device). Rationale: this is the usage-resume timer's shape (an
+in-process host timer over journaled records, rescanned at start) rather
+than a routine, because a routine creates threads, captures its own
+authority, and is enabled by the person, while a wake-up belongs to one
+thread and runs at that thread's current level; recording missed instead of
+catching up keeps a turn from starting at a time nobody chose.
 
 A child AgentRun stopped by the same provider usage-limit signal parks as
 `waiting` with the normalized `usageLimit` fact on the run — never `failed`,
@@ -4933,7 +5060,7 @@ truncated flag when it called more; the calls past the limit still run and
 have no row.
 
 - **The tool-step limit is a setting** (maintainer decision, 2026-11-13).
-  Settings › Permissions › Tool steps holds two numbers: **Tool steps kept
+  Settings › Permissions › Tool steps holds two numbers (and, beside them, the count of turns a runtime may start by itself inside a held turn; [Provider runtimes](design/provider-runtimes.md)): **Tool steps kept
   per turn** (`toolStepsPerTurn`, 1 to 4,096, default 64) for a turn below
   Full access, and **Tool steps kept per turn at Full access**
   (`fullAccessToolStepsPerTurn`, 0 to 4,096, default 0). At Full access 0 is
@@ -4944,10 +5071,19 @@ have no row.
   host reads the setting when a turn starts. Spend ceilings and every other
   hard line are unchanged. Rationale: a count of rows protects nothing a
   person cannot get back, so it is a default; the bytes it used to cost are
-  gone with the next rule. One bound stays fixed: a Chat or Work turn stops
-  after 4,096 discrete runtime events (streamed text does not count),
-  whatever this setting says, because it guards against a runaway turn
-  (maintainer decision, 2026-11-13). The Full access row in Settings says so.
+  gone with the next rule. A turn's event budget follows the same setting
+  (maintainer decision, 2026-11-14, replacing the fixed 4,096-event stop of
+  2026-11-13): a Chat, Work or Code turn stops after 64 discrete runtime
+  events (streamed text does not count) for each tool step its limit keeps,
+  so the default 64 steps keep the 4,096 events a turn had, and a limit that
+  is off (Full access at 0, the default there) stops no turn on an event
+  count; the spend ceiling, the stalled-turn limit, the streamed-output budget
+  and Stop still bound it. Code reads the same two numbers by the level its
+  turn runs at. No ceiling ends a turn the person did not choose to bound.
+  Memory stays bounded without the count: the answered-request ids a runner
+  keeps to refuse a repeat, and the tool names Code carries to a call's
+  outcome, forget their oldest settled entries past 4,096
+  (`AnsweredRequests` in `apps/server/src/providers/turnBudget.ts`).
 - **A step is journaled and streamed as a change.** Chat journals each tool
   event as `chat.attempt-tool-step@1`, carrying the one step that changed
   (none when the list only became truncated) and the attempt's `updatedAt`;
@@ -5073,8 +5209,25 @@ unless the call asks for 1 to 10. It opens no page.
   at most 15 seconds each; an empty result stops it. Each call journals where
   the query went (`web-search.call-routed@1`). The policy covers only these
   backends: a vendor runtime's own web tools follow its native setup under
-  every policy, and a provider's own search is not governed by it. A
-  provider's own search in the native harness is designed, not built
+  every policy, and a provider's own search is not governed by it.
+- **A provider's own search in the native harness.** On Anthropic's own API
+  (the basic `web_search_20250305` server tool, `max_uses: 1`) and OpenAI's own
+  API over Responses (`web_search`, `max_tool_calls: 1`), a harness turn whose
+  research route picks the provider's search offers that search in place of
+  `web-search`, never beside it (`decideHarnessProviderSearch`), under every
+  data policy: the policy governs only Octant's own backends (maintainer
+  decision, 2026-11-15: provider search behaves as it does on its own). The stream adapters accept one built-in
+  search per response and refuse a second, and every other built-in tool, as
+  `unsupported`. Below Full access a tainted thread is not offered it and
+  searches through `web-search` when a backend is eligible, and the offer ends
+  within a turn at its first search or tool answer. The offer is asked again
+  before each request, so lowering a running turn's level or marking its thread
+  withdraws it, and a lead that falls back to another model is offered the
+  provider's search exactly when the fallback's endpoint runs its own, under the
+  thread's same rules, and `web-search` otherwise. Each search marks the
+  thread as having read outside content (`outside-content-read`, with titles,
+  addresses, and cited text for the Watcher) and is journaled as
+  provider-native research with its citations once its request settles
   ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research
@@ -5215,8 +5368,12 @@ flowchart LR
   Chat or Code turn that streams past it keeps everything already journaled,
   journals `[Output truncated by Octant.]` as its last text, interrupts the
   provider, and ends (Chat: interrupted with `output-budget-exceeded`; Code:
-  failed, as at its event budget). A Work reply is held to 64 KiB with the
-  same marker, counted as it arrives and frozen once truncated. An append that
+  failed, as at its event budget). A Work reply is held to the same 32 MiB
+  (`MAX_WORK_TURN_RESPONSE_BYTES`; 64 KiB until the maintainer decision of
+  2026-11-14) with the same marker, counted as it arrives and frozen once
+  truncated. Work journals the reply once, with the settled
+  `work.turn-updated@1`, and a settled turn too heavy for one stream frame
+  is read from the transcript snapshot (`snapshot-required`). An append that
   fails on a full disk (`SQLITE_FULL`) commits nothing and carries
   `reason: "disk-full"`, and every service that reports a failed write says
   the disk is full and to free space, rather than that persistence is
@@ -6521,9 +6678,10 @@ The exact API, account limitations and verification boundary are owned by
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
 
-- **Key providers run as themselves.** Claude Code, Codex, Mistral Vibe, and
-  OpenCode run inside Octant as they run on their own, plus Octant's journal
-  and views (maintainer decision, 2026-10-31). Their native subagents, web
+- **Key providers run as themselves.** Claude Code, Codex, Mistral Vibe,
+  OpenCode, and every other ACP agent run inside Octant as they run on their
+  own, plus Octant's journal and views (maintainer decisions, 2026-10-31 and,
+  for the other ACP agents, 2026-11-14). Their native subagents, web
   tools, skills, the person's home configuration, and a trusted Project's
   hooks, MCP servers, and plugins are the person's own setup, so Octant offers
   them rather than switching them off. The switch-offs elsewhere in these
@@ -6535,7 +6693,9 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person turned it on). Each call still meets the thread's
   [guardrail level](#security-and-authority): Guarded asks, Reviewed's
   reviewer decides, Full access runs without asking. The person may turn it
-  off for an account or a thread; a Project's own hooks, MCP servers, and
+  off for an account or a thread; an account turned off also keeps the
+  runtime's own web search and fetch off in every mode, Work and Code
+  included (maintainer decision, 2026-11-15); a Project's own hooks, MCP servers, and
   plugins still load only once the person trusts that Project for that
   provider, as the providers' own folder-trust prompts require.
   Plan stays read-only and Chat's filesystem and shell stay withheld at
@@ -6545,28 +6705,52 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   person marked trusted for that provider's own Project code in Octant; where
   the provider keeps its own folder-trust list, that list applies as well.
 
-  | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-  | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, with the turns the runtime starts for them held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow`, `CronCreate`, `ScheduleWakeup` and the task tools are not built yet                                                                                                                                                                                |
-  | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-  | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface)) |
-  | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration and, in a trusted Project outside Plan, those of the Project's `opencode.json(c)` files, read into the launch's private configuration under the level's denies while the raw Project files, and so its plugins, agents, and commands, stay off ([why](design/provider-runtimes.md#key-providers)), and a tool those rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with outside folders, `.env` files and Octant's protected files refused. In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                    |
+  | Provider     | With the setup off                                                                                                                                                                            | Rule                                                                                                                                                                                                     | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Claude Code  | Own subagents off; `WebSearch` and `WebFetch` kept only in Work and Code outside Plan, asking below Full access; Project skills off; no setting sources, so home config and skills never read | All on by default: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers, claude.ai connectors, and installed plugins start in every Project at every level but Plan; a Project's `.mcp.json` waits for that Project's trust (maintainer decision, 2026-11-14; [detail](design/provider-runtimes.md#key-providers)). `EnterWorktree`, `ExitWorktree`, and `REPL` are offered outside Plan and take the shell's approval rules. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` and the task tools running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, which in Code keep running as live tasks after the person's turn completes, each turn the runtime then starts opened as a runtime-started turn, and in Work are held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow` with subagents on, its agents shown as child runs under the call and its run held inside the person's turn ([detail](design/provider-runtimes.md#workflows)); `ScheduleWakeup`, `CronCreate`, `CronList`, and `CronDelete`, answered from the thread's Octant-owned wake-ups ([detail](design/provider-runtimes.md#wake-ups-the-model-schedules)); Claude Code's own `EnterPlanMode` and `ExitPlanMode` in Code as level changes the person approves, applied from the next session ([detail](design/provider-runtimes.md#plan-mode-as-level-changes)); an empty Code thread started from a session of the same account and folder begun outside Octant, adopted only by the person, journaled, and marked as carrying outside content ([detail](design/provider-runtimes.md#sessions-started-outside-octant)) |
+  | Codex        | Its own subagents still run, since its app-server has no switch for them; Project skills disabled by path; in Chat every person-added tool server switched off by name                        | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                   | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+  | Mistral Vibe | Project and home skills off; Project context off. It runs through the ACP bridge either way                                                                                                   | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                   | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | OpenCode     | Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`. Shell and delegation follow the level in Work as in Code either way                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                     | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration, and a tool the person's rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with `.env` files and Octant's protected files refused; any other outside folder asks below Full access and is refused in Plan (maintainer decision, 2026-11-14). At Full access it reaches outside folders, and in a trusted Project outside Plan it loads the Project's own `opencode.json(c)` and `.opencode` agents, commands, plugins, and tools as on its own, `OPENCODE_DISABLE_PROJECT_CONFIG` unset, accepting that their rules can override Octant's in that Project ([why](design/provider-runtimes.md#key-providers); maintainer decision, 2026-11-14). In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
   A turn has an origin. A person's send starts one; a runtime may also
   start one by itself when background work it ran finishes or reports.
-  Octant never lets the runtime's turn start on its own: the person's turn
-  that started the work is held open until the work ends, and each turn the
-  runtime starts inside it is folded in, marked by the runtime event
-  `runtime-turn-started` and, in Code, the journaled operation frame of the
-  same name, so the journal records that it was the runtime's and replay
-  rebuilds it. It passes the same gate at the same level, the person's stop
-  ends it with the session and every background task in it, and a cap and
-  the stalled-turn limit bound it (maintainer decision, 2026-11-14; built for
-  Claude Code's background commands and `Monitor` watches, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
-  A wake-up scheduled for a later time (`CronCreate`, `ScheduleWakeup`)
-  stays withheld: a session lasts one turn, so it would never fire, or, kept
-  durably, would fire unseen in a later session.
+  Octant never lets the runtime's turn run unseen. In Code the person's turn
+  completes when the model's reply is done, and the host keeps the session
+  while its background tasks run, shown as live tasks in the thread; when
+  the runtime starts a turn by itself on the idle thread, the host opens a
+  runtime-started turn for it through the thread's ordinary admission, at the
+  thread's level, and that turn reattaches to the kept session. The kept
+  session is stopped when its last task ends with no turn running, when the
+  person stops the thread or changes its level, model, checkout or
+  lifecycle, after the host's background work limit, when the runtime's
+  turn cannot be opened, and at shutdown; none of the runtime's tool calls is
+  answered before the host has opened its turn. Elsewhere (Work, a child
+  run) the person's turn that started the work is held open until the work
+  ends, and each turn the runtime starts inside it is folded in, bounded by a
+  cap and the stalled-turn limit. Either way the turn is marked by the
+  runtime event `runtime-turn-started` and, in Code, the journaled operation
+  frame of the same name, so the journal records that it was the runtime's
+  and replay rebuilds it; it passes the same gate at the same level, and the
+  person's stop ends it with the session and every background task in it
+  (maintainer decisions, 2026-11-14; built for Claude Code's background
+  commands and `Monitor` watches, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  A wake-up the runtime asks for at a later time (`ScheduleWakeup`,
+  `CronCreate`) is the host's, never the runtime's: the driver records it
+  with the host and the runtime's scheduler holds nothing, so nothing fires
+  in a session Octant does not see. The host starts that later turn itself,
+  in the same thread, as a third origin: a host turn on the runtime's behalf,
+  under the host heading `Wake-up you scheduled earlier in this thread:`,
+  with the wake-up's journaled `fired` change naming the turn as the record
+  of its origin (maintainer decision, 2026-11-14; [Wake-ups](#modes-chat-work-and-code)).
 
+  Every other ACP agent is a key provider too (maintainer decision,
+  2026-11-14): a Project trusted for it loads the Project entries its launch
+  otherwise holds back, Kimi Code reads its home skills, servers, plugins,
+  and hooks with the setup, Kilo its own skills, each agent's own subagents
+  run in Work and Code outside Plan with an honest approval card for a
+  request naming no call Octant saw, and Kimi Code's own slash commands run
+  outside Plan; each reports only those features
+  ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
   same way. Pi, not a key provider, loads the person's own home Pi skills,
@@ -6578,8 +6762,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   memory, telemetry, or self-update: telemetry and self-update stay off by their own
   switches ([Security and authority](#security-and-authority)), because they
   send data the person did not choose to send, and the provider's own memory
-  follows its own per-account setting, off by default
-  ([Modes](#modes-chat-work-and-code)).
+  follows its own per-account setting, on by default in Work and Code
+  outside Plan ([Modes](#modes-chat-work-and-code)).
 
   How the person turns it off, and trusts a Project (built):
 
@@ -6645,7 +6829,10 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
     `@octant/domain`): nothing for a provider that is not a key provider;
     nothing at Guarded and Reviewed unless the account, the Project, or the
     thread's On choice allows it; on at Full access unless the thread chose
-    Off. Plan leaves the account's tool servers, hooks,
+    Off. An account turned off never resolves the runtime's own web search
+    and fetch (`webTools`) on, in any mode and at any level: Full access, a
+    trusted Project, and the thread's On turn the rest on without them
+    (maintainer decision, 2026-11-15). Plan leaves the account's tool servers, hooks,
     and the Project's code off; Chat leaves hooks and the Project's code off
     and keeps the account's tool servers, which is the switch's own note.
     The Project's code needs the Project's trust at every level, Full access
@@ -6847,17 +7034,31 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   turn as released on the provider change (`releasedStopId`): the turn keeps
   its limit in history, and the message queue, the composer and the thread
   view stop treating it as waiting, so the next message goes to the new
-  account. Without the opt-in a limited thread waits on its
-  account as before, so there is no silent, unchosen or open-ended failover,
-  rotation, or load-balancing between accounts (maintainer decision,
-  2026-11-14). One more host move exists, for a coordinator's worker that has
-  done nothing yet: when its first turn fails for availability before any
-  output or tool call, the host moves it, by the same provider change and
-  journaled as the host, to the next model of its role's list, which is the
-  person's chosen order and so their consent; it stops when every listed model
-  has failed once, and a worker that has done any work is never moved
-  (maintainer decision, 2026-11-15;
-  [Coordinator threads: Choosing the worker's model](design/coordinator-threads.md#choosing-the-workers-model)).
+  account. A thread a person started never moves on its own: without the
+  opt-in a limited thread waits on its account as before, so there is no
+  silent, unchosen or open-ended failover, rotation, or load-balancing between
+  accounts for it (maintainer decision, 2026-11-14). A thread a role runs, a
+  coordinator's worker whose model the roles chose, may move under its
+  role's list, which is the person's chosen order and so their consent
+  (maintainer decision, 2026-11-15). The host moves such a worker by the same
+  provider change, journaled as the host, in two cases. When its first turn
+  fails for availability before any output or tool call, it moves to the next
+  model of its role's list and the opening prompt is sent again; it stops
+  when every listed model has failed once
+  ([Coordinator threads: Choosing the worker's model](design/coordinator-threads.md#choosing-the-workers-model)).
+  When a running worker's model stops on a usage limit or an outage and its
+  role's **Continue on the fallback if the model stops** is on (the default),
+  it moves to the next eligible model after the current one, with the
+  choice recorded as `continued-on-fallback`, and one host turn under the
+  ordinary admission continues the work and names the old and new model and
+  account and why; the worker row and a state notice to the coordinator
+  disclose it. The walk only goes forward, so a worker moves through its list
+  at most once and then pauses as before, and it never reaches a model outside
+  the roles. A coordinator, a worker on a model a person picked or with the
+  person's own usage-limit hand-off, a thread put away, marked Done, snoozed
+  or archived, and a role with the box off are never moved, and a move never
+  goes into or within a role that has **Ask before using**
+  ([Coordinator threads: Running workers](design/coordinator-threads.md#running-workers)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
@@ -7275,6 +7476,91 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
+### Sees images
+
+The Sees images role (`vision` slot, `image-understanding` job) describes an
+image in words for a thread whose model cannot read images (maintainer
+decision, 2026-11-15). The host decides and fails closed; nothing in the
+renderer or the model chooses where an image goes.
+
+- **Which model.** The host `ImageDescriber` resolves the job through the
+  routing: the Project's own Sees images list beats Settings', main model
+  first, then the fallbacks. A model is passed over, with its reason in the
+  refusal, when it is signed out, down, or at a usage limit (the facts a
+  coordinator worker's choice reads), when the Project's provider policy or
+  data rules (`eu-zdr` data tags, a provider allowlist) do not allow it
+  (`project-incompatible`), or when its connection takes no image from
+  Octant (`capability-incompatible`: the provider must report
+  `nativeAttachments` and the model image input, as for any attachment; an
+  agent runtime, an Ollama vision model, or an OpenAI- or Anthropic-style
+  endpoint whose model reads images qualifies, Amazon Bedrock does not). A
+  Chat Project has no provider policy to apply. Unlike other roles, an empty
+  Sees images is off, like the Advisor: the job never falls back to the
+  Builder, which may not read images.
+- **The call.** One tool-less request in a scratch folder outside every
+  Project, through the same one-shot path as the advisor's, with the image
+  attached and instructions to report text in the image as content, never
+  follow it. A model that does not answer sits out and the next is tried (at
+  most three). An answer that read outside content on the way is not used.
+  The input is a PNG, JPEG, GIF, or WebP of at most 10 MB, the attachment
+  bound; the description is cut at 4,000 characters and says so.
+- **An attached image.** In Chat, Work, and Code, a turn whose model cannot
+  take an attached image is no longer refused when Sees images can describe
+  it: the image stays attached for the record, and the model gets
+  "[Image <name> (attachment <id>), described by <model> (<provider>)]:
+  <description>" for each one, the id being what `octant_look` takes to ask
+  about the same image again. All of a turn's images are described or the turn
+  is refused; with nothing eligible it is refused with "<model> can't read
+  images. Set a model that sees images in Model roles." and the models
+  passed over. A Stop or a revoked admission while the images are described
+  sends no further one. The words stay durable so a later turn's history and
+  a compaction read them with the person's message: Code describes before it
+  journals the turn's start and keeps the words in its content store behind
+  `describedImages` on the start, so a restart sends the same words and asks
+  no model again; Work keeps them in `describedImages` on the accepted turn,
+  beside the prompt it already journals; Chat keeps them in the thread's
+  content store behind `describedImages` on the attempt, purged with the
+  thread. The transcript says "<name> described by <model> (<provider>)". A
+  composer whose model cannot read images asks the host
+  (`GET /api/native-harness/routing/sees-images`, which sends nothing and
+  refuses a window that may not see the named Project) and accepts the image
+  when Sees images can describe it. A person's own image adds no
+  outside-content mark.
+- **`octant_look`.** Offered to a Chat, Work, or Code turn only while the
+  thread cannot take an image from Octant and Sees images can describe one
+  for its Project, through the same per-turn tool contributions every runtime
+  receives. It takes an attachment id of the thread, or (Work and Code) a file
+  path relative to the thread's folder, confined like the Code file reads (no
+  `..`, no absolute path, no link out of the folder, no URL), and an optional
+  question of at most 500 characters. Reading a file the thread may already
+  read needs no new approval. Neither source marks the thread, so the result
+  is not outside content; Octant Shield's Watcher still reads it. A thread
+  already marked with outside content keeps `look` (maintainer decision,
+  2026-11-15): the model's question goes only to a model the Project's rules
+  allow. The result names the model that described the image. Rules for the
+  tool are in [Agent tools](design/agent-tools.md).
+- **Coordinator workers.** `needsImages` work may go to a builder that cannot
+  read images exactly when the describer could take an image for the
+  Project now; the builder then gets `look` and described attachments
+  ([Coordinator threads](design/coordinator-threads.md#choosing-the-workers-model)).
+
+Rationale for registering `look` in the host: like Project memory's tool it
+is core, contributed per turn with the image tool and the other host-owned
+Octant tools. It reads the thread's own attachment store, a confined file
+read, and the host's model routing and data rules, and the public Code-tool
+port in `@octant/plugin-api` carries none of those; giving a plugin an image
+description port would be a seam extension of its own.
+
+- **Spend.** Each describe is admitted under the thread's and its Project's
+  spend ceilings before the image is sent (it is spend, not a turn of its
+  own), and over a ceiling it is refused with the ceiling's own reason and
+  nothing sent. What it used is recorded on the usage ledger under the thread
+  whose image it was, with the describing model, as an `image-description`
+  request on its own `image-description-usage` aggregate. A Work turn's
+  images are admitted this way before the turn's own admission. In Chat the
+  words are written in the same journal transaction as the attempt that
+  names them, so a send refused before that leaves no row behind.
+
 ### Context and usage accounting
 
 Context usage is a circular used-versus-available meter on
@@ -7385,8 +7671,16 @@ them leaves the model text-only with `imageInput` absent, which reads as
 unknown rather than unsupported. Ollama keeps its own `vision` capability
 report. The modality gates which models are offered for reading images and
 whether app-managed tool results may carry images; composer attachments still
-also need the provider's `nativeAttachments`, which direct endpoints do not
-claim. There is no per-model image-input override yet.
+also need the provider's `nativeAttachments`. OpenAI- and Anthropic-style
+direct endpoints claim it when one of their models takes image input, and
+send a turn's PNG, JPEG, GIF, or WebP attachments in its user message (an
+`image_url` part on Chat Completions, an `input_image` part on Responses, a
+base64 `image` block on Messages); admission still checks the turn's own
+model, and refuses any other attachment type rather than drop it on the wire.
+Amazon Bedrock does not claim it. A Chat, Work, or Code turn whose model
+cannot take an attached image gets [Sees images](#sees-images)' description
+of it instead. There is no
+per-model image-input override yet.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request
@@ -8915,8 +9209,10 @@ handoff.
 **Fork handoff (Code).** A fork's first session (no session recorded on the
 fork yet) carries the source's conversation through the fork point, never
 past it. When the fork's provider instance and model can take up the
-source's own session there (today only the Octant Harness, `seedCodeForkHarnessSession`,
-below), the fork resumes that copy and is sent no text. Otherwise, including
+source's own session there (the Octant Harness, `seedCodeForkHarnessSession`,
+below; Claude Code when the fork works in the source's own folder, since its
+sessions are kept per folder, see [native session anchors](#native-session-anchors)),
+the fork resumes that copy and is sent no text. Otherwise, including
 every fork onto a provider instance other than the one that wrote the fork
 point, it reads the source through the same selector (purpose `fork`,
 bounded `throughOperationId`): the source's accepted prompts and completed
@@ -8935,6 +9231,24 @@ sent, with the fork origin and the fork's provider and model: reason `fork`
 with the counts, taint and a content reference to the exact blocks sent, and
 fixed `false` native-session and hidden-reasoning values; or reason
 `fork-native-session` with `nativeSessionTransferred: true` and no content.
+
+<a id="native-session-anchors"></a>**Native session anchors.** A runtime's
+`completed` event may name where the turn ends in its own session
+(`nativeAnchor`): Claude Code reports the transcript id of the turn's last
+assistant message, Codex its turn id. The host journals it on the turn's
+completed `operation-state` (an additive field, absent from older turns).
+A driver that copies its own session offers `forkSession` in the provider
+SDK; the host asks it, for a fork's first session or a rewound thread's next
+one, with the kept turn's recorded session and anchor, and resumes the copy
+it returns. The driver returns nothing when the copy cannot be exact: Claude
+Code copies only for the source's own folder, mode and sign-in, because
+resume looks for a session under its folder in the account's directory. The
+copy is made before the prompt is sent, so any refusal or failure falls back
+to the text handoff, and the journal, file checkpoints and transcript are
+the same either way: the rewind's own record still removes the turns, and
+files go back only through Octant's checkpoints (the SDK's own
+`rewindFiles` is not used, since a second restore beside the checkpoint's
+would disagree with the journal).
 A recovered start reads that record back like a provider switch's: a text
 record is sent again without reading the source, and a native record whose
 copy cannot be taken up again refuses rather than sending text it did not
@@ -8945,9 +9259,10 @@ fork point gone, nothing readable left, history beyond the bounded scan, or a
 handoff that could not be saved). The conversation page carries the summary
 as the turn's `handoff`, and the transcript says what carried over and that
 the source's later replies (and, for text, its session, hidden reasoning and
-tool activity) did not. Other runtimes that can fork a session natively
-(Claude, Codex) still use the text handoff until a driver seam reports a
-fork-at-point capability.
+tool activity) did not. Codex can fork
+a session natively but still uses the text handoff, a gap to close: its
+`thread/fork` copy stays loaded in the app-server that made it, and another
+app-server's resume refuses it.
 
 **A fork that later switches providers (Code).** A forked thread's
 provider-switch handoff also carries the conversation the fork inherited,
@@ -9277,7 +9592,8 @@ the model at another size.
   its own id and each result the name of the call it answers. A turn's own
   attachments ride on its user message for that turn's requests only and are
   never journaled, like tool images; only an endpoint whose model takes them
-  (an Ollama vision model) is admitted such a turn. A request that outgrows the
+  (an Ollama vision model, or an OpenAI- or Anthropic-style model that reads
+  images) is admitted such a turn. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
   alone does not fit. On a Chat, Work, or Code connection, before any whole
@@ -9818,10 +10134,11 @@ the model at another size.
   slot through `admitAgentRunControlRequest`, the one path that starts a
   subagent. The built-in slots include `quick` and `deep` beside the earlier
   seven, and a slot may carry two person-set flags, `askBeforeUsing` (absent
-  means off) and `continueOnFallback` (absent means on); the resolver does not
-  read them yet (designed, not built: a start in an ask-first role becomes a
-  proposal, and a thread with the role carries on with its next model when its
-  own stops). A Project override is per role: a slot it lists replaces Settings'
+  means off) and `continueOnFallback` (absent means on). The harness resolver
+  reads neither; a coordinator worker's start reads `askBeforeUsing` (an
+  ask-first role turns the start into a proposal), and a running coordinator
+  worker reads `continueOnFallback` (it carries on with the role's next model
+  when its own stops). A Project override is per role: a slot it lists replaces Settings'
   for that role and an unlisted role uses Settings, still only with models
   Settings lists for that role (`not-a-subset`). Only a person's window changes
   either layer (maintainer decision, 2026-11-15). A slot's candidates may name a
@@ -10907,23 +11224,29 @@ proofs that suite already holds:
 
 ### Provider runtime network
 
-**Status: built on macOS and Linux, behind the Network limits switch, on by default for sandboxed runtimes (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01; on by default, 2026-11-09).** The decision is
+**Status: built on macOS and Linux, behind the Network limits switch, off by default (maintainer request, 2026-10-31; Linux, Claude's own process, and the composed reviewer 2026-11-01; off by default, maintainer decision 2026-11-14).** The decision is
 `decideProviderRuntimeEgress` in `packages/domain/src/safeNetworkPolicy.ts`,
 the places and records are in `packages/contracts/src/safeNetworks.ts`, and
 the host side is `apps/server/src/network/` (`providerRuntimeNetwork.ts`,
 `safeNetworkStore.ts`, `safeNetworkRoutes.ts`), composed in
 `wiring/runtimeNetwork.ts`. On Linux OpenCode keeps open network (below).
 
-**Network limits ship on, for sandboxed runtimes only.** The proxy is behind
-a host setting, Settings › Permissions › Network limits, which reads on until a
-person turns it off (maintainer request, 2026-11-09: "network limits on by
-default — only if sandbox is enabled though"). It applies only where the
-runtime runs inside Octant's sandbox: the guarded levels, and Full access
-when the thread keeps the sandbox. Full access without the sandbox stays
-open network whatever the switch says. A host that recorded a choice keeps
-it: the default applies only while no `safe-networks.limits-set@1` exists,
-so a host that turned limits off before this change stays off, and one that
-never touched the switch starts limiting from its next runtime launch. The
+**Network limits ship off; a person turns them on, for sandboxed runtimes
+only.** The proxy is behind a host setting, Settings › Permissions › Network
+limits, which reads off until a person turns it on (maintainer decision,
+2026-11-14: Octant adds capabilities and never takes a provider's core
+features away, so no host rule applies out of the box). With the switch off a
+runtime's commands reach every host: Codex's turns name its external sandbox
+`networkAccess: "enabled"`, and Claude's command sandbox gets
+`allowedDomains: ["*"]` so its own proxy neither restricts nor asks about a
+host. Outside-content marks and secret redaction apply either way. Limits,
+once on, apply only where the runtime runs inside Octant's sandbox: the
+guarded levels, and Full access when the thread keeps the sandbox. Full
+access without the sandbox stays open network whatever the switch says. A
+host that recorded a choice keeps it: the default applies only while no
+`safe-networks.limits-set@1` exists, so a host that turned limits on stays
+on, one that turned them off stays off, and one that never touched the
+switch has open network from its next runtime launch. With limits on, the
 risk is a workflow that reaches a host nobody approved (a private registry,
 an internal API); the proxy's refusal names the host and says to trust it
 under Recently refused in Settings › Permissions › Safe networks, and turning
@@ -11448,9 +11771,14 @@ that is not yet effective for the thread is refused and never reaches the model.
   for OpenCode: the launch drops `OPENCODE_DISABLE_CLAUDE_CODE`,
   `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`, and `OPENCODE_DISABLE_EXTERNAL_SKILLS`
   (opencode v2.2.0 reads `.claude` skills only with the first two unset) and
-  asks for `skill` under the posture instead of denying it; the borrowed
-  `CLAUDE.md` prompt and project configuration stay off, and below Full
-  access the confined launch reaches only the Project's skills. Built for
+  asks for `skill` under the posture instead of denying it; project
+  configuration loads only in a Project trusted for OpenCode, outside Plan
+  ([Key providers run as themselves](#providers)), and below Full access the
+  confined launch reaches only the Project's skills. The borrowed `CLAUDE.md`
+  prompt (`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`) is still set on every launch,
+  a recorded gap rather than a rule: OpenCode on its own reads `CLAUDE.md`
+  where no `AGENTS.md` is found, and instruction files are text with no
+  authority (not built yet). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
   `VIBE_DISABLED_SKILLS` unset, and any of the person's setup also unsets
   `VIBE_INCLUDE_PROJECT_CONTEXT`, since the Project's context is text. A skill the provider loads that way is the
@@ -11470,9 +11798,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
   `.clinerules`, `.goosehints`, and the like) stay readable: they are text
   the runtime adds to its own context, not code, and they get no authority
-  from Octant. Two runtimes do not read them: fx, whose root `AGENTS.md` deny
-  predates this rule, and Grok Build, which loads no Project instructions in
-  the untrusted folder Octant gives it.
+  from Octant. Two runtimes read them only with more of the person's setup:
+  fx reads its root `AGENTS.md` whenever it runs as itself (the default) and
+  not with the setup turned off, and Grok Build loads Project instructions
+  only in a Project the person trusted for it, since its untrusted folder
+  loads none ([Key providers run as themselves](#providers)).
 
   | Runtime            | Project code it loads by itself                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
   | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -11491,10 +11821,10 @@ that is not yet effective for the thread is refused and never reaches the model.
   | Qwen Code          | `hooks` in `.qwen/settings.json`, `.qwen/agents` hooks, extensions in `.qwen/extensions`, and in Full access the unapproved `mcpServers` of `.qwen/settings.json` and `.mcp.json`. Its folder trust is off by default, so every folder counts as trusted. It reads the Project settings from the session folder only (source, 0.25.1; not installed here)                                                                                                                                                                                                                                    | **Refused, not denied.** Same settings loader as Gemini, so a denied settings file fails `session/new` in every Project that has one. `refusesProject` fails the start before the process launches, with category `incompatible`, when the Project root holds `.qwen/settings.json`, `.mcp.json`, or a non-empty `.qwen/agents` or `.qwen/extensions`, naming the entry and saying to remove or rename it or use another provider. Decision of 2026-10-14, replacing an earlier one to let it load them. Same exemptions and mid-session limit as Gemini. `--safe-mode` would turn these off and keep session MCP servers per its source, which would end the refusal, but is unproven here                                                                                                                                                                                                                                                                                                                                                      |
   | Claude (Agent SDK) | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | `settingSources: []`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
-  For Claude Code, Mistral Vibe, and OpenCode this denial is today's build,
-  not the rule: in a Project the person trusted for that provider, a key
+  For a key provider, every ACP agent included, this denial holds only until
+  trust: in a Project the person trusted for that provider, a key
   provider loads the Project's hooks, MCP servers, and plugins as it would
-  outside Octant, at every level ([Key providers run as themselves](#providers);
+  outside Octant, at every level but Plan ([Key providers run as themselves](#providers);
   built for Claude Code, which reads the Project's `project` and `local`
   settings and its `.mcp.json` in a trusted Project, and for Mistral Vibe,
   whose launch in a trusted Project unsets `VIBE_TOOL_PATHS` and no longer
@@ -11502,14 +11832,19 @@ that is not yet effective for the thread is refused and never reaches the model.
   `.vibe/plugins`, or `.vibe/tools`, with Vibe's own folder-trust list still
   deciding whether it loads them; its account's MCP servers, connectors, and
   hooks come with the account's switch (`VIBE_MCP_SERVERS`,
-  `VIBE_ENABLE_CONNECTORS`, `VIBE_ENABLE_EXPERIMENTAL_HOOKS` unset); not
-  built yet for OpenCode). That code runs under the
-  provider's own sandbox and the thread's level, and Octant reports that it
-  loaded. Every other runtime keeps the rule above.
+  `VIBE_ENABLE_CONNECTORS`, `VIBE_ENABLE_EXPERIMENTAL_HOOKS` unset; for
+  OpenCode, whose launch in a trusted Project outside Plan unsets
+  `OPENCODE_DISABLE_PROJECT_CONFIG`; and for every other ACP agent, whose
+  rows' entries become readable and whose refusals below end, with Grok's
+  own trust list readable again; maintainer decision, 2026-11-14,
+  [detail](design/provider-runtimes.md#acp-agents-run-as-themselves)). That
+  code runs under the provider's own sandbox and the thread's level, and
+  Octant reports that it loaded. Every other runtime keeps the rule above.
 
   Gemini CLI and Qwen Code are the exception to a deny: their settings loaders
   fail on a file they cannot read, so Octant refuses to start either one in a
-  Project that holds the entries in their rows, before the process launches
+  Project not trusted for it that holds the entries in their rows, before the
+  process launches
   (`refusesProject` on the profile, checked beside the mode refusal). Every
   other Project starts as before. The refusal is a start failure, not a
   capability change: the runtime still reports what it can do, and the failure
@@ -13508,8 +13843,8 @@ mechanisms are:
       endpoints and approved hosts where the host routes them through its
       egress proxy: Codex's app-server, Claude Code, Pi, OpenCode and ACP
       agents ask for the runtime proxy with the Accept edits posture, and Harness commands run
-      on their own proxy. The runtime's proxy follows the Network limits switch, which
-      ships on ([provider runtime network](#provider-runtime-network)); with
+      on their own proxy. The runtime's proxy follows the Network limits switch, which ships
+      off ([provider runtime network](#provider-runtime-network)); with
       the switch off the OS rule is `allow`, as at the guarded levels.
     - **Helpers.** A helper run carries a posture, not the parent's sandbox
       choice, so a helper of a sandboxed Full access Code thread runs at
@@ -13541,14 +13876,22 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     decision, 2026-10-31: "softer guard — full access is full access").
     No runtime or command runs under an OS wall at this level, and a shell
     command can read a protected file. The [secret guard](#secret-guard) is
-    soft there: Octant's own file tools (the Octant Harness's, the ACP
-    client's host-side file operations, and Claude Code's through Octant's
-    tool gate) still refuse a protected path with the same plain message,
+    soft there: Octant's own file tools (the Octant Harness's and the ACP
+    client's host-side file operations) still refuse a protected path with
+    the same plain message. Claude Code's own file tools are Claude's, not
+    Octant's: at Full access its gate allows any path, outside the Project's
+    folders and protected files included, as Claude Code does on its own
+    (maintainer decision, 2026-11-14). Below Full access it keeps every
+    secret-path refusal, and a path outside the Project's folders asks
+    through the gate (Reviewed's reviewer decides it) rather than being
+    refused; Plan refuses it (maintainer decision, 2026-11-14;
+    [detail](design/provider-runtimes.md#full-built-in-tool-set)).
     [Octant Shield](#octant-shield)'s Watcher flags a call that names a
     protected path and the Octant Harness's secret-then-network commands are
     tagged, both journaled and never blocking (the
     [secret guard](#secret-guard) states the rules), and secret redaction
-    stays on. Below Full access the list is
+    stays on at every level: Octant never journals a secret value. Below Full
+    access the list is
     an OS rule on every confined launch.
   - **Outside content is recorded only** at Full access: a quiet tag on the
     tool row, a small mark on the thread card, and the taint in the journal
@@ -13764,8 +14107,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   id. Under auto-accept-edits, and under Plan (a Work round has no read-only
   path, so it would still write what a person approves), the loop pauses as
   `checkpoint-unavailable` and says so in its panel. A checkpoint that fails to mark reads as none.
-  Nothing else about a Work turn widens:
-  it stays confined to the Project root, and providers without an auto-accept
+  Nothing else about a Work turn widens. Its access is set by the host,
+  never the renderer: the Project's folders are open by default, access
+  outside them (access outside the bound root, an approval category above)
+  asks below Full access and is allowed at Full access, Plan refuses it
+  (maintainer decision, 2026-11-14), and providers without an auto-accept
   path keep asking;
   Code threads run in one of five modes, picked in one click from the
   composer of any thread and in the same words as the native apps: Auto,
@@ -14300,7 +14646,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   [provider runtime network](#provider-runtime-network): its OS rules reach
   only its own listener, which allows the provider's endpoints, the Project's
   rules, and the person's safe networks, while Network limits are on (they
-  ship on). On Linux, while the limits are off, and wherever the host
+  ship off). On Linux, while the limits are off, and wherever the host
   does not route runtimes, `provider-endpoints-only` still materializes as plain OS
   network `allow` (`materializeOsNetworkEgress`). Native-harness commands run
   on `proxied` under the [harness tool egress rules](#harness-tool-egress-rules)
@@ -14349,7 +14695,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
     Pi, OpenCode and an ACP agent for a thread that keeps the sandbox, which takes the Accept edits wall. Egress at Guarded and Reviewed is
     the provider's endpoints, the Project's egress rules, and the person's
     safe networks rather than a blanket `allow` (built on macOS, behind the
-    Network limits switch, which ships on;
+    Network limits switch, which ships off;
     [provider runtime network](#provider-runtime-network)).
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
@@ -14376,7 +14722,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   so Codex's own sandbox cannot run inside Octant's. Each turn tells Codex the
   sandbox is external (`externalSandbox`, network `restricted`), and both
   prompting postures run `untrusted`, because under an external sandbox
-  `on-request` runs every command without asking. Approving a command no
+  `on-request` runs every command without asking (Auto running `on-request`
+  with Codex's reviewer is decided and not built yet; see
+  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Approving a command no
   longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -14389,7 +14737,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   mapping under Bubblewrap and is not yet measured.
   Claude's unwrapped postures rest on the runtime's own sandbox because its
   sign-in and tools need reach that a deny-default profile would have to
-  re-grant.
+  re-grant. A command may leave that sandbox as Claude Code lets it
+  (`allowUnsandboxedCommands` with `dangerouslyDisableSandbox` on `Bash`),
+  only after it asks at Guarded and Accept edits or passes the reviewer at
+  Reviewed, and never in Plan (maintainer decision, 2026-11-14;
+  [detail](design/provider-runtimes.md#full-built-in-tool-set)).
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person
@@ -14444,10 +14796,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
   both installed binaries carry it beside the first), the session-quality
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
-  built-in agents, and marketplace auto-install. The provider's own memory
-  alone has a setting per key provider account, off by default, that turns
-  it on (maintainer request, 2026-11-12; built for Work and Code launches
-  outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
+  built-in agents (lifted whenever the person's own subagents are on, the
+  default, since they are Claude Code's own general-purpose and Explore
+  subagents), and marketplace auto-install. The provider's own memory
+  alone has a setting per key provider account, on by default, that the
+  person turns off (maintainer decision, 2026-11-14; built for Work and Code
+  launches outside Plan, [Modes](#modes-chat-work-and-code)): such a launch goes
   without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
   (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
   account's configuration directory, in `projects/<session folder>/memory/`.
@@ -14461,19 +14815,22 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person types it, as in the runtime's own terminal (the model cannot invoke
-  one, and Octant sends none but `/compact`); a plugin's background `command`
-  cannot run because the query is opened with no setting sources, plugins,
-  skills, agents, or MCP servers, so no plugin is loaded (once a person turns
-  their own setup on under
+  person sends it from a Work or Code composer outside Plan, as in the
+  runtime's own terminal (the model cannot invoke one, and Octant itself
+  sends none but `/compact`); a plugin's background `command`
+  runs only where the person's own setup loads it: with that setup off the
+  query is opened with no setting sources, plugins, skills, agents, or MCP
+  servers, so no plugin is loaded (with it on, under
   [Key providers run as themselves](#providers), the account's home settings
-  load with their plugins, which run as they would outside Octant; Chat and
-  Plan read them with every hook off, and the channel switches above stay
-  set), and
+  load with the plugins the person installed and enabled, which run as they
+  would outside Octant; Chat and Plan read them with every hook off, and the
+  channel switches above stay set), and
   `strictMcpConfig` keeps the account's claude.ai connectors out (2.1.304
-  lists them without it, setting sources or not) everywhere but a Project
-  trusted for Claude Code, where the person's and the Project's servers
-  start; Remote Control starts only
+  lists them without it, setting sources or not) while the account's tool
+  servers are off; with them on (every level but Plan, maintainer decision,
+  2026-11-14) the person's own servers and connectors start in every
+  Project, and a Project's own servers only in a Project trusted for Claude
+  Code; Remote Control starts only
   on a flag or command Octant never passes; and the advisor, like every other
   tool the runtime might add, stays out because the port holds the
   initialized tool list to the requested set. The runtime's `Artifact` tool
@@ -14734,9 +15091,14 @@ approval-gated` command that undoes it. The terminal shows no one-time
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
   that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close, so a 2.x Chat, Plan, or Work launch on Linux keeps fork
-  and exec denied. The probe fails closed and the runtime stays listing-only
-  there until Linux confinement can express the narrow per-path exec grant.
+  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
+  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
+  access, whose launches allow fork and exec as they do on macOS; a Chat or
+  Plan launch is refused before it starts, naming that reason (maintainer
+  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
+  and the capability report says so per mode (`turnModes`: Chat and Plan
+  unsupported, `host-confinement`). App-managed tools stay macOS only and
+  pinned to the measured releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
   node, never a subpath, so entries inside it stay denied; a subpath grant is
@@ -14855,46 +15217,47 @@ approval-gated` command that undoes it. The terminal shows no one-time
   usage) is the degraded form: the capability exists but is not promised before
   it is seen.
 
-  | Capability                    | Claude Code                                                                                   | Codex                                                                                                    | OpenCode                                                                                                                                          | Pi                                                                                                | ACP agents                                                                                                                                          | Ollama                                                                                  | Harness endpoints                                                                                         | Outside harness endpoints                                                                    | Oh My Pi                              |
-  | ----------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------- |
-  | `streaming`                   | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unavailable` until a reply streams                                                     | `unavailable` until a reply streams; a chat-completions endpoint may answer whole                         | `unavailable` until a reply streams                                                          | `supported`                           |
-  | `resume`                      | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`; `unsupported` when the agent offers neither load nor resume                                                                            | `supported` by replaying history Octant holds                                           | `supported` by replaying history Octant holds                                                             | `supported` by replaying history Octant holds                                                | `unsupported`                         |
-  | `interruption`                | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `supported`                                                                             | `supported`                                                                                               | `supported`                                                                                  | `supported`                           |
-  | `approvals`                   | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unsupported`; every Harness tool call passes the server instead                        | `unsupported`; every Harness tool call passes the server instead                                          | `unsupported`; every Harness tool call passes the server instead                             | `unsupported`                         |
-  | `userQuestions`               | `supported`                                                                                   | `supported`; asked in Plan, a secret question refused                                                    | `supported`; on the 2.x route from 2.0.22, through its question forms, a secret question refused                                                  | `unsupported`                                                                                     | `varies`: `unsupported` on fx; Mistral Vibe `supported` on 3.0.3 through its form, `unavailable` on other releases                                  | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `reasoning`                   | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                                                       | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                                          | `unavailable` until a response carries reasoning                                             | `supported`                           |
-  | `usage`                       | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                                                                | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
-  | `toolActivity`                | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `cloudSessions`               | `absent`                                                                                      | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
-  | `fileChanges`                 | `supported`                                                                                   | `supported`                                                                                              | `unsupported`; `supported` from 2.2.0                                                                                                             | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
-  | `diffs`                       | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
-  | `taskProgress`                | `supported`                                                                                   | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `supported`                                                                                                                                         | `unsupported`; Settings reports `supported` once a model passes Verify tools            | `unsupported`; Settings reports `supported` once a model passes Verify tools                              | `unsupported`; Settings reports `supported` once a model passes Verify tools                 | `unavailable`                         |
-  | `nativeChildAgents`           | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents` | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents`             | `unsupported`; its own delegation is `nativeSetup.subagents`                                                                                      | `unsupported`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `nativeAttachments`           | `unsupported`                                                                                 | `unsupported`; `supported` when a model takes image input                                                | `unsupported`; `supported` when a model takes non-text input                                                                                      | `unsupported`; `supported` when a model Pi lists takes images (images only)                       | `unsupported`; `supported` when the agent's `initialize` advertises `promptCapabilities.image` (images only)                                        | `varies`: `supported` when a model takes images                                         | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `nativeWebResearch`           | `unsupported`                                                                                 | `unsupported`                                                                                            | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `unsupported`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `appManagedTools`             | `supported`                                                                                   | `supported`                                                                                              | `unsupported`; `supported` on macOS in a verified isolated config                                                                                 | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                                                                                       | `unsupported`; `supported` for each model a person verified                             | `unsupported`; `supported` for each model a person verified                                               | `unsupported`; `supported` for each model the host verified                                  | `unsupported`                         |
-  | `appManagedToolsAtFullAccess` | `absent`                                                                                      | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `acpClientCapabilities`       | `absent`                                                                                      | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                         | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `modelSwitch`                 | `supported`                                                                                   | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
-  | `sessionRollback`             | `absent`; a rewind starts a fresh session with a text handoff                                 | `absent`; same                                                                                           | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
-  | `forceStop`                   | `supported`                                                                                   | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                  | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
-  | `sessionCompaction.work`      | as Chat                                                                                       | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
-  | `sessionCompaction.code`      | as Chat                                                                                       | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `supported`; Octant Harness compacts its own transcript                                 | `supported`; Octant Harness compacts its own transcript                                                   | `supported`; Octant Harness compacts its own transcript                                      | `absent`                              |
-  | `compactionPoint`             | `supported`; an `autoCompactWindow` flag setting per query                                    | `supported`; `model_auto_compact_token_limit` in the thread's config; `unavailable` before Codex 0.162.1 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `supported`; Octant Harness summarizes earlier turns at it                              | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`                              |
-  | `nativeArtifacts.chat`        | `unsupported`; Chat runs in Plan                                                              | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeArtifacts.work`        | `supported` once enabled on a claude.ai sign-in; else `unsupported` with a reason             | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeArtifacts.code`        | as Work                                                                                       | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `citations`                   | `unsupported`                                                                                 | `unsupported`                                                                                            | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `unsupported`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `harnessAutoReview`           | `supported`                                                                                   | `supported`                                                                                              | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `varies`: `supported` on Mistral Vibe, whose auto-approve mode is its reviewer in Code                                                              | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
-  | `reviewVerdicts.allow`        | `unsupported`; an approval is not reported                                                    | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `reviewVerdicts.deny`         | `supported`                                                                                   | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.subagents`       | `supported`; shown as a child run, each call through the parent's gate                        | `supported`; shown as child runs, their requests through the parent's approval path                      | `supported`; its `task` children shown as child runs, their requests through the parent's approval path                                           | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported` in Work and Code outside Plan, shown as child runs, its requests shown without a tool name | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.webTools`        | `supported`; asks below Full access and marks the thread                                      | `supported`; off unless the setup has it on (`web_search = "disabled"`), each search marks the thread    | `supported`; `websearch` and `webfetch` denied unless the setup has them on, each call marks                                                      | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, its search and fetch off unless the setup has them on                                     | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                     | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.toolServers`     | `unsupported`; they start only with a Project's `.mcp.json`                                   | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.hooks`           | `supported`                                                                                   | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.projectCode`     | `supported`; also starts the person's and the Project's MCP servers                           | `unsupported`; Codex's own folder trust decides                                                          | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | Capability                    | Claude Code                                                                                                                        | Codex                                                                                                    | OpenCode                                                                                                                                          | Pi                                                                                                | ACP agents                                                                                                                                          | Ollama                                                                                  | Harness endpoints                                                                                         | Outside harness endpoints                                                                    | Oh My Pi                              |
+  | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------- |
+  | `streaming`                   | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unavailable` until a reply streams                                                     | `unavailable` until a reply streams; a chat-completions endpoint may answer whole                         | `unavailable` until a reply streams                                                          | `supported`                           |
+  | `resume`                      | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`; `unsupported` when the agent offers neither load nor resume                                                                            | `supported` by replaying history Octant holds                                           | `supported` by replaying history Octant holds                                                             | `supported` by replaying history Octant holds                                                | `unsupported`                         |
+  | `interruption`                | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `supported`                                                                             | `supported`                                                                                               | `supported`                                                                                  | `supported`                           |
+  | `approvals`                   | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unsupported`; every Harness tool call passes the server instead                        | `unsupported`; every Harness tool call passes the server instead                                          | `unsupported`; every Harness tool call passes the server instead                             | `unsupported`                         |
+  | `userQuestions`               | `supported`                                                                                                                        | `supported`; asked in Plan, a secret question refused                                                    | `supported`; on the 2.x route from 2.0.22, through its question forms, a secret question refused                                                  | `unsupported`                                                                                     | `varies`: `unsupported` on fx; Mistral Vibe `supported` on 3.0.3 through its form, `unavailable` on other releases                                  | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `reasoning`                   | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `unavailable`; `supported` when the agent reports a reasoning option or model                                                                       | `varies`: from each model's reported thinking                                           | `unavailable` until a response carries reasoning                                                          | `unavailable` until a response carries reasoning                                             | `supported`                           |
+  | `usage`                       | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `varies`; verified Vibe 3.0.3 reports turn usage; other ACP runtimes are unsupported                                                                | `unavailable` until a reply reports counts                                              | `unavailable` until a response reports usage                                                              | `unavailable` until a response reports usage                                                 | `unsupported`; turns are not measured |
+  | `toolActivity`                | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `supported`                                                                                       | `supported`                                                                                                                                         | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `turnModes`                   | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`; a 2.x probe off macOS reports Chat and Plan `unsupported` (`host-confinement`), Work and Code `supported`                               | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `cloudSessions`               | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`; eligible official API endpoints offer separate Code cloud jobs through the optional driver seam | `absent`; a matching observed outside protocol may report `supported` for separate Code jobs | `absent`                              |
+  | `fileChanges`                 | `supported`                                                                                                                        | `supported`                                                                                              | `unsupported`; `supported` from 2.2.0                                                                                                             | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
+  | `diffs`                       | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unavailable`                         |
+  | `taskProgress`                | `supported`                                                                                                                        | `supported`                                                                                              | `supported`                                                                                                                                       | `unavailable`                                                                                     | `supported`                                                                                                                                         | `unsupported`; Settings reports `supported` once a model passes Verify tools            | `unsupported`; Settings reports `supported` once a model passes Verify tools                              | `unsupported`; Settings reports `supported` once a model passes Verify tools                 | `unavailable`                         |
+  | `nativeChildAgents`           | `unsupported`; Octant owns its delegation; Claude's own subagents are `nativeSetup.subagents`                                      | `unsupported`; Octant owns its delegation; Codex's own subagents are `nativeSetup.subagents`             | `unsupported`; its own delegation is `nativeSetup.subagents`                                                                                      | `unsupported`                                                                                     | `unavailable`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `nativeAttachments`           | `unsupported`; `supported` when a model takes images (every Claude model does); JPEG, PNG, GIF and WebP go as image content blocks | `unsupported`; `supported` when a model takes image input                                                | `unsupported`; `supported` when a model takes non-text input                                                                                      | `unsupported`; `supported` when a model Pi lists takes images (images only)                       | `unsupported`; `supported` when the agent's `initialize` advertises `promptCapabilities.image` (images only)                                        | `varies`: `supported` when a model takes images                                         | `unsupported`; `supported` when a model takes images (OpenAI- and Anthropic-style, not Amazon Bedrock)    | `unsupported`                                                                                | `unsupported`                         |
+  | `nativeWebResearch`           | `unsupported`                                                                                                                      | `unsupported`                                                                                            | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `unsupported`                                                                                                                                       | `unsupported`                                                                           | `unsupported`; `supported` on Anthropic's own API and on OpenAI's own API over Responses                  | `unsupported`                                                                                | `unsupported`                         |
+  | `appManagedTools`             | `supported`                                                                                                                        | `supported`                                                                                              | `unsupported`; `supported` on macOS in a verified isolated config                                                                                 | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 or 1.1.0 and later | `varies`: `supported` on macOS when the agent serves HTTP MCP                                                                                       | `unsupported`; `supported` for each model a person verified                             | `unsupported`; `supported` for each model a person verified                                               | `unsupported`; `supported` for each model the host verified                                  | `unsupported`                         |
+  | `appManagedToolsAtFullAccess` | `absent`                                                                                                                           | `absent`                                                                                                 | `absent` in the static block; reported `mixed` once a connection check proved the runtime accepts the tool endpoint without the exclusivity proof | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `acpClientCapabilities`       | `absent`                                                                                                                           | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `supported`                                                                                                                                         | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `modelSwitch`                 | `supported`                                                                                                                        | `supported`                                                                                              | `supported`; the resume names the thread's current model on every prompt                                                                          | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `absent`; Octant replays history, so the model may change                               | `absent`; Octant replays history, so the model may change                                                 | `absent`; Octant replays history, so the model may change                                    | `absent`                              |
+  | `sessionRollback`             | `supported`; a rewind continues a copy of its session cut at the kept turn's anchor, or a text handoff when it has none            | `absent`; a rewind starts a fresh session with a text handoff                                            | `absent`; same                                                                                                                                    | `absent`; same                                                                                    | `absent`; same                                                                                                                                      | `supported`; a rewind continues a copy of the transcript cut back at the last kept turn | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`; same                        |
+  | `forceStop`                   | `supported`                                                                                                                        | `unsupported`; one process serves every thread                                                           | `unsupported`; one process serves every thread                                                                                                    | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `sessionCompaction.chat`      | `supported`; `unavailable` when the install lacks `/compact`                                                                       | `supported`; `unavailable` before Codex 0.162.1                                                          | `unavailable`; `supported` from 2.2.0                                                                                                             | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
+  | `sessionCompaction.work`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `unsupported`; Octant summarizes                                                        | `unsupported`; Octant summarizes                                                                          | `unsupported`; Octant summarizes                                                             | `absent`                              |
+  | `sessionCompaction.code`      | as Chat                                                                                                                            | as Chat                                                                                                  | as Chat                                                                                                                                           | `absent`                                                                                          | `absent`                                                                                                                                            | `supported`; Octant Harness compacts its own transcript                                 | `supported`; Octant Harness compacts its own transcript                                                   | `supported`; Octant Harness compacts its own transcript                                      | `absent`                              |
+  | `compactionPoint`             | `supported`; an `autoCompactWindow` flag setting per query                                                                         | `supported`; `model_auto_compact_token_limit` in the thread's config; `unavailable` before Codex 0.162.1 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `supported`; Octant Harness summarizes earlier turns at it                              | `supported`; same                                                                                         | `supported`; same                                                                            | `absent`                              |
+  | `nativeArtifacts.chat`        | `unsupported`; Chat runs in Plan                                                                                                   | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeArtifacts.work`        | `supported` once enabled on a claude.ai sign-in; else `unsupported` with a reason                                                  | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeArtifacts.code`        | as Work                                                                                                                            | `absent`                                                                                                 | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `citations`                   | `unsupported`                                                                                                                      | `unsupported`                                                                                            | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `unsupported`                                                                                                                                       | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `harnessAutoReview`           | `supported`                                                                                                                        | `supported`                                                                                              | `unsupported`                                                                                                                                     | `unsupported`                                                                                     | `varies`: `supported` on Mistral Vibe, whose auto-approve mode is its reviewer in Code                                                              | `unsupported`                                                                           | `unsupported`                                                                                             | `unsupported`                                                                                | `unsupported`                         |
+  | `reviewVerdicts.allow`        | `unsupported`; an approval is not reported                                                                                         | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `reviewVerdicts.deny`         | `supported`                                                                                                                        | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.subagents`       | `supported`; shown as a child run, each call through the parent's gate                                                             | `supported`; shown as child runs, their requests through the parent's approval path                      | `supported`; its `task` children shown as child runs, their requests through the parent's approval path                                           | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported` in Work and Code outside Plan, shown as child runs, its requests shown without a tool name | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.webTools`        | `supported`; asks below Full access and marks the thread                                                                           | `supported`; off unless the setup has it on (`web_search = "disabled"`), each search marks the thread    | `supported`; `websearch` and `webfetch` denied unless the setup has them on, each call marks                                                      | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, its search and fetch off unless the setup has them on                                     | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                                                          | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.toolServers`     | `supported`; the account's servers, connectors, and plugins, a Project's `.mcp.json` held until trusted                            | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.hooks`           | `supported`                                                                                                                        | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.projectCode`     | `supported`; also starts the Project's MCP servers                                                                                 | `unsupported`; Codex's own folder trust decides                                                          | `unsupported`; project configuration and plugins stay off                                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, under its own folder trust                                                                | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
 
   Which driver kinds each column covers, and how each may be used in a mode, as
   `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
@@ -15307,7 +15670,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   reaches it under the read authority of its window and sees only a terminal
   that window owns. Project terminals are unchanged: their output is never
   journaled and a window reads it from the host's transcript by offset.
-- **Terminal shell configuration.** On macOS a thread or Project terminal is
+- **Terminal shell configuration.** On Windows a terminal opens the shell
+  Settings › Code › Terminal shell names, only at Full access (the
+  [Windows sequence](#current-release-boundary), step 3). On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
   where they exist, the shell's rc and login files, the framework trees they
   source, and the tool homes PATH points into, each listed in
@@ -17473,13 +17838,15 @@ cards; general Azure CLI credentials remain unavailable by design.
     every redirect instead of giving a command a credential lease.
 - **A refused read names its rule and channel.** Octant's own file tools
   (the Octant Harness's read, write, edit, and grep; the ACP client's file
-  read and write) and Claude Code's file tools, through Octant's tool gate,
-  answer a protected path at every level, Full access included, with the
+  read and write) answer a protected path at every level, Full access
+  included, and Claude Code's file tools, through Octant's tool gate, at
+  every level below Full access (at Full access Claude reads and writes any
+  file, as it does on its own; maintainer decision, 2026-11-14), with the
   group, the path, and the channel to use instead (`protectedFileRefusal`). The Octant Harness's
   search across a folder skips protected files without opening them.
   Claude Code's Grep, Glob, and LS take no exclusion and, at the postures
-  where the runtime runs outside Octant's profile (approval-gated,
-  auto-accept-edits, and Full access), run in its unwrapped process, so a search rooted at or
+  where the runtime runs outside Octant's profile below Full access
+  (approval-gated and auto-accept-edits), run in its unwrapped process, so a search rooted at or
   above an existing protected file, or inside a protected folder, is refused
   whole (`secretGuardSearchRefusal`). The refusal names the resolved search
   root and protected rule/channel, explicitly says no results were returned,
@@ -17567,8 +17934,9 @@ cards; general Azure CLI credentials remain unavailable by design.
   have to create a placeholder in the person's home folder first; a file
   created mid-session is covered from the next launch. Below Full access
   Claude Code's commands run in Claude Code's own sandbox, which the guard
-  cannot join; the Project-root rule and the approvals hold them, and its
-  file tools are refused by Octant's gate. Linux launches are covered by
+  cannot join; the Project-root rule and the approvals hold them, a command
+  that leaves that sandbox asks first, and its file tools are refused by
+  Octant's gate. Linux launches are covered by
   tests of the covers they build, not yet by a measured run.
 
 ### Octant Shield
@@ -17661,7 +18029,7 @@ private-network tags. Egress to a trusted place passes by rule; anything else
 goes to the Judge at Reviewed and to the person at Guarded. Each decision is
 journaled per host. Built for provider runtimes on macOS and Linux and for
 Octant Harness commands, behind the Network limits switch, which
-ships on ([provider runtime network](#provider-runtime-network)): a `host` place
+ships off ([provider runtime network](#provider-runtime-network)): a `host` place
 matches that name, a `domain` the name and every name under it, a range is
 CIDR, and the tags are `this-mac` (loopback), `local-network` (the private
 IPv4 ranges and IPv6 unique-local addresses), and `overlay-network`
@@ -18201,11 +18569,11 @@ update source. Octant Nightly builds no disk image.
 
 Cross-platform desktop (macOS, Linux, Windows) remains authorized: the Linux
 desktop shell, then the Linux AppImage with its signed feed, then Windows.
-Windows Work and Code at Full access are tracked as their own work and need
-Windows forms of the confined launches first (maintainer decision, 2026-11-12);
-the guarded levels stay refused there until an explicitly approved Windows
-confinement design is documented. Today Work and Code are refused on Windows at
-every level. Finding and removing worktrees on this computer is
+Work and Code run on Windows at Full access with the sandbox off (step 3 of
+the [Windows sequence](#current-release-boundary) below; maintainer request,
+2026-11-15); every guarded level, and Full access with the sandbox kept, stays
+refused there until the Windows confinement launcher has run a real provider
+on a person's Windows machine. Finding and removing worktrees on this computer is
 authorized on Windows hosts too (maintainer request, 2026-11-11): it runs
 host-side Git and file operations a person confirms, starts no agent, and so
 does not lift that confinement gate. Everything on the work board is in scope for the first
@@ -18303,8 +18671,8 @@ client, public Canvas links, and Browser upload and download manifests take no
 new scope until [the Full access rule](#security-and-authority) is built. What
 is built or specified for them stays as it is. The hold on the Windows building
 blocks is lifted (maintainer decision, 2026-11-14): Windows work takes new
-scope again under the sequence and confinement gate below, and running Work and
-Code on Windows still needs Windows forms of the confined launches first.
+scope again under the sequence and confinement gate below. Work and Code run
+there at Full access only (step 3).
 
 Also out of scope, kept on 2026-11-14: physical phones and tablets and
 app-store upload (above), and an interactive raw provider terminal mode, whose
@@ -18333,13 +18701,11 @@ uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
 enabled signed-update channel, and no workflow publishes it to a release;
 native host admission and credentials remain separate prerequisites. The
-release form is the signed per-user installer of step 5 below. Windows Work and Code below Full access stay
-unavailable until an approved Windows confinement design is documented: the confinement port
-supports only macOS and Linux and refuses every other platform, so the guarded
-levels fail closed there. Full access uses no confinement, but running Work
-and Code there on Windows is tracked as its own work and needs Windows forms
-of the confined launches first (maintainer decision, 2026-11-12); today every
-level is refused. Simulator, the Apple workbench, and vibrancy stay
+release form is the signed per-user installer of step 5 below. Windows Work and
+Code below Full access stay unavailable: the confinement port refuses Windows
+unless its caller opts into the dormant launcher, which no production caller
+does, so the guarded levels fail closed there. Full access uses no confinement,
+so Work and Code run there on Windows (step 3 below). Simulator, the Apple workbench, and vibrancy stay
 macOS-only.
 
 **Windows sequence** (maintainer decision, 2026-11-14). Each step is its own
@@ -18352,16 +18718,136 @@ deliverable and keeps every gate above:
 2. A Windows confinement design for the confined launches (process, file,
    and network boundary equivalent to Seatbelt and Bubblewrap, with the
    secret guard as an OS rule), approved and documented here before any
-   guarded level is admitted. Until then Work and Code stay refused on
-   Windows at every level, and the honest capability report says so.
+   guarded level is admitted. Until then every guarded level stays refused
+   on Windows.
    Partly built: the design below is documented and its launcher is built
    dormant (maintainer decision, 2026-11-15). It has run only on a hosted
-   Windows runner, so every Windows launch stays refused.
-3. Work and Code at Full access on Windows on top of the confined launches'
-   Windows forms; Code terminals with an explicit shell setting (PowerShell
-   by default, never a guessed POSIX shell), Windows process-tree stop in
-   place of process-group signals, and no `/tmp` or POSIX path assumptions in
-   provider launches.
+   Windows runner, so every confined Windows launch stays refused.
+3. Work and Code at Full access on Windows. Partly built (maintainer request,
+   2026-11-15: build it now, without waiting for the launcher):
+   - **The level gate.** A Work turn, a Code turn and every Code operation on
+     a thread (terminal, tests, and the rest) on a Windows host run only at
+     Full access with the sandbox off. Anything else is refused on the server
+     before it is journaled or starts a process, with the reason that Windows
+     has no Octant process sandbox yet (`hostSandboxRefusal` in the domain's
+     `guardrailPolicy.ts`). The gate reads the level the work runs at: a Work
+     turn's level clamped to its caller's ceiling, a Code turn's composer
+     level, recorded start or coordinator Plan clamped to the thread, and a
+     live turn's narrower posture, never only the thread's stored level. A
+     Code command that only journals (creating, renaming, moving a thread) and
+     host-side Git a person confirms are not process launches and run at any
+     level. The mode picker reads the host's reported platform and shows each
+     guarded level, and Keep the sandbox, unavailable with that reason; the
+     one-time Full access warning shows as on every platform.
+   - **Terminals.** A Code or Project terminal on Windows opens the shell
+     Settings › Code › Terminal shell names (`windowsTerminalShell`): Windows
+     PowerShell by default (`System32\WindowsPowerShell\v1.0\powershell.exe`),
+     PowerShell 7 (`%ProgramFiles%\PowerShell\7\pwsh.exe`) or Command Prompt,
+     each by absolute path with its own arguments (`-NoLogo`, `-Command`;
+     `/D /S /C`), never a guessed POSIX shell and never POSIX `-l`. It runs
+     unconfined, only at Full access, through node-pty's ConPTY, with the
+     inherited environment names a Windows shell needs (`SYSTEMROOT`,
+     `USERPROFILE`, `PSMODULEPATH` and their kin) added to the terminal's
+     allowlist. A Project action is written for a POSIX shell and is refused
+     on Windows. Close confirms the stop by the shell's pid, because ConPTY
+     reports a shell's exit about 25 seconds after the process ends
+     (measured on `windows-2025`).
+   - **Ownership receipts.** An owned process's identity on Windows is its
+     pid and creation time, read through System32's Windows PowerShell with
+     an exact argument list and no shell
+     (`(Get-Process -Id <pid>).StartTime.ToFileTimeUtc()`), so a reused pid
+     never matches. Provider runtimes and terminals keep their receipts there
+     as elsewhere, and so do the harness shell's Windows commands (supervisor
+     `windows-harness-shell`, beside the other harness receipts). A host
+     restart finds and stops what it left behind, through the tree stop, and
+     a receipt whose process cannot be shown stopped is kept for the next
+     start instead of holding up this one. Without the identity every receipt
+     failed on Windows, and a provider launch, which waits for its receipt,
+     never started. A tree stop that has not answered within 10 seconds
+     counts as failed, and a harness command whose stop failed ends its call
+     10 seconds later as timed out or cancelled, marked cleanup-uncertain,
+     rather than leaving the call waiting.
+   - **Process-tree stop.** Windows has no process groups, and
+     `ChildProcess.kill` there ends only the root. Every stop that signals a
+     process group elsewhere (each provider family's runtime, owned-process
+     receipts, agent runs, terminals) ends the whole tree on Windows with
+     `System32\taskkill.exe /PID <pid> /T /F`, run by absolute path through no
+     shell (`process/windowsProcessTree.ts`). Rationale: the launcher's
+     `--full-access` job object would end a tree that re-parented itself too,
+     but it is not packaged and has not run on a person's machine; taskkill
+     follows parent links, so a descendant whose parent already exited
+     survives it, a residual recorded here.
+   - **Paths.** Provider launches at Full access take the thread's folder and
+     the OS temporary directory (`os.tmpdir()`), never `/tmp`; terminal paths
+     are judged by the host's own path rules.
+   - **Providers.** A Codex launch at Full access with the sandbox off reads
+     its `--version` and starts its app-server unconfined on Windows
+     (maintainer request, 2026-11-15): the runtime the read precedes has the
+     same reach, and the confined read has no Windows form. The decision is
+     made per launch, from that launch's own level, so no earlier read or
+     cached result admits another launch; every other level keeps the
+     confined read and launch, which refuse there, and the server gate above
+     refuses those turns first. Codex's model catalog is read by a lease of
+     its own with no thread; on Windows it runs unconfined only while the host
+     starts new threads at open Full access (Settings › Code's default mode or
+     Settings › Work's default access is Full access with the sandbox off,
+     each chosen through the one-time warning; `hostStartsThreadsAtOpenFullAccess`
+     in the domain), and is refused otherwise, so Codex reports itself
+     unavailable on a Windows host whose defaults are guarded. Codex's
+     environment keeps a Windows host's `Path`, `SystemRoot` and profile
+     names whatever their case. A Codex installed only as an npm `.cmd` shim
+     does not start (Windows starts a `.cmd` only through a shell, which
+     Octant does not use for a provider); its binary path names the
+     `codex.exe` the package carries.
+   - **Harness shell.** The Octant Harness's shell tool at Full access on
+     Windows runs each command in the terminal shell Settings › Code names
+     (Windows PowerShell by default) from a `.ps1` (`-NoProfile
+-NonInteractive -ExecutionPolicy Bypass -File`) or `.cmd` script in its
+     own script folder, with the Windows names a shell needs in its
+     environment, and ends the command's tree on timeout or cancellation. A
+     command's failure reaches the result: PowerShell running a `-File`
+     script reports exit 0 when a native program inside it failed, so the
+     script ends with the last native program's exit code when one set it, 1
+     when the last command failed, and 0 otherwise, and a cmdlet's error stops
+     it with exit 1 (`$ErrorActionPreference = 'Stop'`). In Windows
+     PowerShell 5.1 a native program's error output the command redirects
+     itself (`2>&1`) counts as such an error, which can read a success as a
+     failure, never the reverse. A Command Prompt script ends with
+     `exit /b %errorlevel%`. A command that ends before its identity is
+     read needs no receipt and keeps its result; only a live command whose
+     receipt cannot be kept is stopped and reported unavailable. The tool
+     keeps its name, and a Work or Code lead on a Windows host is told
+     which shell runs its commands (Windows PowerShell 5.1, PowerShell 7 or a
+     Command Prompt batch script), read from the same setting. The levels below Full access refuse on Windows
+     before a command is planned.
+   - **Not yet on Windows.** These run at Full access on macOS and Linux and
+     are unavailable on Windows: the Claude, OpenCode, Pi and ACP agent
+     families, whose version read, catalog and launch preparation have not
+     been given the Windows form Codex has (their confined reads refuse there,
+     so each reports itself unavailable); the
+     [agent debug tool](design/language-services.md#agent-debug-tool-rules);
+     a Project's [own toolchain copy](design/language-services.md#user-added-servers);
+     and Project actions. A provider that starts no local process before its
+     turn (an Octant Harness model over an endpoint) runs Full access turns
+     there with Octant's own file tools and the harness shell.
+   - **Evidence.** The level gate, the picker, the settings and the launch
+     rules are tested on Linux CI with the host's platform set to Windows.
+     The `server-windows` CI job runs against real processes on
+     `windows-2025`: the tree stop (a PowerShell root and the program it
+     started both end), a running process's identity read twice alike and
+     its receipt kept and removed, a live shell stopped from its receipt when
+     the terminal port starts again, a long harness command a "crashed" port
+     left running stopped from its receipt by a fresh port, the production Codex driver reading its
+     catalog through a runtime registry that keeps receipts, a failed native
+     program, cmdlet and Command Prompt command each reported as a failure, a Full access PowerShell terminal that writes a file
+     and a live one that close ends, the harness shell running a turn's
+     PowerShell command that writes a file in the checkout and returns its
+     output and ending a timed-out command's tree, and a fake Codex app-server
+     compiled to a Windows program (`bun build --compile`) started at Full
+     access with an unconfined version read, refused at a guarded or
+     sandboxed level, and its catalog read only for a host at open Full
+     access. A whole Work or Code turn through a real provider on a person's
+     Windows machine has not run.
 4. The `octant` CLI on Windows: native host paths, a browser opener that runs
    no shell, and a service manager equivalent. Partly built (maintainer
    request, 2026-11-15); detail in the next paragraph. It has run only on a
@@ -18611,9 +19097,10 @@ starts the command, and removes what it added when the command ends.
   on purpose, which step 3 decides). Each refusal is `incompatible`, so a
   launch never runs with less confinement than it asked for.
 - **Full access** is full access here too: no AppContainer, no grants, no
-  network rule. Its Windows form is the job object alone
+  network rule. The launcher's form of it is the job object alone
   (`--full-access`), so a stop ends every process the launch started. Step 3
-  uses it.
+  does not use it yet: until the launcher is packaged, a Full access launch on
+  Windows starts directly and stops through the tree stop described there.
 - **Not confined or not yet known.** The registry and named objects are what
   an AppContainer gives by default (its own hive view and object namespace;
   no per-launch rule is added). Writing an inheritable entry walks every
@@ -18627,10 +19114,9 @@ starts the command, and removes what it added when the command ends.
   container are not measured.
 - **Off by default.** `makeProcessConfinementLive` refuses `win32` exactly as
   before unless its caller passes `unverifiedWindowsConfinement` with the
-  launcher's path, and no production caller does. The provider-level
-  refusals ("Provider processes require Windows host confinement") stay, the
-  launcher is not packaged, and the capability report still says Work and
-  Code are unavailable on Windows. Lifting any of these is step 3, after the
+  launcher's path, and no production caller does, and the launcher is not
+  packaged. Step 3 lifted only Full access with the sandbox off; every
+  confined launch, and so every guarded level, stays refused until the
   launcher has run a real provider on a person's Windows machine.
 - **Evidence.** The plan, argument building, refusals and the off-by-default
   gate are pure tests that run on Linux CI, and the plan's also on the hosted

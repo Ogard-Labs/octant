@@ -281,9 +281,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
         "Same as Builder",
       );
     }
-    expect(screen.getByRole("button", { name: "Sees images model" })).toHaveTextContent(
-      "Same as Builder",
-    );
+    expect(screen.getByRole("button", { name: "Sees images model" })).toHaveTextContent("Off");
     expect(screen.getByText(/Coordinator workers and helper agents use these roles/)).toBeVisible();
     await openOtherRoles(user);
     expect(screen.getByRole("button", { name: "Advisor model" })).toHaveTextContent("Off");
@@ -418,7 +416,7 @@ describe("NativeHarnessRoutingPanel roles", () => {
     renderPanel({ routing: async () => settings(), fixtures: [local] });
 
     const row = await screen.findByRole("group", { name: "Sees images" });
-    expect(row).toHaveTextContent("Same as Builder");
+    expect(row).toHaveTextContent("Off");
     expect(row).toHaveTextContent("No ready model says it accepts images.");
     expect(screen.queryByRole("button", { name: "Sees images model" })).not.toBeInTheDocument();
   });

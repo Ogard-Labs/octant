@@ -1,6 +1,7 @@
 import type { Questionnaire } from "@octant/contracts";
 import { isAbsolute } from "node:path";
 import {
+  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   decodeCodeRelativePath,
   type CodeThread,
   type PermissionPersistence,
@@ -18,7 +19,13 @@ import {
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
-import { ledgerUsageCost, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import {
+  ledgerUsageCost,
+  observeTurnMetrics,
+  providerAvailabilityFromFailure,
+  startTurnMetrics,
+  turnRuntimeEventBudget,
+} from "@octant/domain";
 import {
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   outsideContentRecordedOnly,
@@ -30,6 +37,7 @@ import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderSessionHandle,
+  ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
@@ -41,10 +49,11 @@ import {
   type RuntimeOutsideContentMarking,
 } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
   DEFAULT_STALLED_TURN_LIMIT_MS,
@@ -52,6 +61,7 @@ import {
   makeIdleTimeout,
   makeStreamedOutputBudget,
   makeTurnTextParagraphs,
+  MAX_REMEMBERED_ANSWERED_REQUESTS,
   MAX_TURN_STREAMED_OUTPUT_BYTES,
   STREAMED_OUTPUT_TRUNCATION_MARKER,
 } from "../providers/turnBudget";
@@ -62,16 +72,27 @@ const MAX_CODE_TURN_FIELD_BYTES = 8 * 1024;
 const MAX_CODE_TURN_INPUT_ITEMS = 64;
 // Discrete events only (tool calls, approvals, file changes); streaming
 // deltas are exempt. Agentic turns routinely run hundreds of tool calls.
-const DEFAULT_MAX_EVENTS = 4_096;
 // Inactivity window, not a wall clock: a turn lives as long as the provider
 // keeps producing events. Long-running tools (test suites, builds) can be
 // silent for minutes.
 
 export type CodeTurnOutcome = "completed" | "waiting" | "interrupted" | "failed";
 
+/** What a provider's own failure says about the stop, carried onto the turn's failure. */
+type ProviderStopFacts = Pick<
+  ProviderFailure,
+  "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"
+> & { readonly providerCategory?: ProviderFailure["category"] };
+
 export interface CodeTurnFailure {
   readonly category: Exclude<CodeTurnOutcome, "completed">;
   readonly message: string;
+  /**
+   * The provider could not take the work: its usage limit, or an outage
+   * (refused connection, 5xx, overloaded, timeout). Read by a coordinator
+   * worker's Continue on the fallback; a turn's own refusals never set it.
+   */
+  readonly availability?: "usage-limit" | "down";
   readonly retryAfterMs?: number;
   /** The provider's usage-limit signal, when stopping this turn was one. */
   readonly usageLimit?: ProviderUsageLimit;
@@ -136,6 +157,11 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  /** An approval that asks to change the thread's level rather than to run a tool. */
+  readonly levelChange?: {
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly plan?: string;
+  };
   readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
@@ -185,6 +211,8 @@ export interface CodeTurnEvent {
   readonly reconciliation?: CodeObservationReconciliation;
   readonly executionPolicy?: CodeThread["executionPolicy"];
   readonly permissionPersistence?: PermissionPersistence;
+  /** Where the turn ends in the runtime's own session; only on `completion`. */
+  readonly nativeAnchor?: string;
 }
 
 export interface CodeTurnRunnerInput {
@@ -231,6 +259,15 @@ export interface CodeTurnRunnerInput {
   readonly harnessAutoReviewEnabled?: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
+  readonly wakeups?: ProviderWakeupSchedule;
+  /**
+   * The runtime started this turn by itself in the thread's kept session
+   * (a background task ended or a watch reported). The turn attaches to what
+   * the runtime is already running instead of sending the prompt, which
+   * only records why the turn exists.
+   */
+  readonly runtimeTurn?: true;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -285,8 +322,18 @@ export interface CodeTurnRunnerInput {
 }
 
 export interface CodeTurnRunnerOptions {
-  /** Maximum discrete (non-delta) provider events per turn. */
+  /**
+   * A fixed number of discrete (non-delta) provider events per turn, for a
+   * caller with no host setting to read. Without it the budget follows the
+   * person's tool-step limit for the level the turn runs at.
+   */
   readonly maxEvents?: number;
+  /**
+   * The tool-step limit for a turn at the given level, `undefined` when it is
+   * off. Read as each turn starts. Absent keeps the default limit below Full
+   * access and no limit at Full access.
+   */
+  readonly toolStepLimit?: (fullAccess: boolean) => number | undefined;
   /**
    * The host's stalled-turn limit in milliseconds, `null` when it is Off.
    * Read as each turn starts, so a changed setting applies to the next turn
@@ -306,13 +353,17 @@ export interface CodeTurnRunnerOptions {
 }
 
 export class CodeTurnRunner {
-  readonly #maxEvents: number;
+  readonly #maxEvents: number | undefined;
+  readonly #toolStepLimit: (fullAccess: boolean) => number | undefined;
   readonly #stalledTurnLimitMs: () => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
 
   constructor(options: CodeTurnRunnerOptions = {}) {
-    this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxEvents = options.maxEvents;
+    this.#toolStepLimit =
+      options.toolStepLimit ??
+      ((fullAccess) => (fullAccess ? undefined : DEFAULT_THREAD_TOOL_STEPS_PER_TURN));
     this.#maxStreamedOutputBytes = options.maxStreamedOutputBytes ?? MAX_TURN_STREAMED_OUTPUT_BYTES;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
@@ -321,7 +372,10 @@ export class CodeTurnRunner {
   }
 
   run(input: CodeTurnRunnerInput): Effect.Effect<void, CodeTurnFailure, Scope.Scope> {
-    const maxEvents = this.#maxEvents;
+    const maxEvents =
+      this.#maxEvents ??
+      turnRuntimeEventBudget(this.#toolStepLimit(input.thread.executionPolicy === "full-access")) ??
+      Number.POSITIVE_INFINITY;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
     const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const streamedOutput = makeStreamedOutputBudget(this.#maxStreamedOutputBytes);
@@ -366,7 +420,7 @@ export class CodeTurnRunner {
       const toolNames = new Map<string, string>();
       let providerCompleted = false;
       let responseText = "";
-      const answeredToolRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
 
       // The outcome write must survive losing the settlement race: after a
       // cancel, the abort path and the provider's own interrupted event both
@@ -385,7 +439,7 @@ export class CodeTurnRunner {
       const fail = (
         next: Exclude<CodeTurnOutcome, "completed">,
         message: string,
-        limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+        limit?: ProviderStopFacts,
         resumeRefused?: true,
       ) =>
         Effect.gen(function* () {
@@ -459,6 +513,9 @@ export class CodeTurnRunner {
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+        ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The host answers the runtime's own asks to plan or to leave Plan.
+        levelChanges: true,
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
@@ -660,7 +717,7 @@ export class CodeTurnRunner {
                     yield* Effect.promise(() =>
                       input.onTurnCompleted!({
                         text: responseText,
-                        toolCalls: answeredToolRequestIds.size,
+                        toolCalls: answeredToolRequests.count,
                         turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
                       }).catch(() => undefined),
                     );
@@ -674,8 +731,7 @@ export class CodeTurnRunner {
                     if (boundedEvent.kind !== "tool-request") {
                       return yield* fail("failed", "Provider event sanitization failed closed.");
                     }
-                    if (answeredToolRequestIds.has(sanitizedEvent.requestId)) return;
-                    answeredToolRequestIds.add(sanitizedEvent.requestId);
+                    if (!answeredToolRequests.answer(sanitizedEvent.requestId)) return;
                     const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                     const allowed = toolSet?.definitions.some(
                       (definition) => definition.name === sanitizedEvent.toolName,
@@ -792,6 +848,15 @@ export class CodeTurnRunner {
             );
           }
           timing = startTurnMetrics(clock());
+          if (input.runtimeTurn === true) {
+            if (connection.attachRuntimeTurn === undefined) {
+              return yield* fail("failed", "This provider cannot open a turn it started itself.");
+            }
+            yield* connection
+              .attachRuntimeTurn(input.sessionId)
+              .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+            return;
+          }
           yield* connection
             .send({
               sessionId: input.sessionId,
@@ -799,6 +864,7 @@ export class CodeTurnRunner {
               ...(input.context === undefined ? {} : { context: input.context }),
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...providerWebSearchAtSend(input.appManagedTools, input.sessionId),
             })
             .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
           const promptSent = input.onPromptSent;
@@ -897,6 +963,13 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
   if (event.toolCallId === undefined) return event;
   if (event.category === "tool" && event.status === "started" && event.toolName !== undefined) {
     toolNames.set(event.toolCallId, event.toolName);
+    // A turn with no event budget has no end to its calls; the oldest
+    // call's name is forgotten past the bound, and its outcome then goes
+    // without one, as an outcome for an unseen call does.
+    for (const oldest of toolNames.keys()) {
+      if (toolNames.size <= MAX_REMEMBERED_ANSWERED_REQUESTS) break;
+      toolNames.delete(oldest);
+    }
     return event;
   }
   if (event.category !== "observation" || event.toolName !== undefined) return event;
@@ -1037,6 +1110,14 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+        ...(event.levelChange === undefined
+          ? {}
+          : {
+              levelChange: {
+                kind: event.levelChange.kind,
+                ...(event.levelChange.plan === undefined ? {} : { plan: event.levelChange.plan }),
+              },
+            }),
       });
     case "review-verdict":
       return Effect.succeed({
@@ -1191,7 +1272,11 @@ function normalizeProviderEvent(
     case "failed":
       return Effect.succeed({ ...base, category: "failure", text: text(event.failure.message) });
     case "completed":
-      return Effect.succeed({ ...base, category: "completion" });
+      return Effect.succeed({
+        ...base,
+        category: "completion",
+        ...(event.nativeAnchor === undefined ? {} : { nativeAnchor: event.nativeAnchor }),
+      });
   }
 }
 
@@ -1209,19 +1294,19 @@ function failForProvider(
   fail: (
     outcome: Exclude<CodeTurnOutcome, "completed">,
     message: string,
-    limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+    limit?: ProviderStopFacts,
     resumeRefused?: true,
   ) => Effect.Effect<never, CodeTurnFailure>,
 ): Effect.Effect<never, CodeTurnFailure> {
   if (!isProviderFailure(failure)) return fail("failed", "Provider execution failed.");
-  const limit: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired"> =
-    {
-      ...(failure.toolCatalogHandoffRequired === undefined
-        ? {}
-        : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
-      ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
-      ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
-    };
+  const limit: ProviderStopFacts = {
+    providerCategory: failure.category,
+    ...(failure.toolCatalogHandoffRequired === undefined
+      ? {}
+      : { toolCatalogHandoffRequired: failure.toolCatalogHandoffRequired }),
+    ...(failure.usageLimit === undefined ? {} : { usageLimit: failure.usageLimit }),
+    ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+  };
   if (failure.category === "rate-limited") return fail("waiting", failure.message, limit);
   // A refused resume parks the turn `waiting` with the provider's sentence,
   // but the fact that no answer can ever restart this session must survive
@@ -1257,12 +1342,22 @@ function isCodeTurnFailure(value: unknown): value is CodeTurnFailure {
 function codeTurnFailure(
   category: Exclude<CodeTurnOutcome, "completed">,
   message: string,
-  limit?: Pick<ProviderFailure, "usageLimit" | "retryAfterMs" | "toolCatalogHandoffRequired">,
+  limit?: ProviderStopFacts,
   resumeRefused?: true,
 ): CodeTurnFailure {
+  const availability =
+    limit?.providerCategory === undefined
+      ? undefined
+      : providerAvailabilityFromFailure({
+          category: limit.providerCategory,
+          ...(limit.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
+        });
   return {
     category,
     message,
+    ...(availability === undefined
+      ? {}
+      : { availability: availability.kind === "down" ? "down" : "usage-limit" }),
     ...(limit?.usageLimit === undefined ? {} : { usageLimit: limit.usageLimit }),
     ...(limit?.retryAfterMs === undefined ? {} : { retryAfterMs: limit.retryAfterMs }),
     ...(resumeRefused === undefined ? {} : { resumeRefused }),

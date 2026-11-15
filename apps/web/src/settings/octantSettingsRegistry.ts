@@ -761,6 +761,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "full access sandbox seatbelt confinement secrets network prompts codex harness",
         },
         {
+          id: settingId("code-terminal-shell"),
+          label: "Terminal shell",
+          scope: "mode",
+          keywords: "terminal shell windows powershell pwsh command prompt cmd",
+        },
+        {
           id: settingId("code-editor-executable"),
           label: "External editor",
           scope: "app",
@@ -842,6 +848,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
+        },
+        {
+          id: settingId("background-session-idle-limit"),
+          label: "Background work limit",
+          scope: "host",
+          keywords:
+            "background task command dev server watch monitor live tasks session kept after turn idle stop limit hours off",
         },
         {
           id: settingId("opencode-managed-update"),
@@ -1380,6 +1393,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "tool steps calls kept per turn full access no limit off unlimited spend ceiling work",
+        },
+        {
+          id: settingId("runtime-turns-per-turn"),
+          label: "Turns a runtime starts by itself",
+          scope: "host",
+          keywords:
+            "runtime turns background command watch monitor wake held turn count limit stop session",
         },
         {
           id: settingId("browser-transfer-file-limit"),

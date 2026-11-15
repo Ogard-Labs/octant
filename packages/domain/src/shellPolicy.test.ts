@@ -223,6 +223,7 @@ describe("shell settings policy", () => {
       autoCompactLimitPercent: null,
       stalledTurnLimitMinutes: 30,
       providerToolCallPauseLimitMinutes: 120,
+      backgroundSessionIdleLimitMinutes: 120,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.
@@ -244,6 +245,7 @@ describe("shell settings policy", () => {
       keepToolCallRecords: true,
       toolStepsPerTurn: 64,
       fullAccessToolStepsPerTurn: 0,
+      runtimeTurnsPerTurn: 256,
       browserTransferFileLimitMegabytes: 25,
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,
@@ -265,6 +267,7 @@ describe("shell settings policy", () => {
       keepToolCallRecords: true,
       toolStepsPerTurn: 64,
       fullAccessToolStepsPerTurn: 0,
+      runtimeTurnsPerTurn: 256,
       browserTransferFileLimitMegabytes: 25,
       browserHeldDownloadLimit: 5,
       browserUploadFileCountLimit: 5,

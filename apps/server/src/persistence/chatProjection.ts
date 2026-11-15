@@ -1213,6 +1213,11 @@ function readChatContentBodies(
       if (attempt.researchRef !== undefined) {
         contentIds.add(String(attempt.researchRef.contentId));
       }
+      // The words Sees images wrote for the turn's images, read back into
+      // a later turn's history.
+      for (const image of attempt.describedImages ?? []) {
+        contentIds.add(String(image.description.contentId));
+      }
     }
   }
   for (const citation of citations) {

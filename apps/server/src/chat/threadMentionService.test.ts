@@ -39,6 +39,7 @@ import {
   threadMentionContextResolver,
   type ThreadMentionDirectory,
   type ThreadMentionDirectoryThread,
+  chatMentionWithinReach,
   codeMentionWithinReach,
 } from "./threadMentionService";
 import { defaultWindowWorkspace } from "@octant/domain/shell-policy";
@@ -441,6 +442,41 @@ describe("ThreadMentionService resolve", () => {
     expect(result.unavailable).toEqual([{ threadId: chatThreadId, reason: "unauthorized" }]);
     expect(asked).toEqual([String(workThreadId)]);
     expect(code.readTranscript).not.toHaveBeenCalled();
+  });
+
+  it("judges a send's preflight on the composer the renderer names, as its search did", async () => {
+    const asked: Array<string | undefined> = [];
+    const service = new ThreadMentionService({
+      directories: [
+        directory(
+          "code",
+          [thread(chatThreadId, { mode: "code" })],
+          new Map([[String(chatThreadId), [entry("the composer's own Project")]]]),
+        ),
+      ],
+      sidecars,
+      sideChatThreads: sideChatThreads(),
+      clock: () => "2026-08-14T11:00:00.000Z",
+      uuid: sequentialUuid(),
+      admitsMention: ({ readerThreadId }) => {
+        asked.push(readerThreadId);
+        return readerThreadId === String(workThreadId);
+      },
+    });
+
+    const result = await service.execute(
+      {
+        kind: "resolve-mentions",
+        requestId,
+        threadIds: [chatThreadId],
+        readerThreadId: String(workThreadId),
+      },
+      { windowId },
+    );
+
+    if (result.kind !== "mentions-resolved") throw new Error("expected resolve result");
+    expect(result.unavailable).toEqual([]);
+    expect(asked).toEqual([String(workThreadId)]);
   });
 
   it("marks a thread whose transcript read failed as not-found", async () => {
@@ -1609,6 +1645,74 @@ describe("a Code mention's reach in a window showing several Projects", () => {
       codeMentionWithinReach({
         workspace,
         readerCodeProjectId: undefined,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("a Chat mention's reach in a window showing several Projects", () => {
+  const leadProject = decodeProjectId("00000000-0000-4000-8000-000000000b01");
+  const paneProject = decodeProjectId("00000000-0000-4000-8000-000000000b02");
+  const base = defaultWindowWorkspace(windowId);
+  const workspace = {
+    ...base,
+    contextByMode: {
+      ...base.contextByMode,
+      chat: { ...base.contextByMode.chat, projectId: leadProject },
+    },
+  };
+
+  it("reaches a Chat composer's own Project and no other pane's", () => {
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: paneProject,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: paneProject,
+        mentionedProjectId: leadProject,
+      }),
+    ).toBe(false);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: leadProject,
+        mentionedProjectId: paneProject,
+      }),
+      "the lead's composer does not reach the pane beside it",
+    ).toBe(false);
+  });
+
+  it("reaches only the Chat lead for a composer that is not a Chat thread", () => {
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: undefined,
+        mentionedProjectId: leadProject,
+      }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: undefined,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps an unscoped Chat thread within reach of an unscoped composer only", () => {
+    expect(
+      chatMentionWithinReach({ workspace, readerChatProjectId: null, mentionedProjectId: null }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: null,
         mentionedProjectId: paneProject,
       }),
     ).toBe(false);

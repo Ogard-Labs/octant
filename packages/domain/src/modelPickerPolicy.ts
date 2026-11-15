@@ -253,6 +253,8 @@ export interface PickerGroup {
    */
   readonly modelSwitch?: ProviderCapabilitySupport;
   readonly forceStop?: ProviderCapabilitySupport;
+  /** The provider's own slash commands its runtime last listed; absent when none. */
+  readonly providerCommands?: ProviderObservedState["commands"];
   /**
    * Whether this account's threads may choose the runtime's own artifact tool
    * instead of a Canvas, per mode. Absent when the instance was never probed
@@ -440,6 +442,7 @@ export function buildModelPickerGroups(input: ModelPickerInput): ReadonlyArray<P
       executionHost: input.hostId ?? localExecutionHost,
       sections,
       appManagedTools: observed.capabilities.appManagedTools,
+      ...(observed.commands === undefined ? {} : { providerCommands: observed.commands }),
       ...(observed.capabilities.forceStop === undefined
         ? {}
         : { forceStop: observed.capabilities.forceStop }),

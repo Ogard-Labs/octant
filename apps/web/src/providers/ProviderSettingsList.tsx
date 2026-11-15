@@ -18,6 +18,7 @@ import {
   codexAccountUsesAssignedDirectory,
   isAcpAgentInstance,
   isImageProfileDriverKind,
+  isKeyProviderDriverKind,
   isNewerProviderRelease,
   modelCanTakeDelegatedWork,
   subscriptionDescriptorIdOf,
@@ -66,6 +67,7 @@ import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor"
 import { ProviderLinkedKeyEditor } from "./ProviderLinkedKeyEditor";
 import {
   capabilityLabels,
+  turnModesLabel,
   driverLabel,
   outsideDriverHoldGuidance,
   providerRefusalGuidance,
@@ -1939,6 +1941,12 @@ function ProviderRow(props: ProviderRowProps) {
                         <dt>Session rollback</dt>
                         <dd>{sessionRollbackLabel(props.observed.capabilities)}</dd>
                       </div>
+                      {turnModesLabel(props.observed.capabilities) === undefined ? null : (
+                        <div>
+                          <dt>Runs turns in</dt>
+                          <dd>{turnModesLabel(props.observed.capabilities)}</dd>
+                        </div>
+                      )}
                       {ownReviewerLabel(props.instance.driverKind, props.observed.capabilities) ===
                       undefined ? null : (
                         <div>
@@ -2231,13 +2239,7 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
 function keyProviderAccount(
   instance: ProviderInstance,
 ): ProviderNativeSetupSettingProps["instance"] | undefined {
-  const driverKind =
-    instance.driverKind === "claude" ||
-    instance.driverKind === "codex" ||
-    instance.driverKind === "opencode" ||
-    instance.driverKind === "mistral-vibe"
-      ? instance.driverKind
-      : undefined;
+  const driverKind = isKeyProviderDriverKind(instance.driverKind) ? instance.driverKind : undefined;
   if (driverKind === undefined) return undefined;
   return {
     id: String(instance.id),
@@ -2258,7 +2260,7 @@ function ownMemoryAccount(
     id: String(instance.id),
     displayName: instance.displayName,
     driverKind: instance.driverKind,
-    ...(instance.ownMemory === true ? { ownMemory: true as const } : {}),
+    ...(instance.ownMemory === undefined ? {} : { ownMemory: instance.ownMemory }),
   };
 }
 

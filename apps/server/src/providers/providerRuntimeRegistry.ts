@@ -5,6 +5,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderObservedState,
+  type ProviderSlashCommand,
 } from "@octant/contracts";
 import type { ProviderFailure } from "@octant/contracts";
 import { Effect } from "effect";
@@ -185,6 +186,22 @@ export class ProviderRuntimeRegistry {
     if (current === undefined) return undefined;
     this.#verifiedToolModelsByInstance.set(instanceId, [...modelIds]);
     return this.#storeObservedState(current);
+  }
+
+  /**
+   * Replaces the provider's own slash commands on the instance's observation,
+   * for a session that reported its list changed (Claude Code's
+   * `commands_changed`, an ACP agent's `available_commands_update`). Without
+   * an observation nothing is recorded.
+   */
+  setObservedCommands(
+    instanceId: ProviderInstanceId,
+    commands: ReadonlyArray<ProviderSlashCommand>,
+  ): ProviderObservedState | undefined {
+    const current = this.#observedByInstance.get(instanceId);
+    if (current === undefined) return undefined;
+    const { commands: _previous, ...rest } = current;
+    return this.#storeObservedState(commands.length === 0 ? rest : { ...rest, commands });
   }
 
   clearObservedState(instanceId: ProviderInstanceId): void {

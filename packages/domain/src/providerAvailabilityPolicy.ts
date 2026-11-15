@@ -36,10 +36,13 @@ export function providerAvailabilityFromFailure(
  * Whether the host's last plan-usage reading for an account says its limit
  * is reached: a window the provider flagged exhausted, or one at 100%, whose
  * reset has not come yet; the account's quota flagged exhausted with no
- * window; or a request or token bucket with nothing left before its reset. The account counts as at its limit until the
- * latest such reset; a reached window with no reset named holds while the
- * reading says so. A window below its limit never counts, and a window whose
- * reset has passed says nothing about the account now.
+ * window; or a request or token bucket with nothing left before its reset.
+ * The account counts as at its limit until the latest such reset. A reached
+ * limit with no reset named holds for {@link PROVIDER_DOWN_MS} from the
+ * reading's own time, like an availability mark, and then the next start
+ * tries the account again: a reading the host keeps for hours must not keep a
+ * model out for hours. A window below its limit never counts, and a window
+ * whose reset has passed says nothing about the account now.
  */
 export function usageLimitFromReading(
   entry: ProviderUsageLimitsEntry | undefined,
@@ -51,7 +54,11 @@ export function usageLimitFromReading(
       : entry?.status === "failed"
         ? entry.staleLimits
         : undefined;
-  if (limits === undefined) return undefined;
+  if (limits === undefined || entry === undefined) return undefined;
+  // A failed refresh keeps the last good reading; its time is that reading's,
+  // not the failed refresh's, or refreshes that keep failing would hold it.
+  const readAt = entry.status === "failed" ? entry.lastSuccessfulAt : entry.observedAt;
+  const unnamedHolds = readAt !== undefined && now < Date.parse(String(readAt)) + PROVIDER_DOWN_MS;
   const future = (resetsAt: string | undefined) =>
     resetsAt === undefined || Date.parse(resetsAt) > now;
   const windows = limits.rateLimitWindows ?? [];
@@ -70,9 +77,10 @@ export function usageLimitFromReading(
       reached.push({ resetsAt: bucket.resetsAt });
     }
   }
-  if (reached.length === 0) return undefined;
-  const resets = reached
-    .flatMap((entry) => (entry.resetsAt === undefined ? [] : [String(entry.resetsAt)]))
+  const holding = reached.filter((limit) => limit.resetsAt !== undefined || unnamedHolds);
+  if (holding.length === 0) return undefined;
+  const resets = holding
+    .flatMap((limit) => (limit.resetsAt === undefined ? [] : [String(limit.resetsAt)]))
     .toSorted((a, b) => Date.parse(a) - Date.parse(b));
   const until = resets.at(-1);
   return until === undefined ? {} : { until };

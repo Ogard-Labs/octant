@@ -6,6 +6,7 @@ import {
   type ProviderToolDefinition,
   type ProviderToolImage,
 } from "@octant/contracts";
+import { promptImagesOf, responsesUserContent, type PromptImage } from "./promptImages";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { contextOverflowFromBody } from "./contextOverflowRefusal";
@@ -35,6 +36,14 @@ export interface ProtocolToolResult {
 export interface ProtocolHistoryMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
+  /**
+   * Images the person attached to this user message. They stay with it for
+   * every step of the turn, so a tool round-trip never sends the message
+   * without them.
+   */
+  readonly attachments?:
+    | ReadonlyArray<{ readonly mediaType: string; readonly bytes: Uint8Array }>
+    | undefined;
   readonly toolCalls?: readonly ProtocolToolCall[] | undefined;
   readonly toolResults?: readonly ProtocolToolResult[] | undefined;
 }
@@ -58,6 +67,14 @@ export type ProtocolTurnEvent =
       readonly toolCallId: string;
       readonly toolName: string;
       readonly argumentsJson: string;
+    }
+  | {
+      readonly kind: "web-search";
+      readonly sequence: number;
+      readonly searchId: string;
+      readonly query?: string;
+      readonly sources: ReadonlyArray<{ readonly title?: string; readonly url: string }>;
+      readonly citedText: ReadonlyArray<string>;
     };
 
 export interface ProtocolTurnResult {
@@ -101,6 +118,8 @@ export interface ResponsesTurnInput {
   readonly modelId: string;
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  /** Images the person attached, sent with the prompt as `input_image` parts. */
+  readonly promptImages?: ReadonlyArray<PromptImage>;
   /** Stable instructions, sent as the request's `instructions` so the prefix cache keeps them. */
   readonly system?: string;
   readonly tools?: readonly ProviderToolDefinition[];
@@ -130,6 +149,13 @@ export interface ResponsesTurnInput {
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: ProtocolTurnEvent) => void;
   readonly onAttemptFailure?: (metadata: ProtocolTurnFailureMetadata) => void;
+  /**
+   * Offer the Responses web search tool, capped by `max_tool_calls: 1`, which
+   * limits built-in tool calls across the response and leaves function calls
+   * alone. The driver sets it only on OpenAI's own API and only when the
+   * host's data policy allows it.
+   */
+  readonly webSearch?: boolean;
 }
 
 export interface ProtocolTurnFailureMetadata {
@@ -165,6 +191,18 @@ interface NormalizationState {
   readonly toolCalls: ProtocolToolCall[];
   responseId?: string;
   outputStopReason?: ProviderOutputStopReason;
+  /** Whether this request offered the web search tool. */
+  webSearchOffered: boolean;
+  /** The one built-in search this response may run. */
+  webSearch?: {
+    id: string;
+    query?: string;
+    sources: Array<{ title?: string; url: string }>;
+    /** Whether the search item finished, so the model has read what it found. */
+    answered: boolean;
+    /** What was last reported, so a later report carries only what is new. */
+    reported?: string;
+  };
 }
 
 interface TrackedOutputItem {
@@ -237,7 +275,13 @@ async function runResponsesTurn(
           ];
         }
         return [
-          { role: entry.role, content: entry.text },
+          {
+            role: entry.role,
+            content:
+              entry.role === "user"
+                ? responsesUserContent(entry.text, promptImagesOf(entry.attachments))
+                : entry.text,
+          },
           ...(entry.toolCalls === undefined
             ? []
             : entry.toolCalls.map((call) => ({
@@ -256,7 +300,14 @@ async function runResponsesTurn(
           ...responsesToolImages(entry.toolResults ?? []),
         ];
       }),
-      ...(includeUserPrompt ? [{ role: "user" as const, content: input.prompt }] : []),
+      ...(includeUserPrompt
+        ? [
+            {
+              role: "user" as const,
+              content: responsesUserContent(input.prompt, input.promptImages),
+            },
+          ]
+        : []),
       ...(toolAnswers === undefined ? [] : toolAnswers),
     ],
     stream: true,
@@ -265,7 +316,16 @@ async function runResponsesTurn(
     ...(input.profile === "chatgpt-plan" || input.promptCacheKey === undefined
       ? {}
       : { prompt_cache_key: input.promptCacheKey }),
-    ...(tools === undefined ? {} : { tools }),
+    ...(tools === undefined && input.webSearch !== true
+      ? {}
+      : {
+          tools: [...(tools ?? []), ...(input.webSearch === true ? [{ type: "web_search" }] : [])],
+        }),
+    // A search item lists every page it read only when asked to; without it
+    // the outside-content record would hold just the pages the reply cited.
+    ...(input.webSearch === true
+      ? { max_tool_calls: 1, include: ["web_search_call.action.sources"] }
+      : {}),
     ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
   };
   // The plan profile checks the exact wire body before send: a request that
@@ -303,6 +363,7 @@ async function runResponsesTurn(
     items: new Map(),
     functionCalls: new Map(),
     toolCalls: [],
+    webSearchOffered: input.webSearch === true,
   };
   assertSequenceStart(state.nextSequence);
 
@@ -333,6 +394,12 @@ async function runResponsesTurn(
     attempt.accepted = state.accepted;
     attempt.outputStarted = state.outputStarted;
     throw error;
+  } finally {
+    // However the response ended (completed, stopped at its output limit,
+    // refused, failed, stopped, cut off, or unreadable), what its search found
+    // and the reply cited since is reported; a report already made is not
+    // repeated.
+    reportWebSearch(state, input.onEvent);
   }
   const terminal: ProtocolTurnResult["terminal"] =
     state.toolCalls.length > 0 ? "tool-calls" : "completed";
@@ -411,10 +478,27 @@ function normalizeEvent(
       state.outputStarted = true;
       validateFunctionCallArgumentsDone(event, state);
       return;
+    case "response.output_text.annotation.added": {
+      state.accepted = true;
+      // A URL citation names a page the built-in search found.
+      const annotation = event.annotation;
+      if (
+        state.webSearch !== undefined &&
+        isRecord(annotation) &&
+        annotation.type === "url_citation" &&
+        isNonEmptyString(annotation.url)
+      ) {
+        addWebSource(state.webSearch, annotation.url, annotation.title);
+      }
+      return;
+    }
     case "response.completed": {
       state.accepted = true;
       validateResponseState(event.response, "completed", state);
       validateTerminalItems(event.response, state);
+      // URL citations in the reply can name pages, or titles, the search item
+      // did not list; they are reported once the reply is whole.
+      reportWebSearch(state, onEvent);
       if (isRecord(event.response) && typeof event.response.model === "string") {
         const served = event.response.model.trim();
         if (served.length > 0 && served.length <= 256) state.servedModelId = served;
@@ -460,6 +544,11 @@ function normalizeEvent(
       state.accepted = true;
       throw failure("provider-failed", "The provider failed to complete the response.");
     default:
+      if (state.webSearch !== undefined && event.type.startsWith("response.web_search_call.")) {
+        state.accepted = true;
+        state.outputStarted = true;
+        return;
+      }
       if (isToolEvent(event)) {
         state.accepted = true;
         state.outputStarted = true;
@@ -604,6 +693,10 @@ function validateOutputItem(
   if (item.type === "function_call") {
     state.accepted = true;
     validateFunctionCallItem(event, item, state, onEvent);
+    return;
+  }
+  if (item.type === "web_search_call") {
+    validateWebSearchItem(event, item, state, onEvent);
     return;
   }
   if (isToolItemType(item.type)) {
@@ -1026,6 +1119,10 @@ function validateTerminalOutput(output: unknown[], state: NormalizationState): v
     if (!isRecord(value) || !isNonEmptyString(value.id) || typeof value.type !== "string") {
       throw invalidLifecycle();
     }
+    if (value.type === "web_search_call" && state.webSearch?.id === value.id) {
+      readWebSearchAction(state.webSearch, value.action);
+      return;
+    }
     if (isKnownToolItemType(value.type)) {
       throw failure("unsupported", "The provider attempted an unsupported tool call.");
     }
@@ -1285,6 +1382,86 @@ function readOptionalCount(details: Record<string, unknown>, key: string): numbe
   if (value === undefined || value === null) return undefined;
   if (!isTokenCount(value)) throw protocol("The provider stream contained invalid usage.");
   return value;
+}
+
+/**
+ * The one built-in web search a response may run, when the request offered
+ * it. A second search item, or one the request never offered, fails the step
+ * as every other built-in tool does: a provider that ignored the cap would
+ * otherwise search again on what it had just read.
+ */
+function validateWebSearchItem(
+  event: Record<string, unknown> & { readonly type: string },
+  item: Record<string, unknown>,
+  state: NormalizationState,
+  onEvent: ResponsesTurnInput["onEvent"],
+): void {
+  if (!state.webSearchOffered || !isNonEmptyString(item.id)) {
+    throw failure("unsupported", "The provider attempted an unsupported tool call.");
+  }
+  if (state.webSearch === undefined) {
+    state.webSearch = { id: item.id, sources: [], answered: false };
+  } else if (state.webSearch.id !== item.id) {
+    throw failure("unsupported", "The provider attempted an unsupported tool call.");
+  }
+  state.accepted = true;
+  state.outputStarted = true;
+  if (event.type === "response.output_item.done") {
+    readWebSearchAction(state.webSearch, item.action);
+    // Reported as soon as the search is done, so the thread is marked as
+    // having read outside content even if the response then fails.
+    state.webSearch.answered = true;
+    reportWebSearch(state, onEvent);
+  }
+}
+
+/** Report the response's finished search, or what it learned since it was last reported. */
+function reportWebSearch(state: NormalizationState, onEvent: ResponsesTurnInput["onEvent"]): void {
+  const search = state.webSearch;
+  if (search === undefined || !search.answered) return;
+  const snapshot = JSON.stringify([search.query, search.sources]);
+  if (search.reported === snapshot) return;
+  search.reported = snapshot;
+  emit(
+    {
+      kind: "web-search",
+      sequence: allocateSequence(state),
+      searchId: search.id,
+      ...(search.query === undefined ? {} : { query: search.query }),
+      sources: search.sources.map((source) => ({ ...source })),
+      citedText: [],
+    },
+    state,
+    onEvent,
+  );
+}
+
+/** The query and sources a finished search item reports, as far as they are readable. */
+function readWebSearchAction(
+  search: NonNullable<NormalizationState["webSearch"]>,
+  action: unknown,
+): void {
+  if (!isRecord(action)) return;
+  if (isNonEmptyString(action.query) && search.query === undefined) search.query = action.query;
+  if (Array.isArray(action.sources)) {
+    for (const source of action.sources) {
+      if (isRecord(source) && isNonEmptyString(source.url))
+        addWebSource(search, source.url, undefined);
+    }
+  }
+}
+
+function addWebSource(
+  search: NonNullable<NormalizationState["webSearch"]>,
+  url: string,
+  title: unknown,
+): void {
+  const existing = search.sources.find((source) => source.url === url);
+  if (existing !== undefined) {
+    if (existing.title === undefined && isNonEmptyString(title)) existing.title = title;
+    return;
+  }
+  search.sources.push({ url, ...(isNonEmptyString(title) ? { title } : {}) });
 }
 
 function isToolEvent(event: { readonly type: string }): boolean {

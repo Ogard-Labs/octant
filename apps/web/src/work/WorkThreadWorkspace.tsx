@@ -91,6 +91,8 @@ import {
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -137,6 +139,8 @@ import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { useSeesImages } from "../harness/useSeesImages";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import {
   threadImageOfferKey,
   useThreadImageOffers,
@@ -197,6 +201,7 @@ import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -382,6 +387,10 @@ function WorkTurnHeader(props: {
           windowCapability={props.windowCapability}
         />
       )}
+      <DescribedImagesNote
+        className="work-thread-workspace__handoff"
+        images={props.turn.describedImages}
+      />
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -517,6 +526,8 @@ export interface WorkThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -861,6 +872,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    provider: composerProviderCommands(props.providerGroups, thread?.providerInstanceId),
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
@@ -1338,10 +1350,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ? "idle"
           : "none-left";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
-    ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
-    ...(thread === undefined ? {} : { modelId: thread.modelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(props.providerGroups ?? [], {
+      ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
+      ...(thread === undefined ? {} : { modelId: thread.modelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: thread === undefined ? undefined : String(thread.projectId),
+    providerInstanceId: thread === undefined ? undefined : String(thread.providerInstanceId),
+    modelId: thread === undefined ? undefined : String(thread.modelId),
+  }).takesImages;
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -2992,7 +3013,18 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         )}
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="work"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}

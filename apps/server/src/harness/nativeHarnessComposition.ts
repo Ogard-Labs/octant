@@ -1,5 +1,6 @@
 import {
   decodeNativeHarnessContextRemaining,
+  WEB_SEARCH_TOOL_DEFINITION,
   type AgentRun,
   type AgentRunAuthority,
   type ChatThread,
@@ -15,6 +16,7 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
+import { decideHarnessProviderSearch, type ProviderOwnSearchOrigin } from "@octant/domain";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import {
   type ForgeShellChange,
@@ -68,6 +70,7 @@ import {
   type NativeHarnessSkillPort,
   type NativeHarnessToolPorts,
 } from "./nativeHarnessTools";
+import type { NativeHarnessProviderSearchGrants } from "./nativeHarnessEndpointRegistry";
 
 /** Where a Full access tag is journaled, and whose earlier reads count toward it. */
 interface SecretEgressTagScope {
@@ -241,6 +244,24 @@ export interface NativeHarnessCompositionOptions {
   }) => NativeHarnessSkillPort;
   readonly hostId: ToolActionAuthority["hostId"];
   readonly readThreadTaint: (threadId: string) => boolean;
+  /**
+   * What decides whether a turn may offer the provider's own web search: the
+   * endpoint's search origin and whether Octant's own search has an eligible
+   * backend. The web search data policy is not among them: it governs only
+   * Octant's own backends. Absent offers none.
+   */
+  readonly providerWebSearchFacts?: (providerInstanceId: ProviderInstanceId) =>
+    | {
+        readonly origin: ProviderOwnSearchOrigin | undefined;
+        readonly webSearchReady: boolean;
+      }
+    | undefined;
+  /**
+   * Where a turn's grant is kept decidable for the session it is sent on, so
+   * the session's loop can ask again before each request, for whichever
+   * endpoint the request goes to. Absent, the grant sent with the turn stands.
+   */
+  readonly providerSearchGrants?: Pick<NativeHarnessProviderSearchGrants, "track">;
   /** Questions to the person; absent on a host with no surface to answer them. */
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   /** Where each lead tool call is noted while its turn runs. */
@@ -467,6 +488,52 @@ export function createNativeHarnessComposition(
           goal: createNativeHarnessGoalPort({ goals: options.goals, threadId, uuid: options.uuid }),
         }),
   });
+  /**
+   * The turn's grant of the provider's own search, decided each time it is
+   * read: the turn runner reads it when it sends the turn, after the turn's
+   * context is prepared and any owed outside-content mark is settled, so the
+   * taint and level it is decided on are the ones the first request carries.
+   * Reading it also tracks the session, so its loop asks again before each
+   * later request: the endpoint's origin, the thread's taint, and its level
+   * are read again then, for the endpoint that request goes to.
+   */
+  const withProviderSearch = (
+    tools: AppManagedToolSet,
+    input: {
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly threadId: string;
+      readonly research: boolean;
+      readonly routing: ChatThread["researchRouting"];
+      /** Read with the grant, since a turn's level can change before it is sent. */
+      readonly fullAccess: () => boolean;
+    },
+  ): AppManagedToolSet => {
+    if (options.providerWebSearchFacts === undefined) return tools;
+    const readFacts = options.providerWebSearchFacts;
+    const decideFor = (providerInstanceId: ProviderInstanceId) => {
+      const facts = readFacts(providerInstanceId);
+      return facts === undefined
+        ? undefined
+        : decideHarnessProviderSearch({
+            research: input.research,
+            routing: input.routing,
+            ...facts,
+            tainted: options.readThreadTaint(input.threadId),
+            fullAccess: input.fullAccess(),
+          });
+    };
+    return {
+      ...tools,
+      providerWebSearch: (sessionId) => {
+        options.providerSearchGrants?.track(
+          sessionId,
+          decideFor,
+          tools.definitions.find((tool) => tool.name === WEB_SEARCH_TOOL_DEFINITION.name),
+        );
+        return decideFor(input.providerInstanceId);
+      },
+    };
+  };
   const compose = (input: {
     readonly threadId: string;
     readonly mode: "chat" | "work" | "code";
@@ -1038,7 +1105,7 @@ export function createNativeHarnessComposition(
         projectId: thread.projectId,
         lead: leadOf(thread),
       });
-      return compose({
+      const composed = compose({
         threadId,
         mode: "chat",
         ports: {
@@ -1067,12 +1134,22 @@ export function createNativeHarnessComposition(
           ...(sideChat ? {} : skillsFor("chat", thread)),
         },
       });
+      // A Side Chat is not a lead and searches only as its source allows.
+      return sideChat
+        ? composed
+        : withProviderSearch(composed, {
+            providerInstanceId: thread.providerInstanceId,
+            threadId,
+            research: thread.researchEnabled,
+            routing: thread.researchRouting,
+            fullAccess: () => false,
+          });
     },
     forWork: ({ thread, projectRoot, extraFolders }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = workShell({ threadId, projectId: String(thread.projectId) });
-      return compose({
+      const composed = compose({
         threadId,
         mode: "work",
         ports: {
@@ -1107,6 +1184,14 @@ export function createNativeHarnessComposition(
           ...skillsFor("work", thread),
         },
       });
+      // Work and Code follow the automatic research route.
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
+      });
     },
     forCode: ({ thread, checkoutRoot, extraFolders, windowId, secrets }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
@@ -1117,7 +1202,7 @@ export function createNativeHarnessComposition(
       const planned =
         thread.executionPolicy === "plan" ||
         options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
-      return compose({
+      const composed = compose({
         threadId,
         mode: "code",
         ...(planned ? { executionPolicy: "plan" as const } : {}),
@@ -1160,6 +1245,13 @@ export function createNativeHarnessComposition(
           ...skillsFor("code", thread),
         },
       });
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+      });
     },
     forServerCode: ({ thread, filesystem, shell, windowId, secrets, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
@@ -1167,7 +1259,7 @@ export function createNativeHarnessComposition(
       const planned =
         thread.executionPolicy === "plan" ||
         options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
-      return compose({
+      const composed = compose({
         threadId,
         mode: "code",
         ...(planned ? { executionPolicy: "plan" as const } : {}),
@@ -1207,11 +1299,20 @@ export function createNativeHarnessComposition(
           ...skillsFor("code", thread),
         },
       });
+      // The same grant as a Code thread on this host: the server changes
+      // where the tools act, not which search the lead is offered.
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: () => options.readCodeExecutionPolicy?.(threadId, windowId) === "full-access",
+      });
     },
     forServerWork: ({ thread, filesystem, shell, server }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
-      return compose({
+      const composed = compose({
         threadId,
         mode: "work",
         protectedSecretPath: isProtectedPathOnServer,
@@ -1245,6 +1346,14 @@ export function createNativeHarnessComposition(
           }),
           ...skillsFor("work", thread),
         },
+      });
+      // The same grant as a Work thread on this host.
+      return withProviderSearch(composed, {
+        providerInstanceId: thread.providerInstanceId,
+        threadId,
+        research: true,
+        routing: "automatic",
+        fullAccess: () => options.readWorkExecutionPolicy?.(threadId) === "full-access",
       });
     },
     forAgentRun: ({ run, authority, projectRoot }) => {
@@ -1370,6 +1479,11 @@ export function createNativeHarnessComposition(
         },
         uuid: options.uuid,
       });
+      // A child is never granted the provider's own search. Its network reach
+      // is the run's clamped grant, enforced per call and by its shell's
+      // egress rules; a built-in search runs inside the provider, where
+      // neither can see or refuse its query, so a child with network
+      // authority searches through `web-search` only.
       return taintAppManagedToolResults({
         tools,
         threadId: runId,

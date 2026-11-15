@@ -26,6 +26,7 @@ import {
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
+import { readClaudeGitIdentity } from "./claudeGitIdentity";
 import {
   type ProviderRuntimeNetworkPort,
   type ProviderServerAccessPort,
@@ -86,6 +87,8 @@ export interface ProviderDriverFactoryOptions {
    * journal at each call. Absent leaves artifact delivery off.
    */
   readonly claudeArtifactDelivery?: (instanceId: ProviderInstanceId) => boolean;
+  /** The person's runtime-turn count from Settings, read each time Claude starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   /** The person's current own-memory switch for a Claude Code or Codex account. */
   readonly providerOwnMemory?: (instanceId: ProviderInstanceId) => boolean;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
@@ -111,8 +114,6 @@ export function makeProviderDriver(
   instance: ProviderInstance,
   options: ProviderDriverFactoryOptions,
 ): ProviderDriver {
-  if (process.platform === "win32" && instance.driverKind !== "ollama")
-    throw new Error("Provider processes require Windows host confinement.");
   if (isImageProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }
@@ -269,12 +270,16 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       return makeClaudeDriver({
+        ...(options.runtimeTurnsPerTurn === undefined
+          ? {}
+          : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
         ...(readClaudeOwnMemory === undefined
           ? {}
           : { ownMemory: () => readClaudeOwnMemory(instance.id) }),
         ...(readArtifactDelivery === undefined
           ? {}
           : { artifactDelivery: () => readArtifactDelivery(instance.id) }),
+        gitIdentity: readClaudeGitIdentity,
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,

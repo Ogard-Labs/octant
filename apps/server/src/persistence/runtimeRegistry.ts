@@ -28,6 +28,8 @@ import {
   ChildWorktreeSourceUpdated,
   CHILD_WORKTREE_SEED_UPDATED,
   ChildWorktreeSeedUpdated,
+  THREAD_WAKEUP_CHANGED,
+  ThreadWakeupChanged,
 } from "@octant/contracts";
 import {
   OWNER_BROWSER_AUDIT_EVENT,
@@ -767,6 +769,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
+    .register(THREAD_WAKEUP_CHANGED, 1, ThreadWakeupChanged)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
     .register("zen.space-snapshot-recorded@1", 1, ZenSpaceSnapshotRecordedV1)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)

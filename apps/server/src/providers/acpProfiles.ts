@@ -95,6 +95,8 @@ export interface AcpProcessProfile {
   readonly managedFiles: (input: {
     readonly managedHome: string;
     readonly executionPolicy: ProviderExecutionPolicy;
+    /** The agent's own subagents run in this launch (`acpSubagentsRun`). */
+    readonly ownSubagents?: boolean;
   }) => ReadonlyArray<AcpManagedFile>;
   readonly hostAuthentication?: AcpHostAuthentication;
   /**
@@ -106,10 +108,11 @@ export interface AcpProcessProfile {
   /** Project-root entries the agent may neither read nor write. */
   readonly forbiddenRootEntries?: ReadonlyArray<string>;
   /**
-   * A key provider's own setup, for a session that carries it: the guards
-   * that launch leaves out and the Project-root entries it may read again.
-   * Only Mistral Vibe, the one key provider on this bridge, has one; every
-   * other agent keeps every guard and every deny.
+   * The agent's own setup, for a session that carries it: the guards that
+   * launch leaves out, the host-profile entries it may read again, and the
+   * Project-root entries it may read again. Every ACP agent is a key provider
+   * (maintainer decision, 2026-11-14); an agent without one keeps every
+   * guard and every deny.
    */
   readonly nativeSetup?: (
     setup: ProviderNativeSetup,
@@ -117,6 +120,7 @@ export interface AcpProcessProfile {
   ) => {
     readonly releasedGuards: ReadonlyArray<string>;
     readonly releasedRootEntries: ReadonlyArray<string>;
+    readonly releasedHostEntries?: ReadonlyArray<string>;
   };
   readonly confinement: AcpConfinementStrategy;
 }
@@ -227,7 +231,10 @@ export interface AcpProviderProfile {
    * The sentence a Project root earns a refusal with, before a session process
    * starts, when it holds files the agent loads by itself and that start tools
    * (MCP servers, hooks, extensions). Used where the entry cannot be denied
-   * because the agent fails to start without being able to read it.
+   * because the agent fails to start without being able to read it. A session
+   * whose setup carries the Project's code (`projectCode`, a Project trusted
+   * for the agent, outside Plan) is not refused: the files then load as the
+   * agent loads them on its own.
    */
   readonly refusesProject?: (root: string) => string | undefined;
   /** Overrides the default `session/set_config_option` call for setting the model. */
@@ -253,8 +260,10 @@ export interface AcpProviderProfile {
   readonly authenticateOnProbe: boolean;
   /**
    * When present, the probe fails closed unless the agent advertises exactly
-   * this embedded command inventory, and user prompts starting with `/` are
-   * rejected before reaching the agent.
+   * this embedded command inventory. A prompt starting with `/` runs one of
+   * those commands in Work and Code outside Plan, as in the agent's own app
+   * (maintainer decision, 2026-11-14); Plan and Chat refuse it, since a
+   * command such as `update-config` writes.
    */
   readonly reviewedCommands?: ReadonlyArray<string>;
   /** Provider-owned CLI login, with delegated browser auth reserved for legacy profiles. */
@@ -291,11 +300,96 @@ function opencodeConfiguration(executionPolicy: ProviderExecutionPolicy) {
       { action: "read", resource: "*", effect: "allow" },
       { action: "edit", resource: "*", effect: sideEffects },
       { action: "shell", resource: "*", effect: sideEffects },
-      { action: "external_directory", resource: "*", effect: "deny" },
+      // Outside folders ask below Full access and are allowed at it; Plan,
+      // which cannot approve anything, refuses them (maintainer decision,
+      // 2026-11-14).
+      {
+        action: "external_directory",
+        resource: "*",
+        effect:
+          executionPolicy === "full-access" ? "allow" : executionPolicy === "plan" ? "deny" : "ask",
+      },
       { action: "skill", resource: "*", effect: "deny" },
       { action: "question", resource: "*", effect: "deny" },
     ],
   } as const;
+}
+
+/**
+ * Whether an ACP agent's own subagents run in a launch: wherever the person's
+ * setup carries them, in Work and Code outside Plan, at every level there
+ * (maintainer decision, 2026-11-14). Plan stays read-only and Chat keeps no
+ * folder or shell, so neither runs them.
+ */
+export function acpSubagentsRun(
+  mode: AcpSessionMode | undefined,
+  executionPolicy: ProviderExecutionPolicy,
+  setup: ProviderNativeSetup | undefined,
+): boolean {
+  return (
+    setup?.subagents === true && executionPolicy !== "plan" && (mode === "work" || mode === "code")
+  );
+}
+
+/**
+ * The default own setup of an ACP agent: what the launch holds back of a
+ * Project, its `forbiddenRootEntries`, becomes readable once the Project is
+ * trusted for the agent, which `projectCode` carries only in Work and Code
+ * outside Plan (maintainer decision, 2026-11-14). The agent's own folder
+ * trust, where it keeps one, still decides on top. `context` names the
+ * Project's instruction text, which every runtime may read, so it comes with
+ * any of the person's setup.
+ */
+function releasesTrustedProject(
+  rootEntries: ReadonlyArray<string>,
+  options: {
+    readonly context?: ReadonlyArray<string>;
+    readonly guards?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
+    readonly hostEntries?: (setup: ProviderNativeSetup) => ReadonlyArray<string>;
+    /** The guard that keeps the agent's own subagents off. */
+    readonly subagentGuard?: string;
+  } = {},
+): NonNullable<AcpProcessProfile["nativeSetup"]> {
+  return (setup, launch) => ({
+    releasedGuards: [
+      ...(options.guards?.(setup) ?? []),
+      ...(options.subagentGuard !== undefined &&
+      acpSubagentsRun(launch.mode, launch.executionPolicy, setup)
+        ? [options.subagentGuard]
+        : []),
+    ],
+    releasedRootEntries: setup.projectCode
+      ? rootEntries
+      : providerRunsAsItself(setup)
+        ? (options.context ?? [])
+        : [],
+    releasedHostEntries: options.hostEntries?.(setup) ?? [],
+  });
+}
+
+/**
+ * What an ACP agent reports it loads through its own setup: a trusted
+ * Project's code, and whichever features its launch otherwise holds back.
+ * `subagents` is reported where Octant holds a switch for them (Grok Build's
+ * guard, Devin's managed configuration); the web tools are those the agent
+ * never had switched off. What an agent reads from its own profile folder
+ * by itself (Goose's, Gemini CLI's, GitHub Copilot's, Cline's, Qwen Code's,
+ * GLM Agent's and Grok Build's own configuration) is loaded as before and is
+ * not counted here, because the switch cannot hold it back.
+ */
+function acpOwnSetupSupport(
+  supported: ReadonlyArray<"subagents" | "skills" | "toolServers" | "hooks">,
+): NonNullable<ProviderCapabilities["nativeSetup"]> {
+  const support = (feature: "subagents" | "skills" | "toolServers" | "hooks") =>
+    supported.includes(feature) ? ("supported" as const) : ("unsupported" as const);
+  return {
+    subagents: support("subagents"),
+    webTools: "unsupported",
+    skills: support("skills"),
+    toolServers: support("toolServers"),
+    hooks: support("hooks"),
+    projectCode: "supported",
+  };
 }
 
 const opencodeGlobalConfigPaths = [
@@ -396,6 +490,7 @@ const kiloProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Kilo is not authenticated. Run kilo auth login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport(["skills"]),
   process: {
     agentName: "Kilo",
     versionPattern:
@@ -440,6 +535,14 @@ const kiloProfile: AcpProviderProfile = {
     // MCP files: its source on `main` reads <project>/.kilocode/mcp.json and
     // .kilo/mcp.json on every start and skips one it cannot read.
     forbiddenRootEntries: [".kilo/mcp.json", ".kilocode/mcp.json"],
+    // The person's own skills, and a trusted Project's MCP files. The managed
+    // configuration above stays: it carries the level's permission and the
+    // agent Octant selects, which the person's own Kilo configuration would
+    // replace, and Kilo's other Project configuration stays off because no
+    // Kilo release was read for the files it would load.
+    nativeSetup: releasesTrustedProject([".kilo/mcp.json", ".kilocode/mcp.json"], {
+      guards: (setup) => (setup.skills ? ["KILO_DISABLE_EXTERNAL_SKILLS"] : []),
+    }),
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -460,9 +563,9 @@ const DEVIN_CONFIGURATION = {
     agents_standard: false,
   },
   plugin_dirs: [],
-  // Devin enables native subagents by default. Octant owns delegation and
-  // exposes its own bounded AgentRun surface, so the provider's run_subagent
-  // and read_subagent tools must be absent from every managed session.
+  // Devin enables native subagents by default. A launch without the
+  // person's subagents keeps its run_subagent and read_subagent tools absent;
+  // one with them sets this true (`managedFiles` below).
   subagents_enabled: false,
   auto_update: false,
   notify: "never",
@@ -475,6 +578,18 @@ function devinConfigPath(managedHome: string): string {
 function devinMcpConfigPath(managedHome: string): string {
   return join(managedHome, ".config/devin/mcp_config.json");
 }
+
+const DEVIN_PROJECT_ENTRIES: ReadonlyArray<string> = [
+  ".agents/skills",
+  ".cognition/skills",
+  ".devin/config.json",
+  ".devin/config.local.json",
+  ".devin/hooks.json",
+  ".devin/hooks.v1.json",
+  ".devin/mcp_config.json",
+  ".devin/mcp_config.local.json",
+  ".devin/skills",
+];
 
 const devinProfile: AcpProviderProfile = {
   kind: "devin",
@@ -515,6 +630,7 @@ const devinProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Devin is not authenticated. Run the provider-owned Devin login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport(["subagents"]),
   process: {
     agentName: "affogato",
     versionPattern: /^devin (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*) \([0-9a-f]+\)\r?\n?$/,
@@ -533,10 +649,17 @@ const devinProfile: AcpProviderProfile = {
       "auto",
       "acp",
     ],
-    managedFiles: ({ managedHome }) => [
+    // Its own subagents follow the person's setup in Work and Code outside
+    // Plan (`acpSubagentsRun`); everywhere else the managed configuration
+    // keeps `subagents_enabled` false.
+    managedFiles: ({ managedHome, ownSubagents }) => [
       {
         path: devinConfigPath(managedHome),
-        content: `${JSON.stringify(DEVIN_CONFIGURATION, null, 2)}\n`,
+        content: `${JSON.stringify(
+          { ...DEVIN_CONFIGURATION, subagents_enabled: ownSubagents === true },
+          null,
+          2,
+        )}\n`,
       },
       {
         // Devin 3000.3 moved MCP configuration out of config.json. Keep the
@@ -562,17 +685,12 @@ const devinProfile: AcpProviderProfile = {
     // workspace-trust setting stops them. With these files unreadable the
     // session opened, started none of them, and still reached its own MCP
     // servers.
-    forbiddenRootEntries: [
-      ".agents/skills",
-      ".cognition/skills",
-      ".devin/config.json",
-      ".devin/config.local.json",
-      ".devin/hooks.json",
-      ".devin/hooks.v1.json",
-      ".devin/mcp_config.json",
-      ".devin/mcp_config.local.json",
-      ".devin/skills",
-    ],
+    forbiddenRootEntries: DEVIN_PROJECT_ENTRIES,
+    // A trusted Project's skills and `.devin` files, under Devin's own
+    // workspace trust (`--respect-workspace-trust`). The managed configuration
+    // stays, so its own subagents stay off and the person's home configuration
+    // is not read.
+    nativeSetup: releasesTrustedProject(DEVIN_PROJECT_ENTRIES),
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -854,6 +972,7 @@ const grokProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Grok Build is not authenticated. Run grok login (or grok login --device-auth on a headless host), then retry.",
+  nativeSetupSupport: acpOwnSetupSupport(["subagents"]),
   process: {
     // display-only now; identity is verified via verifyAgentInfo below (real
     // initialize responses have no agentInfo field)
@@ -906,6 +1025,14 @@ const grokProfile: AcpProviderProfile = {
     // and the ACP server still answered. The person's own trust decisions
     // stay in place for their interactive Grok.
     hostDeniedEntries: ["trusted_folders.toml"],
+    // In a Project trusted for Grok Build outside Plan, the trust list is
+    // readable again, so Grok's own folder trust decides what of the Project
+    // loads, as it does on its own.
+    // Its own subagents, in Work and Code outside Plan, unset `GROK_SUBAGENTS`.
+    nativeSetup: releasesTrustedProject([], {
+      hostEntries: (setup) => (setup.projectCode ? ["trusted_folders.toml"] : []),
+      subagentGuard: "GROK_SUBAGENTS",
+    }),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".grok"),
@@ -938,6 +1065,7 @@ const gooseProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Goose is not authenticated. Run `goose configure` in your terminal, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "goose",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -960,6 +1088,12 @@ const gooseProfile: AcpProviderProfile = {
     // step and starts the hooks and `.mcp.json` servers each one carries; an
     // unreadable folder lists no plugins.
     forbiddenRootEntries: [".agents/plugins", ".agents/skills", ".claude/skills", ".goose/skills"],
+    nativeSetup: releasesTrustedProject([
+      ".agents/plugins",
+      ".agents/skills",
+      ".claude/skills",
+      ".goose/skills",
+    ]),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
@@ -996,6 +1130,7 @@ const glmProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "GLM Agent is not authenticated. Run the provider-owned GLM Agent CLI login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "glm-acp-agent",
     npmPackageName: "glm-acp-agent",
@@ -1019,6 +1154,7 @@ const glmProfile: AcpProviderProfile = {
     // GLM Agent advertises the packages in <cwd>/.claude/skills as commands and
     // puts one's body into the message when its `/name` is typed (its README).
     forbiddenRootEntries: [".claude/skills"],
+    nativeSetup: releasesTrustedProject([".claude/skills"]),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/glm-acp-agent"),
@@ -1066,7 +1202,7 @@ const refusesProjectEntries =
     const found = entries.filter((entry) => projectHoldsEntry(root, entry));
     if (found.length === 0) return undefined;
     const names = found.map((entry) => `\`${entry}\``).join(", ");
-    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, without Octant's approval, so it does not start here. Remove or rename ${found.length === 1 ? "it" : "them"}, or use another provider in this Project.`;
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, so it starts here only once you trust this Project for ${displayName}. Trust it, remove or rename ${found.length === 1 ? "that file" : "those files"}, or use another provider in this Project.`;
   };
 
 const geminiProfile: AcpProviderProfile = {
@@ -1098,6 +1234,7 @@ const geminiProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Gemini CLI is not authenticated. Run gemini and complete its provider-owned CLI login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "gemini-cli",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -1117,6 +1254,7 @@ const geminiProfile: AcpProviderProfile = {
     // folder is trusted (its documentation and skill manager source); no
     // variable or flag turns that off.
     forbiddenRootEntries: [".agents/skills", ".gemini/skills"],
+    nativeSetup: releasesTrustedProject([".agents/skills", ".gemini/skills"]),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".gemini"),
@@ -1128,6 +1266,22 @@ const geminiProfile: AcpProviderProfile = {
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
+
+const COPILOT_PROJECT_ENTRIES: ReadonlyArray<string> = [
+  ".agents/skills",
+  ".claude/settings.json",
+  ".claude/settings.local.json",
+  ".claude/skills",
+  ".github/agents",
+  ".github/copilot/settings.json",
+  ".github/copilot/settings.local.json",
+  ".github/extensions",
+  ".github/hooks",
+  ".github/lsp.json",
+  ".github/mcp.json",
+  ".github/skills",
+  ".mcp.json",
+];
 
 const copilotProfile: AcpProviderProfile = {
   kind: "copilot",
@@ -1141,6 +1295,7 @@ const copilotProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "GitHub Copilot is not authenticated. Run `copilot login`, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "Copilot",
     versionPattern: /^GitHub Copilot CLI (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.?\r?\n?$/,
@@ -1172,21 +1327,8 @@ const copilotProfile: AcpProviderProfile = {
     // as repository settings: in a trusted folder `copilot plugin marketplace
     // list` (1.0.90) showed a marketplace declared in either, and with both
     // unreadable it warned and went on.
-    forbiddenRootEntries: [
-      ".agents/skills",
-      ".claude/settings.json",
-      ".claude/settings.local.json",
-      ".claude/skills",
-      ".github/agents",
-      ".github/copilot/settings.json",
-      ".github/copilot/settings.local.json",
-      ".github/extensions",
-      ".github/hooks",
-      ".github/lsp.json",
-      ".github/mcp.json",
-      ".github/skills",
-      ".mcp.json",
-    ],
+    forbiddenRootEntries: COPILOT_PROJECT_ENTRIES,
+    nativeSetup: releasesTrustedProject(COPILOT_PROJECT_ENTRIES),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".copilot"),
@@ -1196,6 +1338,16 @@ const copilotProfile: AcpProviderProfile = {
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
+
+const CLINE_PROJECT_ENTRIES: ReadonlyArray<string> = [
+  ".agents/skills",
+  ".claude/skills",
+  ".cline/hooks",
+  ".cline/plugins",
+  ".cline/skills",
+  ".clinerules/hooks",
+  ".clinerules/skills",
+];
 
 const clineProfile: AcpProviderProfile = {
   kind: "cline",
@@ -1216,6 +1368,7 @@ const clineProfile: AcpProviderProfile = {
   authenticateOnProbe: false,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Cline is not authenticated. Run cline auth, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "cline",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -1244,15 +1397,8 @@ const clineProfile: AcpProviderProfile = {
     // every JS or TS plugin module in .cline/plugins and runs the hook scripts
     // in .cline/hooks and .clinerules/hooks, with no trust step and no switch
     // an ACP launch can set; an unreadable folder is skipped.
-    forbiddenRootEntries: [
-      ".agents/skills",
-      ".claude/skills",
-      ".cline/hooks",
-      ".cline/plugins",
-      ".cline/skills",
-      ".clinerules/hooks",
-      ".clinerules/skills",
-    ],
+    forbiddenRootEntries: CLINE_PROJECT_ENTRIES,
+    nativeSetup: releasesTrustedProject(CLINE_PROJECT_ENTRIES),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".cline", "data"),
@@ -1293,6 +1439,7 @@ const qwenProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "Qwen Code is not authenticated. Run the provider-owned Qwen CLI login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "qwen-code",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -1309,6 +1456,7 @@ const qwenProfile: AcpProviderProfile = {
     // Qwen Code loads Project skills from these folders by itself (its skill
     // provider folders in source); only bare mode skips them.
     forbiddenRootEntries: [".agents/skills", ".qwen/skills"],
+    nativeSetup: releasesTrustedProject([".agents/skills", ".qwen/skills"]),
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".qwen"),
@@ -1361,6 +1509,7 @@ const fxProfile: AcpProviderProfile = {
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage:
     "fx is not authenticated. Add a Vercel AI Gateway API key for this provider, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport([]),
   process: {
     agentName: "fx",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
@@ -1398,6 +1547,9 @@ const fxProfile: AcpProviderProfile = {
     // admits none of those for fx, and a project `.mcp.json` would start
     // executables outside the approval flow, so the root denies them.
     forbiddenRootEntries: FX_WORKSPACE_DENIED_ENTRIES,
+    // A trusted Project's own entries; the workspace `AGENTS.md` is the
+    // Project's instruction text and comes with any of the person's setup.
+    nativeSetup: releasesTrustedProject(FX_WORKSPACE_DENIED_ENTRIES, { context: ["AGENTS.md"] }),
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -1436,6 +1588,7 @@ const kimiProfile: AcpProviderProfile = {
   reviewedCommands: KIMI_REVIEWED_COMMANDS,
   authentication: { kind: "provider-owned" },
   unauthenticatedMessage: "Kimi Code is not authenticated. Run kimi login, then retry.",
+  nativeSetupSupport: acpOwnSetupSupport(["skills", "toolServers", "hooks"]),
   process: {
     agentName: "Kimi Code CLI",
     versionPattern:
@@ -1472,6 +1625,17 @@ const kimiProfile: AcpProviderProfile = {
     // unreadable the session opened, started nothing from it, and still
     // reached its own MCP servers.
     forbiddenRootEntries: [".kimi-code", ".agents", ".mcp.json"],
+    // The person's own Kimi home: its `AGENTS.md` with any of their setup,
+    // skills, MCP servers and plugins, and hooks, each with its feature (hooks
+    // never in Chat or Plan); a trusted Project's own entries outside Plan.
+    nativeSetup: releasesTrustedProject([".kimi-code", ".agents", ".mcp.json"], {
+      hostEntries: (setup) => [
+        ...(providerRunsAsItself(setup) ? ["AGENTS.md"] : []),
+        ...(setup.skills ? ["skills"] : []),
+        ...(setup.toolServers ? ["mcp.json", "plugins"] : []),
+        ...(setup.hooks ? ["hooks"] : []),
+      ],
+    }),
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and
     // the reviewed command inventory remains the authority for ACP commands.

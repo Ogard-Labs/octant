@@ -15,12 +15,22 @@ export const DEFAULT_THREAD_TOOL_STEPS_PER_TURN = 64;
 /** The most a person may set either tool-step limit to. */
 export const MAX_THREAD_TOOL_STEPS_SETTING = 4_096;
 /**
- * The most discrete runtime events one Chat or Work turn handles before the
- * host stops it; streamed text deltas do not count. Fixed whatever the
- * tool-step settings say: it guards against a runaway turn (maintainer
- * decision, 2026-11-13).
+ * How many discrete runtime events a turn may handle for each tool step its
+ * limit keeps; streamed text deltas do not count. The turn's event budget
+ * follows the person's tool-step limit, so the default 64 steps keep the
+ * 4,096 events a turn has always had, and a limit that is off (Full access
+ * by default) stops no turn (maintainer decision, 2026-11-14).
  */
-export const MAX_TURN_RUNTIME_EVENTS = 4_096;
+export const RUNTIME_EVENTS_PER_TOOL_STEP = 64;
+/**
+ * How many turns a runtime may start by itself inside one person's turn below
+ * Full access until a person changes it: generous, since a watch the person
+ * asked for may report many times (maintainer decision, 2026-11-14; it was a
+ * fixed 16).
+ */
+export const DEFAULT_RUNTIME_TURNS_PER_TURN = 256;
+/** The most a person may set the runtime-turn count to. */
+export const MAX_RUNTIME_TURNS_PER_TURN_SETTING = 4_096;
 /** The most a step's progress or result message keeps. */
 export const MAX_THREAD_TOOL_STEP_SUMMARY_BYTES = 2_048;
 

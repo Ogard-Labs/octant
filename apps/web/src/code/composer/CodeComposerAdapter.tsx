@@ -14,6 +14,8 @@ import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelecti
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
+  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -82,6 +84,7 @@ import {
   selectedModelReadsImages,
   useWorkComposerImages,
 } from "../../work/composer/useWorkComposerImages";
+import { useSeesImages } from "../../harness/useSeesImages";
 import { WorkImageAttachmentChips } from "../../work/composer/WorkImageAttachmentChips";
 import {
   ThreadMentionChips,
@@ -311,11 +314,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const slash = useComposerSlashCommands({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-  });
   const atMenu = useComposerAtMenu({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -373,12 +371,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   };
   const mentionListId = "code-new-thread-mentions";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(providerGroups, {
-    ...(props.selectedProviderInstanceId === undefined
-      ? {}
-      : { providerInstanceId: props.selectedProviderInstanceId }),
-    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(providerGroups, {
+      ...(props.selectedProviderInstanceId === undefined
+        ? {}
+        : { providerInstanceId: props.selectedProviderInstanceId }),
+      ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: props.projectId === undefined ? undefined : String(props.projectId),
+    providerInstanceId:
+      props.selectedProviderInstanceId === undefined
+        ? undefined
+        : String(props.selectedProviderInstanceId),
+    modelId: props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
+  }).takesImages;
   const threadMentions = useThreadMentions({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -409,6 +419,16 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
   const { executionPolicy, autoApprove } = threadAccessOf(permissionMode);
+  const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    provider: composerProviderCommands(
+      providerGroups,
+      props.selectedProviderInstanceId,
+      executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
+    ),
+  });
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.

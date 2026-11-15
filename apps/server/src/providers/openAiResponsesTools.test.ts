@@ -535,3 +535,197 @@ describe("sendResponsesTurn tool calls", () => {
     expect(body).not.toHaveProperty("prompt_cache_key");
   });
 });
+
+describe("OpenAI's own web search in one response", () => {
+  const searchItem = (id: string, status: "in_progress" | "completed") => ({
+    id,
+    type: "web_search_call",
+    status,
+    ...(status === "completed"
+      ? {
+          action: {
+            type: "search",
+            query: "octant release",
+            sources: [{ type: "url", url: "https://example.com/octant" }],
+          },
+        }
+      : {}),
+  });
+
+  it("asks for the web search tool capped at one built-in call and reports the search when it is done, then the titles the reply cited", async () => {
+    const observed: ProtocolTurnEvent[] = [];
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        {
+          type: "response.web_search_call.searching",
+          sequence_number: 3,
+          item_id: "ws_1",
+          output_index: 0,
+        },
+        functionCallDone(4, searchItem("ws_1", "completed")),
+        {
+          type: "response.output_text.annotation.added",
+          sequence_number: 5,
+          annotation: { type: "url_citation", url: "https://example.com/octant", title: "Octant" },
+        },
+        completed(6, [searchItem("ws_1", "completed")]),
+      ),
+    );
+    await Effect.runPromise(
+      sendResponsesTurn({
+        ...input(fetch),
+        webSearch: true,
+        onEvent: (event) => observed.push(event),
+      }),
+    );
+    const init = (fetch.mock.calls[0] as unknown as [unknown, RequestInit | undefined])[1];
+    const body = JSON.parse(String(init?.body));
+    expect(body.tools).toEqual([{ type: "web_search" }]);
+    expect(body.max_tool_calls).toBe(1);
+    expect(body.include).toEqual(["web_search_call.action.sources"]);
+    const reported = {
+      kind: "web-search",
+      sequence: expect.any(Number),
+      searchId: "ws_1",
+      query: "octant release",
+      citedText: [],
+    };
+    expect(observed.filter((event) => event.kind === "web-search")).toEqual([
+      { ...reported, sources: [{ url: "https://example.com/octant" }] },
+      { ...reported, sources: [{ url: "https://example.com/octant", title: "Octant" }] },
+    ]);
+  });
+
+  it("still reports a finished search when the response then fails", async () => {
+    const observed: ProtocolTurnEvent[] = [];
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        functionCallDone(3, searchItem("ws_1", "completed")),
+        { type: "error", sequence_number: 4, code: "server_error", message: "boom" },
+      ),
+    );
+    const failure = await failureOf(
+      sendResponsesTurn({
+        ...input(fetch),
+        webSearch: true,
+        onEvent: (event) => observed.push(event),
+      }),
+    );
+    expect(failure.category).not.toBe("unsupported");
+    expect(observed.filter((event) => event.kind === "web-search")).toEqual([
+      expect.objectContaining({
+        searchId: "ws_1",
+        sources: [{ url: "https://example.com/octant" }],
+      }),
+    ]);
+  });
+
+  it.each([
+    ["completes", [completed(5, [searchItem("ws_1", "completed")])], false],
+    [
+      "stops at its output limit",
+      [
+        {
+          type: "response.incomplete",
+          sequence_number: 5,
+          response: {
+            ...responseState("incomplete"),
+            incomplete_details: { reason: "max_output_tokens" },
+          },
+        },
+      ],
+      false,
+    ],
+    ["refuses", [{ type: "response.refusal.delta", sequence_number: 5, delta: "no" }], false],
+    [
+      "fails",
+      [
+        {
+          type: "response.failed",
+          sequence_number: 5,
+          response: {
+            ...responseState("failed"),
+            error: { code: "server_error", message: "boom" },
+          },
+        },
+      ],
+      false,
+    ],
+    [
+      "reports an error",
+      [{ type: "error", sequence_number: 5, code: "server_error", message: "boom" }],
+      false,
+    ],
+    ["is stopped", [created(5)], true],
+    ["ends without a terminal response", [], false],
+    ["cannot be read", [{ type: "response.output_text.delta", sequence_number: 9 }], false],
+  ])(
+    "reports the titles the reply cited exactly once when the response %s",
+    async (_ending, tail, stop) => {
+      const observed: ProtocolTurnEvent[] = [];
+      const controller = new AbortController();
+      const fetch = vi.fn(async () =>
+        sse(
+          created(1),
+          functionCallAdded(2, searchItem("ws_1", "in_progress")),
+          functionCallDone(3, searchItem("ws_1", "completed")),
+          {
+            type: "response.output_text.annotation.added",
+            sequence_number: 4,
+            annotation: {
+              type: "url_citation",
+              url: "https://example.com/octant",
+              title: "Octant",
+            },
+          },
+          ...tail,
+        ),
+      );
+      await Effect.runPromise(
+        Effect.either(
+          sendResponsesTurn({
+            ...input(fetch),
+            webSearch: true,
+            signal: controller.signal,
+            onEvent: (event) => {
+              observed.push(event);
+              // Stopped once the search is reported, before the reply ends.
+              if (stop && event.kind === "web-search") controller.abort();
+            },
+          }),
+        ),
+      );
+      expect(
+        observed.flatMap((event) => (event.kind === "web-search" ? [event.sources] : [])),
+      ).toEqual([
+        [{ url: "https://example.com/octant" }],
+        [{ url: "https://example.com/octant", title: "Octant" }],
+      ]);
+    },
+  );
+
+  it("refuses a second built-in search in the same response as unsupported", async () => {
+    const fetch = vi.fn(async () =>
+      sse(
+        created(1),
+        functionCallAdded(2, searchItem("ws_1", "in_progress")),
+        functionCallDone(3, searchItem("ws_1", "completed")),
+        functionCallAdded(4, searchItem("ws_2", "in_progress"), 1),
+      ),
+    );
+    const failure = await failureOf(sendResponsesTurn({ ...input(fetch), webSearch: true }));
+    expect(failure.category).toBe("unsupported");
+  });
+
+  it("still refuses a built-in search the request did not offer", async () => {
+    const fetch = vi.fn(async () =>
+      sse(created(1), functionCallAdded(2, searchItem("ws_1", "in_progress"))),
+    );
+    const failure = await failureOf(sendResponsesTurn(input(fetch)));
+    expect(failure.category).toBe("unsupported");
+  });
+});

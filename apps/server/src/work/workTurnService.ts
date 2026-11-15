@@ -91,11 +91,17 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
   type ProviderRuntimeEvent,
+  type DescribedTurnImages,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderSessionHandle,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import type {
@@ -109,6 +115,7 @@ import {
   accumulateTurnUsage,
   decideConversationSession,
   decideWorkTurnAuthority,
+  describedImageText,
   assertProviderAllowedByProjectPolicy,
   ProjectProviderPolicyRejected,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -116,6 +123,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
+  hostSandboxRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -287,6 +295,11 @@ export interface ServerWorkTurns {
 export interface WorkTurnServiceDependencies {
   /** Whether a move holds a thread; a held thread starts no turn. */
   readonly moveHold?: (threadId: string) => boolean;
+  /**
+   * The host's schedule for a thread's wake-ups, read at each session start;
+   * absent, or answering undefined, offers the runtime no wake-up tool.
+   */
+  readonly wakeupsForThread?: (threadId: string) => ProviderWakeupSchedule | undefined;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -375,6 +388,18 @@ export interface WorkTurnServiceDependencies {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
+  /**
+   * Sees images: describes a turn's images for a model that cannot read
+   * them, or refuses with the reason. Absent, such a turn is refused as before.
+   */
+  readonly describeImages?: (input: {
+    readonly threadId: WorkThreadId;
+    readonly projectId: ProjectId;
+    readonly providerInstanceId: WorkThread["providerInstanceId"];
+    readonly modelId: WorkThread["modelId"];
+    readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
+  }) => Promise<TurnImagesDescription>;
   readonly turnRuntime?: WorkTurnRuntimePort;
   readonly prepareProductFeedbackForTurn?: (input: {
     readonly windowId: WindowId;
@@ -614,6 +639,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
+  readonly #describeImages: WorkTurnServiceDependencies["describeImages"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
@@ -664,9 +690,11 @@ export class WorkTurnService {
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
+  readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
+    this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -680,6 +708,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#conversationInputTransfer = dependencies.conversationInputTransfer;
     this.#supportsAttachments = dependencies.supportsAttachments;
+    this.#describeImages = dependencies.describeImages;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
@@ -865,8 +894,6 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
-    if (process.platform === "win32")
-      throw this.#failure("unavailable", "Work execution requires Windows host confinement.");
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
@@ -1015,6 +1042,17 @@ export class WorkTurnService {
       options?.accessCeiling === undefined
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
+    // Judged at that level, not only the thread's stored one, before anything
+    // is journaled or started: a host without Octant's sandbox runs only the
+    // level that uses none.
+    const sandboxRefusal = hostSandboxRefusal({
+      platform: process.platform,
+      access: {
+        ...workThreadAccessOf(turnAccess),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      },
+    });
+    if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     // A thread in a server Work Project binds its turn here, before anything
     // starts: the harness's tools on the server, or why it cannot run there.
@@ -1192,15 +1230,56 @@ export class WorkTurnService {
     if (starting.status === "unknown") {
       throw this.#failure("invalid", "An image attached to this turn is no longer staged.");
     }
-    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
-      throw this.#failure(
-        "unsupported",
-        "The selected model does not support images. Choose a vision model, or remove the attachments.",
-      );
-    }
     let attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
     if (attachmentInputs === undefined) {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
+    }
+    // A model that cannot read images gets the words Sees images writes for
+    // each one; the images stay attached to the turn for the record. With no
+    // model to describe them, the turn is refused rather than sent without.
+    let describedImages: DescribedTurnImages | undefined;
+    let describedTexts: ReadonlyArray<string> = [];
+    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
+      if (this.#describeImages === undefined) {
+        throw this.#failure(
+          "unsupported",
+          "The selected model does not support images. Choose a vision model, or remove the attachments.",
+        );
+      }
+      // A turn stopped or revoked while its images are described sends no further one.
+      const describing = new AbortController();
+      const watch = setInterval(() => {
+        if (options?.admissionCurrent?.() === false) describing.abort();
+      }, 250);
+      const described = await this.#describeImages({
+        signal: describing.signal,
+        threadId: command.threadId,
+        projectId: command.authority.projectId,
+        providerInstanceId: command.authority.providerInstanceId,
+        modelId: command.authority.modelId,
+        images: attachmentInputs.map((input) => ({
+          attachmentId: input.attachmentId,
+          name: input.displayName,
+          mediaType: input.mediaType,
+          bytes: input.bytes,
+        })),
+      }).finally(() => clearInterval(watch));
+      if (described.status === "refused") throw this.#failure("unsupported", described.reason);
+      describedImages = described.images.map((image) => ({
+        attachmentId: image.attachmentId,
+        name: image.name,
+        describedBy: image.describedBy,
+        description: image.text,
+      }));
+      describedTexts = described.images.map((image) =>
+        describedImageText({
+          name: image.name,
+          attachmentId: image.attachmentId,
+          describedBy: image.describedBy,
+          description: image.text,
+        }),
+      );
+      attachmentInputs = [];
     }
 
     const selections =
@@ -1630,6 +1709,16 @@ export class WorkTurnService {
                   block: { kind: "user-message" as const, text: externalData.content.text },
                 },
               ]),
+          ...describedTexts.map(
+            (text, index): WorkTurnContextContribution => ({
+              text,
+              sourceKind: "message",
+              referenceId: `described-image:${command.turnId}:${index}`,
+              category: "workspace-context",
+              posture: "required",
+              block: { kind: "user-message", text },
+            }),
+          ),
           {
             text: command.prompt,
             sourceKind: "message",
@@ -1734,6 +1823,7 @@ export class WorkTurnService {
               ? {}
               : { sideChatReturns: command.sideChatReturns }),
             ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+            ...(describedImages === undefined ? {} : { describedImages }),
             ...(command.extensionSelections === undefined ||
             command.extensionSelections.length === 0
               ? {}
@@ -2426,6 +2516,7 @@ export class WorkTurnService {
               input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
           }),
         ),
+        ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"
@@ -3020,24 +3111,31 @@ export class WorkTurnService {
 
   /** The conversation a requested compaction may summarize, sourced as turn context sources it. */
   sessionCompactionConversation(threadId: WorkThreadId): ReadonlyArray<SessionConversationMessage> {
-    return this.#projection.listForThread(threadId).flatMap((turn) =>
-      turn.transcript.flatMap(
-        (entry, index): ReadonlyArray<SessionConversationMessage> =>
-          entry.text.trim() === ""
-            ? []
-            : [
-                {
-                  source: {
-                    kind: "message",
-                    referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
-                  },
-                  role: entry.role,
-                  exchangeKey: String(turn.turnId),
-                  content: entry.text,
+    return this.#projection.listForThread(threadId).flatMap((turn) => {
+      // The words Sees images wrote for the turn's images were part of what
+      // the person's message said to the model, so a rebuilt history and a
+      // compaction read them with it.
+      const described = describedImageLines(turn.describedImages);
+      return turn.transcript.flatMap((entry, index): ReadonlyArray<SessionConversationMessage> => {
+        const text =
+          index === 0 && entry.role === "user" && described.length > 0
+            ? [...described, entry.text].join("\n\n")
+            : entry.text;
+        return text.trim() === ""
+          ? []
+          : [
+              {
+                source: {
+                  kind: "message",
+                  referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
                 },
-              ],
-      ),
-    );
+                role: entry.role,
+                exchangeKey: String(turn.turnId),
+                content: text,
+              },
+            ];
+      });
+    });
   }
 
   /** Whether a turn on this thread is accepted, running, or waiting on the person. */
@@ -3610,4 +3708,26 @@ function personMemoryContributions(
       block: { kind: "person-memory", text },
     },
   ];
+}
+
+/** The model-facing text of each image a turn's model got described, in order. */
+function describedImageLines(images: DescribedTurnImages | undefined): ReadonlyArray<string> {
+  return (images ?? []).flatMap((image) =>
+    image.description === undefined
+      ? []
+      : [
+          describedImageText({
+            name: image.name,
+            attachmentId: image.attachmentId,
+            describedBy: image.describedBy,
+            description: image.description,
+          }),
+        ],
+  );
+}
+
+function wakeupsOption(wakeups: ProviderWakeupSchedule | undefined): {
+  readonly wakeups?: ProviderWakeupSchedule;
+} {
+  return wakeups === undefined ? {} : { wakeups };
 }

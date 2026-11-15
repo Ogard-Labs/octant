@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/providers";
 import { useState } from "react";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { keyProviderLabel } from "../providers/providerSettingsPresentation";
 
 type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
 
@@ -14,13 +15,6 @@ export interface ProjectNativeProvidersSectionProps {
   readonly onChange: (providers: KeyProviderDriverKinds) => Promise<boolean>;
   readonly disabled?: boolean;
 }
-
-const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  "mistral-vibe": "Mistral Vibe",
-};
 
 /**
  * Which key providers this Project trusts to run as themselves here: each
@@ -73,7 +67,7 @@ export function ProjectNativeProvidersSection(props: ProjectNativeProvidersSecti
               disabled={disabled}
               onChange={() => void toggle(kind)}
             />
-            <span>{PROVIDER_NAMES[kind]}</span>
+            <span>{keyProviderLabel(kind)}</span>
           </label>
         ))}
       </div>

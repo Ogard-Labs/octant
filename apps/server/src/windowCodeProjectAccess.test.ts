@@ -147,6 +147,31 @@ describe("a window showing panes of several Projects", () => {
     ).toBe(false);
   });
 
+  it("reaches a server Work Project shown beside a local one only while its pane shows it", () => {
+    const shown = withPane("work", ids.other);
+    const pane = shown.layouts.work;
+    if (pane.kind !== "pane") throw new Error("expected pane");
+    // A server Project holds no folder on this host: its pane's context has no bound root.
+    const serverPane = {
+      ...shown,
+      layouts: {
+        ...shown.layouts,
+        work: {
+          ...pane,
+          context: {
+            ...contextKeyForProject("work", LOCAL_HOST_ID, ids.other, "/x"),
+            boundRoot: null,
+          },
+        },
+      },
+    };
+    expect(windowCanAccessWorkProject({ workspace: serverPane, projectId: ids.other })).toBe(true);
+    expect(windowCanAccessWorkProject({ workspace: serverPane, projectId: ids.bound })).toBe(true);
+    expect(
+      windowCanAccessWorkProject({ workspace: withPane("work", undefined), projectId: ids.other }),
+    ).toBe(false);
+  });
+
   it("reaches a Work Project shown in one of its Work panes only while the pane shows it", () => {
     expect(
       windowCanAccessWorkProject({ workspace: withPane("work", ids.other), projectId: ids.other }),

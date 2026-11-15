@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { hostStartsThreadsAtOpenFullAccess } from "@octant/domain/guardrail-policy";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -221,9 +222,11 @@ import {
 import {
   type NativeHarnessEndpointHooks,
   NativeHarnessEndpointRegistry,
+  NativeHarnessProviderSearchGrants,
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
   appToolThreadLevel,
+  accountKeepsOwnMemory,
   browserToolTransport,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
@@ -232,6 +235,7 @@ import {
   isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
+  providerOwnSearchOrigin,
   resolveModelContextWindow,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
@@ -277,6 +281,8 @@ export interface ConfiguredProviderDriverOptions {
    */
   readonly compactionShare?: (keeper: "octant" | "runtime") => number | null;
   readonly permissionPersistence: () => PermissionPersistence;
+  /** The person's runtime-turn count from Settings, read when a runtime starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
@@ -435,6 +441,9 @@ export function makeConfiguredProviderDriver(
       // `claudeInstances` is a getter over the journal on the host's options;
       // reading it here at every call keeps a running session on the
       // person's current switch.
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       claudeArtifactDelivery: (instanceId) =>
         options.claudeInstances?.some(
           (candidate) =>
@@ -450,7 +459,7 @@ export function makeConfiguredProviderDriver(
           (candidate) =>
             String(candidate.id) === String(instanceId) &&
             (candidate.driverKind === "claude" || candidate.driverKind === "codex") &&
-            candidate.ownMemory === true,
+            accountKeepsOwnMemory(candidate),
         ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
@@ -734,7 +743,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
     const codexProcessPort =
       options.codexProcess ??
-      makeCodexProcessLive({ octantVersion: version, runtimeNetwork, serverAccess });
+      makeCodexProcessLive({
+        octantVersion: version,
+        runtimeNetwork,
+        serverAccess,
+        windowsCatalogForOpenFullAccess: () =>
+          hostStartsThreadsAtOpenFullAccess({
+            code: persistence.readCodeSettings()?.settings,
+            work: workThreadProjection.settings(),
+          }),
+      });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
         Effect.suspend(() =>
@@ -1628,6 +1646,9 @@ export function wireProviders(deps: ProvidersDependencies) {
     // asks the fallback (built below, from the options these hooks are part
     // of) where to go when its own model stays down.
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
+    // Each harness turn's provider-search grant, tracked by the harness
+    // composition (wired later, in the harness area) and asked by the loop.
+    const nativeHarnessProviderSearchGrants = new NativeHarnessProviderSearchGrants();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
       // What a request teaches about its model's window is kept with the
@@ -1639,6 +1660,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       leadFallback: {
         next: (input) => nativeHarnessLeadFallback.next(input),
       },
+      ownSearchOn: (instanceId) => {
+        const instance = persistence.readProviderInstance(instanceId);
+        return instance !== undefined && providerOwnSearchOrigin(instance) !== undefined;
+      },
+      providerSearch: nativeHarnessProviderSearchGrants,
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialBroker =
@@ -2083,6 +2109,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      runtimeTurnsPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return keeper === "octant"
@@ -2361,6 +2389,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessLeadFallback,
+      nativeHarnessProviderSearchGrants,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,

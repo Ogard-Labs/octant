@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import {
   chmodSync,
   constants,
@@ -113,9 +114,19 @@ export interface OpenCodeProcessStartInput {
    * The person let OpenCode load its own skills: the launch keeps the
    * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
    * does not deny the `skill` permission. Its project configuration and
-   * plugins stay off either way.
+   * plugins stay off unless `projectConfig` is set.
    */
   readonly ownSkills?: true;
+  /**
+   * A Project the person trusted for OpenCode, outside Plan and Chat:
+   * `OPENCODE_DISABLE_PROJECT_CONFIG` goes, so OpenCode loads the Project's
+   * own `opencode.json(c)` and `.opencode` agents, plugins, and commands as it
+   * does on its own (maintainer decision, 2026-11-14). Those files load after
+   * the private configuration and may override Octant's rules, which the
+   * person accepted by trusting the Project; the launch is then never
+   * attested as isolated. Ignored in Plan and Chat, which keep it set.
+   */
+  readonly projectConfig?: true;
   /**
    * The person let OpenCode run as itself with its tool servers: these are the
    * MCP servers they added to their own configuration, written into the
@@ -198,6 +209,27 @@ function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   return kept;
 }
 
+/** The guards a launch keeps: `projectConfig` lifts only the Project configuration switch. */
+function openCodeLaunchGuards(
+  ownSkills: boolean,
+  projectConfig: boolean,
+): Readonly<Record<string, string>> {
+  const guards = ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS;
+  if (!projectConfig) return guards;
+  const { OPENCODE_DISABLE_PROJECT_CONFIG: _projectConfigOff, ...kept } = guards;
+  return kept;
+}
+
+/** Plan stays read-only and Chat keeps no folder, so neither loads a Project's own configuration. */
+function launchLoadsProjectConfig(input: OpenCodeProcessStartInput): boolean {
+  return (
+    input.projectConfig === true &&
+    input.executionPolicy !== undefined &&
+    input.executionPolicy !== "plan" &&
+    (input.mode === "work" || input.mode === "code")
+  );
+}
+
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000;
 const VERSION_TIMEOUT_MS = 5_000;
@@ -224,10 +256,38 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * The jail allows fork plus exec of exactly this one binary — no real git,
  * no shell, no other exec. The stand-in is macOS only. Linux confinement
  * cannot grant that one exec without also allowing fork, which reopens the
- * Plan jail, so a 2.x Chat, Plan, or Work launch on Linux keeps both denied
- * and the readiness probe fails closed.
+ * Plan jail, so a 2.x Chat or Plan launch on Linux is refused before it
+ * starts (`openCodeRefusesTurnHere`).
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
+
+/**
+ * Why a 2.x Chat or Plan launch is refused off macOS. Linux confinement can
+ * only deny fork outright, and 2.x has to start `git` to serve a work tree,
+ * so the jail those modes need cannot serve one there. Work and Code outside
+ * Plan already allow a shell, so 2.x runs there (maintainer decision,
+ * 2026-11-14).
+ */
+export const OPENCODE_LINUX_CHAT_PLAN_REFUSAL =
+  "OpenCode 2 runs on Linux only in Work and Code outside Plan: Chat and Plan allow no process, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
+
+/**
+ * Whether this launch is one the host's confinement cannot give a 2.x
+ * runtime: Chat or Plan (no fork, no exec) wherever the git stand-in is not
+ * available. Work and Code outside Plan launch as they always have.
+ */
+export function openCodeRefusesTurnHere(input: {
+  readonly runtime: OpenCodeRuntime;
+  readonly platform: NodeJS.Platform;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.runtime === "beta" &&
+    input.platform !== "darwin" &&
+    (input.mode === "chat" || input.executionPolicy === "plan")
+  );
+}
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -691,6 +751,19 @@ export function openCodeServesQuestionForms(version: string | undefined): boolea
   return openCode2VersionAtLeast(version, OPEN_CODE_2_QUESTION_FORMS_SINCE);
 }
 
+/**
+ * The first 2.x release whose server was read for OpenCode's own commands:
+ * `GET /api/command` lists them and `POST /api/session/{id}/command` runs one
+ * (read again at 2.2.0). 1.x is left out: its command route answers only once
+ * the whole run has ended, so a turn could not start from it.
+ */
+const OPEN_CODE_2_COMMAND_ROUTES_SINCE = [2, 0, 22] as const;
+
+/** Whether this runtime version string names a 2.x release read for the command routes. */
+export function openCodeServesCommandRoutes(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_COMMAND_ROUTES_SINCE);
+}
+
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
   // 2.0.x has no `--pure`; the private profile and guards alone kept the
@@ -746,6 +819,7 @@ export function createPrivateOpenCodeProfile(
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
   ownSkills = false,
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+  projectConfig = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -786,7 +860,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...(ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS),
+      ...openCodeLaunchGuards(ownSkills, projectConfig),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -892,7 +966,9 @@ function processGroupExists(child: OpenCodeChild): boolean {
 function signalProcessGroup(child: OpenCodeChild, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the runtime and every
+    // program it started, where `child.kill` ended only the runtime.
+    if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -1063,6 +1139,9 @@ function prepareOpenCodeLaunch(
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
+  if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
+    return Effect.fail(failure("unsupported", OPENCODE_LINUX_CHAT_PLAN_REFUSAL));
+  }
   return Effect.try({
     try: () => {
       const root = realpathSync(input.cwd);
@@ -1134,7 +1213,7 @@ function prepareOpenCodeLaunch(
       // project". The jail allows fork plus exec of exactly /usr/bin/false
       // and nothing else. Linux confinement cannot express that one exec
       // without also allowing fork, which is the hole the Plan jail exists
-      // to close, so Linux keeps fork denied and the probe fails closed.
+      // to close, so a 2.x Chat or Plan launch on Linux was refused above.
       // OpenCode 1.x and Work and Code modes are unchanged.
       const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {
@@ -1401,6 +1480,7 @@ function acquireOpenCodeServer(
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
           input.ownSkills === true,
           input.ownToolServers,
+          launchLoadsProjectConfig(input),
         );
       } catch {
         resume(
@@ -1724,7 +1804,9 @@ export function makeOpenCodeProcessLive(
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
-            supportsOpenCodeIsolation(probe.version),
+            // A Project's own plugins and servers enter a launch that loads
+            // its configuration, so that launch is never isolated.
+            supportsOpenCodeIsolation(probe.version) && !launchLoadsProjectConfig(input),
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

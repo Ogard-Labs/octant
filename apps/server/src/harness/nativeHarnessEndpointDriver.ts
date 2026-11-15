@@ -10,6 +10,7 @@ import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type {
   HarnessEndpointDriver,
+  HarnessEndpointRequest,
   HarnessEndpointResponse,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
@@ -21,7 +22,7 @@ import {
 } from "../providers/modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import type { NativeHarnessEndpointHooks } from "./nativeHarnessEndpointRegistry";
-import { createNativeHarnessConnection } from "./nativeHarnessLoop";
+import { createNativeHarnessConnection, sortToolDefinitionsByName } from "./nativeHarnessLoop";
 import {
   MemoryNativeHarnessTranscriptStore,
   type NativeHarnessTranscriptStore,
@@ -110,6 +111,15 @@ export function runOnNativeHarness(
         ...(host.harness?.leadFallback === undefined
           ? {}
           : { leadFallback: host.harness.leadFallback }),
+        ...(host.harness?.ownSearchOn === undefined
+          ? {}
+          : {
+              ownSearchOn: ({ providerInstanceId }) =>
+                host.harness?.ownSearchOn?.(providerInstanceId) === true,
+            }),
+        ...(host.harness?.providerSearch === undefined
+          ? {}
+          : { providerSearch: host.harness.providerSearch }),
         admitTurn,
         contextWindow: (modelId) => {
           const model = host.runtimeRegistry
@@ -176,7 +186,7 @@ function hostedTransport(
                 // The host announces its own retries; a notice the driver
                 // streams would report a retry the host never ran, or report
                 // one twice.
-                response = await session.send(request, {
+                response = await session.send(withSearchStillGranted(request, host), {
                   signal: attempt.signal,
                   onEvent: (event) => {
                     if (event.kind !== "retrying") attempt.onEvent(event);
@@ -203,6 +213,35 @@ function hostedTransport(
       };
     },
   };
+}
+
+/**
+ * The request as one attempt may send it. A retry waits out its backoff
+ * while the turn's level can drop or its thread be marked, so each attempt
+ * asks the turn's grant again for this endpoint: a request whose grant is now
+ * withdrawn goes without the provider's own search, with the turn's own
+ * `web-search` in its place when it has one. An attempt never gains the
+ * provider's search; the loop withdraws it for the rest of the turn on its
+ * next request.
+ */
+function withSearchStillGranted(
+  request: HarnessEndpointRequest,
+  host: NativeHarnessEndpointHost,
+): HarnessEndpointRequest {
+  if (request.providerWebSearch !== true) return request;
+  const asked = host.harness?.providerSearch?.now(request.sessionId, host.instanceId);
+  if (asked === undefined || asked.status === "untracked" || asked.grant !== undefined) {
+    return request;
+  }
+  const { providerWebSearch: _withdrawn, ...withoutSearch } = request;
+  const webSearchTool = asked.webSearchTool;
+  return webSearchTool === undefined ||
+    withoutSearch.tools.some((tool) => tool.name === webSearchTool.name)
+    ? withoutSearch
+    : {
+        ...withoutSearch,
+        tools: sortToolDefinitionsByName([...withoutSearch.tools, webSearchTool]),
+      };
 }
 
 /** The served model name as the catalogue keeps it, or undefined when it is blank or longer than 256 characters. */
