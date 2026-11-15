@@ -268,7 +268,7 @@ under the fill).
 | Person's message (bubble)                                              | card colour, no hairline                                                                                             | ink 4%, no blur                                 | card colour; strong border under increased contrast             |
 | Composer notice card                                                   | callout ground                                                                                                       | ink 4% with its tone at 14% over it, no blur    | callout ground                                                  |
 | Menu, popover, select, combobox, hover card, palette, toast, tour card | float at 66% (dark) / 78% (light) over `--octant-float-blur` in a browser; float at 96%, no blur, in the desktop app | float at 96%, no blur                           | opaque float, no blur                                           |
-| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur                           | opaque float                                                    |
+| Dialog, Settings sheet, narrow dock sheet, Settings' narrow drawer     | as menus                                                                                                             | float at 96%, no blur (Settings sheet: opaque)  | opaque float                                                    |
 | Tooltip                                                                | the float, opaque                                                                                                    | the same                                        | the same                                                        |
 
 - **Why floats are dense on glass.** A frosted menu works over an opaque
@@ -292,11 +292,11 @@ under the fill).
 - **Settings leaves the window as it is; a dialog blurs it.** Settings is a
   sheet so a person can watch the window change while they change its
   appearance, so behind it nothing is blurred or dimmed: only a 6% shade sets
-  the sheet apart. In the desktop app the sheet itself is nearly solid: the
-  float at 96% with no blur, so a hint of the window shows through it but no
-  thread text can be read through it (maintainer request, 2026-11-15). An 80%
-  fill over a 28px backdrop blur was tried first and left the text behind it
-  sharp, because the packaged window does not blur under the sheet. Everything beside
+  the sheet apart. In the desktop app the sheet itself is solid, the float with
+  no blur (maintainer request, 2026-11-15): under Glass the window lets the
+  apps behind it through, and no blur in the page can reach them. An 80% fill
+  over a 28px backdrop blur, then a 96% fill, both left another app's text
+  readable through Settings. Everything beside
   it stays visible; blurring the whole window past reading hid exactly what
   Settings is a sheet for. Behind a dialog, a
   decision rather than a view, the layers that hold content (the rail, the

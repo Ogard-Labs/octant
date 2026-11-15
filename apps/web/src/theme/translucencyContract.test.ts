@@ -70,7 +70,7 @@ describe("window glass", () => {
     expect(Number(alpha)).toBeGreaterThanOrEqual(92);
   });
 
-  it("leaves the window behind Settings untouched, draws the sheet nearly solid, and blurs the window only behind a dialog in the desktop app", () => {
+  it("leaves the window behind Settings untouched, draws the sheet solid, and blurs the window only behind a dialog in the desktop app", () => {
     const css = read("styles/components.css");
     const dialogFade =
       /html\[data-octant-native-host="true"\]:not\([\s\S]*?\):has\(\.octant-dialog__popup\[data-open\]\)\s*\.shell-frame\s*>\s*:is\(([^)]*)\)\s*\{([^}]*)\}/.exec(
@@ -83,12 +83,11 @@ describe("window glass", () => {
     expect(Number(/blur\((\d+)px\)/.exec(dialogFade?.[2] ?? "")?.[1])).toBeGreaterThanOrEqual(4);
     expect(dialogFade?.[2]).not.toMatch(/visibility|display|pointer-events/);
     // Settings is a sheet a person watches the window through: no rule blurs or
-    // dims the content layers for it, and the sheet itself is nearly solid, so a
-    // hint of the window shows through it but no word behind it can be read. The
-    // packaged window does not blur under the sheet, so the fill alone hides it.
+    // dims the content layers for it, and the sheet itself is solid: under Glass
+    // the apps behind the window show through, and no blur in the page reaches them.
     expect(css).not.toMatch(/:has\([^)]*\.octant-sheet__popup\[data-open\][^)]*\)\s*\.shell-frame/);
     const sheet = /\.octant-sheet__popup\.octant-sheet__popup \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    expect(sheet).toContain("color-mix(in srgb, var(--octant-float) 96%, transparent)");
+    expect(sheet).toContain("background: var(--octant-float);");
     expect(sheet).toContain("backdrop-filter: none;");
   });
 

@@ -503,18 +503,17 @@ html[data-octant-native-host="true"]:not(
   background: color-mix(in srgb, var(--octant-float) 96%, transparent);
 }
 
-/* The Settings sheet is nearly solid in the desktop app: a hint of the window
-   shows through it, but no word behind it can be read. The 66% fill a later rule
-   gave every modal left the thread's text crisp behind Settings' rows, and an 80%
-   fill over a 28px backdrop blur left it just as sharp, because the packaged
-   window does not blur what lies under the sheet. The doubled class wins over the
-   modal rules above whatever their order. */
+/* The Settings sheet is solid in the desktop app. Under Glass the window lets
+   the apps behind it through, and no blur in the page can reach them: at 80%
+   over a 28px backdrop blur, and again at 96%, another app's text stayed
+   readable through Settings' rows. The doubled class wins over the modal rules
+   above whatever their order. */
 html[data-octant-native-host="true"]:not(
     [data-octant-reduced-transparency="true"],
     [data-octant-increased-contrast="true"]
   )
   .octant-sheet__popup.octant-sheet__popup {
-  background: color-mix(in srgb, var(--octant-float) 96%, transparent);
+  background: var(--octant-float);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
