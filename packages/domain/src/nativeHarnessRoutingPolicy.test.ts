@@ -93,6 +93,50 @@ describe("native harness route resolution", () => {
     expect(chosen).toMatchObject({ kind: "primary", slotId: "advisor", candidate: small });
   });
 
+  it("reads no image on the Builder's model when Sees images has no model", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: configured,
+      facts: allReady,
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "unroutable", slotId: "vision", reason: "slot-empty" });
+  });
+
+  it("lets a Project's Sees images list beat Settings and walks past a refused model with its reason", () => {
+    const vision = {
+      slots: [...configured.slots, { id: "vision" as never, candidates: [big] }],
+      jobSlots: [],
+    };
+    const project = { slots: [{ id: "vision" as never, candidates: [small, spare] }], jobSlots: [] };
+    const decision = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: vision,
+      project,
+      facts: (candidate) =>
+        candidate === small ? { ready: true, refusals: ["project-incompatible"] } : { ready: true },
+      now,
+    });
+    expect(decision).toMatchObject({
+      kind: "failure-fallback",
+      slotId: "vision",
+      candidate: spare,
+      rejected: [{ candidate: small, reasons: ["project-incompatible"] }],
+    });
+    const none = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: vision,
+      project,
+      facts: () => ({ ready: true, refusals: ["capability-incompatible"] }),
+      now,
+    });
+    expect(none).toMatchObject({ kind: "unroutable", reason: "no-eligible-candidate" });
+    expect(none.rejected.map((entry) => entry.reasons)).toEqual([
+      ["capability-incompatible"],
+      ["capability-incompatible"],
+    ]);
+  });
+
   it("steps to the next ready candidate while the primary cools down, and says why", () => {
     const decision = resolveNativeHarnessRoute({
       job: "lead",

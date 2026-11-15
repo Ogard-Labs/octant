@@ -581,6 +581,8 @@ export interface CodeOperationRuntimeOptions {
    * reaching the provider with the pictures silently dropped.
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
+  /** Sees images, for a thread whose model cannot read the images a turn attached. */
+  readonly describeImages?: CodeOperationServiceOptions["describeImages"];
   readonly routineBrowserTools?: (input: {
     readonly thread: CodeThread;
     readonly readThread: () => CodeThread | undefined;
@@ -1506,6 +1508,7 @@ export function createCodeOperationRuntime(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    ...(options.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     conversationTurns: (threadId, read) =>
       codeThreadTurns((page) => events.conversation(page), threadId, read),
     ...(options.supportsSessionRollback === undefined

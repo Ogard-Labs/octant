@@ -17,6 +17,7 @@ import {
   decodeCodeConversationWindowRequest,
   decodeCodeOperationId,
   decodeCodeThreadId,
+  type CodeAttachmentReference,
   type CodeOperationEvent,
   type EventEnvelope,
   type CodeConversationPage,
@@ -721,6 +722,38 @@ export class CodeOperationEventStore {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * One image a recent turn of this thread sent, by its attachment id, as
+   * the turn's start recorded it. Undefined for an id no recent turn of this
+   * thread names, so another thread's image is never reached by id.
+   */
+  turnAttachmentOfThread(
+    threadId: CodeThreadId,
+    attachmentId: string,
+  ): CodeAttachmentReference | undefined {
+    try {
+      for (const envelope of this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: 256,
+      })) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+          continue;
+        const frame = decodeCodeOperationEventFrame(envelope.payload);
+        if (String(frame.threadId) !== String(threadId)) continue;
+        if (frame.event.kind !== "conversation-turn-started") continue;
+        const found = frame.event.attachments?.find(
+          (attachment) => String(attachment.attachmentId) === attachmentId,
+        );
+        if (found !== undefined) return found;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -1811,6 +1844,16 @@ function startTurn(
     ...(frame.event.executionPolicy === undefined
       ? {}
       : { executionPolicy: frame.event.executionPolicy }),
+    // Who described each image is shown; the words stay in the content store.
+    ...(frame.event.describedImages === undefined
+      ? {}
+      : {
+          describedImages: frame.event.describedImages.map((image) => ({
+            attachmentId: String(image.attachmentId),
+            name: image.name,
+            describedBy: image.describedBy,
+          })),
+        }),
     assistant: [],
     forkMergeBacks: [],
     steps: [],
@@ -1915,6 +1958,7 @@ type CodeConversationBuilder = {
   reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
+  describedImages?: CodeConversationTurn["describedImages"];
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
   forkMergeBacks: Array<CodeForkMergeBack>;

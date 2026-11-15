@@ -91,11 +91,13 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
   type ProviderRuntimeEvent,
+  type DescribedTurnImages,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import type {
@@ -109,6 +111,7 @@ import {
   accumulateTurnUsage,
   decideConversationSession,
   decideWorkTurnAuthority,
+  describedImageText,
   assertProviderAllowedByProjectPolicy,
   ProjectProviderPolicyRejected,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -375,6 +378,16 @@ export interface WorkTurnServiceDependencies {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
+  /**
+   * Sees images: describes a turn's images for a model that cannot read
+   * them, or refuses with the reason. Absent, such a turn is refused as before.
+   */
+  readonly describeImages?: (input: {
+    readonly projectId: ProjectId;
+    readonly providerInstanceId: WorkThread["providerInstanceId"];
+    readonly modelId: WorkThread["modelId"];
+    readonly images: ReadonlyArray<TurnImage>;
+  }) => Promise<TurnImagesDescription>;
   readonly turnRuntime?: WorkTurnRuntimePort;
   readonly prepareProductFeedbackForTurn?: (input: {
     readonly windowId: WindowId;
@@ -614,6 +627,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
+  readonly #describeImages: WorkTurnServiceDependencies["describeImages"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
@@ -680,6 +694,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#conversationInputTransfer = dependencies.conversationInputTransfer;
     this.#supportsAttachments = dependencies.supportsAttachments;
+    this.#describeImages = dependencies.describeImages;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
@@ -1192,15 +1207,47 @@ export class WorkTurnService {
     if (starting.status === "unknown") {
       throw this.#failure("invalid", "An image attached to this turn is no longer staged.");
     }
-    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
-      throw this.#failure(
-        "unsupported",
-        "The selected model does not support images. Choose a vision model, or remove the attachments.",
-      );
-    }
     let attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
     if (attachmentInputs === undefined) {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
+    }
+    // A model that cannot read images gets the words Sees images writes for
+    // each one; the images stay attached to the turn for the record. With no
+    // model to describe them, the turn is refused rather than sent without.
+    let describedImages: DescribedTurnImages | undefined;
+    let describedTexts: ReadonlyArray<string> = [];
+    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
+      if (this.#describeImages === undefined) {
+        throw this.#failure(
+          "unsupported",
+          "The selected model does not support images. Choose a vision model, or remove the attachments.",
+        );
+      }
+      const described = await this.#describeImages({
+        projectId: command.authority.projectId,
+        providerInstanceId: command.authority.providerInstanceId,
+        modelId: command.authority.modelId,
+        images: attachmentInputs.map((input) => ({
+          attachmentId: input.attachmentId,
+          name: input.displayName,
+          mediaType: input.mediaType,
+          bytes: input.bytes,
+        })),
+      });
+      if (described.status === "refused") throw this.#failure("unsupported", described.reason);
+      describedImages = described.images.map((image) => ({
+        attachmentId: image.attachmentId,
+        name: image.name,
+        describedBy: image.describedBy,
+      }));
+      describedTexts = described.images.map((image) =>
+        describedImageText({
+          name: image.name,
+          describedBy: image.describedBy,
+          description: image.text,
+        }),
+      );
+      attachmentInputs = [];
     }
 
     const selections =
@@ -1630,6 +1677,16 @@ export class WorkTurnService {
                   block: { kind: "user-message" as const, text: externalData.content.text },
                 },
               ]),
+          ...describedTexts.map(
+            (text, index): WorkTurnContextContribution => ({
+              text,
+              sourceKind: "message",
+              referenceId: `described-image:${command.turnId}:${index}`,
+              category: "current-request",
+              posture: "required",
+              block: { kind: "user-message", text },
+            }),
+          ),
           {
             text: command.prompt,
             sourceKind: "message",
@@ -1734,6 +1791,7 @@ export class WorkTurnService {
               ? {}
               : { sideChatReturns: command.sideChatReturns }),
             ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+            ...(describedImages === undefined ? {} : { describedImages }),
             ...(command.extensionSelections === undefined ||
             command.extensionSelections.length === 0
               ? {}

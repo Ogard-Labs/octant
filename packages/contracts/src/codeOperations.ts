@@ -15,6 +15,7 @@ import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1769,6 +1770,22 @@ const ConversationTurnStartedEvent = Schema.Struct({
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   /**
+   * The attached images Sees images described because the thread's model
+   * cannot read images, each with the model that described it and where the
+   * description is kept. The model gets the description; the image stays
+   * attached for the record. A restart sends the same descriptions again.
+   */
+  describedImages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        attachmentId: CodeAttachmentId,
+        name: DescribedImageName,
+        describedBy: ImageDescribedBy,
+        description: CodeEvidenceReference,
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
+  /**
    * The checkout as it stood just before the provider was asked, so the user
    * can put the files back the way they were at any message. Absent when the
    * checkout could not be read, and on turns journaled before checkpoints
@@ -2358,6 +2375,8 @@ export const CodeConversationTurn = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   /** The checkout as it stood before this turn ran, when the host caught it. */
   checkpoint: Schema.optional(CodeCheckpoint),
   /**

@@ -218,6 +218,7 @@ export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";
 export * from "./modelRoleSuggestionPolicy";
 export * from "./nativeHarnessRoutingPolicy";
+export * from "./imageDescriptionPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";
