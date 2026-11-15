@@ -1696,6 +1696,9 @@ export const ProviderContextBlock = Schema.Struct({
     // The instructions the person wrote for one Project, after their own.
     // Standing and keyed by the Project, like the person's own.
     "project-instructions",
+    // The person's orchestration text, for coordinator threads and a Project's
+    // designated planner only, after the two texts above. Standing and keyed.
+    "orchestration-instructions",
     // What Octant remembers about the person from earlier threads, framed as
     // data. Standing, so a session keeps it after the first turn.
     "person-memory",

@@ -13,6 +13,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
   PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
   PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
   decodeOctantInstructionsCommand,
@@ -29,6 +30,7 @@ import { HeldTurnContext } from "../providers/heldTurnContext";
 import { AGENT_ACCESS_ORIGIN } from "../clientPrincipal";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import {
+  ORCHESTRATION_INSTRUCTIONS_CONTEXT_KEY,
   OctantInstructionsStore,
   PERSON_INSTRUCTIONS_CONTEXT_KEY,
   projectInstructionsContextKey,
@@ -159,7 +161,9 @@ describe("your instructions for Octant", () => {
     expect(storeOn(journalOn(connection)).view(true)).toEqual({
       kind: "octant-instructions",
       instructions: "Second rule.",
+      orchestration: "",
       version: 2,
+      orchestrationVersion: 0,
       canChange: true,
     });
     connection.close();
@@ -297,6 +301,141 @@ describe("your instructions for Octant", () => {
       }),
     ]);
     expect(turn(true).context).toEqual([]);
+    connection.close();
+  });
+});
+
+describe("orchestration", () => {
+  it("journals orchestration on its own record, and keeps both texts across a restart", () => {
+    const connection = openConnection();
+    const journal = journalOn(connection);
+    const store = storeOn(journal);
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+
+    const result = store.change(
+      {
+        kind: "change-orchestration-instructions",
+        expectedVersion: 0,
+        orchestration: "Start a worker per failing test.",
+      },
+      person,
+    );
+
+    expect(result).toMatchObject({
+      instructions: "Plan in Work.",
+      orchestration: "Start a worker per failing test.",
+      version: 1,
+      orchestrationVersion: 1,
+    });
+    expect(events(journal).map((event) => event.payload)).toEqual([
+      { instructions: "Plan in Work." },
+    ]);
+    expect(
+      journal
+        .replayAggregateType({
+          aggregateType: ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+          afterSequence: 0,
+          limit: 10,
+        })
+        .map((event) => [event.eventName, event.payload]),
+    ).toEqual([
+      [
+        "orchestration-instructions.changed@1",
+        { orchestration: "Start a worker per failing test." },
+      ],
+    ]);
+    expect(storeOn(journalOn(connection)).view(true)).toMatchObject({
+      instructions: "Plan in Work.",
+      orchestration: "Start a worker per failing test.",
+      version: 1,
+      orchestrationVersion: 1,
+    });
+    expect(
+      store.change(
+        { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "x" },
+        person,
+      ),
+    ).toMatchObject({ reason: "stale-version" });
+    expect(
+      store.change(
+        { kind: "change-orchestration-instructions", expectedVersion: 1, orchestration: "x" },
+        agent,
+      ),
+    ).toMatchObject({ reason: "not-the-person" });
+    connection.close();
+  });
+
+  it("never makes an open edit of your instructions stale by saving orchestration", () => {
+    const connection = openConnection();
+    const store = storeOn(journalOn(connection));
+    const opened = store.view(true);
+
+    store.change(
+      {
+        kind: "change-orchestration-instructions",
+        expectedVersion: opened.orchestrationVersion,
+        orchestration: "Split.",
+      },
+      person,
+    );
+    const saved = store.change(
+      {
+        kind: "change-person-instructions",
+        expectedVersion: opened.version,
+        instructions: "Plan in Work.",
+      },
+      person,
+    );
+
+    expect(saved).toMatchObject({
+      kind: "octant-instructions",
+      instructions: "Plan in Work.",
+      orchestration: "Split.",
+    });
+    connection.close();
+  });
+
+  it("gives orchestration only to a thread that orchestrates, after the other two texts", () => {
+    const connection = openConnection();
+    const store = new OctantInstructionsStore({
+      journal: journalOn(connection),
+      uuid,
+      clock: () => now,
+    });
+    const projectId = "00000000-0000-4000-8000-0000000000a1";
+    store.change(
+      { kind: "change-person-instructions", expectedVersion: 0, instructions: "Plan in Work." },
+      person,
+    );
+    store.change(
+      { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "Split." },
+      person,
+    );
+    store.change(
+      decodeOctantInstructionsCommand({
+        kind: "change-project-instructions",
+        projectId,
+        expectedVersion: 0,
+        instructions: "Ship.",
+      }),
+      person,
+    );
+
+    expect(
+      store.contextBlocks({ projectId, orchestrates: true }).map((block) => block.kind),
+    ).toEqual(["person-instructions", "project-instructions", "orchestration-instructions"]);
+    expect(store.contextBlocks({ projectId }).map((block) => block.kind)).toEqual([
+      "person-instructions",
+      "project-instructions",
+    ]);
+    expect(store.contextBlocks({ projectId, orchestrates: true }).at(-1)).toEqual({
+      kind: "orchestration-instructions",
+      key: ORCHESTRATION_INSTRUCTIONS_CONTEXT_KEY,
+      text: expect.stringMatching(/start setting and bounds[\s\S]*\n\nSplit\.$/),
+    });
     connection.close();
   });
 });
