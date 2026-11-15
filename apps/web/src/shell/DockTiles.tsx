@@ -32,7 +32,7 @@ import {
   type DockTileLayout,
   type DockTileMove,
 } from "./rightUtilityDockSelection";
-import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { TILED_DOCK_WIDTH, type RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 /** A tile is never shorter than this while the dock has the room. */
 const MIN_TILE_HEIGHT = 140;
@@ -42,6 +42,13 @@ const MIN_TILE_HEIGHT = 140;
  * overlapped and its History tab clipped at 243px.
  */
 const MIN_COLUMN_WIDTH = 280;
+/**
+ * Columns stand side by side only when the tile area holds two usable columns
+ * (the dock's two-column width, less a pixel or two of rounding and the tile
+ * area's own edge); narrower, their tiles stack. At two times the 280px floor
+ * a Browser and a Files pane stood side by side at 300px each.
+ */
+const SIDE_BY_SIDE_WIDTH = TILED_DOCK_WIDTH - 2;
 const KEY_STEP = 0.02;
 const KEY_STEP_LARGE = 0.08;
 
@@ -315,7 +322,7 @@ export function DockTiles(props: DockTilesProps) {
           : { width: rect.width, height: rect.height },
       );
       const width = node.clientWidth;
-      setStacked(columnCount > 1 && width > 0 && width < MIN_COLUMN_WIDTH * columnCount);
+      setStacked(columnCount > 1 && width > 0 && width < SIDE_BY_SIDE_WIDTH);
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
@@ -559,17 +566,14 @@ function Tile(props: {
       node.removeEventListener("focusin", focus, true);
     };
   }, []);
-  const { host: barHost, items: barItems } = useDockBarSlot(props.single ? "alone" : "tiled");
+  const { host: barHost, items: barItems, leadRef } = useDockBarSlot("tiled");
   const bar = useRef<HTMLDivElement>(null);
-  const row = useRef<HTMLDivElement>(null);
-  // A tool alone has no tile bar: the title band already names it. Its
-  // controls, if it has any, stand in one slim row of the same height, insets
-  // and hairline, holding only them.
-  const folded = useFoldedControls(
-    props.single ? row : bar,
-    barItems ?? [],
-    props.single ? 0 : TILE_CONTROLS,
-  );
+  // Every pane has the one bar, alone or among tiles: the same height, insets
+  // and controls, so nothing in a pane moves when a neighbour opens or closes.
+  const folded = useFoldedControls(bar, barItems ?? [], TILE_CONTROLS);
+  // Alone there is nothing to arrange, and only the Browser and Terminal can
+  // become a card; the control keeps its slot either way.
+  const arrangeable = !props.single || props.onMinimise !== undefined;
   const { content, box } = props;
   const across = along(box.left, box.width);
   const down = along(box.top, box.height);
@@ -595,38 +599,39 @@ function Tile(props: {
       style={style}
       tabIndex={-1}
     >
-      {props.single ? null : (
-        // One bar per tile, the tool's own header: its name (or the Browser's
-        // pages) leads, the tool's own controls follow, the tile's controls
-        // trail, and every bar is one height so neighbouring tiles line up.
+      {/* One bar per pane, the tool's own header: its name (or its tabs: the
+          Browser's pages, a shell's sessions, Files' open files) leads, the
+          tool's own controls follow, Arrange and Close trail. */}
+      <div
+        className="dock-tile__bar"
+        data-fold={folded}
+        data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
+        ref={bar}
+      >
         <div
-          className="dock-tile__bar"
-          data-fold={folded}
-          data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
-          ref={bar}
+          className="dock-tile__lead"
+          draggable={!props.single}
+          onDragEnd={props.onDragEnd}
+          onDragStart={(event) => {
+            // Some engines refuse to start a drag that carries no data.
+            event.dataTransfer.setData("text/plain", content.label);
+            event.dataTransfer.effectAllowed = "move";
+            props.onDragStart();
+          }}
         >
-          <div
-            className="dock-tile__lead"
-            draggable
-            onDragEnd={props.onDragEnd}
-            onDragStart={(event) => {
-              // Some engines refuse to start a drag that carries no data.
-              event.dataTransfer.setData("text/plain", content.label);
-              event.dataTransfer.effectAllowed = "move";
-              props.onDragStart();
-            }}
-          >
-            {content.barLeading}
-          </div>
-          <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
-          <>
+          <div className="dock-tile__title">{content.barLeading}</div>
+          <div className="dock-tile__lead-slot" ref={leadRef} />
+        </div>
+        <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
+        <>
+          {arrangeable ? (
             <OctantMenuRoot>
               <OctantMenuTrigger
                 aria-label={`Arrange ${content.label}`}
                 className="shell-icon-button dock-tile__control window-no-drag"
                 title={`Arrange ${content.label}`}
               >
-                <LayoutPanelLeft aria-hidden="true" size={14} />
+                <LayoutPanelLeft aria-hidden="true" size={16} />
               </OctantMenuTrigger>
               <OctantMenuPortal>
                 <OctantMenuPositioner>
@@ -663,19 +668,23 @@ function Tile(props: {
                         ))}
                       </>
                     )}
-                    <OctantMenuSeparator />
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      onClick={props.onShowAlone}
-                    >
-                      <span>Show alone</span>
-                    </OctantMenuItem>
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      onClick={props.onHide}
-                    >
-                      <span>Hide from view</span>
-                    </OctantMenuItem>
+                    {props.single ? null : (
+                      <>
+                        <OctantMenuSeparator />
+                        <OctantMenuItem
+                          className="workspace-disclosure__action window-no-drag"
+                          onClick={props.onShowAlone}
+                        >
+                          <span>Show alone</span>
+                        </OctantMenuItem>
+                        <OctantMenuItem
+                          className="workspace-disclosure__action window-no-drag"
+                          onClick={props.onHide}
+                        >
+                          <span>Hide from view</span>
+                        </OctantMenuItem>
+                      </>
+                    )}
                     {props.onMinimise === undefined ? null : (
                       <OctantMenuItem
                         className="workspace-disclosure__action window-no-drag"
@@ -688,20 +697,22 @@ function Tile(props: {
                 </OctantMenuPositioner>
               </OctantMenuPortal>
             </OctantMenuRoot>
+          ) : (
             <IconButton
               className="dock-tile__control text-muted-foreground"
-              icon={X}
-              label={`Close ${content.label}`}
-              onClick={props.onClose}
+              disabled
+              icon={LayoutPanelLeft}
+              label={`Arrange ${content.label}`}
             />
-          </>
-        </div>
-      )}
-      {props.single && barItems !== undefined && barItems.length > 0 ? (
-        <div className="dock-tile__row" data-fold={folded} ref={row}>
-          <DockBarRow fold={folded} items={barItems} toolLabel={content.label} />
-        </div>
-      ) : null}
+          )}
+          <IconButton
+            className="dock-tile__control text-muted-foreground"
+            icon={X}
+            label={`Close ${content.label}`}
+            onClick={props.onClose}
+          />
+        </>
+      </div>
       <DockBarContext.Provider value={barHost}>
         <div className={content.bodyClassName} data-dock-inset={content.inset ? "true" : undefined}>
           {content.children}

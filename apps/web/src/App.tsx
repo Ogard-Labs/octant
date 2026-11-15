@@ -443,6 +443,7 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
+  resolveTwoColumnDockWidth,
   dockTotalWidth,
   ENVIRONMENT_STRIP_WIDTH,
   resolveRightUtilityDockSurface,
@@ -477,6 +478,7 @@ import {
   showUtilityTabAlone,
   showUtilityTabBelow,
   showUtilityTabBeside,
+  showUtilityTabStacked,
   threadUtilityDockState,
   threadUtilityDockKey,
   withoutTileLayout,
@@ -485,7 +487,11 @@ import {
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
 } from "./shell/rightUtilityDockSelection";
-import { splitEnvironmentStrip } from "./shell/dockEnvironmentStrip";
+import {
+  environmentApart,
+  splitEnvironmentStrip,
+  withEnvironmentOpen,
+} from "./shell/dockEnvironmentStrip";
 import { describeUtilityTabs } from "./shell/utilityTabs";
 import { sidebarRowMode, threadDragSurface } from "./shell/threadDragSurface";
 import { deliverComposerThreadDrop } from "./chat/composerThreadDrop";
@@ -3592,12 +3598,15 @@ function LaunchedShell(
     // divider's shares and the caps always address the tiles on screen.
     const displayDockState = (stored: ThreadUtilityDockState) => {
       const retained = retainAvailableUtilityTabs(stored, openableDockSurfaces);
-      return bottomPanelOpen
+      const held = bottomPanelOpen
         ? removeUtilityTabs(
             retained,
             new Set(renderedBottomPanelState.tabs.map((tab) => tab.surface)),
           )
         : retained;
+      // Beside the tool columns Environment is a section of its own, never a
+      // tile; the drawer has no section and shows it as any tool.
+      return isNarrow ? held : environmentApart(held);
     };
     const displayedDockState = displayDockState(dockState);
     const dockSurface = displayedDockState.tabs.find(
@@ -4621,6 +4630,13 @@ function LaunchedShell(
     changeDockTiles((state) => showUtilityTabBeside(state, tabId));
   }
   function openDockTabBeside(surface: RightUtilityDockSurfaceId) {
+    openDockTabPlaced(surface, "beside");
+  }
+  /** A tool button's press: the tool opens under the focused tile, in its column. */
+  function openDockTabStacked(surface: RightUtilityDockSurfaceId) {
+    openDockTabPlaced(surface, "stacked");
+  }
+  function openDockTabPlaced(surface: RightUtilityDockSurfaceId, direction: "beside" | "stacked") {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
@@ -4629,9 +4645,11 @@ function LaunchedShell(
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
     }
-    widenDockForColumns(openUtilityTabBesideState(displayedDockState, surface, instanceId));
+    widenDockForColumns(
+      openUtilityTabBesideState(displayedDockState, surface, instanceId, direction),
+    );
     setActivePaneDockVisible(true);
-    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId));
+    changeDockTiles((state) => openUtilityTabBesideState(state, surface, instanceId, direction));
   }
   function showDockTabBelow(tabId: string) {
     noteTerminalShown(tabId);
@@ -4651,7 +4669,13 @@ function LaunchedShell(
     changeDockTiles((state) => restoreUtilityTool(state, tabId));
   }
   function minimiseDockTool(tabId: string) {
-    changeDockTiles((state) => minimiseUtilityTool(state, tabId));
+    changeDockTiles((state) => {
+      const next = minimiseUtilityTool(state, tabId);
+      // The card stands in the Environment section, so a tool minimised while
+      // the section is closed opens it: at the foot of an empty dock the card
+      // read as the tool having gone.
+      return next === state || isNarrow ? next : withEnvironmentOpen(next);
+    });
   }
   function moveDockTile(tabId: string, direction: DockTileMove) {
     changeDockTiles((state) => moveUtilityTile(state, tabId, direction));
@@ -4935,7 +4959,11 @@ function LaunchedShell(
         }
         return;
       case "open-beside":
-        openDockTabBeside(surface);
+        openDockTabStacked(surface);
+        return;
+      case "open-section":
+        if (!dockOpen) setActivePaneDockVisible(true);
+        changeDockTiles(withEnvironmentOpen);
         return;
       case "open":
         openDockTab(surface);
@@ -4946,7 +4974,8 @@ function LaunchedShell(
         return;
       case "show-beside":
         if (!dockOpen) setActivePaneDockVisible(true);
-        showDockTabBeside(press.tabId);
+        noteTerminalShown(press.tabId);
+        changeDockTiles((state) => showUtilityTabStacked(state, press.tabId));
         return;
       case "close":
         for (const tabId of press.tabIds) closeDockTab(tabId);
@@ -5976,6 +6005,7 @@ function LaunchedShell(
           bottomPresentedOpen: bottomPanelPresentedOpen,
           bottomActive: activeBottomSurface?.id,
           capsFull: dockCapsFull,
+          environmentSection: !isNarrow,
         })
       : NO_DOCK_TOOL_BUTTONS,
   );
@@ -6583,8 +6613,20 @@ function LaunchedShell(
     storedWidth: contextSidebarWidth,
     widthChosen: dockWidthChosen || previewContextWidth !== undefined,
     tabSurfaces: dockTabs.map((tab) => tab.surface.id),
-    tileColumns: dockToolColumns,
   });
+  // Two columns ask for more only where the window has it; the stylesheet
+  // chooses between the two widths, since it knows the room.
+  const dockTwoColumnWidth =
+    dockToolColumns >= 2
+      ? dockTotalWidth({
+          toolsWidth: resolveTwoColumnDockWidth({
+            storedWidth: contextSidebarWidth,
+            widthChosen: dockWidthChosen || previewContextWidth !== undefined,
+          }),
+          environmentOpen: dockEnvironmentOpen,
+          toolsShown: true,
+        })
+      : undefined;
   const dockPresentationWidth = dockTotalWidth({
     toolsWidth: dockToolsWidth,
     environmentOpen: dockEnvironmentOpen,
@@ -8472,6 +8514,9 @@ function LaunchedShell(
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
+        {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
+          ? { contextSidebarTwoColumnWidth: dockTwoColumnWidth }
+          : {})}
         {...(dockPresentedOpen && dockEnvironmentOpen
           ? {
               dockEnvironmentWidth: ENVIRONMENT_STRIP_WIDTH,

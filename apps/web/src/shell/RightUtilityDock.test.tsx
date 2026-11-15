@@ -236,8 +236,9 @@ describe("RightUtilityDock", () => {
         </div>,
       );
       splitter = screen.getByRole("separator", { name: "Resize utility dock" });
-      // The thread keeps 440px beside two columns, so the handle may go further.
-      expect(splitter).toHaveAttribute("aria-valuemax", "740");
+      // The thread keeps its 560px beside two columns too; only the half-of-the-
+      // workspace stop is lifted for them.
+      expect(splitter).toHaveAttribute("aria-valuemax", "620");
     } finally {
       client.mockRestore();
       bounds.mockRestore();

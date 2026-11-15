@@ -163,7 +163,7 @@
   border-radius: 0;
   box-shadow: none;
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-regular);
   letter-spacing: normal;
   text-align: left;
@@ -186,7 +186,7 @@ button.environment-link:hover {
   margin: 0;
   overflow: hidden;
   color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -538,10 +538,15 @@ html[data-octant-increased-contrast="true"]
 
 /* The Computer card: the first thing Environment says, above the header card,
    because where a thread runs is what a move changes. */
+/* The computer is the first row of the Environment section. Its own heading
+   still names the group for assistive technology and is not drawn. */
 .thread-environment-dock__computer {
-  margin: 0 0 var(--oct-space-2);
-  padding-bottom: var(--oct-space-2);
-  border-bottom: 1px solid var(--octant-pane-line, var(--oct-hairline));
+  display: grid;
+  min-width: 0;
+}
+
+.thread-environment-dock__computer > .environment-card > .environment-card__caption {
+  display: none;
 }
 
 .environment-move {
@@ -558,7 +563,7 @@ html[data-octant-increased-contrast="true"]
   align-items: center;
   gap: var(--oct-space-2);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-text-detail);
   text-align: left;
 }
 
@@ -596,6 +601,7 @@ html[data-octant-increased-contrast="true"]
   min-width: 0;
   overflow: hidden;
   color: var(--oct-fg);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

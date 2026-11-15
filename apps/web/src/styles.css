@@ -144,6 +144,8 @@
   --octant-glass-border: rgb(255 255 255 / 13%);
   --octant-glass-highlight: inset 0 1px 0 rgb(255 255 255 / 18%);
   --octant-wide-primary-min: 360px;
+  /* The least the thread column is ever given beside the dock. */
+  --octant-narrow-primary-min: 360px;
   --octant-context-sidebar-min: 280px;
   --octant-success-surface: #16281f;
   --octant-success-text: #6bb299;
@@ -1107,17 +1109,37 @@ strong {
   grid-row: 1 / -1;
 }
 
-/* Two columns of tools drop the half-of-the-workspace term and ask the thread
-   for less than one column does (--octant-tiled-primary-min, set on the shell
-   beside --octant-wide-primary-min), as dockWidthCeiling does for the handle. */
+/* Two columns of tools stand side by side only where the window holds the
+   thread's minimum, Environment and two usable columns (960px of tools). The
+   step term is 0 below that room and past any width above it, so the dock
+   takes the two-column width when the room is there and keeps the one-column
+   width, with its tiles stacked, when it is not: a second tool never takes
+   width from the thread or moves Environment. dockWidthCeiling stops the
+   handle at the same room. */
 .workspace-layer--wide-context-open[data-dock-tile-columns="2"] {
+  --octant-dock-tool-room: calc(
+    100% - var(--octant-wide-primary-min) - var(--octant-dock-env-width, 0px)
+  );
   grid-template-columns:
-    minmax(var(--octant-tiled-primary-min, var(--octant-wide-primary-min)), 1fr)
     minmax(
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(100% - var(--octant-context-sidebar-min)))
+      ),
+      1fr
+    )
+    max(
       var(--octant-context-sidebar-min),
       min(
-        var(--octant-context-sidebar-width, 360px),
-        calc(100% - var(--octant-tiled-primary-min, var(--octant-wide-primary-min)))
+        calc(100% - var(--octant-wide-primary-min)),
+        var(--octant-context-two-column-width, var(--octant-context-sidebar-width, 360px)),
+        max(
+          min(
+            var(--octant-context-sidebar-width, 360px),
+            calc(50% + var(--octant-dock-env-width, 0px))
+          ),
+          calc((var(--octant-dock-tool-room) - 959px) * 9999)
+        )
       )
     );
 }
@@ -1127,13 +1149,24 @@ strong {
   grid-row: 2;
 }
 
+/* The thread keeps its minimum (560px from 1100px up) and the dock takes what
+   is left, up to the width it asks for and, for one column of tools, half the
+   workspace. Only when the window cannot hold the dock's own minimum beside
+   that (Environment and one 280px tool column) does the thread give, never
+   under 360px. */
 .workspace-layer--wide-context-open {
   grid-template-columns:
-    minmax(var(--octant-wide-primary-min), 1fr)
     minmax(
+      max(
+        var(--octant-narrow-primary-min),
+        min(var(--octant-wide-primary-min), calc(100% - var(--octant-context-sidebar-min)))
+      ),
+      1fr
+    )
+    max(
       var(--octant-context-sidebar-min),
-      /* dockWidthCeiling: half the workspace, and never past the primary
-         column's own minimum. The handle stops at the same half. */ min(
+      /* dockWidthCeiling: what the primary column's minimum leaves, and for
+         one column never past half the workspace. The handle stops there too. */ min(
         var(--octant-context-sidebar-width, 360px),
         calc(100% - var(--octant-wide-primary-min)),
         calc(50% + var(--octant-dock-env-width, 0px))
@@ -5047,7 +5080,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 /* The bare variant draws nothing, so the rail takes the ghost hover fill itself. */
 .composer-model-picker__rail-item:hover,
-.scaffolds__entry-button:hover,
 .folder-picker__item-nav:hover {
   background: var(--muted);
 }
@@ -5562,144 +5594,208 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 
 /*
- * The two cards offered inside a new, empty Code thread. They are an
- * invitation, so they lift off the transcript ground: the card fill, the
- * container radius and the soft float shadow, with a head whose accent tile
- * says what the card is for.
+ * The empty thread's start block: a heading and hint, then one quiet surface
+ * (card fill, container radius, one hairline, no shadow) holding two labelled
+ * groups of list rows. It shares the thread column's edges with the composer,
+ * and sits low in the column so it rests above the composer instead of at the
+ * top-left of an otherwise blank transcript.
  */
-.scaffolds,
-.workspace-presets {
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript--empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding-block: 24px 32px;
+}
+
+.empty-start {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.empty-start__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-medium);
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty-start__hint {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  line-height: 20px;
+}
+
+.empty-start__surface {
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
-  width: 100%;
-  max-width: 520px;
-  margin: 12px auto 0;
-  padding: 12px;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--octant-border-subtle);
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
-  box-shadow: var(--oct-shadow-float);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
 }
 
-.scaffolds__header,
-.workspace-presets__header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--octant-text-primary);
+.empty-start__surface:empty {
+  display: none;
 }
 
-.start-card__tile {
+.empty-start__group {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--octant-accent) 16%, transparent);
-  color: var(--octant-accent-text);
-}
-
-.start-card__heading {
+  flex-direction: column;
   min-width: 0;
 }
 
-.start-card__title {
-  margin: 0;
-  font-size: var(--oct-text-base);
-  font-weight: var(--oct-weight-strong);
-  line-height: 1.3;
+.empty-start__group + .empty-start__group {
+  border-top: 1px solid var(--octant-border-subtle);
 }
 
-.start-card__subtitle {
-  margin: 0;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.4;
+.empty-start__label {
+  padding: 12px 12px 8px;
 }
 
-.scaffolds__list {
+.empty-start__rows {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.scaffolds__entry {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.empty-start__rows > li + li {
+  border-top: 1px solid var(--octant-border-subtle);
 }
 
-/* A choice tile: a fixed 56px row, so a long summary is cut to one line and
-   nothing shifts when a tile is pointed at or chosen. */
-.scaffolds__entry-button {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
+/* A row is fixed: two lines are 52px and a preset's third line makes it 72px,
+   so a long summary is cut to one line and nothing shifts on hover or load. */
+.empty-start__row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 12px;
+  box-sizing: border-box;
   width: 100%;
-  height: 56px;
-  padding: 0 12px;
-  white-space: normal;
-  border: 1px solid var(--octant-border-subtle);
+  height: 52px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
+  white-space: normal;
+}
+
+.empty-start__row--preset {
+  height: 72px;
+}
+
+.empty-start__row--action {
   cursor: default;
 }
 
-.scaffolds__entry-icon,
-.scaffolds__entry-chevron {
-  flex: 0 0 auto;
+.empty-start__row--action:hover:not(:disabled) {
+  background: var(--oct-wash-hover);
+}
+
+.empty-start__row--action:disabled {
+  opacity: 1;
+}
+
+.empty-start__icon,
+.empty-start__chevron {
+  margin-top: 2px;
   color: var(--octant-text-muted);
 }
 
-.scaffolds__entry-chevron {
-  margin-left: auto;
+.empty-start__row--action .empty-start__icon,
+.empty-start__row--action .empty-start__chevron {
+  align-self: start;
 }
 
-.scaffolds__entry-text {
+.empty-start__row--action .empty-start__chevron {
+  margin-top: 2px;
+}
+
+.empty-start__text {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
 }
 
-.scaffolds__entry-summary {
+.empty-start__name {
   overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+  line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.scaffolds__entry-button[aria-pressed="true"] {
-  border-color: var(--octant-accent);
+.empty-start__summary {
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.scaffolds__entry-button:disabled {
-  cursor: default;
-  opacity: var(--oct-disabled-opacity);
+.empty-start__summary--blocked {
+  color: var(--oct-warn-fg);
 }
 
-.scaffolds__entry-name {
-  color: var(--octant-text-primary);
-  font-weight: var(--oct-weight-medium);
+.empty-start__row--action:disabled .empty-start__name,
+.empty-start__row--action:disabled .empty-start__icon,
+.empty-start__row--action:disabled .empty-start__chevron {
+  color: var(--octant-text-muted);
 }
 
-.scaffolds__entry-blocked {
-  margin: 0;
+.empty-start__opens {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.empty-start__pane {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.empty-start__apply {
+  align-self: start;
+  margin-top: -1px;
+}
+
+/* A chosen template opens its directory form and command below the rows. */
+.empty-start__group > .scaffolds__start,
+.empty-start__group > .scaffolds__message,
+.empty-start__group > .scaffolds__output,
+.empty-start__group > .workspace-presets__skills,
+.empty-start__group > .workspace-presets__message {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid var(--octant-border-subtle);
 }
 
 .scaffolds__start {
@@ -7377,37 +7473,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--octant-danger-text);
 }
 
-.workspace-presets__list,
 .workspace-presets__skills {
   display: flex;
   flex-direction: column;
   gap: var(--oct-space-1);
-  margin: 0;
-  padding: 0;
   list-style: none;
-}
-
-.workspace-presets__entry {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.workspace-presets__entry strong {
-  color: var(--octant-text-primary);
-  font-weight: var(--oct-weight-medium);
-}
-
-.workspace-presets__entry p {
-  margin: 2px 0 0;
-}
-
-.workspace-presets__panes {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--oct-space-1);
 }
 
 .workspace-presets__skills li {
@@ -7418,10 +7488,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .workspace-presets__skill-status {
   color: var(--octant-text-muted);
-}
-
-.workspace-presets__message {
-  margin: 0;
 }
 
 .linear-issues {
@@ -7670,19 +7736,21 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: 0;
   align-items: center;
   padding: 0;
-  color: var(--oct-meta);
-  background: transparent;
+  /* A tab at rest is still a tab: a quiet wash of the ink in the tab's shape
+     and the secondary ink. Bare text beside one filled tab read as a label
+     and a link, not as a row of tabs. */
+  color: var(--oct-fg-2);
+  background: var(--oct-fill-4);
   border-radius: var(--oct-radius-sm);
 }
 .content-tab:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--oct-fill-2);
 }
-/* The open tab is filled with the raised control surface, so it reads as the
-   selected one without a tinted ring. */
+/* The open tab is clearly filled, in the primary ink, with no tinted ring. */
 .content-tab:has([role="tab"][aria-selected="true"]) {
   color: var(--oct-fg);
-  background: var(--octant-control);
+  background: var(--oct-fill-1);
 }
 .content-tab > .content-tab__select {
   height: 28px;

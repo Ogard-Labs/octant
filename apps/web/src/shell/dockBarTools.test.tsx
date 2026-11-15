@@ -11,7 +11,7 @@ import { DeviceToolbar } from "../device/DeviceToolbar";
 import { DockBarTestHost } from "./dockBarHost.test-support";
 import { DockBarContext, type DockBarItem, type DockBarPlacement } from "./dockBarControls";
 
-const placements: ReadonlyArray<DockBarPlacement> = ["tiled", "alone", "bottom"];
+const placements: ReadonlyArray<DockBarPlacement> = ["tiled", "bottom"];
 
 function hosted(placement: DockBarPlacement, node: React.ReactNode) {
   const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];

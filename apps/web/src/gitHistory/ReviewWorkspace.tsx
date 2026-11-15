@@ -1,6 +1,6 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { lazy, Suspense, useMemo, useState } from "react";
-import { ReviewToolbarSlotContext } from "../code/reviewToolbarSlot";
+import { ReviewDiffShownContext, ReviewToolbarSlotContext } from "../code/reviewToolbarSlot";
 import { createGitHistoryClient } from "@octant/client-runtime/git-history-client";
 import type { DockReviewToolProps } from "../shell/DockReviewTool";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -108,7 +108,9 @@ function BoundReview(props: DockReviewToolProps) {
         )}
         <div className="git-history__list git-history__list--changes" hidden={view !== "changes"}>
           <Suspense fallback={<OctantEmpty state="loading" title="Loading changes" />}>
-            <WorkingTree {...props} />
+            <ReviewDiffShownContext.Provider value={view === "changes"}>
+              <WorkingTree {...props} />
+            </ReviewDiffShownContext.Provider>
           </Suspense>
         </div>
         {openedLocal ? (

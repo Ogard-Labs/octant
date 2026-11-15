@@ -56,8 +56,14 @@ export interface ShellFrameProps {
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
   readonly wideContextOpen: boolean;
-  /** Columns of tool tiles the dock shows; two lets it take all the thread's own minimum leaves. */
+  /** Columns of tool tiles the dock shows; two stand side by side only where the window has the room. */
   readonly dockTileColumns?: number;
+  /**
+   * The dock's width with two columns of tools side by side. The grid takes it
+   * only where the thread's minimum leaves it, and `contextSidebarWidth` (one
+   * column, stacked) otherwise.
+   */
+  readonly contextSidebarTwoColumnWidth?: number;
   /**
    * The Environment strip's width while it is open in the dock, so the grid
    * keeps it out of what the tool columns may shrink to. Absent otherwise.
@@ -231,6 +237,11 @@ export function ShellFrame(props: ShellFrameProps) {
                     ? {}
                     : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
                   "--octant-context-sidebar-width": `${Math.round(props.contextSidebarWidth)}px`,
+                  ...(props.contextSidebarTwoColumnWidth === undefined
+                    ? {}
+                    : {
+                        "--octant-context-two-column-width": `${Math.round(props.contextSidebarTwoColumnWidth)}px`,
+                      }),
                   ...(props.dockEnvironmentWidth === undefined
                     ? {}
                     : {

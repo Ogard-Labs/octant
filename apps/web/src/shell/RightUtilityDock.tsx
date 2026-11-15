@@ -45,6 +45,8 @@ export interface RightUtilityDockProps {
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   /** A Browser page's favicon as a `data:` URL, when the page has declared one. */
   readonly pageIcon?: (tabId: string) => string | undefined;
+  /** What a Browser page shows: its title, else its host; absent before a page loads. */
+  readonly pageTitle?: (tabId: string) => string | undefined;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (tabId: string) => void;
   readonly open: boolean;
@@ -165,6 +167,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       {...(props.pageIcon === undefined ? {} : { pageIcon: props.pageIcon })}
+      {...(props.pageTitle === undefined ? {} : { pageTitle: props.pageTitle })}
       onSelectSurface={props.onSelectSurface}
       {...(props.overview === undefined ? {} : { overview: props.overview })}
       {...(props.plan === undefined ? {} : { plan: props.plan })}

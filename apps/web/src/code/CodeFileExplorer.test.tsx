@@ -53,17 +53,18 @@ describe("CodeFileExplorer", () => {
     expect(tree).not.toHaveTextContent("/Users/");
   });
 
-  it("keeps Refresh beside the filter in the one row when the tool stands alone", () => {
+  it("hands Refresh to the pane's bar and keeps only the filter in its own row", () => {
     const handed: (ReadonlyArray<DockBarItem> | undefined)[] = [];
     render(
       <DockBarContext.Provider
-        value={{ placement: "alone", set: (_owner, items) => handed.push(items) }}
+        value={{ placement: "tiled", set: (_owner, items) => handed.push(items) }}
       >
         <CodeFileExplorer entries={entries()} onOpenFile={vi.fn()} onRefresh={vi.fn()} />
       </DockBarContext.Provider>,
     );
-    expect(screen.getByRole("button", { name: "Refresh files" })).toBeInTheDocument();
-    expect(handed.at(-1)).toEqual([]);
+    expect(screen.queryByRole("button", { name: "Refresh files" })).toBeNull();
+    expect(handed.at(-1)?.map((item) => item.id)).toEqual(["refresh"]);
+    expect(screen.getByRole("searchbox", { name: "Filter files" })).toBeInTheDocument();
   });
 
   it("filters the bounded projection and labels binary, oversized, and unavailable files honestly", async () => {

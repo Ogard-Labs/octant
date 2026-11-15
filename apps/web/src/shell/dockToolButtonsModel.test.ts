@@ -78,6 +78,30 @@ describe("the title band's tool buttons", () => {
     expect(buildDockToolButtons(input({ surfaces: [] }))).toEqual({ buttons: [], more: [] });
   });
 
+  it("opens and closes Environment as a section of its own, with nothing to arrange", () => {
+    const closed = byId(buildDockToolButtons(input({ environmentSection: true })), "environment");
+    expect(closed?.press).toEqual({ kind: "open-section" });
+    expect(closed?.pressed).toBe(false);
+    // Open, it reads pressed whatever tool is in front and whatever the tiles hold.
+    const open = byId(
+      buildDockToolButtons(
+        input({
+          environmentSection: true,
+          tabs: [
+            { id: "environment", surface: "environment" },
+            { id: "files", surface: "files" },
+          ],
+          shownTabIds: ["files"],
+          activeTabId: "files",
+        }),
+      ),
+      "environment",
+    );
+    expect(open?.pressed).toBe(true);
+    expect(open?.press).toEqual({ kind: "close", tabIds: ["environment"] });
+    expect(open?.menu).toEqual([{ value: "close", label: "Close Environment" }]);
+  });
+
   it("opens an unopened tool beside the focused tile", () => {
     const files = byId(buildDockToolButtons(input()), "files");
     expect(files).toMatchObject({ pressed: false, open: false, press: { kind: "open-beside" } });

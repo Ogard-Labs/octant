@@ -730,6 +730,7 @@ export function openUtilityTabBesideState(
   state: ThreadUtilityDockState,
   surface: RightUtilityDockSurfaceId,
   instanceId: string,
+  direction: "beside" | "stacked" = "beside",
 ): ThreadUtilityDockState {
   const repeatable = surface === "browser" || surface === "terminal";
   const existing = repeatable ? undefined : state.tabs.find((tab) => tab.id === surface);
@@ -743,7 +744,25 @@ export function openUtilityTabBesideState(
     { ...state, tabs },
     repeatable ? withoutMinimisedTool({ ...state, tabs }, surface) : state.minimised,
   );
-  return place(base, tab.id, "beside");
+  return direction === "stacked" ? placeStacked(base, tab.id) : place(base, tab.id, "beside");
+}
+
+/**
+ * Shows an open tab under the focused tile, in its column. Tools stack: a
+ * press never makes a second column, which is the person's own arrangement
+ * (Move right, or a drop on the dock's right third). Only a column already at
+ * its cap sends the tool beside.
+ */
+export function showUtilityTabStacked(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  return placeStacked(state, tabId);
+}
+
+function placeStacked(state: ThreadUtilityDockState, tabId: string): ThreadUtilityDockState {
+  const below = place(state, tabId, "below");
+  return below === state ? place(state, tabId, "beside") : below;
 }
 
 /** Columns of tiles a state shows: one for the single-tool view. */

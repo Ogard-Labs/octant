@@ -79,11 +79,13 @@ describe("the right sidebar surface", () => {
       sharedStylesheet,
       '.content-tab:has([role="tab"][aria-selected="true"])',
     );
-    // The raised control fill, with no ring.
-    expect(selected).toMatch(/background:\s*var\(--octant-control\)/);
+    // The open tab is clearly filled, with no ring; a tab at rest keeps a
+    // quiet tab shape of its own, and the pointer's fill sits between the two.
+    expect(selected).toMatch(/background:\s*var\(--oct-fill-1\)/);
     expect(selected).not.toMatch(/box-shadow/);
+    expect(ruleBody(sharedStylesheet, ".content-tab")).toMatch(/background:\s*var\(--oct-fill-4\)/);
     expect(ruleBody(sharedStylesheet, ".content-tab:hover")).toMatch(
-      /background:\s*var\(--oct-fg-soft\)/,
+      /background:\s*var\(--oct-fill-2\)/,
     );
     expect(ruleBody(sharedStylesheet, ".content-tab")).toMatch(/height:\s*28px/);
     expect(ruleBody(sharedStylesheet, ".content-tab > .content-tab__close")).toMatch(
@@ -98,7 +100,7 @@ describe("the right sidebar surface", () => {
     expect(dockStylesheet).not.toContain("--oct-radius-xs");
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
   });
-  it("shows several Browsers as one Browser tool with a row of pages", async () => {
+  it("shows several Browsers as one Browser tool with a row of pages named for what they show", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
     const onSelectSurface = vi.fn();
@@ -109,6 +111,7 @@ describe("the right sidebar surface", () => {
         onCloseTab={vi.fn()}
         onOpenTab={onOpenTab}
         onSelectSurface={onSelectSurface}
+        pageTitle={(id) => (id === "browser-2" ? "Octant docs" : undefined)}
         renderTab={(tab) => <p>{`Live ${tab.label}`}</p>}
         resolution={{ kind: "surface", surface: browser }}
         tabs={[page("browser-1", "Browser 1"), terminal, page("browser-2", "Browser 2")]}
@@ -116,12 +119,14 @@ describe("the right sidebar surface", () => {
     );
 
     const pages = screen.getByRole("tablist", { name: "Browser pages" });
-    expect(within(pages).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
+    // A page is named for its title; one that has loaded nothing is "New tab".
+    expect(within(pages).getByRole("tab", { name: "Octant docs" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
+    expect(within(pages).getByRole("button", { name: "Close Browser 2" })).toBeInTheDocument();
     expect(screen.getByText("Live Browser 2")).toBeVisible();
-    await user.click(within(pages).getByRole("tab", { name: "Browser 1" }));
+    await user.click(within(pages).getByRole("tab", { name: "New tab" }));
     expect(onSelectSurface).toHaveBeenCalledWith("browser-1");
     await user.click(within(pages).getByRole("button", { name: "New Browser page" }));
     expect(onOpenTab).toHaveBeenCalledWith("browser");
@@ -648,9 +653,9 @@ describe("tool tiles in the right sidebar", () => {
     }
   });
 
-  it("gives a single tool no bar and marks the other open tool on its button", () => {
+  it("gives a single tool the one pane bar and marks the other open tool on its button", () => {
     render(<TiledDock initial={opened("files", "environment")} />);
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(toolButton("Environment")).toHaveAttribute("aria-pressed", "true");
     expect(toolButton("Files")).toHaveAttribute("aria-description", "Open");
   });
@@ -933,13 +938,13 @@ describe("tool tiles in the right sidebar", () => {
     expect(within(pages).getByRole("button", { name: "New Browser page" })).toBeVisible();
   });
 
-  it("keeps a lone Browser tile's page tab and new-page button in the row at the top of its body", () => {
+  it("keeps a lone Browser's page tab and new-page button in its pane bar", () => {
     const page = "10000000-0000-4000-8000-000000000001";
     const state = addUtilityTabState(openUtilityTabState({ tabs: [] }, "files"), "browser", page);
     render(<TiledDock initial={state} />);
     const region = screen.getByRole("region", { name: "Browser" });
-    expect(region.querySelector(".dock-tile__bar")).toBeNull();
-    const pages = within(region).getByRole("tablist", { name: "Browser pages" });
+    const bar = region.querySelector(".dock-tile__bar") as HTMLElement;
+    const pages = within(bar).getByRole("tablist", { name: "Browser pages" });
     expect(within(pages).getAllByRole("tab")).toHaveLength(1);
     expect(within(pages).getByRole("button", { name: "New Browser page" })).toBeVisible();
   });

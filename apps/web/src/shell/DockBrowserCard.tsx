@@ -73,6 +73,11 @@ export function DockBrowserCard(props: {
   );
 }
 
+/** A page's host, for a tab or a card that has no title to show yet. */
+export function browserPageHost(url: string | undefined): string | undefined {
+  return hostOf(url);
+}
+
 function hostOf(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
   try {

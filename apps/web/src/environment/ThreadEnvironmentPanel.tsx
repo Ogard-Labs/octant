@@ -33,9 +33,9 @@ export interface ThreadEnvironmentPanelProps {
    */
   readonly headerContent?: ReactNode;
   /**
-   * The Computer card: where the thread runs, and the one place it moves to
-   * another of the person's computers. It comes first, above the header card,
-   * because where a thread runs is what a move changes.
+   * The computer row: where the thread runs, and the one place it moves to
+   * another of the person's computers. It is the first row of the first
+   * section, because where a thread runs is what a move changes.
    */
   readonly computer?: ReactNode;
   readonly children?: ReactNode;
@@ -83,12 +83,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      {/* The strip is named Environment; its first section names what the
-          thread works in (the folder with its path, then the branch) and what
-          that checkout has changed, as rows. */}
-      {props.computer === undefined ? null : (
-        <div className="thread-environment-dock__computer">{props.computer}</div>
-      )}
+      {/* The strip is named Environment; its first section names where the
+          thread runs and what it works in (the computer, the folder with its
+          path, then the branch) and what that checkout has changed, as rows. */}
       <header className="thread-environment-dock__header">
         <h2 className="visually-hidden">Environment</h2>
         {/* The whole summary stays one sentence for assistive technology;
@@ -97,6 +94,11 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         <p aria-hidden="true" className="environment-card__caption">
           Environment
         </p>
+        {/* The computer is the section's first row, not a section of its own:
+            a label over one row, then a hairline, spent 68px on one fact. */}
+        {props.computer === undefined ? null : (
+          <div className="thread-environment-dock__computer">{props.computer}</div>
+        )}
         <EnvironmentRow
           icon={Folder}
           label={props.summary.identity.label}

@@ -1760,8 +1760,10 @@ describe("the public-block visual language", () => {
       expect(wide).toMatch(/:active::before \{\s*background: var\(--oct-meta\)/);
     });
 
-    it("gives every tile bar one height, so neighbouring tiles line up", () => {
-      expect(body(".dock-tile__bar")).toMatch(/height:\s*32px/);
+    it("gives every pane bar one height and surface, alone or tiled", () => {
+      expect(body(".dock-tile__bar")).toMatch(/height:\s*36px/);
+      expect(body(".dock-tile__bar")).toMatch(/background:\s*var\(--octant-sidebar-fill\)/);
+      expect(dock).not.toContain("dock-tile__row");
       expect(dock).not.toContain("dock-tile__caption");
     });
 

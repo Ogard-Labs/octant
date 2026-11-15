@@ -172,6 +172,16 @@ describe("CodeDiffPane", () => {
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
   });
 
+  it("draws a changed file's path as one left-to-right run, so a dot-folder keeps its leading dot", () => {
+    // The row cuts a long path from its start by running right to left; the
+    // path itself must not, or ".config/x" draws as "config/x.".
+    const css = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+    const run = css.slice(css.indexOf("\n.code-diff-pane__file-run {"));
+    const body = run.slice(0, run.indexOf("}"));
+    expect(body).toMatch(/direction:\s*ltr/);
+    expect(body).toMatch(/unicode-bidi:\s*isolate/);
+  });
+
   it("keeps the selected captured path and editor identity across reordered versions, and explicitly refuses to retarget a missing path", async () => {
     const code = client();
     const fixture = runtime();
@@ -317,13 +327,13 @@ describe("CodeDiffPane", () => {
       expect(from, selector).toBeGreaterThanOrEqual(0);
       return css.slice(from, css.indexOf("}", from));
     };
-    for (const selector of [
-      ".code-diff-pane > .code-diff-pane__toolbar,\n.code-diff-pane > .code-diff-pane__status",
-      ".git-history__toolbar",
-    ]) {
-      expect(block(selector)).toMatch(/flex:\s*none/);
-      expect(block(selector)).toMatch(/flex-wrap:\s*wrap/);
-    }
+    expect(block(".code-diff-pane > .code-diff-pane__toolbar")).toMatch(/flex:\s*none/);
+    expect(block(".code-diff-pane > .code-diff-pane__toolbar")).toMatch(/flex-wrap:\s*wrap/);
+    expect(block(".git-history__toolbar")).toMatch(/flex:\s*none/);
+    // The status line is one row that never wraps: the marks shorten instead.
+    expect(block(".code-diff-pane__status")).toMatch(/flex:\s*none/);
+    expect(block(".code-diff-pane__status")).toMatch(/white-space:\s*nowrap/);
+    expect(block(".code-diff-pane__status")).not.toMatch(/flex-wrap/);
     expect(block(".code-diff-pane__body")).toMatch(/overflow:\s*auto/);
     expect(block(".code-diff-pane__body")).toMatch(/flex:\s*1 1 0/);
   });
@@ -357,6 +367,9 @@ describe("CodeDiffPane", () => {
     await chooseSideBySide();
 
     const files = await screen.findByRole("navigation", { name: "Changed files" });
+    expect(
+      [...files.querySelectorAll("bdi.code-diff-pane__file-run")].map((run) => run.textContent),
+    ).toContain("src/index.ts");
     const entries = within(files).getAllByRole("button");
     expect(entries.map((entry) => entry.textContent)).toEqual([
       "Mmodified: src/index.ts+1−1",

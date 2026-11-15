@@ -906,13 +906,18 @@ owned by [Language services](language-services.md).
 
 In a Code thread a file opens inside the **Files tool**, in the dock beside the
 thread, and a plain click never replaces the thread with a Code file tab. The
-tool is a file viewer: a strip of open files (name and ×) with the tree-toggle
-at its end, a breadcrumb path in muted ink with the checkout's name at its end,
-then the editor filling the tool, and the file tree as a column about 260px wide
-at the right with its filter field on top. A single click on a tree row previews
+tool is a file viewer: the open files (name and ×) are the tabs of its pane bar,
+where Refresh and the tree toggle are the bar's actions; under the bar a
+breadcrumb path in muted ink with the checkout's name at its end,
+then the editor filling the tool, and the file tree as a column 260px wide
+at the right with its filter field on top in a 32px row on the pane's 12px inset.
+With no file open the editor's place holds one quiet centred line. The tree
+toggle used to stand in a row of the editor's column, and in a pane under 480px
+that column collapsed to the toggle's 40px and stood as an empty gutter left of
+the tree (measured 2026-11-15). A single click on a tree row previews
 the file in the one italic tab that the next single click replaces; a double
 click on the row or the tab, or an edit, keeps the tab. In a tool narrower than
-480px the tree and the editor take turns. The editor draws no eyebrow and no
+480px the tree and the editor take turns: the tree fills the pane, and choosing a file closes it. The editor draws no eyebrow and no
 rows of text buttons: Save (only while the buffer is dirty) and Open externally
 are icon buttons in the tool's bar, and Commands, Find, Replace, Format, Go to
 line, Outline, Send selection to agent, Editor settings, Find references in
@@ -2675,15 +2680,18 @@ only Environment open the dock is exactly its width. It is hidden in the narrow
 layout (`isNarrow`: windows 960px wide or less, where the dock becomes a sheet), where the
 thread would otherwise drop below its minimum.
 
-Its content is a flat list. The first section ("Environment") carries the
-thread's place as rows: the Project (folder icon, its name, then its folder
+Its content is a flat list that takes its own height (the section scrolls as
+one). The first section ("Environment") carries the thread's place as rows:
+the computer it runs on (and, where a thread can move, the row that moves it),
+the Project (folder icon, its name, then its folder
 path in muted ink, home shortened to `~`, the path cut before the name), the
 branch with its checkout kind (Worktree, Main folder or Shared folder), then
-the checkout's state. An unavailable checkout is one muted warning row whose
+the checkout's state. The computer was a section of its own, a label over one
+row and a hairline, 68px for one fact. An unavailable checkout is one muted warning row whose
 short text has the full reason as tooltip and description. "Changes" follows,
 with Commit or push and Create pull request as plain action rows. A section is a
-muted 12px sentence-case label over rows; a row is a 16px muted icon, a 13px
-label in body ink and an optional right-aligned detail in muted ink as plain
+muted 12px sentence-case label over rows; a row is a 16px muted icon, a 14px
+medium label in body ink and an optional right-aligned detail in muted ink as plain
 text (no chip, no border), 28px tall, filled across its width by the pointer
 only, with no ring on click and a chevron only on hover for a row that opens
 something. The label ellipsises first; the detail keeps its whole value. A
@@ -2691,8 +2699,18 @@ hairline sets sections apart and rows have none. Minimised Browsers and
 terminals appear after the last section, set off by the same hairline, as live
 previews that flow with the list: a head row (the page's mark or the tool's
 icon, its title, then show and close), and a rounded 16:10 picture below with no
-box around the head. With Environment hidden the cards keep their place at the
-foot of the dock.
+box around the head. Minimising a tool opens the section when it is closed, so a
+card always stands in it; only in the drawer, which has no section, do the cards
+keep their place at the foot of the dock. The list used to be as tall as the
+section, which put the cards under the fold: a minimised Browser stood 944px
+down a 952px section and read as missing (measured 2026-11-15).
+
+Environment is never a tile. The dock keeps it apart from the tool tiles in
+every state (`environmentApart`): it does not count toward the tile caps, a
+tool placed beside it makes no second column, and no press can replace it. Its
+button opens and closes the section and arranges nothing. As a tile it could
+be the one a press replaced, which took the section off screen while its tab
+stayed open.
 
 Every tool has one of two size classes (`rightUtilityDockModel.ts`). **Fixed**
 tools are Environment (300px) and the panel tools (Vitals, Plan, Agents,
@@ -2705,7 +2723,28 @@ Canvas, Document, Files, iOS Simulator, Android Emulator and Desktop;
 their column's edge. When a flexible and a fixed tool share the tool column, the
 column follows the flexible rules; when only fixed tools are open it is fixed at
 360px with no handle. Opening or closing any tool never changes the Environment
-section's width or position.
+section's width, and the section stays on the thread's right edge.
+
+**How the width is shared.** One rule, in this order. The thread keeps its
+minimum whatever is open: 560px from 1100px up, 360px below
+(`--octant-wide-primary-min`, `WIDE_PRIMARY_MIN`); there is no smaller minimum
+beside two columns. Environment keeps 300px. The tool columns take what is
+left, up to the one width they ask for (640px, the width a person dragged to,
+or 360px for fixed tools) and, for one column, half the workspace; however
+many tools are open, that width does not change. Tools stack in one column:
+a press opens a tool under the focused tile, and only a column at its cap of
+three sends the next one beside. A second column is the person's own
+arrangement (Move right, or a drop on the right), and its columns stand side
+by side only where the tool columns can be 960px (`TILED_DOCK_WIDTH`, two
+columns at the flexible minimum) beside the thread's minimum and Environment;
+the dock then takes 960px (or a wider dragged width), and elsewhere it keeps
+the one-column width and the second column's tiles stack under the first's.
+When the window cannot hold even the dock's own minimum (Environment and one
+280px tool column) beside the thread's 560px, the sidebar gives first, down to
+its 220px minimum, and then the thread, never under 360px. Measured before
+(1600px window, 2026-11-15): a second tool took the thread from 560px to 440px
+and moved Environment 120px, and the two tools then stacked anyway; at 1280px
+the sidebar was drawn 88px wide.
 
 The tool columns' handle stands on the seam between the strip and
 the tools, and with Environment closed on the dock's own edge (and the shelf stays
@@ -2731,11 +2770,8 @@ On wide windows it may use at most half of the workspace beside the sidebar
 (`dockWidthCeiling`, never under the sidebar minimum or over its maximum; the
 Environment strip is not part of that half, so the tool columns shrink first),
 which keeps the thread readable beside any tool, and the resize handle stops there
-too; with two columns of tool tiles shown it may take all the thread's own
-minimum leaves (the thread keeps 440px beside two columns from 1100px up and
-360px below, which the stylesheet's grid mirrors as `--octant-tiled-primary-min`;
-one column keeps 560px from 1100px up. At 560px two tools could never stand side by
-side in a 1440px window, so a second column asks the thread for less); the bottom panel may use at most 38 percent of the
+too; with two columns of tool tiles shown side by side it may take all the thread's own
+minimum leaves (560px from 1100px up and 360px below, the same minimum one column keeps); the bottom panel may use at most 38 percent of the
 viewport height while preserving 320px for the primary workspace, and it hosts
 exactly Review, Terminal, Browser, Files and Side chat. The dock can host
 Review, Pull requests (open rows for a Code thread's Project), Files, Document
@@ -2798,7 +2834,8 @@ The tool columns have one width whatever they show, so a click inside them moves
 nothing: the launcher and every tool use the width the person last dragged them
 to. They never take more than half the workspace, and their handle stops at the
 same half. Any open flexible tool holds 640px (and a column of only fixed tools 360px) while that tab stays
-open, including one restored after a restart, and does not save it. A width the
+open, including one restored after a restart, and does not save it. A second column never changes that
+width unless the window has room for two side by side (see "How the width is shared"). A width the
 person drags to stands until the next tool opens. A pane appears at its final
 size: no width animates from narrow to wide.
 
@@ -2826,15 +2863,16 @@ them, so open tools can also be shown together as tiles, each one live, beside
 the one tool row. At most two columns of at most three tiles are shown; a
 request past either cap is refused, except that "beside" with two columns present
 puts the tool below in the last column. A tile is a region named for its tool
-with **one bar**, the tool's own header, 32px high in every tile so neighbouring
-bars line up. Its leading edge names the tool once (the icon and name; for the
-Browser the bar is its row of pages, each with its close, and the new-page
-control, and with one page the page's title is the name) and its trailing edge
+with **one bar**, the tool's own header, 36px high in every pane (a tool alone
+has the same bar as a tiled one), so neighbouring bars line up and nothing in a
+pane moves when a neighbour opens or closes. Its leading edge names the tool once (the icon and name; for the
+Browser the bar is its row of pages, each named for what it shows, with its close, and the new-page
+control; a shell's sessions and Files' open files lead their bars the same way) and its trailing edge
 holds the tile's controls: an **Arrange <tool>** menu button and a **Close
 <tool>** button that closes the tool as pressing its button again does (every
 page for the Browser). Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
-times, so the dock has no strip and a tile has no caption over its bar. A tool alone has no tile bar and keeps the one slim row below. The Arrange menu holds **Move
+times, so the dock has no strip and a tile has no caption over its bar. Alone, a tool's Arrange holds only **Minimise to card** (Browser and Terminal) and is otherwise disabled in its slot. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when
 that move is possible within the caps (a one-column layout moved sideways makes the
 second column, and a column left empty goes), then **Show alone**, **Hide
@@ -2850,10 +2888,8 @@ of the range the floors allow), each named for the two tools it sits between
 ("Resize Environment and Vitals") and reporting the range it can really reach; no tile
 is shorter than 140px or column narrower than 280px (the dock's own minimum
 width) while the dock has the room, and the columns stack when the tile area
-cannot give two columns 280px each. Columns therefore stand side by side only
-when the tile area has the width: at 1440px with the sidebar open a second
-column widens the dock to about 620px and the columns stand side by side at about
-306px each (they stacked at 500px while the thread kept 560px), and in a narrower
+cannot give two columns 480px each (see "How the width is shared"). Columns therefore stand side by side only
+when the window has the width, and in a narrower
 window "beside" stacks, which is why the head control promises no direction;
 a tool button's menu keeps an explicit Show below. Stacked columns stay
 resizable by a separator between them along the vertical axis, and no tile is
@@ -2884,13 +2920,12 @@ belong to the five tools with a button of their own (Environment, Terminal,
 Review, Browser, Files); a tool opened from More tools is shown the same way
 and is then arranged, hidden and closed from its own tile's bar, a tool alone
 having no bar and being closed by picking it again in More tools. Pressing a
-button shows a tool beside the focused tile in one step (opening it first when
-needed), beside it when the columns stand side by side and below it when they
-stack; when the tile caps are full it shows the tool in the focused tile's place
+button shows a tool under the focused tile in one step (opening it first when
+needed), and beside it only when that column is at its cap; when the tile caps are full it shows the tool in the focused tile's place
 and the tool it replaces stays open, hidden from view. Dragging an open tool's
 button onto the dock body does the same: the right third shows it
-beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown and no width the person
-has chosen, the tool columns widen to 840px (not saved), under the ceiling above;
+beside, the lower third below, and anywhere else replaces the focused tile. With two columns shown, no width the person
+has chosen and room for them side by side, the tool columns widen to 960px (not saved), under the ceiling above;
 showing a tool beside, which makes the second column, clears the person's
 sizing the way opening a Browser or Terminal does, and a drag afterwards holds. The
 narrow modal presentation has room for one tool and draws only the focused tile;
@@ -3179,6 +3214,17 @@ place uses the same row, group head and Sort menu. The dock packs its search,
 freshness and rows at the top of its scroll area in the same row anatomy, one
 flat list with no menus.
 
+Pull-request state is one shared mapping (`code/pullRequestState.ts`: state to
+glyph, words and token) used by the review panes, the lists, the chips and the
+Inbox's GitHub rows. Open is green (`--oct-pr-open`) with the pull-request
+glyph, merged purple (`--oct-pr-merged`) with the merge glyph, closed red
+(`--oct-pr-closed`) with the closed glyph, draft grey (`--oct-pr-draft`) with
+the draft glyph; links are blue (`--oct-link`); additions and passing checks use
+the success ink, deletions and failing checks the danger ink, pending checks the
+warning ink. In the Mono style open, merged and links fall back to greys and keep
+their glyphs; closed and failures keep red. The snapshot holds no label, so no
+surface draws one.
+
 The pull-request merge warning stays inline and nonmodal. Opening it focuses
 Cancel; Tab can leave the warning to continue reviewing. Escape within the warning
 or Cancel returns focus to Merge (or the review heading if Merge is unavailable).
@@ -3192,9 +3238,16 @@ allowed) and what the host checks are owned by
 
 History uses the existing interface face and monospace identifiers, semantic
 text/status tokens, and shared `OctantInput`, `OctantSelectField`,
-`OctantToggleGroup`, and `OctantButton` controls. A semantic commit table owns
-its vertical scroller and virtualizes fixed-height rows. Author, date, and SHA
-columns progressively give space to the commit message in narrow docks.
+`OctantToggleGroup`, and `OctantButton` controls. One 36px toolbar row holds the
+search field (it takes the width; Enter searches, emptying it returns the whole
+history), the branch as a compact select and a Refresh icon button; one 28px
+status line follows ("13 commits · main"). A semantic commit table owns
+its vertical scroller and virtualizes fixed-height 40px rows of two columns: the
+graph, whose first lane starts on the pane's 12px inset, and the commit as two
+lines, the subject cut with an ellipsis over one meta line (refs, author, date,
+SHA; a pane under 360px keeps the refs and the date). The whole row opens the
+commit. Three stacked rows of controls took 190px before the first commit, and
+a subject was clipped mid-word (measured 2026-11-15).
 
 A row opens an immutable commit comparison inside Review. Back restores the
 history list and keyboard focus; search, branch choice, and loaded pages stay
@@ -3208,12 +3261,15 @@ stores a layout for that thread.
 
 ### Review layout
 
-Review is a column of three rows and the diffs. One 36px toolbar row under the
-tab bar holds the view switch (Working tree, Local commits, History) at its left;
-at its right, for the working tree, Unified and Side by side as a compact icon
-segmented control, an Ignore whitespace icon toggle, a refresh icon button that
-re-reads the comparison, findings and checks, and a ⋯ menu that holds Select Git
-hunks. One 28px status row follows: "N files changed · +a −d" at the left and, at
+Review is its pane bar, one status line and the diffs. The bar holds the view
+switch (Working tree, Local commits, History) after the name and, for the
+working tree, the diff's actions as icon buttons with tooltips: Show side by
+side or Show unified (one button that names the other layout), an Ignore
+whitespace toggle, a refresh that
+re-reads the comparison, findings and checks, and Select Git
+hunks; they fold into the bar's More menu when it is narrow. A row of their own
+under the bar held four icons at its right end and nothing else. Where no pane
+bar hosts them (the bottom panel) the review keeps one 36px toolbar row. One 32px status line follows and never wraps (the marks shorten first): "N files changed · +a −d" at the left and, at
 the right, the recorded checks ("No tests run") and the finding count ("No
 findings") as quiet meta text with icons, then an info icon whose tooltip carries
 the scope sentences (checkout changes only; extra Project folders are not
@@ -3222,8 +3278,10 @@ an empty result: a "Findings" header with its count appears only when findings
 exist. The changed files are a list of rows (status letter M, A, D or R in the
 diff tokens, the folder muted and the name strong, the counts at the right) that
 takes the diff to that file: a 220px left column when the pane is at least 640px
-wide, a short scrolling list above the diffs when narrower. Diffs run edge to
-edge, each file under a sticky 28px header, with hunks in the existing diff
+wide, a short scrolling list above the diffs when narrower. A path is cut from
+its start and keeps its own order (a dot-folder's leading dot stays where it is:
+`.config/settings.json` drew as `config/settings.json.`). Diffs run edge to
+edge of the pane, each file under a sticky 28px header, with hunks in the existing diff
 colours and line numbers in meta ink.
 
 ### What's new card and announcement

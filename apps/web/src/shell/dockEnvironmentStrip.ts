@@ -27,7 +27,10 @@ export function splitEnvironmentStrip(state: ThreadUtilityDockState): DockEnviro
   return { environmentTabId, ...layoutOf(state, environmentTabId) };
 }
 
-function layoutOf(state: ThreadUtilityDockState, environmentTabId: string | undefined) {
+function layoutOf(
+  state: ThreadUtilityDockState,
+  environmentTabId: string | undefined,
+): Omit<DockEnvironmentSplit, "environmentTabId"> {
   if (state.layout !== undefined) {
     const columns: DockTileColumn[] = [];
     const columnOrigins: number[] = [];
@@ -67,6 +70,51 @@ function layoutOf(state: ThreadUtilityDockState, environmentTabId: string | unde
     toolTabIds: [shown],
     toolLayout: { columns: [{ share: 1, tiles: [{ tabId: shown, share: 1 }] }] },
     columnOrigins: [0],
+  };
+}
+
+/**
+ * The dock state with Environment kept apart from the tiles: it is never a tile
+ * in the layout and never the tool in front while another tool is shown. As a
+ * tile it counted toward the caps, made a second column out of one tool
+ * (Environment | Browser), and was the tile a press replaced, which took the
+ * section off screen while its tab stayed open. Tile changes are made on this
+ * state, so no placement, cap or replacement can reach the section.
+ */
+export function environmentApart(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  const environmentId = state.tabs.find((tab) => tab.surface === "environment")?.id;
+  if (environmentId === undefined) return state;
+  const tools = layoutOf(state, environmentId);
+  const active =
+    tools.toolTabIds.length === 0
+      ? environmentId
+      : state.active !== undefined && tools.toolTabIds.includes(state.active)
+        ? state.active
+        : tools.toolTabIds[0];
+  const inLayout =
+    state.layout?.columns.some((column) =>
+      column.tiles.some((tile) => tile.tabId === environmentId),
+    ) === true;
+  if (!inLayout && active === state.active) return state;
+  const { layout: stored, active: _front, ...rest } = state;
+  const layout = stored === undefined ? undefined : tools.toolLayout;
+  return {
+    ...rest,
+    ...(active === undefined ? {} : { active }),
+    ...(layout === undefined ? {} : { layout }),
+  };
+}
+
+/**
+ * Opens the Environment section and changes nothing else: the tools shown, the
+ * tool in front and every tile stay as they are.
+ */
+export function withEnvironmentOpen(state: ThreadUtilityDockState): ThreadUtilityDockState {
+  if (state.tabs.some((tab) => tab.surface === "environment")) return state;
+  return {
+    ...state,
+    tabs: [...state.tabs, { id: "environment", surface: "environment" }],
+    ...(state.active === undefined && state.layout === undefined ? { active: "environment" } : {}),
   };
 }
 

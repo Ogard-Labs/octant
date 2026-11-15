@@ -30,10 +30,11 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Columns2, Ellipsis, Info, Pilcrow, RefreshCw, Rows2 } from "../ui/icons";
+import { Columns2, Ellipsis, Info, ListChecks, Pilcrow, RefreshCw, Rows2 } from "../ui/icons";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { OctantMenu } from "../ui/base/OctantMenu";
-import { ReviewToolbarSlotContext } from "./reviewToolbarSlot";
+import { ReviewDiffShownContext, ReviewToolbarSlotContext } from "./reviewToolbarSlot";
+import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, diffModelRowSources, type ParsedDiffFile } from "./unifiedDiff";
@@ -200,6 +201,7 @@ function AvailableDiff(
     savedReview?.kind === "review" ? savedReview.path : undefined,
   );
   const toolbarSlot = useContext(ReviewToolbarSlotContext);
+  const diffShown = useContext(ReviewDiffShownContext);
   const [hunksOpen, setHunksOpen] = useState(false);
   const [jump, setJump] = useState<{ readonly path: string }>();
   const [providerReadsAvailable, setProviderReadsAvailable] = useState(false);
@@ -412,6 +414,63 @@ function AvailableDiff(
           createGitOperationId: props.createGitOperationId,
         }
       : undefined;
+  // In a pane the diff's controls are the bar's actions, after the view switch:
+  // one toolbar. A row of their own under the bar held four icons at its right
+  // end and nothing else.
+  const barItems: ReadonlyArray<DockBarItem> =
+    toolbarSlot !== undefined || !diffShown
+      ? []
+      : [
+          {
+            kind: "button",
+            id: "diff-layout",
+            label: layout === "unified" ? "Show side by side" : "Show unified",
+            icon: layout === "unified" ? Columns2 : Rows2,
+            onSelect: () => {
+              const next = layout === "unified" ? "side-by-side" : "unified";
+              choseLayout.current = true;
+              setLayout(next);
+              writeCodeDiffLayout(threadId, next);
+            },
+          },
+          ...(props.ignoreWhitespace === undefined
+            ? []
+            : [
+                {
+                  kind: "button" as const,
+                  id: "diff-whitespace",
+                  label:
+                    props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace",
+                  icon: Pilcrow,
+                  pressed: props.ignoreWhitespace.value,
+                  onSelect: () => props.ignoreWhitespace?.onChange(!props.ignoreWhitespace.value),
+                },
+              ]),
+          ...(props.onRefresh === undefined
+            ? []
+            : [
+                {
+                  kind: "button" as const,
+                  id: "diff-refresh",
+                  label: "Refresh review",
+                  icon: RefreshCw,
+                  onSelect: props.onRefresh,
+                },
+              ]),
+          ...(hunkInputs === undefined
+            ? []
+            : [
+                {
+                  kind: "button" as const,
+                  id: "diff-hunks",
+                  label: "Select Git hunks",
+                  icon: ListChecks,
+                  pressed: hunksOpen,
+                  onSelect: () => setHunksOpen((open) => !open),
+                },
+              ]),
+        ];
+  const barHosted = useDockBarControls(barItems) !== undefined;
   const controls = (
     <div className="code-diff-pane__controls">
       <OctantToggleGroup<CodeDiffLayout>
@@ -465,7 +524,9 @@ function AvailableDiff(
     <section aria-label="Review" className="code-diff-pane">
       <h1 className="sr-only">{props.snapshot.title}</h1>
       {toolbarSlot === undefined ? (
-        <header className="code-diff-pane__toolbar">{controls}</header>
+        barHosted ? null : (
+          <header className="code-diff-pane__toolbar">{controls}</header>
+        )
       ) : toolbarSlot === null ? null : (
         createPortal(controls, toolbarSlot)
       )}
@@ -790,12 +851,17 @@ function ChangedFiles(props: {
                 </span>
                 <span className="sr-only">{CHANGE_LABELS[file.change]}: </span>
                 <span className="code-diff-pane__file-path">
-                  {slash < 0 ? null : (
-                    <span className="code-diff-pane__file-folder">
-                      {file.path.slice(0, slash + 1)}
-                    </span>
-                  )}
-                  <span className="code-diff-pane__file-name">{file.path.slice(slash + 1)}</span>
+                  {/* One left-to-right run inside the box that cuts from the
+                      start: without it the box's own direction moved a leading
+                      dot to the far end (".config/x" drew as "config/x."). */}
+                  <bdi className="code-diff-pane__file-run">
+                    {slash < 0 ? null : (
+                      <span className="code-diff-pane__file-folder">
+                        {file.path.slice(0, slash + 1)}
+                      </span>
+                    )}
+                    <span className="code-diff-pane__file-name">{file.path.slice(slash + 1)}</span>
+                  </bdi>
                 </span>
                 {file.binary ? null : (
                   <span className="code-diff-pane__file-counts">

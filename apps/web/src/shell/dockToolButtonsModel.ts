@@ -47,6 +47,8 @@ export type DockToolPress =
   /** The tool is shown in the bottom panel while a reader hides it: leave the reader. */
   | { readonly kind: "reveal" }
   | { readonly kind: "open-beside" }
+  /** Environment, beside the tool columns: the section opens and no tile changes. */
+  | { readonly kind: "open-section" }
   | { readonly kind: "show-beside"; readonly tabId: string }
   /** The drawer shows one tool: a press replaces it with a tool that has no tab yet. */
   | { readonly kind: "open" }
@@ -157,6 +159,12 @@ export interface DockToolButtonsInput {
   readonly bottomActive?: RightUtilityDockSurfaceId | undefined;
   /** Both columns are at their limit, so a tool not shown has no room. */
   readonly capsFull: boolean;
+  /**
+   * Environment is a section of its own beside the tool columns (every dock
+   * but the drawer): its button opens and closes the section and arranges
+   * nothing, since it is never a tile.
+   */
+  readonly environmentSection?: boolean;
 }
 
 function describeButton(
@@ -185,6 +193,21 @@ function describeButton(
     tabIds,
     ...(tabId === undefined ? {} : { tabId }),
   };
+  if (tool.id === "environment" && input.environmentSection === true && !narrow) {
+    const [section] = tabs;
+    if (section === undefined) {
+      return { ...base, pressed: false, open: false, menu: [], press: { kind: "open-section" } };
+    }
+    return {
+      ...base,
+      pressed: input.dockPresentedOpen,
+      open: false,
+      menu: [{ value: "close", label: `Close ${tool.label}` }],
+      press: input.dockPresentedOpen
+        ? { kind: "close", tabIds: [section.id] }
+        : { kind: "open-dock" },
+    };
+  }
   const minimisable =
     input.shelfDrawn === true && !narrow && MINIMISABLE_DOCK_SURFACES.has(tool.id);
   const cards = input.minimised ?? [];

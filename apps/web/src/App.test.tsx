@@ -6654,11 +6654,11 @@ describe("App", () => {
     await user.click(await screen.findByRole("menuitem", { name: "New Browser page" }));
 
     const pages = within(dock).getByRole("tablist", { name: "Browser pages" });
-    expect(within(pages).getByRole("tab", { name: "Browser 1" })).toBeVisible();
-    expect(within(pages).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    // A page that has loaded nothing is "New tab"; the new one is in front.
+    const tabs = within(pages).getAllByRole("tab", { name: "New tab" });
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0]).toBeVisible();
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
   });
 
   it("opens a tool from its button in the title band and closes it on the next press", async () => {
@@ -6799,21 +6799,19 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Environment" });
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
 
-    // Environment is a strip beside the tools, so showing it alone leaves the
-    // tool where it is.
+    // Environment is a section beside the tools, never a tile: its menu has
+    // nothing to arrange and only closes it, and the tool stays where it is.
     await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
-    await user.click(await screen.findByRole("menuitem", { name: "Show alone" }));
-    expect(screen.getByRole("region", { name: "Environment" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
-
-    await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
-    await user.click(await screen.findByRole("menuitem", { name: "Close Environment" }));
+    const close = await screen.findByRole("menuitem", { name: "Close Environment" });
+    expect(screen.queryByRole("menuitem", { name: "Show alone" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Hide from view" })).toBeNull();
+    await user.click(close);
     await waitFor(() => expect(screen.queryByRole("region", { name: "Environment" })).toBeNull());
     expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
   });
 
-  it("shows a tool in the focused tile's place when the tile caps are full, leaving the replaced tool open", async () => {
+  it("stacks every tool a press opens and keeps Environment a section apart from them", async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     render(
@@ -6831,7 +6829,8 @@ describe("App", () => {
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await screen.findByRole("toolbar", { name: "Tools" });
-    // Two columns, the second holding three tiles: nothing more fits beside.
+    // Environment does not count toward the tiles, so three tools and the
+    // section leave room for a fourth tool, and nothing is replaced.
     for (const tool of ["Files", "Browser", "Environment", "Terminal"]) {
       await user.click(bandTool(tool));
     }
@@ -6841,16 +6840,16 @@ describe("App", () => {
 
     const review = bandTool("Review");
     expect(review).not.toHaveAttribute("aria-disabled");
-    expect(review).toHaveAttribute("aria-description", "Shows in place of Terminal");
+    expect(review).not.toHaveAttribute("aria-description", "Shows in place of Terminal");
     await user.click(review);
 
     await screen.findByRole("region", { name: "Review" });
-    await waitFor(() => expect(bandTool("Terminal")).toHaveAttribute("aria-pressed", "false"));
-    // The replaced tool is hidden from view, not closed: its button says so.
-    expect(bandTool("Terminal")).toHaveAttribute("data-dock-open", "true");
-    expect(bandTool("Terminal")).toHaveAttribute("aria-description", "Shows in place of Review");
-    expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
-    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+    for (const tool of ["Files", "Browser", "Terminal"]) {
+      expect(bandTool(tool)).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("region", { name: tool })).toBeVisible();
+    }
+    expect(screen.getByRole("region", { name: "Environment" })).toBeVisible();
+    expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("opens the thread Terminal in a remembered bottom panel and still offers another", async () => {
@@ -7529,7 +7528,7 @@ describe("App", () => {
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
-    await user.click(await within(dock).findByRole("button", { name: "Side by side" }));
+    await user.click(await within(dock).findByRole("button", { name: "Show side by side" }));
     expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(thread).toBeVisible();
     expect(screen.queryByRole("heading", { name: "No Code Project open" })).not.toBeInTheDocument();

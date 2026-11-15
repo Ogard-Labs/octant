@@ -30,7 +30,7 @@ import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
 import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
-import { DockBrowserCard } from "../shell/DockBrowserCard";
+import { browserPageHost, DockBrowserCard } from "../shell/DockBrowserCard";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
 import type { DockCardControls } from "../shell/RightUtilityDockSurface";
 import { DockTerminalCard } from "../shell/DockTerminalCard";
@@ -603,12 +603,19 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     picture: false,
     threadId: decodeBrowserThreadId(dockThread?.threadId ?? NO_THREAD),
   });
-  const pageIcon = (tabId: string): string | undefined => {
+  const pageObservation = (tabId: string) => {
     const contextId = displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId;
-    if (contextId === undefined) return pageIconSnapshot?.observation?.faviconDataUrl;
+    if (contextId === undefined) return pageIconSnapshot?.observation;
     return pageIconSnapshot?.contexts?.find(
       (entry) => String(entry.context.contextId) === contextId,
-    )?.observation?.faviconDataUrl;
+    )?.observation;
+  };
+  const pageIcon = (tabId: string): string | undefined => pageObservation(tabId)?.faviconDataUrl;
+  // The tab's name is what the page shows: its title, else its host.
+  const pageTitle = (tabId: string): string | undefined => {
+    const observation = pageObservation(tabId);
+    const title = observation?.title?.trim();
+    return title !== undefined && title !== "" ? title : browserPageHost(observation?.url);
   };
 
   /** The Browser context of the page a card stands for, when that page has one of its own. */
@@ -827,6 +834,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("tests")
         }
         pageIcon={pageIcon}
+        pageTitle={pageTitle}
         tabs={dockTabs}
         tiles={{
           ...(displayedDockState.layout === undefined ? {} : { layout: displayedDockState.layout }),

@@ -31,6 +31,7 @@ import {
   shownUtilityTabIds,
   showUtilityTabAlone,
   showUtilityTabBelow,
+  showUtilityTabStacked,
   showUtilityTabBeside,
   withoutTileLayout,
   type ThreadUtilityDockState,
@@ -360,6 +361,16 @@ describe("dock tool tiles", () => {
   function columnsOf(state: ThreadUtilityDockState): ReadonlyArray<ReadonlyArray<string>> {
     return (state.layout?.columns ?? []).map((column) => column.tiles.map((tile) => tile.tabId));
   }
+  it("stacks a pressed tool under the focused tile and makes a column only when that one is full", () => {
+    let state = showUtilityTabStacked(opened("files", "canvas"), "files");
+    expect(columnsOf(state)).toEqual([["canvas", "files"]]);
+    state = openUtilityTabBesideState(state, "plan", "plan", "stacked");
+    expect(columnsOf(state)).toEqual([["canvas", "files", "plan"]]);
+    // Three tiles are a column's cap: the next tool goes beside.
+    state = openUtilityTabBesideState(state, "ios-simulator", "ios-simulator", "stacked");
+    expect(columnsOf(state)).toEqual([["canvas", "files", "plan"], ["ios-simulator"]]);
+  });
+
   /** Plan on the left; Files above Canvas on the right; Canvas focused. */
   function twoColumns() {
     let state = opened("ios-simulator", "canvas", "files", "plan");

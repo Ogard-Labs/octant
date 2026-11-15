@@ -200,12 +200,19 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 /* The rail beside the sidebar spends width from the same budget, so the
    clamp subtracts it too. */
+/* The sidebar gives width to the thread and the dock only down to its own
+   minimum (220px, MIN_SIDEBAR_WIDTH): past that the thread gives instead. With
+   no floor a 1280px window with Environment and a tool open drew the sidebar
+   88px wide. */
 .shell.shell-frame.shell--wide-context-open {
-  --octant-sidebar-target-width: min(
-    var(--octant-sidebar-width, 232px),
-    calc(
-      100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
-        var(--octant-context-sidebar-min)
+  --octant-sidebar-target-width: max(
+    min(var(--octant-sidebar-width, 232px), 220px),
+    min(
+      var(--octant-sidebar-width, 232px),
+      calc(
+        100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
+          var(--octant-context-sidebar-min)
+      )
     )
   );
 }
@@ -2722,12 +2729,6 @@ html[data-octant-density="compact"]
   }
 }
 
-@media (min-width: 1100px) {
-  .shell.shell-frame.shell--wide-context-open[data-dock-tile-columns="2"] {
-    --octant-tiled-primary-min: 440px;
-  }
-}
-
 @media (min-width: 681px) and (max-width: 960px) {
   .shell.shell-frame {
     --octant-sidebar-target-width: min(var(--octant-sidebar-width, 232px), 236px);
@@ -4534,21 +4535,36 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 }
 
 /* PR state carries the same meaning in navigation, boards, and pane headers. */
-.pull-request-chip[data-tone="draft"],
-.pull-request-chip[data-tone="unknown"] {
-  color: var(--oct-meta);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="open"] {
+  color: var(--oct-pr-open);
 }
 
-.pull-request-chip[data-tone="open"] {
-  color: var(--octant-success-text);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="merged"] {
+  color: var(--oct-pr-merged);
 }
 
-.pull-request-chip[data-tone="merged"] {
-  color: var(--octant-palette-purple);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="closed"] {
+  color: var(--oct-pr-closed);
 }
 
-.pull-request-chip[data-tone="closed"] {
-  color: var(--octant-danger-text);
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="draft"],
+:is(.pull-request-chip, .pr-state-pill, .work-list__state)[data-pr-state="unknown"] {
+  color: var(--oct-pr-draft);
+}
+
+.pr-state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  white-space: nowrap;
+}
+
+.pr-detail__prose a,
+.code-pr-review__prose a,
+.code-pr-review__github-link {
+  color: var(--oct-link);
 }
 
 /* The age holds a slot of one width, right-aligned, so a title never gives or

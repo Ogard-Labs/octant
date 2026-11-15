@@ -8,3 +8,10 @@ import { createContext } from "react";
  * own controls row; `null` is a slot that is about to exist.
  */
 export const ReviewToolbarSlotContext = createContext<HTMLElement | null | undefined>(undefined);
+
+/**
+ * Whether the working-tree view is the one on screen. The diff stays mounted
+ * behind Local commits and History, and its controls must leave the pane's bar
+ * while it is hidden.
+ */
+export const ReviewDiffShownContext = createContext(true);

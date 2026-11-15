@@ -248,30 +248,29 @@ describe("a tool's controls in its tile's bar", () => {
 });
 
 describe("a tool shown alone", () => {
-  it("draws no tile bar and one slim row holding only the tool's controls", () => {
+  it("draws the same one bar a tiled tool has: its name, its controls, Arrange and Close", () => {
     render(<Dock layout={alone} />);
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
-    const rows = document.querySelectorAll(".dock-tile__row");
-    expect(rows).toHaveLength(1);
-    expect(screen.getByText("alone, view a")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Arrange one" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Close one" })).toBeNull();
-    expect(within(rows[0] as HTMLElement).queryByText("one")).toBeNull();
-    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
-  });
-
-  it("draws no row at all for a tool that hands up no controls", () => {
-    render(<Dock layout={aloneWithoutControls} />);
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    const bars = document.querySelectorAll(".dock-tile__bar");
+    expect(bars).toHaveLength(1);
     expect(document.querySelector(".dock-tile__row")).toBeNull();
-    expect(screen.getByText("plain alone")).toBeInTheDocument();
+    expect(screen.getByText("tiled, view a")).toBeInTheDocument();
+    expect(within(bars[0] as HTMLElement).getByText("one")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close one" })).toBeInTheDocument();
   });
 
-  it("folds the row's controls by the same steps as a bar's", () => {
+  it("keeps Arrange in its place, disabled, while there is nothing to arrange", () => {
+    render(<Dock layout={aloneWithoutControls} />);
+    expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
+    expect(screen.getByText("plain tiled")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Arrange / })).toBeDisabled();
+  });
+
+  it("folds its controls by the same steps as a tiled bar's", () => {
     barOfWidth(200);
     render(<Dock layout={alone} />);
     expect(screen.getByRole("button", { name: "View A, Things view" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh things" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More one actions" })).toBeInTheDocument();
   });
 });
 
@@ -304,14 +303,9 @@ describe("a tool in the bottom panel", () => {
 });
 
 describe("the bar's sizes", () => {
-  it("holds the bar and the single row to 32px on the bar's insets, with 4px between controls", () => {
-    for (const selector of [".dock-tile__bar", ".dock-tile__row"]) {
-      expect(rule(selector)).toMatch(/height:\s*32px/);
-    }
+  it("holds every pane's bar to 36px on the 12px and 8px insets, with 4px between controls", () => {
+    expect(rule(".dock-tile__bar")).toMatch(/height:\s*36px/);
     expect(rule(".dock-tile__bar")).toMatch(
-      /padding:\s*0 var\(--oct-space-2\) 0 var\(--oct-space-3\)/,
-    );
-    expect(rule(".dock-tile__row")).toMatch(
       /padding:\s*0 var\(--oct-space-2\) 0 var\(--oct-space-3\)/,
     );
     expect(rule(".dock-tile__tool-actions")).toMatch(/gap:\s*var\(--oct-space-1\)/);
@@ -368,17 +362,17 @@ describe("the slot a host keeps", () => {
 
   it("redraws a control when its tool registers it again with a new name, and clears it on unmount", () => {
     const { rerender } = render(
-      <DockBarTestHost placement="alone">
+      <DockBarTestHost placement="tiled">
         <Registrant id="a" label="Refresh a" />
       </DockBarTestHost>,
     );
     rerender(
-      <DockBarTestHost placement="alone">
+      <DockBarTestHost placement="tiled">
         <Registrant id="a" label="Refresh again" />
       </DockBarTestHost>,
     );
     expect(screen.getByRole("button", { name: "Refresh again" })).toBeInTheDocument();
-    rerender(<DockBarTestHost placement="alone">{null}</DockBarTestHost>);
+    rerender(<DockBarTestHost placement="tiled">{null}</DockBarTestHost>);
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -539,7 +533,7 @@ describe("a tile that changes between tiled and alone", () => {
     expect(screen.getByLabelText("Draft")).toBe(input);
     expect(input).toHaveValue("keep me");
     expect(input).toHaveFocus();
-    expect(document.querySelector(".dock-tile__bar")).toBeNull();
+    expect(document.querySelectorAll(".dock-tile__bar")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Refresh draft" })).toBeInTheDocument();
     rerender(layoutOf(two));
     expect(screen.getByLabelText("Draft")).toBe(input);

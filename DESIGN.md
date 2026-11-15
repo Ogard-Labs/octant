@@ -128,6 +128,13 @@ fourth.
 | Selection              | `--octant-selection`         | `#2c2c2c` | `#ebebea` | Chosen row in a scrolling picker (opaque so it never shifts) |
 | Scrim                  | `--octant-scrim`             | `#000000` | `#000000` | Opaque by contract; mixed to a wash where used               |
 
+**Pull-request roles.** `--oct-pr-open` (the success ink), `--oct-pr-merged`
+(the purple palette role), `--oct-pr-closed` (the danger ink), `--oct-pr-draft`
+(the muted ink) and `--oct-link` (the blue palette role) are defined once in
+`octant.css` from the semantic and palette roles, so they follow the theme in
+dark and light. Mono greys open, merged and links; closed keeps its red. Feature
+CSS names these tokens and never a hue.
+
 _Why the muted change._ Meta ink at `#949494` on the opaque dark float
 (`#333333`) is 4.17:1, under the 4.5:1 text floor, and the float is what every
 menu shows under reduced transparency. `#9b9b9b` was the first grey that clears
@@ -541,12 +548,12 @@ fetched, never emoji.
 | 3 Well     | A segmented track, a history capsule, a command block, a stepper              | `--octant-well` or the field paint                         | one hairline at most                              |
 | 4 Floating | A menu, popover, hover card, toast, dialog, the Settings sheet, the tour card | `--octant-float-glass` (see [Translucency](#translucency)) | `--octant-shadow-pop`                             |
 
-| Shadow token               | Dark                                                                   | Light                                                                  | Use                                                                              |
-| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                                                           |
-| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card)                                  |
-| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer, a picker pinned to it, and the start cards in an empty Code thread |
-| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used                                           |
+| Shadow token               | Dark                                                                   | Light                                                                  | Use                                             |
+| -------------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------- |
+| `--octant-shadow-pop`      | `0 0 0 1px rgb(255 255 255 / 10%), 0 16px 40px -14px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 16px 40px -14px rgb(16 24 40 / 28%)` | Every floating surface                          |
+| `--octant-shadow-overlay`  | `0 0 0 1px rgb(255 255 255 / 10%), 0 12px 32px -12px rgb(0 0 0 / 70%)` | `0 0 0 1px rgb(16 24 40 / 10%), 0 12px 32px -12px rgb(16 24 40 / 28%)` | A small float drawn by a feature (tooltip card) |
+| `--oct-shadow-float`       | `0 6px 24px -10px rgb(0 0 0 / 30%)`                                    | `0 4px 18px -6px` ink 7%                                               | The composer and a picker pinned to it          |
+| `--octant-shadow-hairline` | `0 0 0 1px var(--octant-border)`                                       | the same                                                               | A ring where an outline cannot be used          |
 
 The resting shadow tokens (`--octant-shadow-xs`, `-sm`, `-md`, `-lg`,
 `-control`, `-control-pressed`, `-selected`, `-well`, `-primary`,
@@ -1351,15 +1358,21 @@ in [Workspace: Shell grid and tool row](docs/design/workspace.md#shell-grid-and-
 
 ### One tile bar
 
-A tiled tool has one 32px bar: its name, its controls, then Arrange and Close,
-on insets of 12px leading and 8px trailing, 4px between controls. Controls are
-24px with 16px glyphs; a view choice is a 28px word tray of 24px segments; an
-action everyone knows is an icon button with a tooltip. The bar's hairline is
-drawn inside its 32px. At most one 32px secondary row holds content (a filter,
-a path) on the bar's insets. When the controls do not fit, word switches fold
-to a named control, then actions into one More menu; status text and must-read
-cues never fold. A tool alone in the dock keeps no bar. The folding order is in
-[Workspace: Tool tiles](docs/design/workspace.md#tool-tiles).
+Every pane in the dock has one 36px bar, the same whether the tool is shown
+alone or among tiles: its name (a 16px icon and a 14px medium label) or its own
+tabs, its controls, then Arrange and Close, on insets of 12px leading and 8px
+trailing, 4px between controls, on the bar surface (the sidebar's fill, a step
+off the pane) with its hairline drawn inside the 36px. Controls are 24px with
+16px glyphs; a view choice is a 28px word tray of 24px segments; an action
+everyone knows is an icon button with a tooltip. Arrange keeps its slot,
+disabled, while there is nothing to arrange. At most one 32px secondary row
+holds content (a filter, a status line) on the bar's insets, and a pane's
+content starts on the same 12px. When the controls do not fit, word switches
+fold to a named control, then actions into one More menu; status text and
+must-read cues never fold. A tool alone used to have a 36px tab row inset 8px,
+a 32px control row or no bar, and a tiled one a 32px bar inset 12px, so a
+second tool moved every tab and control of the first (measured 2026-11-15).
+The folding order is in [Workspace: Tool tiles](docs/design/workspace.md#tool-tiles).
 
 Panel tabs (the tool strip, the Browser's pages, a Code thread's open files)
 draw one recipe (`.content-tab`, with `PanelTabStrip` and `PanelTab` for a
@@ -1367,10 +1380,17 @@ panel's own row): a 28px tab in the control radius with a leading mark (a
 tool's icon; a Browser page's 16px favicon, or the globe when it has none; a
 file tab has no mark and shows its name alone), a 13px label that
 ellipsises at 180px, and a 16px × that always keeps its slot. The open tab
-(`aria-selected`) has the raised control fill and the primary ink; the others
-are secondary ink with a hover fill. The × shows on the open tab, on hover and
+(`aria-selected`) is clearly filled (`--oct-fill-1`) in the primary ink; a tab
+at rest keeps a quiet tab shape of its own (`--oct-fill-4`, secondary ink) and
+the pointer's fill sits between the two (`--oct-fill-2`), because bare text
+beside one filled tab read as a label and a link, not as tabs. A Browser tab is
+named for what its page shows (the title, else the host, "New tab" before a
+page loads). The × shows on the open tab, on hover and
 on focus by opacity alone, so a label never shifts. A tab with unsaved edits
-shows a dot in the × slot until it is hovered or focused. A panel's own tab row
+shows a dot in the × slot until it is hovered or focused. In a pane the tabs
+(the Browser's pages, a shell's sessions, Files' open files) stand in the pane
+bar in place of the tool's name; where no pane bar hosts them (the bottom
+panel) a panel's own tab row
 is a 36px bar (`.panel-tabs`) a step off the pane with a hairline under it; it
 scrolls sideways without a scrollbar and moves only its own scroll to keep the
 open tab in view. It is a tablist: arrows, Home and End move between tabs, a
@@ -1564,18 +1584,24 @@ one row at the trailing edge (the dismissing answer outlined first, the acting
   stops under reduced motion.
 - A route or tool still loading is one quiet line on the page, never a card.
 - A state inside a pane is `OctantEmpty`'s card layout.
-- The two start cards in a new, empty Code thread ("Set up this workspace" and
-  "Start a project") are an invitation a person must not miss, so they are the
-  one card that lifts: the card fill, `--oct-radius-md`, `--oct-shadow-float`,
-  at most 520px wide in the transcript's column. The head is a 28px
-  `--oct-radius-sm` tile washed with the accent (`--octant-accent` 16%) holding
-  a 16px glyph in `--octant-accent-text`, a 15/600 title and a 12px muted
-  subtitle. The preset's Apply is the primary button, and the panes it opens are
-  secondary badges with the tool's 12px glyph, named in words (Overview,
-  Browser, Side chat), never as ids. A scaffold is a 56px choice tile: a 16px
-  glyph for its kind (Web app, Cross-platform, Native Swift), the name at 500,
-  its summary in the meta ink cut to one line, a trailing chevron, and only
-  `--muted` under the pointer. Nothing moves when a tile is pointed at or chosen.
+- A new, empty Code thread is one composed start block, never a bare sentence
+  over separate cards. It is aligned to the thread column's edges, so its left
+  and right edges are the composer's, and it sits low in the column, resting
+  above the composer. A 17/500 heading (the thread's title, else "Start this
+  thread") has the one-line hint in the meta ink beneath it. Below is one quiet
+  surface: the card fill, `--oct-radius-md`, one hairline, no shadow. It holds
+  two groups separated by a hairline, "Set up this workspace" and "Start from a
+  template", each headed by the section label (`oct-section-label`). The groups
+  are list rows, not nested boxes: a 16px muted glyph on one shared icon column,
+  the name at 14/500 in primary ink, a 13px description in the meta ink cut to one
+  line, and a hairline between rows. A two-line row is 52px. A template row is
+  one button with a trailing chevron and the `--oct-wash-hover` fill under the
+  pointer; a template this machine cannot run says "Needs ..., which is not on
+  this machine" as its description in `--oct-warn-fg`. A preset row ends with a
+  secondary (outline) Apply aligned to its first line, and what it opens is a
+  quiet 12px meta line of tool glyphs and words (Overview, Browser, Side chat),
+  never ids, which makes that row 72px. There is no accent, no tinted tile and no
+  bold in the block. Nothing moves on hover, focus or load.
 - A section with nothing in it inside a card (an Inbox list, an Environment
   card) is one line in the detail role with at most one button, never an
   `OctantEmpty` card inside the card.

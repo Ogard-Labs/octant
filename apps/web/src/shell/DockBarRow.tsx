@@ -123,7 +123,8 @@ export function useFoldedControls(
       const padded = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
       const insets = Number.isFinite(padded) && padded > 0 ? padded : INSETS;
       const name = node.querySelector<HTMLElement>(".dock-tile__name");
-      const lead = name === null ? 0 : 14 + GAP + name.scrollWidth;
+      // The name's 16px icon and the 8px between them.
+      const lead = name === null ? 0 : 16 + 2 * GAP + name.scrollWidth;
       const room = node.clientWidth - insets - lead - trailing;
       // The row exists only for something that must move to it.
       const steps = items.some(isRowable) ? FOLDS : FOLDS.filter((step) => step !== "row");
@@ -494,6 +495,7 @@ export function DockBarRow(props: {
           actions.map((item) =>
             item.kind === "button" ? (
               <IconButton
+                {...(item.pressed === undefined ? {} : { "aria-pressed": item.pressed })}
                 className="dock-tile__control window-no-drag"
                 disabled={item.disabled === true}
                 icon={item.icon}

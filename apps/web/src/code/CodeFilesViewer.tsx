@@ -1,5 +1,7 @@
 import type { CodeFileChangeNotice, CodeRelativePath, CodeThreadView } from "@octant/contracts";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useDockBarControls, useDockBarLead, useDockBarPlacement } from "../shell/dockBarControls";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantIconButton } from "../ui/base/OctantButton";
 import { PanelTab, PanelTabStrip } from "../shell/PanelTabs";
@@ -184,83 +186,109 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
     [active, observeChanges],
   );
 
+  // In a pane the open files are the bar's tabs, as the Browser's pages are,
+  // and Refresh and the tree toggle are the bar's actions. Where nothing hosts
+  // a bar (the bottom panel has no tab slot) the viewer draws its own row.
+  const barLead = useDockBarLead();
+  const placement = useDockBarPlacement();
+  const toggleTree = useCallback(() => setTreeOpen((value) => !value), []);
+  useDockBarControls(
+    placement === undefined
+      ? []
+      : [
+          {
+            kind: "button",
+            id: "files-tree",
+            label: treeOpen ? "Hide file tree" : "Show file tree",
+            icon: treeOpen ? PanelRightOpen : PanelRight,
+            onSelect: toggleTree,
+          },
+        ],
+  );
+  const tabs =
+    files.length === 0 ? null : (
+      <PanelTabStrip className="code-files-viewer__tabs" label="Open files" selectedId={active}>
+        {files.map((file) => (
+          <PanelTab
+            dirty={dirtyMarks.has(String(file.path))}
+            id={String(file.path)}
+            key={file.path}
+            label={pathBasename(file.path)}
+            onClose={() => close(file.path)}
+            onKeep={() => keep(file.path)}
+            onSelect={() => setActive(file.path)}
+            preview={file.preview}
+            roving={file.path === (active ?? files[0]?.path)}
+            selected={file.path === active}
+            title={file.path}
+          />
+        ))}
+      </PanelTabStrip>
+    );
+
   return (
-    <div className="code-files-viewer" data-tree={treeOpen ? "open" : "closed"} ref={root}>
-      <div className="code-files-viewer__main">
+    <div className="code-files-viewer" ref={root}>
+      {barLead !== null ? (
+        tabs === null ? null : (
+          createPortal(tabs, barLead)
+        )
+      ) : (
         <div className="code-files-viewer__strip">
-          {files.length === 0 ? (
-            <span className="code-files-viewer__strip-fill" />
-          ) : (
-            <PanelTabStrip
-              className="code-files-viewer__tabs"
-              label="Open files"
-              selectedId={active}
+          {tabs ?? <span className="code-files-viewer__strip-fill" />}
+          {placement !== undefined ? null : (
+            <OctantIconButton
+              aria-pressed={treeOpen}
+              className="code-files-viewer__tree-toggle"
+              label={treeOpen ? "Hide file tree" : "Show file tree"}
+              onClick={toggleTree}
             >
-              {files.map((file) => (
-                <PanelTab
-                  dirty={dirtyMarks.has(String(file.path))}
-                  id={String(file.path)}
-                  key={file.path}
-                  label={pathBasename(file.path)}
-                  onClose={() => close(file.path)}
-                  onKeep={() => keep(file.path)}
-                  onSelect={() => setActive(file.path)}
-                  preview={file.preview}
-                  roving={file.path === (active ?? files[0]?.path)}
-                  selected={file.path === active}
-                  title={file.path}
-                />
-              ))}
-            </PanelTabStrip>
+              {treeOpen ? (
+                <PanelRightOpen aria-hidden="true" size={16} />
+              ) : (
+                <PanelRight aria-hidden="true" size={16} />
+              )}
+            </OctantIconButton>
           )}
-          <OctantIconButton
-            aria-pressed={treeOpen}
-            className="code-files-viewer__tree-toggle"
-            label={treeOpen ? "Hide file tree" : "Show file tree"}
-            onClick={() => setTreeOpen((value) => !value)}
-          >
-            {treeOpen ? (
-              <PanelRightOpen aria-hidden="true" size={16} />
+        </div>
+      )}
+      <div className="code-files-viewer__frame" data-tree={treeOpen ? "open" : "closed"}>
+        <div className="code-files-viewer__main">
+          <div className="code-files-viewer__body">
+            {active === undefined || props.view === undefined ? (
+              <p className="code-files-viewer__empty">
+                <File aria-hidden="true" size={16} />
+                Choose a file to open it here.
+              </p>
             ) : (
-              <PanelRight aria-hidden="true" size={16} />
+              <ActiveFile
+                controller={props.controller}
+                hostBridge={props.hostBridge}
+                key={active}
+                onDirty={(dirty) => dirtyKeeps(active, dirty)}
+                onOpen={(path) => open(path, false)}
+                onRegisterActions={registerActions}
+                onOpenInMainArea={() => props.onOpenInMainArea(active)}
+                path={active}
+                refreshRef={refreshActive}
+                view={props.view}
+              />
             )}
-          </OctantIconButton>
+          </div>
         </div>
-        <div className="code-files-viewer__body">
-          {active === undefined || props.view === undefined ? (
-            <p className="code-files-viewer__empty">
-              <File aria-hidden="true" size={16} />
-              Choose a file to open it here.
-            </p>
-          ) : (
-            <ActiveFile
-              controller={props.controller}
-              hostBridge={props.hostBridge}
-              key={active}
-              onDirty={(dirty) => dirtyKeeps(active, dirty)}
-              onOpen={(path) => open(path, false)}
-              onRegisterActions={registerActions}
-              onOpenInMainArea={() => props.onOpenInMainArea(active)}
-              path={active}
-              refreshRef={refreshActive}
-              view={props.view}
-            />
-          )}
-        </div>
+        <aside aria-label="Files" className="code-files-viewer__tree">
+          <CodeFileExplorerPanel
+            {...props.explorer}
+            changes={changes}
+            onFilesChanged={onFilesChanged}
+            onKeepFile={(entry) => open(entry.path, true, true)}
+            onOpenFile={(entry) => open(entry.path, false, true)}
+            {...(active === undefined ? {} : { selectedPath: active })}
+          />
+        </aside>
       </div>
       {asking === undefined ? null : (
         <UnsavedFileDialog name={asking.name} onChoose={asking.answer} />
       )}
-      <aside aria-label="Files" className="code-files-viewer__tree">
-        <CodeFileExplorerPanel
-          {...props.explorer}
-          changes={changes}
-          onFilesChanged={onFilesChanged}
-          onKeepFile={(entry) => open(entry.path, true, true)}
-          onOpenFile={(entry) => open(entry.path, false, true)}
-          {...(active === undefined ? {} : { selectedPath: active })}
-        />
-      </aside>
     </div>
   );
 }
