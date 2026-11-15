@@ -31,6 +31,10 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
   const attachments = useThreadAttachments("code", input);
   // The provider turn the shown page ends with, while it is not the newest.
   const anchor = useRef<string | undefined>(undefined);
+  // Bumped whenever the reader leaves a page (Jump to latest, a follow-up). The
+  // selected-thread guard lets reads of one thread overlap, so a read of the
+  // page left behind could otherwise land last and put it back.
+  const pageGeneration = useRef(0);
   // The search hit is looked for once per opened thread, on its first load.
   // The thread screen mounts afresh for every hit it opens, so the hit is
   // read when the thread changes rather than tracked on its own.
@@ -45,6 +49,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
     setThreadModel(undefined);
     anchor.current = undefined;
     pendingFocus.current = focus.current;
+    pageGeneration.current += 1;
   }, [identity]);
 
   const refresh = useCallback(
@@ -52,6 +57,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
       if (!enabled || transport === undefined || identity === undefined || threadId === undefined) {
         return;
       }
+      const generation = pageGeneration.current;
       await runLoad({
         guard,
         identity,
@@ -64,14 +70,15 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
             loadCodeConversationPage(transport, threadId, anchor.current, pendingFocus.current),
           ]),
         onLoaded: ([thread, { loaded, anchoredAt }]) => {
-          pendingFocus.current = undefined;
-          anchor.current = anchoredAt;
           setPolicy(thread.executionPolicy);
           setCodeThread(thread);
           setThreadModel({
             providerInstanceId: String(thread.providerInstanceId),
             modelId: String(thread.modelId),
           });
+          if (generation !== pageGeneration.current) return;
+          pendingFocus.current = undefined;
+          anchor.current = anchoredAt;
           setConversation(loaded);
         },
         onFailed: () => {
@@ -109,6 +116,7 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
             attachments.sent();
             // The reply arrives at the newest turns, so the reader goes there.
             anchor.current = undefined;
+            pageGeneration.current += 1;
           },
           reload: () => loadMobileCodeConversation(transport, threadId),
         }),
@@ -120,6 +128,8 @@ export function useCodeThread(input: ThreadHookInput, focusOperationId?: string)
 
   const jumpToLatest = useCallback(async () => {
     anchor.current = undefined;
+    pendingFocus.current = undefined;
+    pageGeneration.current += 1;
     await refresh();
   }, [refresh]);
 
