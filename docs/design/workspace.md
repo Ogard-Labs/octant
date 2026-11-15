@@ -1560,8 +1560,15 @@ done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Chat admits Agents as its only dock tool;
-opening it does not expose Work or Code tools or the bottom panel. Provider-observed children carry an explicit
-observation-only label and no managed controls. Task-plan progress remains a
+opening it does not expose Work or Code tools or the bottom panel. Every
+subagent of the thread is one row in the same list, whether Octant started it
+through `octant_agents` or the thread's provider runtime started it itself, and
+every row names its provider and its model ("Model unknown" when the runtime
+does not report one). A provider-started row reads "Started by <provider>",
+sits under the run or subagent that started it, and has no managed controls;
+it offers Stop only when the thread's running turn can stop that one subagent
+on its own (built for Claude and OpenCode), and keeps its reported state until
+the provider reports it finished. Task-plan progress remains a
 separate disclosure. See
 [Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread).
 The Agents dock is a list and a page, and it shows and controls subagents
@@ -1575,7 +1582,13 @@ Graph switch sits beside the title. **Graph** arranges the same subagents by
 what waits for what: a run sits below every run it runs after and below the run
 that started it, with an arrow from each run it waits for and a dashed line
 from the run that started it, and a row keeps the order its runs were requested
-in. A card carries the task, the provider's mark and the model, the effort and
+in. A provider-started subagent is a leaf card under its parent, with the
+dashed started-by line and no dependency arrows. Siblings the agent labelled
+with the same `compareGroup` render as one labelled group of side-by-side
+cards (provider, model, state, how long it ran, task, latest result preview)
+in the order they were requested; the host groups them and ranks nothing, and
+the composer card shows the group as one line with counts by state. A card
+carries the task, the provider's mark and the model, the effort and
 role, and the state in words, which reads "Waiting on N" while the host holds
 the run for N unfinished runs; it opens the page a row opens, and Back returns
 to the graph. A row of cards wider than the dock scrolls sideways.

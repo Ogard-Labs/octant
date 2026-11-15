@@ -265,11 +265,15 @@ behind a Details disclosure. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
-Provider-observed children remain separate from managed runs. Their detail shows
-reported activity, observation timing, available lineage and explicit partial,
-truncated or conflicting history. An unknown model stays unknown. Observations
-have no managed conversation, execution controls, workspace authority or result
-acknowledgement.
+Subagents the provider runtime started itself are rows in the same card,
+counted and previewed by the same rules as managed runs, finished ones
+included, each reading "Started by <provider>" with its model or "Model
+unknown". Their detail shows reported activity, observation timing, available
+lineage and explicit partial, truncated or conflicting history. They have no
+managed conversation, workspace authority or result acknowledgement; their one
+control is Stop, offered only where the running turn can stop that subagent
+alone, and a stop request leaves the reported state until the provider reports
+the subagent finished. Every row, managed or not, names its provider.
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
