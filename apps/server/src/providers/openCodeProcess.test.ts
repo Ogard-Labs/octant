@@ -14,7 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ProviderFailure } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -1401,6 +1401,172 @@ describe("OpenCodeProcessPort", () => {
         const input = await confinedLaunch(home, platform, "v2-0-1-ready");
         expect((input.extraRules ?? []).some((rule) => rule.includes("CLAUDE.md"))).toBe(false);
         expect(input.privateHomeAllowPaths ?? []).not.toContain(file);
+      }
+    });
+  });
+
+  describe("the person's global OpenCode AGENTS.md", () => {
+    function agentsHome(): {
+      readonly home: string;
+      readonly file: string;
+      readonly folder: string;
+    } {
+      const home = mkdtempSync(join(tmpdir(), "octant-opencode-agents-home-"));
+      directories.push(home);
+      mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+      writeFileSync(join(home, ".config", "opencode", "AGENTS.md"), "Answer in British English.\n");
+      writeFileSync(join(home, ".config", "opencode", "opencode.json"), "{}");
+      const folder = join(realpathSync(home), ".config", "opencode");
+      return { home, file: join(folder, "AGENTS.md"), folder };
+    }
+
+    /**
+     * Starts OpenCode with a stand-in that records what it finds at its own
+     * global lookup, `$OPENCODE_CONFIG_DIR/AGENTS.md`, and the wall it got.
+     */
+    async function launch(
+      home: string,
+      options: {
+        readonly platform: NodeJS.Platform;
+        readonly executionPolicy?: ProviderExecutionPolicy;
+        readonly runsAsItself?: boolean;
+        readonly mode?: string;
+      },
+    ): Promise<{
+      readonly seen: string;
+      readonly input: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+    }> {
+      const root = fixtureRoot(options.mode ?? "isolation-supported");
+      const binaryPath = join(root, "opencode-agents-fixture");
+      const seenPath = join(root, ".seen-global-agents");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\ncd '${root}'\ncat "$OPENCODE_CONFIG_DIR/AGENTS.md" > '${seenPath}' 2>/dev/null\nexec '${fakeCliPath}' "$@"\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+      let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;
+      await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            confinement: {
+              prepare: (input) => {
+                captured = input;
+                return { command: input.executable, args: input.args };
+              },
+            },
+            platform: options.platform,
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+            inheritedEnvironment: {
+              ...process.env,
+              HOME: home,
+              XDG_CONFIG_HOME: "",
+              OPENCODE_CONFIG_DIR: "",
+            },
+          }).start({
+            binaryPath,
+            cwd: root,
+            mode: "work",
+            executionPolicy: options.executionPolicy ?? "approval-gated",
+            ...(options.runsAsItself === false ? {} : { runsAsItself: true as const }),
+          }),
+        ),
+      );
+      return { seen: readFileSync(seenPath, "utf8"), input: captured };
+    }
+
+    it("is what an OpenCode 1.x launch running as itself finds where it looks, at Full access too", async () => {
+      const { home } = agentsHome();
+      for (const executionPolicy of ["approval-gated", "full-access"] as const) {
+        const { seen } = await launch(home, { platform: "linux", executionPolicy });
+        expect(seen).toBe("Answer in British English.\n");
+      }
+    });
+
+    it("opens exactly that file for reading on macOS, and nothing else in the folder", async () => {
+      const { home, file, folder } = agentsHome();
+      const { input } = await launch(home, { platform: "darwin" });
+      expect(new Set((input?.extraRules ?? []).filter((rule) => rule.includes(folder)))).toEqual(
+        new Set([
+          `(allow file-read-metadata (literal "${folder}"))`,
+          `(allow file-read* (literal "${file}"))`,
+        ]),
+      );
+      expect((input?.privateHomeAllowPaths ?? []).some((path) => path.startsWith(folder))).toBe(
+        false,
+      );
+    });
+
+    it("binds exactly that file read-only on Linux", async () => {
+      const { home, file, folder } = agentsHome();
+      const { input } = await launch(home, { platform: "linux" });
+      const granted = [...(input?.privateHomeAllowPaths ?? []), ...(input?.readRoots ?? [])];
+      expect(granted.filter((path) => path.startsWith(folder))).toEqual([file]);
+      expect(input?.additionalWriteRoots ?? []).not.toContain(file);
+    });
+
+    it("is not found or opened when OpenCode does not run as itself", async () => {
+      const { home, folder } = agentsHome();
+      for (const platform of ["darwin", "linux"] as const) {
+        const { seen, input } = await launch(home, { platform, runsAsItself: false });
+        expect(seen).toBe("");
+        expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
+        expect((input?.privateHomeAllowPaths ?? []).some((path) => path.startsWith(folder))).toBe(
+          false,
+        );
+      }
+    });
+
+    it("refuses an AGENTS.md the person protected", async () => {
+      const { home, file } = agentsHome();
+      applyProtectedFilesChoice({ added: [file], removed: [] });
+      try {
+        for (const platform of ["darwin", "linux"] as const) {
+          const { seen, input } = await launch(home, { platform });
+          expect(seen).toBe("");
+          expect((input?.extraRules ?? []).some((rule) => rule.includes("AGENTS.md"))).toBe(false);
+          expect(input?.privateHomeAllowPaths ?? []).not.toContain(file);
+        }
+      } finally {
+        applyProtectedFilesChoice({ added: [], removed: [] });
+      }
+    });
+
+    it("refuses an AGENTS.md that is a link, or that sits in a linked folder", async () => {
+      const { home } = agentsHome();
+      const elsewhere = join(realpathSync(home), "private-notes.md");
+      writeFileSync(elsewhere, "not instructions\n");
+      const link = join(home, ".config", "opencode", "AGENTS.md");
+      rmSync(link);
+      symlinkSync(elsewhere, link);
+      const linkedFolder = mkdtempSync(join(tmpdir(), "octant-opencode-agents-linked-"));
+      directories.push(linkedFolder);
+      writeFileSync(join(linkedFolder, "AGENTS.md"), "from a linked folder\n");
+      const linkedHome = mkdtempSync(join(tmpdir(), "octant-opencode-agents-home-"));
+      directories.push(linkedHome);
+      mkdirSync(join(linkedHome, ".config"));
+      symlinkSync(linkedFolder, join(linkedHome, ".config", "opencode"));
+      for (const candidate of [home, linkedHome]) {
+        for (const platform of ["darwin", "linux"] as const) {
+          const { seen, input } = await launch(candidate, { platform });
+          expect(seen).toBe("");
+          const rules = input?.extraRules ?? [];
+          expect(rules.some((rule) => rule.includes("AGENTS.md"))).toBe(false);
+          expect(
+            (input?.privateHomeAllowPaths ?? []).some(
+              (path) => path.endsWith("AGENTS.md") || path === elsewhere,
+            ),
+          ).toBe(false);
+        }
+      }
+    });
+
+    it("opens nothing for an OpenCode 2.x launch", async () => {
+      const { home, folder } = agentsHome();
+      for (const platform of ["darwin", "linux"] as const) {
+        const { seen, input } = await launch(home, { platform, mode: "v2-0-1-ready" });
+        expect(seen).toBe("");
+        expect((input?.extraRules ?? []).some((rule) => rule.includes(folder))).toBe(false);
       }
     });
   });

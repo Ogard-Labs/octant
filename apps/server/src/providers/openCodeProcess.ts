@@ -138,6 +138,13 @@ export interface OpenCodeProcessStartInput {
    * session's rules decide them). Absent keeps every tool server off.
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * The person let OpenCode run as itself: a 1.x launch also finds their
+   * global `AGENTS.md` where OpenCode looks for it, as it does on its own
+   * (see `openCodeGlobalAgentsInstructionFile`). Absent, 1.x finds none and
+   * falls back to the global `CLAUDE.md`.
+   */
+  readonly runsAsItself?: true;
 }
 
 export interface OpenCodeProcessPort {
@@ -1098,6 +1105,70 @@ function openCodeGlobalClaudeInstructionFile(
   }
 }
 
+/**
+ * The person's global OpenCode `AGENTS.md` when an OpenCode 1.x launch may
+ * read it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts` and core `global.ts`), 1.x reads the first of
+ * `<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
+ * global config folder is `$OPENCODE_CONFIG_DIR`, else
+ * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. A launch sets
+ * `OPENCODE_CONFIG_DIR` to its private folder, so this is the file the
+ * person's own environment names, and the launch links it in there. 2.x is
+ * left as it is.
+ *
+ * The rest of the folder (the person's `opencode.json`, plugins, agents)
+ * stays out: the grant names this one file. A protected file stays denied,
+ * and a link, or a file reached through a linked folder, is refused rather
+ * than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalAgentsInstructionFile(
+  runtime: OpenCodeRuntime,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  const home = environment.HOME;
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  const absolute = (value: string | undefined) =>
+    value !== undefined && isAbsolute(value) ? value : undefined;
+  try {
+    const configDirectory = absolute(environment.OPENCODE_CONFIG_DIR);
+    const configHome = absolute(environment.XDG_CONFIG_HOME);
+    const folder =
+      configDirectory !== undefined
+        ? realpathSync(configDirectory)
+        : configHome !== undefined
+          ? join(realpathSync(configHome), "opencode")
+          : join(realpathSync(home), ".config", "opencode");
+    const file = join(folder, "AGENTS.md");
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Links the person's global `AGENTS.md` into the launch's private config
+ * folder, where OpenCode looks for it. Undefined when nothing was linked, so
+ * the wall opens nothing for it.
+ */
+function linkOpenCodeGlobalAgentsInstructions(
+  profile: PrivateOpenCodeProfile,
+  file: string | undefined,
+): string | undefined {
+  const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
+  if (file === undefined || configDirectory === undefined) return undefined;
+  try {
+    symlinkSync(file, join(configDirectory, "AGENTS.md"));
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
 interface OpenCodeLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -1173,6 +1244,8 @@ function prepareOpenCodeLaunch(
   runtime: OpenCodeRuntime,
   port: number,
   platform: NodeJS.Platform,
+  /** The person's global `AGENTS.md`, linked into the private config folder. */
+  globalAgentsInstructions: string | undefined,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
@@ -1234,7 +1307,7 @@ function prepareOpenCodeLaunch(
         // denied as a whole and reopens the file by literal rule below: as an
         // allowed path here it would deny `.claude` entry by entry instead, so
         // a sign-in written after launch would be readable.
-        ...(platform === "darwin" ? [] : [globalClaudeInstructions]),
+        ...(platform === "darwin" ? [] : [globalClaudeInstructions, globalAgentsInstructions]),
       ]);
       const writeRoots = existingAbsolutePaths([
         configDirectory,
@@ -1339,6 +1412,14 @@ function prepareOpenCodeLaunch(
                   : [
                       seatbeltAllowLiteralMetadataRule(dirname(globalClaudeInstructions)),
                       seatbeltAllowLiteralReadRule(globalClaudeInstructions),
+                    ]),
+                // The person's global AGENTS.md, which the private config
+                // folder links to; nothing else in its folder opens.
+                ...(globalAgentsInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalAgentsInstructions)),
+                      seatbeltAllowLiteralReadRule(globalAgentsInstructions),
                     ]),
                 // The git stand-in's only exec: the always-failing binary the
                 // PATH shim resolves `git` to. No other exec becomes possible.
@@ -1555,8 +1636,27 @@ function acquireOpenCodeServer(
       const password = randomBytes(32).toString("base64url");
       const username = runtime === "beta" ? "opencode" : "octant";
       const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      const globalAgentsInstructions =
+        input.runsAsItself === true
+          ? linkOpenCodeGlobalAgentsInstructions(
+              profile,
+              openCodeGlobalAgentsInstructionFile(
+                runtime,
+                options.inheritedEnvironment ?? process.env,
+                options.platform,
+              ),
+            )
+          : undefined;
       const prepared = Effect.runSyncExit(
-        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port, options.platform),
+        prepareOpenCodeLaunch(
+          input,
+          profile,
+          options.confinement,
+          runtime,
+          port,
+          options.platform,
+          globalAgentsInstructions,
+        ),
       );
       if (Exit.isFailure(prepared)) {
         profile.cleanup();

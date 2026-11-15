@@ -3520,6 +3520,8 @@ describe("OpenCode driver", () => {
     };
     const own = await launch(true);
     expect(own?.ownSkills).toBe(true);
+    // Running as itself, 1.x also finds the person's global AGENTS.md.
+    expect(own?.runsAsItself).toBe(true);
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "skill")).toBe("ask");
     // The person's tool servers follow the level, and shell still asks.
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "other-server_tool")).toBe(
@@ -3529,6 +3531,7 @@ describe("OpenCode driver", () => {
 
     const locked = await launch(false);
     expect(locked).not.toHaveProperty("ownSkills");
+    expect(locked).not.toHaveProperty("runsAsItself");
     expect(evaluateV2Permission([...(locked?.betaPermissions ?? [])], "skill")).toBe("deny");
   });
 
