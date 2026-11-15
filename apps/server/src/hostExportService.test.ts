@@ -324,6 +324,7 @@ describe("host export", () => {
         listProjects: () => [],
         readProjectMemory: (id) => ({ projectId: decodeProjectId(id), active: [], history: [] }),
         personMemoryEntries: () => [],
+        instructions: () => ({ yours: "" }),
         listCanvases: () => [],
         readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
         listProjectIds: () => [],

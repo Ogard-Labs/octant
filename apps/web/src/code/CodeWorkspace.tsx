@@ -44,7 +44,7 @@ import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
 import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
 import { CodeTestPane } from "./CodeTestPane";
-import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
+import { CodeThreadWorkspace, type CodeThreadWorkspaceProps } from "./CodeThreadWorkspace";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -137,6 +137,9 @@ export interface CodeWorkspaceProps {
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
+  /** A search hit's provider turn the thread view brings into view once. */
+  readonly revealOperationId?: CodeThreadWorkspaceProps["revealOperationId"];
+  readonly onTurnRevealed?: () => void;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
@@ -234,6 +237,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeThreadWorkspace
         {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
+        {...(props.revealOperationId === undefined
+          ? {}
+          : { revealOperationId: props.revealOperationId })}
+        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined
           ? {}

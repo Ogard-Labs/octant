@@ -2438,9 +2438,8 @@ titles among the threads the host listed and, in every mode, message text
 through that mode's host read (`GET /api/chat/transcript-search`,
 `/api/work/transcript-search`, `/api/code/transcript-search`), which lists
 the same threads as the sidebar and its Archived group. A message hit shows its
-snippet after the title matches and names the turn that holds it; a Chat hit
-opens the thread scrolled to that turn, and a Work or Code hit opens its thread,
-because those transcripts do not yet jump to a turn
+snippet after the title matches and names the turn that holds it, and opens
+the thread scrolled to that turn in every mode
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view

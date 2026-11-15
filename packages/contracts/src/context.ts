@@ -73,6 +73,7 @@ export const ContextEntryCategory = Schema.Literal(
   "provider-framing",
   "octant-policy",
   "user-instructions",
+  "person-instructions",
   "project-instructions",
   "person-memory",
   "project-memory",

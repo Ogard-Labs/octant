@@ -347,7 +347,7 @@ export type ShellActions = {
   readonly setChatThreadRestartContinuation: ChatController["setThreadRestartContinuation"];
   readonly snoozeChatThread: ChatController["snoozeThread"];
   readonly snoozeCodeThread: CodeController["snoozeThread"];
-  readonly spendRevealChatTurn: () => void;
+  readonly spendRevealTurn: () => void;
   readonly splitPane: ShellController["splitPane"];
   readonly startNewThreadDraft: (mode: OctantMode) => void;
   readonly toggleBottomPanel: (opener: HTMLElement) => void;

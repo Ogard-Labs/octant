@@ -722,6 +722,76 @@ describe("CodeThreadWorkspace", () => {
     expect(loadEarlierConversation).toHaveBeenCalledOnce();
   });
 
+  it("loads earlier pages until a search hit's turn is loaded, then brings it into view", async () => {
+    const newest = "33333333-3333-4333-8333-333333333333";
+    const older = "44444444-4444-4444-8444-444444444444";
+    const loadEarlierConversation = vi.fn();
+    const onTurnRevealed = vi.fn();
+    const newestRows = [
+      { id: "newest:user", role: "user" as const, text: "Newest prompt", operationId: newest },
+      {
+        id: "newest:assistant",
+        role: "assistant" as const,
+        text: "Newest reply",
+        operationId: newest,
+      },
+    ];
+    const view = (conversation: typeof newestRows, earlier: "idle" | "none-left") => (
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: conversation as never,
+          conversationHistory: "loaded",
+          earlierConversation: earlier,
+          loadEarlierConversation,
+        })}
+        onTurnRevealed={onTurnRevealed}
+        providerGroups={[providerGroup()]}
+        revealOperationId={older as never}
+        threadId={threadId}
+      />
+    );
+    const { rerender } = render(view(newestRows, "idle"));
+
+    await waitFor(() => expect(loadEarlierConversation).toHaveBeenCalledOnce());
+    expect(onTurnRevealed).not.toHaveBeenCalled();
+
+    rerender(
+      view(
+        [
+          { id: "older:user", role: "user", text: "The prompt that matched", operationId: older },
+          ...newestRows,
+        ],
+        "none-left",
+      ),
+    );
+
+    await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+    expect(screen.getByText("The prompt that matched")).toBeInTheDocument();
+    expect(loadEarlierConversation).toHaveBeenCalledOnce();
+  });
+
+  it("spends a search hit the thread no longer holds without loading anything", async () => {
+    const loadEarlierConversation = vi.fn();
+    const onTurnRevealed = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [{ id: "turn-1:user", role: "user", text: "Only prompt" }],
+          conversationHistory: "loaded",
+          earlierConversation: "none-left",
+          loadEarlierConversation,
+        })}
+        onTurnRevealed={onTurnRevealed}
+        providerGroups={[providerGroup()]}
+        revealOperationId={"55555555-5555-4555-8555-555555555555" as never}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+    expect(loadEarlierConversation).not.toHaveBeenCalled();
+  });
+
   it("keeps new-thread setup hidden while an existing transcript is loading", () => {
     render(
       <CodeThreadWorkspace

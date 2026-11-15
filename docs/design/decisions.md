@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **260**   | **157** | **99**       | **4**               |
+| **All areas**                                                                         | **260**   | **157** | **100**      | **3**               |
 
 ## Principles and hard lines
 
@@ -1502,7 +1502,7 @@ A person writes instructions for Octant itself, beside each provider's own instr
 - Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
 - They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
+Status: Partly built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 
@@ -2519,6 +2519,7 @@ Thread Search matches message text in Chat, Work, and Code, on the desktop and t
 - Each mode's read lists exactly the threads its sidebar and Archived group list, applies that listing authority on the host before the hit cap, and never searches a deleted thread or a turn a rewind removed.
 - A hit names the turn that holds the match: the Chat or Work turn, or the operation of a Code provider turn. Queries, hit counts, and snippets share one set of bounds, and a query's LIKE wildcards are text.
 - The reads are GETs a paired device reaches under the overview read grant. Code text is searched through a rebuildable projection of the operation journal that joins a reply's streamed parts; Work text is searched in the rebuildable turn projection.
+- A hit opens its thread at the matched turn in every mode (maintainer request, 2026-11-15). On the desktop a Chat hit not loaded opens as a detached range, and a Work or Code hit loads earlier pages until its turn is loaded, so the reader lands on it with the newer turns below. On the phone a Code hit older than the newest page opens the page ending at it, with Jump to latest; the phone also offers a waiting Code turn's usage resume, because the Code conversation read now carries the usage limit a waiting turn stopped at.
 
 Status: Built. Since: 2026-11-14. Detail: [Workspace: Navigation and Projects](workspace.md#navigation-and-projects) and [Host reads and commands](host-reads-and-commands.md).
 

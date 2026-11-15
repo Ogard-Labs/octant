@@ -80,6 +80,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   { value: "provider-framing", label: "Provider framing" },
   { value: "octant-policy", label: "Octant policy" },
   { value: "user-instructions", label: "User instructions" },
+  { value: "person-instructions", label: "Your instructions" },
   { value: "project-instructions", label: "Project instructions" },
   { value: "person-memory", label: "Person memory" },
   { value: "project-memory", label: "Project memory" },

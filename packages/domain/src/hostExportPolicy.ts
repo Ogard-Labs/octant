@@ -215,6 +215,7 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
   const tombstones: HostExportBundle["retention"]["tombstones"][number][] = [];
   let header: HostExportBundle["octant"] | undefined;
   let settings: HostExportBundle["settings"] | undefined;
+  let instructions: HostExportBundle["instructions"];
   let omissions: HostExportBundle["omissions"] | undefined;
   let completed: number | undefined;
 
@@ -238,6 +239,7 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
     else if (decoded.kind === "projects") projects.push(...decoded.projects);
     else if (decoded.kind === "project-memory") projectMemory.push(...decoded.projectMemory);
     else if (decoded.kind === "person-memory") personMemory.push(...decoded.entries);
+    else if (decoded.kind === "instructions") instructions = decoded.instructions;
     else if (decoded.kind === "canvases") canvases.push(...decoded.canvases);
     else if (decoded.kind === "settings") settings = decoded.settings;
     else if (decoded.kind === "ssh-targets") continue;
@@ -267,6 +269,7 @@ export function assembleHostExportBundle(pages: ReadonlyArray<unknown>): Assembl
       projects,
       projectMemory,
       personMemory,
+      ...(instructions === undefined ? {} : { instructions }),
       canvases,
       settings,
       usage,
