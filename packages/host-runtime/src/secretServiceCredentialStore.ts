@@ -51,6 +51,8 @@ export const SECRET_SERVICE_PUSH_PLATFORM_CREDENTIAL_ATTRIBUTE =
  * The broker signs with one and never returns it.
  */
 export const SECRET_SERVICE_SSH_KEY_ATTRIBUTE = "octant.ssh-keys.v1";
+/** The API keys a person gives a web search backend. A person may replace one. */
+export const SECRET_SERVICE_WEB_SEARCH_CREDENTIAL_ATTRIBUTE = "octant.web-search-credentials.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -80,6 +82,10 @@ const NAMESPACES = {
   "ssh-key": {
     attribute: SECRET_SERVICE_SSH_KEY_ATTRIBUTE,
     label: "Octant SSH key",
+  },
+  "web-search-credential": {
+    attribute: SECRET_SERVICE_WEB_SEARCH_CREDENTIAL_ATTRIBUTE,
+    label: "Octant web search key",
   },
 } as const;
 export type SecretServiceNamespace = keyof typeof NAMESPACES;
