@@ -222,7 +222,10 @@ export function compileSandboxLaunchPolicy(
             "/sbin",
           ];
     if (
-      [...writable, ...readWrite].some((grant) =>
+      [...(launch.writeBoundRoot === false ? [] : boundRoots), ...readWrite].some((grant) =>
+        administrationRoots.some((root) => overlaps(grant.path, root)),
+      ) ||
+      writable.some((grant) =>
         administrationRoots.some(
           (root) => grant.path === root || root.startsWith(`${grant.path}/`),
         ),

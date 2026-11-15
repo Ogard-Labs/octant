@@ -166,6 +166,27 @@ describe("sandbox launch policy", () => {
     ).toBe("refused");
   });
 
+  it("refuses writable folders inside host administration roots", () => {
+    const { input, selection } = fixture();
+    const result = compileSandboxLaunchPolicy(
+      {
+        ...input,
+        sandboxPolicy: {
+          ...selection,
+          policy: {
+            ...selection.policy,
+            filesystem: {
+              ...selection.policy.filesystem,
+              readWriteRoots: [realpathSync("/usr/bin")],
+            },
+          },
+        },
+      },
+      "linux",
+    );
+    expect(result).toMatchObject({ status: "refused", rules: ["filesystem.hostAdministration"] });
+  });
+
   it("keeps folder grants separate from provider sign-in exemptions", () => {
     const { base, input, selection } = fixture();
     const account = join(base, "own-account");
