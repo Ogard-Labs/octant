@@ -8,6 +8,11 @@ export interface OctantAlertProps {
   readonly action?: ReactNode;
   readonly tone?: "neutral" | "accent" | "success" | "warning" | "danger";
   readonly role?: "alert" | "status";
+  /**
+   * "card" is the floating notice; "row" is a quiet line inside a panel: the
+   * tone's icon, one sentence and an action, no fill, no outline and no card.
+   */
+  readonly layout?: "card" | "row";
   readonly className?: string;
   readonly id?: string;
   /** Names the alert for assistive technology when its words alone do not. */
@@ -21,6 +26,7 @@ export function OctantAlert({
   action,
   tone = "neutral",
   role = tone === "warning" || tone === "danger" ? "alert" : "status",
+  layout = "card",
   className,
   id,
   label,
@@ -36,7 +42,7 @@ export function OctantAlert({
           : Info;
   return (
     <div
-      className={cn("callout", className)}
+      className={cn("callout", layout === "row" && "callout--row", className)}
       data-tone={tone}
       {...(id === undefined ? {} : { id })}
       {...(label === undefined ? {} : { "aria-label": label })}

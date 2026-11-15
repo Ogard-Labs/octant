@@ -131,8 +131,8 @@ describe("CodeFileExplorer", () => {
       expect(screen.getAllByRole("treeitem").length).toBeLessThan(50);
 
       const tree = screen.getByRole("tree");
-      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 28)}px` });
-      tree.scrollTop = 500 * 28 - 280;
+      expect(tree.firstElementChild).toHaveStyle({ height: `${String(500 * 24)}px` });
+      tree.scrollTop = 500 * 24 - 280;
       fireEvent.scroll(tree);
       expect(screen.queryByRole("treeitem", { name: /module-000\.ts/ })).not.toBeInTheDocument();
     });

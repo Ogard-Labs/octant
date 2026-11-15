@@ -1469,6 +1469,47 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByText("Browser unavailable")).toBeVisible();
   });
 
+  it("tells the person an expired page in their words and opens it again from the last address", async () => {
+    const browser = client();
+    vi.mocked(browser.create).mockRejectedValueOnce(
+      new BrowserAutomationClientFailure(
+        "context-expired",
+        "The Browser page expired. It used the Private profile. Call navigate with the intended URL to open a new Private page.",
+      ),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000014" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    enterAddress("https://example.com");
+    fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This Private page expired.");
+    expect(screen.queryByText(/Call navigate/)).not.toBeInTheDocument();
+    expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Open again" }));
+    await waitFor(() => expect(vi.mocked(browser.create)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(browser.create).mock.calls[1]?.[0].policy.allowedOrigins).toEqual(
+      vi.mocked(browser.create).mock.calls[0]?.[0].policy.allowedOrigins,
+    );
+    expect(screen.queryByText("This Private page expired.")).not.toBeInTheDocument();
+  });
+
+  it("lays a Browser notice out as a quiet row with no tinted box", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+    const rule = styles.slice(styles.indexOf(".browser-workspace__message {"));
+    const body = rule.slice(0, rule.indexOf("}"));
+    expect(body).not.toMatch(/background|border/);
+  });
+
   it("clears a local failure when an agent advances the authoritative Browser context", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread)

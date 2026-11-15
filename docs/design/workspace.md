@@ -900,6 +900,28 @@ client. A Code file additionally exposes the language-server outline and
 selection-to-agent review. Language capabilities and launch authority remain
 owned by [Language services](language-services.md).
 
+In a Code thread a file opens inside the **Files tool**, in the dock beside the
+thread, and a plain click never replaces the thread with a Code file tab. The
+tool is a file viewer: a strip of open files (name and ×) with the tree-toggle
+at its end, a breadcrumb path in muted ink with the checkout's name at its end,
+then the editor filling the tool, and the file tree as a column about 200px wide
+at the right with its filter field on top. A single click on a tree row previews
+the file in the one italic tab that the next single click replaces; a double
+click on the row or the tab, or an edit, keeps the tab. In a tool narrower than
+420px the tree and the editor take turns. The editor draws no eyebrow and no
+rows of text buttons: Save (only while the buffer is dirty) and Open externally
+are icon buttons in the tool's bar, and Commands, Find, Replace, Format, Go to
+line, Outline, Send selection to agent, Editor settings, Find references in
+checkout, Preview rename, Find quick fixes and **Open in main area** are items of
+one **File actions** menu there, with Monaco's own shortcuts unchanged. Open in
+main area is the only way to open a file as a workspace Code file tab, which
+draws the same actions in a slim header of its own. Tree rows are 24px with a
+16px chevron slot and 16px glyphs by type (code, document, image, file, folder)
+in muted ink, ellipsise long names, mark the selected file with the selected
+fill, and end a changed file's row with a small dot (warning for modified,
+success for added) read from the host's Git observation; the incomplete-tree
+note is one muted line.
+
 Unsaved text is kept locally on the client, separately from pane references,
 messages and the host journal. Code recovery keys include the endpoint, checkout
 and file identity; Work recovery uses the authorized host, Project and a stable

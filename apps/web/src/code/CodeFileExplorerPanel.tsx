@@ -7,7 +7,11 @@ import {
 } from "@octant/contracts";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { FolderTree, RefreshCw } from "../ui/icons";
-import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
+import {
+  CodeFileExplorer,
+  type CodeFileChange,
+  type CodeFileExplorerEntry,
+} from "./CodeFileExplorer";
 import { useCodeFileListingController } from "./useCodeFileListingController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -26,6 +30,10 @@ export interface CodeFileExplorerPanelProps {
   readonly extraFolders?: ReadonlyArray<string> | undefined;
   readonly onOpenFile: (entry: Extract<CodeFileExplorerEntry, { readonly kind: "file" }>) => void;
   readonly selectedPath?: CodeRelativePath | undefined;
+  /** Files that differ from the last commit, marked in the checkout's tree. */
+  readonly changes?: ReadonlyMap<string, CodeFileChange>;
+  /** A double click on a file: keep it open rather than preview it. */
+  readonly onKeepFile?: CodeFileExplorerPanelProps["onOpenFile"];
   /** Injected in tests; otherwise built from the server URL and capability. */
   readonly client?: CodeFileListingClient;
   readonly serverUrl?: string;
@@ -95,6 +103,8 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
         entries={controller.entries}
         loading={controller.status === "loading"}
         onOpenFile={props.onOpenFile}
+        {...(props.onKeepFile === undefined ? {} : { onKeepFile: props.onKeepFile })}
+        {...(props.changes === undefined ? {} : { changes: props.changes })}
         onRefresh={() => void controller.refresh()}
         refreshing={controller.status === "loading"}
         truncated={controller.truncated}
@@ -106,6 +116,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
           folder={folder}
           live={index < MAX_LIVE_EXTRA_FOLDER_WATCHES}
           onOpenFile={props.onOpenFile}
+          {...(props.onKeepFile === undefined ? {} : { onKeepFile: props.onKeepFile })}
           {...(props.threadId === undefined ? {} : { threadId: props.threadId })}
           {...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId })}
           {...(props.client === undefined ? {} : { client: props.client })}
@@ -130,7 +141,13 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
 function ExtraFolderExplorer(
   props: Pick<
     CodeFileExplorerPanelProps,
-    "threadId" | "checkoutId" | "client" | "serverUrl" | "windowCapability" | "onOpenFile"
+    | "threadId"
+    | "checkoutId"
+    | "client"
+    | "serverUrl"
+    | "windowCapability"
+    | "onOpenFile"
+    | "onKeepFile"
   > & { readonly folder: string; readonly live: boolean },
 ) {
   // A folder spelled in a way the file-path schema refuses (a decomposed
@@ -168,6 +185,10 @@ function ExtraFolderExplorer(
           onOpenFile={(entry) => {
             const path = projectFilePath(`${props.folder}/${entry.path}`);
             if (path !== undefined) props.onOpenFile({ ...entry, path });
+          }}
+          onKeepFile={(entry) => {
+            const path = projectFilePath(`${props.folder}/${entry.path}`);
+            if (path !== undefined) props.onKeepFile?.({ ...entry, path });
           }}
           onRefresh={() => void controller.refresh()}
           refreshing={controller.status === "loading"}

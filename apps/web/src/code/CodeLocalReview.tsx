@@ -222,7 +222,11 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
           : `Latest recorded checks: ${checks.result.state}${checks.result.state !== "completed" ? "" : ` · ${checks.result.verdict}`}. This result is not bound to the displayed comparison; recheck Tests after the correction turn.`}
       </p>
       {loading ? <p role="status">Loading local findings…</p> : null}
-      {targetNotice === undefined ? null : <OctantAlert tone="neutral">{targetNotice}</OctantAlert>}
+      {targetNotice === undefined ? null : (
+        <OctantAlert layout="row" tone="neutral">
+          {targetNotice}
+        </OctantAlert>
+      )}
       <CodeReviewPane
         client={boundedClient}
         scope={props.scope}
@@ -299,7 +303,11 @@ function BoundCodeLocalReview(props: CodeLocalReviewProps) {
           }
         }}
       />
-      {notice === undefined ? null : <OctantAlert tone="neutral">{notice}</OctantAlert>}
+      {notice === undefined ? null : (
+        <OctantAlert layout="row" tone="neutral">
+          {notice}
+        </OctantAlert>
+      )}
     </section>
   );
 }

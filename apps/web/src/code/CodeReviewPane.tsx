@@ -377,7 +377,11 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           </OctantButton>
         </div>
       )}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
     </section>
   );
 }
