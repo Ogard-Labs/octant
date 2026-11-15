@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type ThreadRetentionThreadId,
 } from "@octant/contracts";
+import { PROJECT_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
 import {
   CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE,
   CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
@@ -363,6 +364,11 @@ export function erasePurgedProjectData(input: {
       .get(memoryAggregate.aggregateType, memoryAggregate.aggregateId) !== undefined;
   const aggregates = new Map<string, AggregateKey>([
     [`project-memory:${projectId}`, memoryAggregate],
+    // The person's instructions for this Project go with it.
+    [
+      `${PROJECT_INSTRUCTIONS_AGGREGATE_TYPE}:${projectId}`,
+      { aggregateType: PROJECT_INSTRUCTIONS_AGGREGATE_TYPE, aggregateId: projectId },
+    ],
     [
       `${TOOL_EGRESS_PROJECT_AGGREGATE}:${projectId}`,
       { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE, aggregateId: projectId },

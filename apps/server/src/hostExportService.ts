@@ -7,7 +7,10 @@ import {
 import { decodeUtcTimestamp, type UtcTimestamp } from "@octant/contracts/events";
 import type { HostId } from "@octant/contracts/host";
 import type { PersonMemoryEntry } from "@octant/contracts/person-memory";
-import type { HostExportInstructions } from "@octant/contracts/host-export";
+import type {
+  HostExportInstructions,
+  HostExportProjectInstructions,
+} from "@octant/contracts/host-export";
 import type { ProjectMemoryView } from "@octant/contracts/projects";
 import type { ThreadExportBundle, ThreadExportOutcome } from "@octant/contracts/thread-export";
 import type {
@@ -87,6 +90,8 @@ export interface HostExportServiceOptions {
   };
   /** The instructions the person wrote for Octant. Absent sends no instructions page. */
   readonly instructions?: () => HostExportInstructions;
+  /** Each Project's instructions that are not empty, sent in bounded pages. */
+  readonly projectInstructions?: () => ReadonlyArray<HostExportProjectInstructions>;
   readonly canvases: {
     readonly list: (input: {
       readonly cursor: string | undefined;
@@ -190,6 +195,7 @@ export class HostExportService {
     ) {
       return;
     }
+    if (!(yield* this.#projectInstructionsPages(limit))) return;
     const canvasDropped = yield* this.#canvasPages(limit);
     if (canvasDropped === undefined) return;
     unrepresentable += canvasDropped;
@@ -300,6 +306,17 @@ export class HostExportService {
     return dropped;
   }
 
+  async *#projectInstructionsPages(limit: number): AsyncGenerator<HostExportPage, boolean> {
+    const entries = this.#options.projectInstructions?.() ?? [];
+    for (let start = 0; start < entries.length; start += limit) {
+      const projectInstructions = entries.slice(start, start + limit);
+      if (!(yield* this.#emit({ kind: "project-instructions", projectInstructions }))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   async *#canvasPages(limit: number): AsyncGenerator<HostExportPage, number | undefined> {
     let cursor: string | undefined;
     let dropped = 0;
@@ -389,15 +406,17 @@ export class HostExportService {
             ? page.projectMemory.length
             : page.kind === "person-memory"
               ? page.entries.length
-              : page.kind === "canvases"
-                ? page.canvases.length
-                : page.kind === "usage"
-                  ? page.usage.length
-                  : page.kind === "retention-windows"
-                    ? page.windows.length
-                    : page.kind === "retention-tombstones"
-                      ? page.tombstones.length
-                      : 1;
+              : page.kind === "project-instructions"
+                ? page.projectInstructions.length
+                : page.kind === "canvases"
+                  ? page.canvases.length
+                  : page.kind === "usage"
+                    ? page.usage.length
+                    : page.kind === "retention-windows"
+                      ? page.windows.length
+                      : page.kind === "retention-tombstones"
+                        ? page.tombstones.length
+                        : 1;
     this.#observeResident?.(page.kind, count);
     if (threadExportContainsForbiddenKey(page)) {
       yield { kind: "refused", reason: "unrepresentable" };
@@ -418,6 +437,7 @@ export interface HostExportLiveDependencies {
   readonly readProjectMemory: (projectId: string) => ProjectMemoryView;
   readonly personMemoryEntries: () => ReadonlyArray<PersonMemoryEntry>;
   readonly instructions: () => HostExportInstructions;
+  readonly projectInstructions: () => ReadonlyArray<HostExportProjectInstructions>;
   readonly listCanvases: () => ReadonlyArray<unknown>;
   readonly readSettings: () => HostExportSettingsSource;
   readonly listProjectIds: () => ReadonlyArray<string>;
@@ -461,6 +481,7 @@ export function createLiveHostExportService(input: HostExportLiveDependencies): 
     projectMemory: { read: (projectId) => input.readProjectMemory(projectId) },
     personMemory: { entries: () => input.personMemoryEntries() },
     instructions: () => input.instructions(),
+    projectInstructions: () => input.projectInstructions(),
     canvases: {
       list: ({ cursor, limit }) =>
         pageHostExportSlice(input.listCanvases(), cursor, limitOf(limit)),

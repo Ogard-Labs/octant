@@ -753,6 +753,8 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly octantInstructionBlocks?: (input: {
     readonly thread: CodeThread;
+    /** Whether the thread reads as a coordinator now, so it gets orchestration. */
+    readonly orchestrates: boolean;
   }) => ReadonlyArray<OctantInstructionsBlock>;
   /**
    * The active Project memory entries this thread's turn carries, as a Chat
@@ -5548,8 +5550,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ];
     // After Octant's own instructions and before person memory, and counted
     // with Octant's instructions as person memory is.
+    // The role is decided again on every turn, so Stop coordinating takes the
+    // orchestration text away at the next turn.
     const instructionBlocks =
-      this.#options.octantInstructionBlocks?.({ thread: active.thread }) ?? [];
+      this.#options.octantInstructionBlocks?.({
+        thread: active.thread,
+        orchestrates: this.#options.isCoordinatorThread?.(String(active.thread.id)) === true,
+      }) ?? [];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,
       windowId: active.windowId,

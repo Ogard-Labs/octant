@@ -82,6 +82,7 @@ const CATEGORY_OPTIONS: ReadonlyArray<{
   { value: "user-instructions", label: "User instructions" },
   { value: "person-instructions", label: "Your instructions" },
   { value: "project-instructions", label: "Project instructions" },
+  { value: "orchestration-instructions", label: "Orchestration" },
   { value: "person-memory", label: "Person memory" },
   { value: "project-memory", label: "Project memory" },
   { value: "conversation", label: "Conversation" },

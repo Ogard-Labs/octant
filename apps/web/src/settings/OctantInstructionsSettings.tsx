@@ -1,5 +1,9 @@
 import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
-import type { OctantInstructionsView } from "@octant/contracts/octant-instructions";
+import {
+  decodeOctantInstructionsCommand,
+  type OctantInstructionsView,
+  type ProjectInstructionsView,
+} from "@octant/contracts/octant-instructions";
 import {
   OCTANT_INSTRUCTIONS_LIMITS,
   octantInstructionsWithinLimit,
@@ -15,6 +19,12 @@ import "./octant-instructions.css";
 
 export const YOUR_INSTRUCTIONS_PURPOSE =
   "Rules for working inside Octant, sent with every new turn on every provider: which provider or model takes which job, and when to use Work, Canvas, routines, or the board. A provider's own instruction files still apply and come first on how it works.";
+
+export const ORCHESTRATION_PURPOSE =
+  "For coordinator threads and a Project's planner only, after your instructions: when to start a worker, which provider and model suits which task, how workers report back, and when to stop and ask. It grants nothing; a coordinator's start setting and bounds still apply.";
+
+export const PROJECT_INSTRUCTIONS_PURPOSE =
+  "Rules for this Project's threads in Octant, sent after your instructions with every new turn in this Project. A provider's own instruction files in the folder still apply and come first on how it works.";
 
 export const INSTRUCTIONS_READ_ONLY_NOTE =
   "Only you can change these, from a window on this computer or a device you paired.";
@@ -144,7 +154,10 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
   const [view, setView] = useState<OctantInstructionsView>();
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string>();
+  const [problem, setProblem] = useState<{
+    readonly field: "instructions" | "orchestration";
+    readonly message: string;
+  }>();
 
   const load = useCallback(async () => {
     if (client === undefined) return;
@@ -160,24 +173,34 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
     void load();
   }, [load]);
 
-  async function save(instructions: string) {
+  async function save(field: "instructions" | "orchestration", text: string) {
     if (client === undefined || view === undefined) return;
     setBusy(true);
     setProblem(undefined);
     try {
-      const result = await client.change({
-        kind: "change-person-instructions",
-        expectedVersion: view.version,
-        instructions,
-      });
+      const result = await client.change(
+        field === "instructions"
+          ? {
+              kind: "change-person-instructions",
+              expectedVersion: view.version,
+              instructions: text,
+            }
+          : {
+              kind: "change-orchestration-instructions",
+              expectedVersion: view.orchestrationVersion,
+              orchestration: text,
+            },
+      );
       if (result.kind === "octant-instructions") {
         setView(result);
         return;
       }
-      setProblem(result.message);
-      if (result.reason === "stale-version") await load();
+      if (result.kind === "octant-instructions-refused") {
+        setProblem({ field, message: result.message });
+        if (result.reason === "stale-version") await load();
+      }
     } catch {
-      setProblem("Your instructions could not be saved.");
+      setProblem({ field, message: "Your instructions could not be saved." });
     } finally {
       setBusy(false);
     }
@@ -202,17 +225,117 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
     );
   }
   return (
+    <>
+      <InstructionsField
+        busy={busy}
+        canChange={view.canChange}
+        focused={props.focusedSetting === "your-instructions"}
+        label="Your instructions"
+        onSave={(value) => void save("instructions", value)}
+        problem={problem?.field === "instructions" ? problem.message : undefined}
+        purpose={YOUR_INSTRUCTIONS_PURPOSE}
+        scope="host"
+        settingId="your-instructions"
+        text="person"
+        value={view.instructions}
+      />
+      <InstructionsField
+        busy={busy}
+        canChange={view.canChange}
+        focused={props.focusedSetting === "orchestration-instructions"}
+        label="Orchestration"
+        onSave={(value) => void save("orchestration", value)}
+        problem={problem?.field === "orchestration" ? problem.message : undefined}
+        purpose={ORCHESTRATION_PURPOSE}
+        scope="host"
+        settingId="orchestration-instructions"
+        text="orchestration"
+        value={view.orchestration}
+      />
+    </>
+  );
+}
+
+export interface ProjectInstructionsSettingsProps {
+  readonly client: OctantInstructionsClient;
+  readonly projectId: string;
+  /** An archived or stale Project shows its text without Save. */
+  readonly readOnly?: boolean;
+}
+
+/** A Project's settings, beside Project memory: the person's instructions for this Project. */
+export function ProjectInstructionsSettings(props: ProjectInstructionsSettingsProps) {
+  const { client, projectId } = props;
+  const [view, setView] = useState<ProjectInstructionsView>();
+  const [problem, setProblem] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await client.readProject(projectId);
+      if (result.kind === "project-instructions") {
+        setView(result);
+        setProblem(undefined);
+      } else if (result.kind === "octant-instructions-refused") {
+        setProblem(result.message);
+      }
+    } catch {
+      setProblem("This Project's instructions could not be read from this host.");
+    }
+  }, [client, projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function save(instructions: string) {
+    if (view === undefined) return;
+    setBusy(true);
+    setProblem(undefined);
+    try {
+      const result = await client.change(
+        decodeOctantInstructionsCommand({
+          kind: "change-project-instructions",
+          projectId,
+          expectedVersion: view.version,
+          instructions,
+        }),
+      );
+      if (result.kind === "project-instructions") {
+        setView(result);
+        return;
+      }
+      if (result.kind === "octant-instructions-refused") {
+        // The reread clears the problem when it succeeds, so the refusal is
+        // shown after it; otherwise the person keeps a draft with no reason.
+        if (result.reason === "stale-version") await load();
+        setProblem(result.message);
+      }
+    } catch {
+      setProblem("This Project's instructions could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (view === undefined) {
+    return (
+      <SettingsState kind={problem === undefined ? "loading" : "error"}>
+        {problem ?? "Reading this Project's instructions…"}
+      </SettingsState>
+    );
+  }
+  return (
     <InstructionsField
       busy={busy}
-      canChange={view.canChange}
-      focused={props.focusedSetting === "your-instructions"}
-      label="Your instructions"
+      canChange={view.canChange && props.readOnly !== true}
+      label="Project instructions"
       onSave={(value) => void save(value)}
       problem={problem}
-      purpose={YOUR_INSTRUCTIONS_PURPOSE}
-      scope="host"
-      settingId="your-instructions"
-      text="person"
+      purpose={PROJECT_INSTRUCTIONS_PURPOSE}
+      scope="project"
+      settingId="project-instructions"
+      text="project"
       value={view.instructions}
     />
   );
