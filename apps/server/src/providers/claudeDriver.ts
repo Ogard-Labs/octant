@@ -3106,15 +3106,16 @@ function makeConnection(
             return deny("Claude user question input was invalid.");
           }
           const reusableApprovalKey = approvalReuseKey(request.toolName, digest);
-          if (
+          const reusesEarlierAnswer = () =>
             request.toolName !== "AskUserQuestion" &&
             grant.unsandboxed !== true &&
-            activeState.approvalReuse.has(reusableApprovalKey)
-          ) {
+            activeState.approvalReuse.has(reusableApprovalKey);
+          const allowUnderEarlierAnswer = (): ClaudeToolDecision => {
             holdWorktree(activeState, request.toolName, request.input, grant.workingDirectory);
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
-          }
+          };
+          if (reusesEarlierAnswer()) return allowUnderEarlierAnswer();
           while (
             request.toolName !== "AskUserQuestion" &&
             activeState.pendingApprovals.size >= MAX_PENDING_APPROVALS
@@ -3124,6 +3125,10 @@ function makeConnection(
               return deny("Claude tool request was cancelled.");
             }
           }
+          // The approval this call waited behind may have been answered for
+          // the whole session meanwhile: asking again would put the same call
+          // to the person twice.
+          if (reusesEarlierAnswer()) return allowUnderEarlierAnswer();
           const mapped = mapClaudeToolRequest(activeState.context!, request);
           if (mapped.kind === "question") {
             if (providerPrompts === undefined) {

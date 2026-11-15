@@ -1800,6 +1800,77 @@ describe("Claude execution policy", () => {
     await Effect.runPromise(Fiber.join(subscriber));
   });
 
+  it("runs a call that waited in line under an answer the person gave meanwhile", async () => {
+    const f = harness("subscription", "current-session");
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
+    );
+    const call = async (command: string, toolUseId: string) => {
+      const input = { command };
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input,
+        toolUseId,
+        signal,
+      });
+      return open.canUseTool({ toolName: "Bash", input, toolUseId, signal });
+    };
+    const approvalRequests = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "approval-request" }> =>
+          event.kind === "approval-request",
+      );
+    // Four approvals fill the cap; the same command as the first waits in line.
+    const asked = ["bun run test", "bun run a", "bun run b", "bun run c"].map((command, index) =>
+      call(command, `asked-${index}`),
+    );
+    await vi.waitFor(() => expect(approvalRequests()).toHaveLength(4));
+    await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "waiting",
+      signal,
+    });
+    const waiting = open.canUseTool({
+      toolName: "Bash",
+      input: { command: "bun run test" },
+      toolUseId: "waiting",
+      signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: approvalRequests()[0]!.requestId,
+        approved: true,
+      }),
+    );
+    await expect(asked[0]).resolves.toEqual({ behavior: "allow" });
+    // The answer covers the same call, so the waiting one runs unasked.
+    await expect(waiting).resolves.toEqual({ behavior: "allow" });
+    expect(approvalRequests()).toHaveLength(4);
+    await acquired.close();
+    await Effect.runPromise(Fiber.join(subscriber));
+  });
+
   it("completes a turn that makes far more than 64 tool calls", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
