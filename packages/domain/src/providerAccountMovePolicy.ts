@@ -1,5 +1,9 @@
 import type { EventActor } from "@octant/contracts/events";
-import type { ProviderInstance } from "@octant/contracts/providers";
+import type { ProviderInstance, ProviderInstanceId } from "@octant/contracts/providers";
+import type {
+  ThreadUsageLimitHandoff,
+  ThreadUsageLimitHandoffOutcome,
+} from "@octant/contracts/usage-limit-handoff";
 import type { ModelPickerSelection, PickerGroup } from "./modelPickerPolicy";
 
 export type ProviderAccountMoveRefusal =
@@ -94,4 +98,145 @@ export function providerAccountMoveTargets(
         section.models.some((picker) => String(picker.model.id) === String(selection.modelId)),
       ),
   );
+}
+
+/**
+ * Whether the person may set "when this account hits its usage limit, hand
+ * off to" this account. It is the same choice as a move made ahead of time,
+ * so it takes the move's rules except a running turn: the choice changes
+ * nothing until a later turn stops on the limit.
+ */
+export function decideUsageLimitHandoffSetting(input: {
+  readonly actor: EventActor | undefined;
+  readonly modelPoolOn: boolean;
+  readonly from: Pick<ProviderInstance, "id" | "driverKind"> | undefined;
+  /** The account to hand off to, or `off` to turn the opt-in off. */
+  readonly to: Pick<ProviderInstance, "id" | "driverKind" | "enabled"> | "off" | undefined;
+}): ProviderAccountMoveDecision {
+  if (input.to === "off") {
+    // Turning it off widens nothing, but it is still the person's choice.
+    const refusal = decideProviderAccountMove({
+      ...input,
+      to: undefined,
+      turnRunning: false,
+      modelPoolOn: false,
+    });
+    return refusal.kind === "refused" && refusal.reason === "unattended"
+      ? refusal
+      : { kind: "moves" };
+  }
+  return decideProviderAccountMove({ ...input, to: input.to, turnRunning: false });
+}
+
+export type UsageLimitHandoffDecision =
+  | { readonly kind: "stays" }
+  | { readonly kind: "hands-off" }
+  | { readonly kind: "stopped"; readonly message: string };
+
+/**
+ * What the host does when a turn has just stopped. It hands the thread off
+ * only on the person's standing opt-in, only for a stop the provider itself
+ * reported as a usage limit, only once per stop, and only to the one account
+ * the person named. When that account cannot take the thread, or the thread
+ * is already on it (so that account hit its limit too), the host stops and
+ * says why instead of trying anything else.
+ */
+export function decideUsageLimitHandoff(input: {
+  /** The account the person named; absent when the opt-in is off. */
+  readonly targetProviderInstanceId: string | undefined;
+  /** The stop the opt-in last acted on, if any. */
+  readonly lastStopId: string | undefined;
+  /** The stop that just ended the turn, when it was a usage limit. */
+  readonly limitStopId: string | undefined;
+  readonly modelPoolOn: boolean;
+  readonly from: Pick<ProviderInstance, "id" | "driverKind" | "displayName"> | undefined;
+  readonly to: Pick<ProviderInstance, "id" | "driverKind" | "enabled" | "displayName"> | undefined;
+}): UsageLimitHandoffDecision {
+  if (input.targetProviderInstanceId === undefined || input.limitStopId === undefined) {
+    return { kind: "stays" };
+  }
+  if (input.lastStopId === input.limitStopId) return { kind: "stays" };
+  if (
+    input.from !== undefined &&
+    String(input.from.id) === String(input.targetProviderInstanceId)
+  ) {
+    return {
+      kind: "stopped",
+      message: `${input.from.displayName} hit its usage limit too, so the thread waits here.`,
+    };
+  }
+  if (input.modelPoolOn) {
+    return {
+      kind: "stopped",
+      message: "The model pool is on, so the thread stays on its account.",
+    };
+  }
+  if (input.to === undefined) {
+    return { kind: "stopped", message: "The account to hand off to is no longer set up." };
+  }
+  if (!input.to.enabled) {
+    return { kind: "stopped", message: `${input.to.displayName} is turned off.` };
+  }
+  if (input.from !== undefined && input.from.driverKind !== input.to.driverKind) {
+    return {
+      kind: "stopped",
+      message: `${input.to.displayName} is not an account of this thread's provider.`,
+    };
+  }
+  return { kind: "hands-off" };
+}
+
+type WithUsageLimitHandoff = {
+  readonly usageLimitHandoff?: ThreadUsageLimitHandoff | undefined;
+};
+
+/**
+ * The thread with the person's opt-in set to `target`, or turned off when it
+ * is absent. Choosing the same account again keeps what the opt-in last did,
+ * so the thread keeps saying it; choosing another account starts afresh.
+ */
+export function withUsageLimitHandoff<T extends WithUsageLimitHandoff>(
+  thread: T,
+  target: ProviderInstanceId | undefined,
+): T {
+  const { usageLimitHandoff: previous, ...rest } = thread;
+  if (target === undefined) return rest as T;
+  const kept =
+    previous !== undefined &&
+    String(previous.providerInstanceId) === String(target) &&
+    previous.last !== undefined
+      ? { last: previous.last }
+      : {};
+  return { ...rest, usageLimitHandoff: { providerInstanceId: target, ...kept } } as T;
+}
+
+/** The thread with what the opt-in just did recorded on it. */
+export function withUsageLimitHandoffOutcome<T extends WithUsageLimitHandoff>(
+  thread: T,
+  last: ThreadUsageLimitHandoffOutcome,
+): T {
+  if (thread.usageLimitHandoff === undefined) return thread;
+  return { ...thread, usageLimitHandoff: { ...thread.usageLimitHandoff, last } };
+}
+
+/**
+ * Whether the thread has moved off the account its latest turn stopped on for
+ * a usage limit. Such a stop parks the turn as waiting, and everything that
+ * waits on a parked turn (the queue, the composer, the board) would keep
+ * waiting on an account the thread no longer uses: the observed case was a
+ * hand-off that reported success while the next message stayed queued. The
+ * host records the released stop on the provider change, so every reader
+ * answers from the same journaled fact.
+ */
+export function parkedStopReleased(
+  thread: {
+    /** Work and Code record it on the provider handoff. */
+    readonly providerHandoff?: { readonly releasedStopId?: string | undefined } | undefined;
+    /** Chat, which keeps no handoff record on the thread, records it here. */
+    readonly releasedStopId?: string | undefined;
+  },
+  stopId: string | undefined,
+): boolean {
+  const released = thread.providerHandoff?.releasedStopId ?? thread.releasedStopId;
+  return stopId !== undefined && released !== undefined && released === stopId;
 }

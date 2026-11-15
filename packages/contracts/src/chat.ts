@@ -39,6 +39,7 @@ import {
   ProviderUsageLimit,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { DiagnosticFailureCode } from "./diagnostics";
 import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
@@ -490,6 +491,18 @@ export const ChatThread = Schema.Struct({
    */
   usageResume: Schema.optional(UsageResumeThreadState),
   /**
+   * The person's opt-in to hand this thread to one named account when its
+   * account hits its usage limit; see {@link ThreadUsageLimitHandoff}.
+   */
+  usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
+  /**
+   * The attempt the latest provider change released: it had stopped on the
+   * old account's usage limit, and moving off that account means it no longer
+   * holds the thread. It keeps its limit in history; the queue and the
+   * composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  /**
    * Set when a person turned off **Continue after restart** for this thread:
    * an answer a host restart cuts off waits for them instead of continuing by
    * itself. Absent, the Chat setting decides.
@@ -642,6 +655,17 @@ export const MoveChatThreadAccountCommand = Schema.Struct({
   kind: Schema.Literal("move-chat-thread-account"),
   ...ChatThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
+}).annotations(strict);
+
+/**
+ * The person's "when this account hits its usage limit, hand off to" choice
+ * for the thread. Absent `providerInstanceId` turns it off. Refused while the
+ * thread's model pool is on, since the pool names the current account.
+ */
+export const SetChatThreadUsageLimitHandoffCommand = Schema.Struct({
+  kind: Schema.Literal("set-chat-thread-usage-limit-handoff"),
+  ...ChatThreadCommandFields,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
 }).annotations(strict);
 
 /**
@@ -970,6 +994,7 @@ export const ChatCommand = Schema.Union(
   WakeChatThreadCommand,
   ChangeChatProviderCommand,
   MoveChatThreadAccountCommand,
+  SetChatThreadUsageLimitHandoffCommand,
   SelectChatMultiModelPoolCommand,
   ChangeChatResearchCommand,
   ChangeChatInstructionsCommand,

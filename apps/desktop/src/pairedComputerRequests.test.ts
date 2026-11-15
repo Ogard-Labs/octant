@@ -198,6 +198,8 @@ describe("a window's request to a paired computer", () => {
         "POST /api/server-proxy/grants",
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
+        "GET /api/todos",
+        "POST /api/todos/commands",
       ],
     );
   });

@@ -33,6 +33,7 @@ describe("SettingsSectionId", () => {
       "memory",
       "secret-stores",
       "data",
+      "todos",
       "sync",
       "remote-access",
       "host",

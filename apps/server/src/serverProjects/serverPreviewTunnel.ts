@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server, type Socket } from "node:net";
 import {
+  pinnedHostKeyOptions,
   SERVER_CONNECTION_OPTIONS,
   serverSshEnvironment,
   type ServerAddress,
@@ -56,6 +57,10 @@ export interface ServerPreviewOptions {
   readonly record: (record: ServerPreviewView & { readonly owner: string }) => boolean;
   readonly sshPath?: string;
   readonly configFile?: string;
+  /** Why no stream may go to a server now, such as its machine being suspended. */
+  readonly refuses?: (server: ServerAddress) => string | undefined;
+  /** The known hosts file holding a server's pinned keys, when the host pinned any. */
+  readonly pinnedKnownHosts?: (server: ServerAddress) => string | undefined;
   /**
    * The server's process authority clock. A tunnel's hour runs on it, so a
    * wall clock set back cannot keep a tunnel open longer.
@@ -68,11 +73,13 @@ export function serverPreviewSshArguments(
   server: ServerAddress,
   port: number,
   configFile?: string,
+  pinnedKnownHosts?: string,
 ): ReadonlyArray<string> {
   return [
     ...(configFile === undefined ? [] : ["-F", configFile]),
     ...[
       ...SERVER_CONNECTION_OPTIONS,
+      ...pinnedHostKeyOptions(pinnedKnownHosts),
       "ControlMaster=no",
       "ControlPath=none",
       "ExitOnForwardFailure=yes",
@@ -220,6 +227,9 @@ export class ServerPreviewTunnels {
       if (cleanup.status === "unsettled") return refused("cleanup-unsettled");
     }
     if (!this.#openingCurrent(input)) return refused("authority-or-record-unavailable");
+    // Checked here, after any old cleanup, so a start and a reconnect both
+    // refuse a suspended machine before they listen.
+    if (this.#options.refuses?.(input.server) !== undefined) return refused("machine-suspended");
     const listener = createServer((socket) => this.#accept(input.projectId, socket));
     const port = await new Promise<number | undefined>((resolve) => {
       listener.once("error", () => resolve(undefined));
@@ -286,7 +296,9 @@ export class ServerPreviewTunnels {
       preview === undefined ||
       preview.status !== "listening" ||
       !this.#current(preview) ||
-      preview.streams.size >= 8
+      preview.streams.size >= 8 ||
+      // Each stream spawns ssh itself, so the refusal a call gets applies here too.
+      this.#options.refuses?.(preview.server) !== undefined
     ) {
       socket.destroy();
       if (preview !== undefined && !this.#current(preview)) void this.#end(preview, "revoked");
@@ -294,7 +306,14 @@ export class ServerPreviewTunnels {
     }
     const child = spawn(
       this.#options.sshPath ?? "ssh",
-      [...serverPreviewSshArguments(preview.server, preview.remotePort, this.#options.configFile)],
+      [
+        ...serverPreviewSshArguments(
+          preview.server,
+          preview.remotePort,
+          this.#options.configFile,
+          this.#options.pinnedKnownHosts?.(preview.server),
+        ),
+      ],
       {
         env: serverSshEnvironment(process.env, this.#options.agentSocket()),
         stdio: ["pipe", "pipe", "pipe"],

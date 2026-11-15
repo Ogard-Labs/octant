@@ -11,6 +11,7 @@ import {
   decodeCodeEvidenceReference,
   decodeCodeOperationResult,
   decodeCodeOperationId,
+  decodeCodeRuntimeWork,
   decodeCodeThread,
   EventEnvelope,
   decodeMentionableThreadId,
@@ -932,5 +933,243 @@ describe("ordinary failure", () => {
     turns = [turn("cancelled")];
     expect(await tail()).toEqual({ id: messageId, status: "cancelled" });
     expect(await port.reconcile({ scope, messageId })).toEqual({ status: "cancelled" });
+  });
+});
+
+describe("a turn parked on a usage limit after the thread moved to another account", () => {
+  const now = thread.createdAt;
+  const projectId = "92000000-0000-4000-8000-000000000010";
+  const bindingRevisionId = "92000000-0000-4000-8000-000000000011";
+  const stopId = "92000000-0000-4000-8000-000000000020";
+  const personal = "92000000-0000-4000-8000-000000000021";
+  const moved = {
+    providerInstanceId: personal,
+    providerHandoff: {
+      previousProviderInstanceId: thread.providerInstanceId,
+      previousModelId: thread.modelId,
+      nextProviderInstanceId: personal,
+      nextModelId: thread.modelId,
+      changedAt: now,
+      releasedStopId: stopId,
+    },
+  };
+  const binding = { canonicalRoot: "/workspace/project" };
+  const project = (type: "work" | "code") =>
+    decodeProject({
+      id: projectId,
+      name: "Project",
+      type,
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding,
+      bindingHistory: [
+        {
+          revisionId: bindingRevisionId,
+          revision: 1,
+          currentBinding: binding,
+          actor: { kind: "local-user", actorId: windowId },
+          changedAt: now,
+        },
+      ],
+      ...(type === "code" ? { codeAccessPersistence: "current-session" } : {}),
+    });
+  const fields = {
+    id: threadId,
+    projectId,
+    bindingRevisionId,
+    title: "Limited work",
+    lifecycle: "active",
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  it("lets the next Work message dispatch once the hand-off released the parked turn", async () => {
+    const { deps } = setup();
+    const parked = decodeWorkTurnState({
+      requestId: stopId,
+      threadId,
+      turnId: stopId,
+      projectId,
+      authority: {
+        hostId: "local",
+        projectId,
+        bindingRevisionId,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+      },
+      prompt: "Keep going.",
+      status: "waiting",
+      transcript: [],
+      failure: {
+        category: "rate-limited",
+        message: "The provider's usage window is spent.",
+        usageLimit: { kind: "exhausted" },
+      },
+      capabilities: {
+        workspace: "project-backed",
+        confinement: "project-root-confined",
+        shell: "denied",
+        git: "denied",
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      },
+      version: 1,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+    let workThread = decodeWorkThread(fields);
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      persistence: { ...deps.persistence, readProject: () => project("work") },
+      work: { readThread: () => workThread, listTurns: () => [parked], startFirstTurn: vi.fn() },
+    });
+    const input = { scope: { mode: "work", threadId }, windowId, intent: "dispatch" } as const;
+
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    workThread = decodeWorkThread({ ...fields, ...moved });
+    expect(await port.inspect(input)).toMatchObject({
+      status: "ready",
+      tail: { id: stopId, status: "failed", ordinaryFailure: true },
+    });
+  });
+
+  it("lets the next Code message dispatch once the hand-off released the parked turn", async () => {
+    const { deps } = setup();
+    const checkoutId = "92000000-0000-4000-8000-000000000012";
+    const repositoryId = `repo_${"b".repeat(64)}`;
+    const code = (extra: object) =>
+      decodeCodeThread({
+        ...fields,
+        ...extra,
+        checkoutId,
+        repositoryId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: "feature/limited-work",
+          remoteName: "origin",
+          proposedBaseRepository: "octant/octant",
+          proposedBaseBranch: "main",
+          outcomeKind: "local-implementation",
+          confirmedAt: now,
+        },
+      });
+    let codeThread = code({});
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      persistence: {
+        ...deps.persistence,
+        readProject: () => project("code"),
+        readCodeThread: () => codeThread,
+        readCodeRuntimeWorks: () => [
+          {
+            work: decodeCodeRuntimeWork({
+              id: stopId,
+              threadId,
+              kind: "provider-turn",
+              state: "waiting",
+              updatedAt: now,
+            }),
+            firstSequence: 1,
+          },
+        ],
+        readCodeCheckout: () =>
+          decodeCodeCheckoutIdentity({
+            id: checkoutId,
+            repositoryId,
+            kind: "plain-folder",
+            availability: "available",
+            head: { kind: "none" },
+            observedAt: now,
+          }),
+      },
+    });
+    const input = { scope: { mode: "code", threadId }, windowId, intent: "dispatch" } as const;
+
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    codeThread = code(moved);
+    expect(await port.inspect(input)).toMatchObject({
+      status: "ready",
+      tail: { id: stopId, status: "failed", ordinaryFailure: true },
+    });
+  });
+});
+
+describe("a Chat attempt parked on a usage limit after the thread moved to another account", () => {
+  it("lets the next Chat message dispatch once the hand-off released the parked attempt", async () => {
+    const { deps } = setup();
+    const now = thread.createdAt;
+    const turnId = "92000000-0000-4000-8000-000000000030";
+    const attemptId = "92000000-0000-4000-8000-000000000031";
+    const reference = { contentId: turnId, digest: "c".repeat(64), byteLength: 4 };
+    const view = (current: typeof thread) =>
+      decodeChatThreadView({
+        thread: current,
+        turns: [
+          {
+            id: turnId,
+            threadId,
+            sequence: 1,
+            userMessageRef: reference,
+            attachmentIds: [],
+            attempts: [
+              {
+                id: attemptId,
+                turnId,
+                threadId,
+                providerInstanceId: thread.providerInstanceId,
+                providerSessionId: "92000000-0000-4000-8000-000000000032",
+                modelId: thread.modelId,
+                contextManifestId: "92000000-0000-4000-8000-000000000033",
+                outcome: "waiting",
+                responseRefs: [],
+                citationIds: [],
+                usageLimit: { kind: "exhausted" },
+                createdAt: now,
+                updatedAt: now,
+              },
+            ],
+            createdAt: now,
+          },
+        ],
+        contents: [],
+        attachments: [],
+        citations: [],
+        workItems: [],
+        workListVersion: 0,
+        followUpVersion: 0,
+        lastSequence: 3,
+      });
+    let current = thread;
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      persistence: {
+        ...deps.persistence,
+        readChatThread: () => current,
+        readChatThreadView: () => view(current),
+      },
+    });
+    const input = { scope: { mode: "chat", threadId }, windowId, intent: "dispatch" } as const;
+
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    current = decodeChatThread({
+      ...thread,
+      providerInstanceId: "92000000-0000-4000-8000-000000000021",
+      releasedStopId: attemptId,
+    });
+    expect(await port.inspect(input)).toMatchObject({
+      status: "ready",
+      tail: { id: attemptId, status: "failed", ordinaryFailure: true },
+    });
   });
 });

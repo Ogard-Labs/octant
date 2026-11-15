@@ -17,13 +17,14 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, Agents, Thread, and Settings routes", () => {
-    expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts"]);
+  it("exposes Inbox home, Agents, Thread, Settings, and To-dos routes", () => {
+    expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts", "todos"]);
     expect(MOBILE_TAB_LABELS).toEqual({
       home: "Inbox",
       agents: "Agents",
       thread: "Thread",
       hosts: "Settings",
+      todos: "To-dos",
     });
   });
 

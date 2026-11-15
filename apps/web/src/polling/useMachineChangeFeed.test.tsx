@@ -90,6 +90,7 @@ describe("useMachineChangeFeed", () => {
             "tool-approvals" as const,
             "thread-follow-ups" as const,
             "thread-message-queue" as const,
+            "todos" as const,
           ],
         };
       },
@@ -100,6 +101,7 @@ describe("useMachineChangeFeed", () => {
     expect(result.current.toolApprovals).toBe(1);
     expect(result.current.threadFollowUps).toBe(1);
     expect(result.current.threadMessageQueue).toBe(1);
+    expect(result.current.todos).toBe(1);
     expect(result.current.chatNavigation).toBe(0);
   });
 

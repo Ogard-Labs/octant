@@ -662,6 +662,19 @@ async function handleCommand(
         200,
         origin,
       );
+    // A file routine watches a folder of this host, and a server Project has
+    // none here; the dispatcher refuses one at every occurrence, so it is
+    // refused at save with the same reason rather than as a missing folder.
+    const fileProjectId = body.definition.projectId;
+    if (dependencies.serverProjects?.().some((project) => project.id === fileProjectId) === true)
+      return jsonResponse(
+        commandFailure(
+          "blocked",
+          "A file routine watches a folder on this computer, so it cannot run in a Project on a server.",
+        ),
+        200,
+        origin,
+      );
     let checked: AutomationCommand;
     try {
       checked = decodeAutomationCommand(command);

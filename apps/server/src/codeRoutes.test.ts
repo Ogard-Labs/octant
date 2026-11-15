@@ -439,7 +439,7 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("lets a device the host's own person paired change Continue after restart for a Code thread or the Code setting, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated" }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "00000000-0000-4000-8000-000000000940";
@@ -456,6 +456,18 @@ describe("Code routes", () => {
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
         restartContinuation: true,
+      },
+      {
+        kind: "move-code-thread-account",
+        threadId,
+        expectedVersion: 1,
+        providerInstanceId: "00000000-0000-4000-8000-000000000943",
+      },
+      {
+        kind: "set-code-thread-usage-limit-handoff",
+        threadId,
+        expectedVersion: 1,
+        providerInstanceId: "00000000-0000-4000-8000-000000000943",
       },
     ];
     const from = (command: unknown, admittedBy?: "host-person" | "hub-roster") => {
@@ -498,7 +510,7 @@ describe("Code routes", () => {
         }),
       );
     }
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("refuses a paired device choosing the model for automatic calls, and lets a local window", async () => {

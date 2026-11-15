@@ -2,11 +2,13 @@ import {
   decodeServerProjectsCommand,
   type ServerProject,
   type ServerProjectCloudMachine,
+  type ServerProjectCodeBinding,
   type ServerProjectsCommand,
   type ServerProjectsCommandResult,
   type ServerProjectsRefusalReason,
   type ServerProjectsView,
 } from "@octant/contracts/server-projects";
+import { serverCodeCheckout } from "./serverProjectThreads";
 import { serverWorkBindingRevisionId } from "./serverWorkThreads";
 import { authenticateRoutePrincipal, boundPrincipalIsRestricted } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
@@ -174,10 +176,19 @@ function catalogView(
         ...project,
         ...(project.mode === "work"
           ? { workBindingRevisionId: serverWorkBindingRevisionId(project) }
-          : {}),
+          : { codeBinding: codeBindingOf(project) }),
         ...(cloudMachine === undefined ? {} : { cloudMachine }),
       };
     }),
+  };
+}
+
+function codeBindingOf(project: ServerProject): ServerProjectCodeBinding {
+  const derived = serverCodeCheckout(project);
+  return {
+    bindingRevisionId: derived.bindingRevisionId,
+    repositoryId: derived.checkout.repositoryId,
+    checkoutId: derived.checkout.id,
   };
 }
 

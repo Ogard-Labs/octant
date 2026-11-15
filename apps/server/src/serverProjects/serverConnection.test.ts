@@ -99,6 +99,48 @@ describe("a server connection's arguments", () => {
       message: expect.stringContaining("too long"),
     });
   });
+
+  it("refuses a call to a server the host refuses now with its reason, and starts no ssh", async () => {
+    const asked: Array<string> = [];
+    const connection = new ServerConnection({
+      agentSocket: () => undefined,
+      sshPath: "/nonexistent/ssh",
+      refuses: (server) => {
+        asked.push(`${server.user}@${server.alias}`);
+        return server.alias === "m-1.machines.test" ? "This machine is suspended." : undefined;
+      },
+    });
+    const call = await connection.run(
+      { alias: "m-1.machines.test", user: "octant" },
+      { script: "true", timeoutMs: 1_000, maxOutputBytes: 64 },
+    );
+    expect(call).toEqual({ status: "unreachable", message: "This machine is suspended." });
+    expect(asked).toEqual(["octant@m-1.machines.test"]);
+  });
+
+  it("checks a pinned server's host key against its pinned keys alone", () => {
+    const args = serverSshArguments({ alias: "m-1.machines.test", user: "octant" }, "true", {
+      terminal: false,
+      pinnedKnownHosts: "/tmp/octant-ssh-x/0123456789abcdef.known_hosts",
+    });
+    for (const option of [
+      "StrictHostKeyChecking=yes",
+      'UserKnownHostsFile="/tmp/octant-ssh-x/0123456789abcdef.known_hosts"',
+      "GlobalKnownHostsFile=none",
+      "KnownHostsCommand=none",
+      "VerifyHostKeyDNS=no",
+      "CheckHostIP=no",
+      "UpdateHostKeys=no",
+      "HostKeyAlias=octant-pinned-host",
+    ]) {
+      expect(args).toContain(option);
+    }
+    expect(
+      serverSshArguments({ alias: "web1", user: "deploy" }, "true", { terminal: false }).some(
+        (option) => option.startsWith("UserKnownHostsFile") || option.startsWith("HostKeyAlias"),
+      ),
+    ).toBe(false);
+  });
 });
 
 it.skipIf(process.platform === "win32")(
@@ -208,6 +250,9 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
   afterAll(() => sshd?.stop());
 
   const server = () => ({ alias: sshd.alias, user: sshd.user });
+  /** A throwaway host key in the form a provider reports it: type and base64, nothing else. */
+  const publicKey = (name: string) =>
+    readFileSync(join(sshd.root, name), "utf8").split(" ").slice(0, 2).join(" ");
 
   it("runs a script there with its arguments and exit status", async () => {
     const call = await connection.run(server(), {
@@ -237,6 +282,91 @@ describe.skipIf(!canRunThrowawaySshd)("a call on a throwaway server", () => {
     );
     expect(call.status).toBe("unreachable");
     expect(existsSync(join(sshd.root, "reached"))).toBe(false);
+  });
+
+  it("reaches a brand-new server whose host key the host pinned, with nothing in the person's known hosts", async () => {
+    const pinned = new ServerConnection({
+      agentSocket: () => sshd.agentSocket,
+      configFile: sshd.configFile,
+      pinnedHostKeys: (address) =>
+        address.alias === sshd.unknownHostAlias ? [publicKey("hostkey.pub")] : undefined,
+    });
+    const call = await pinned.run(
+      { alias: sshd.unknownHostAlias, user: sshd.user },
+      { script: "printf pinned", timeoutMs: 10_000, maxOutputBytes: 1_024 },
+    );
+    expect(call.status === "ran" && call.output.toString()).toBe("pinned");
+  });
+
+  it("refuses a pinned server whose host key changed, even where the person's known hosts accept it", async () => {
+    const pinned = new ServerConnection({
+      agentSocket: () => sshd.agentSocket,
+      configFile: sshd.configFile,
+      pinnedHostKeys: () => [publicKey("otherhostkey.pub")],
+    });
+    const call = await pinned.run(server(), {
+      script: "touch reached-through-changed-key",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(call.status).toBe("unreachable");
+    expect(existsSync(join(sshd.root, "reached-through-changed-key"))).toBe(false);
+  });
+
+  it("lets no setting of the person's (DNS, address or another known hosts file) vouch for a pinned server's key", () => {
+    const config = join(sshd.root, "vouching_config");
+    writeFileSync(
+      config,
+      [
+        "Host *",
+        "  VerifyHostKeyDNS yes",
+        "  CheckHostIP yes",
+        "  UpdateHostKeys yes",
+        `  UserKnownHostsFile ${join(sshd.root, "known_hosts")}`,
+        `  GlobalKnownHostsFile ${join(sshd.root, "known_hosts")}`,
+        "  HostKeyAlias web1",
+        "",
+      ].join("\n"),
+    );
+    const args = serverSshArguments(server(), undefined, {
+      terminal: false,
+      configFile: config,
+      pinnedKnownHosts: join(sshd.root, "pinned_known_hosts"),
+    });
+    // `ssh -G` prints the settings ssh would connect with, after every source.
+    const effective = spawnSync("ssh", ["-G", ...args], { encoding: "utf8" }).stdout;
+    expect(effective).toContain("verifyhostkeydns false");
+    expect(effective).toContain("checkhostip no");
+    expect(effective).toContain("updatehostkeys false");
+    expect(effective).toContain(`userknownhostsfile ${join(sshd.root, "pinned_known_hosts")}\n`);
+    expect(effective).toContain("globalknownhostsfile none");
+    expect(effective).toContain("hostkeyalias octant-pinned-host");
+    expect(effective).toContain("stricthostkeychecking true");
+  });
+
+  it("opens a new shared connection once a pin is installed, instead of reusing one trusted before it", async () => {
+    let pinned: ReadonlyArray<string> | undefined;
+    const shared = new ServerConnection({
+      agentSocket: () => sshd.agentSocket,
+      configFile: sshd.configFile,
+      pinnedHostKeys: () => pinned,
+    });
+    const before = await shared.run(server(), {
+      script: "printf before",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(before.status === "ran" && before.output.toString()).toBe("before");
+
+    // The machine now answers with a key the pin does not hold.
+    pinned = [publicKey("otherhostkey.pub")];
+    const after = await shared.run(server(), {
+      script: "touch reached-through-old-connection",
+      timeoutMs: 10_000,
+      maxOutputBytes: 1_024,
+    });
+    expect(after.status).toBe("unreachable");
+    expect(existsSync(join(sshd.root, "reached-through-old-connection"))).toBe(false);
   });
 
   it("is unreachable where nothing listens", async () => {

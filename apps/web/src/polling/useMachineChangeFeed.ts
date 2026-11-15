@@ -15,6 +15,7 @@ export interface MachineChangeRevisions {
   readonly toolApprovals: number;
   readonly threadFollowUps: number;
   readonly threadMessageQueue: number;
+  readonly todos: number;
 }
 
 const INITIAL_REVISIONS: MachineChangeRevisions = {
@@ -29,6 +30,7 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   toolApprovals: 0,
   threadFollowUps: 0,
   threadMessageQueue: 0,
+  todos: 0,
 };
 
 /**
@@ -102,6 +104,7 @@ async function consumeMachineChanges(
                 "tool-approvals",
                 "thread-follow-ups",
                 "thread-message-queue",
+                "todos",
               ]
             : frame.topics,
         );
@@ -141,5 +144,6 @@ function advanceRevisions(
     toolApprovals: current.toolApprovals + Number(changed.has("tool-approvals")),
     threadFollowUps: current.threadFollowUps + Number(changed.has("thread-follow-ups")),
     threadMessageQueue: current.threadMessageQueue + Number(changed.has("thread-message-queue")),
+    todos: current.todos + Number(changed.has("todos")),
   };
 }
