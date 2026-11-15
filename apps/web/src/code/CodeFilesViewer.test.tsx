@@ -4,6 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeFilesViewer, type CodeFilesViewerProps } from "./CodeFilesViewer";
 
+const editorSave = vi.fn(async () => true);
+const editorDiscard = vi.fn();
+
 vi.mock("./useCodeEditorFile", () => ({
   useCodeEditorFile: (options: { readonly relativePath?: string }) => ({
     file: { path: options.relativePath, state: "available" },
@@ -15,10 +18,17 @@ vi.mock("./MonacoEditorPane", () => ({
   MonacoEditorPane: (props: {
     readonly file: { readonly path: string };
     readonly onDirtyChange?: (dirty: boolean) => void;
+    readonly onRegisterActions?: (actions: unknown) => void;
     readonly onOpenInMainArea?: () => void;
   }) => (
     <section aria-label={`Code editor for ${props.file.path}`}>
-      <button onClick={() => props.onDirtyChange?.(true)} type="button">
+      <button
+        onClick={() => {
+          props.onDirtyChange?.(true);
+          props.onRegisterActions?.({ save: editorSave, discard: editorDiscard });
+        }}
+        type="button"
+      >
         Edit {props.file.path}
       </button>
       <button onClick={props.onOpenInMainArea} type="button">
@@ -129,7 +139,7 @@ describe("CodeFilesViewer", () => {
     await user.click(await screen.findByRole("treeitem", { name: "a.ts" }));
     await user.click(await screen.findByRole("button", { name: "Edit a.ts" }));
     await user.click(screen.getByRole("treeitem", { name: "b.ts" }));
-    expect(tabNames()).toEqual(["a.ts", "b.ts, preview"]);
+    expect(tabNames()).toEqual(["a.ts, unsaved changes", "b.ts, preview"]);
   });
 
   it("closes a tab and falls back to its neighbour", async () => {
@@ -175,5 +185,71 @@ describe("CodeFilesViewer", () => {
       expect(screen.getByRole("treeitem", { name: "a.ts (modified)" })).toBeVisible(),
     );
     expect(screen.getByRole("treeitem", { name: "b.ts" })).toBeVisible();
+  });
+
+  describe("closing a file with unsaved edits", () => {
+    async function openDirty() {
+      const user = userEvent.setup();
+      mount();
+      await user.dblClick(await screen.findByRole("treeitem", { name: "a.ts" }));
+      await user.click(await screen.findByRole("button", { name: "Edit a.ts" }));
+      return user;
+    }
+    const closeA = (user: ReturnType<typeof userEvent.setup>) =>
+      user.click(screen.getByRole("button", { name: "Close a.ts" }));
+
+    it("closes a clean tab without asking", async () => {
+      const user = userEvent.setup();
+      mount();
+      await user.dblClick(await screen.findByRole("treeitem", { name: "a.ts" }));
+      await user.click(screen.getByRole("button", { name: "Close a.ts" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(tabNames()).toEqual([]);
+    });
+
+    it("marks the tab with a dot and asks before closing it", async () => {
+      const user = await openDirty();
+      expect(screen.getByTestId("tab-dirty-dot")).toBeInTheDocument();
+      await closeA(user);
+      expect(await screen.findByRole("dialog", { name: "Save changes to a.ts?" })).toBeVisible();
+      expect(screen.getByText("Your edits will be lost if you don't save them.")).toBeVisible();
+    });
+
+    it("keeps the tab when the person cancels", async () => {
+      editorSave.mockClear();
+      const user = await openDirty();
+      await closeA(user);
+      await user.click(await screen.findByRole("button", { name: "Cancel" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(tabNames()).toHaveLength(1);
+      expect(editorSave).not.toHaveBeenCalled();
+    });
+
+    it("saves and then closes the tab on Save", async () => {
+      editorSave.mockClear();
+      const user = await openDirty();
+      await closeA(user);
+      await user.click(await screen.findByRole("button", { name: "Save" }));
+      await waitFor(() => expect(tabNames()).toEqual([]));
+      expect(editorSave).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the tab open when saving fails", async () => {
+      editorSave.mockResolvedValueOnce(false);
+      const user = await openDirty();
+      await closeA(user);
+      await user.click(await screen.findByRole("button", { name: "Save" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(tabNames()).toHaveLength(1);
+    });
+
+    it("drops the edits and closes the tab on Don't save", async () => {
+      editorDiscard.mockClear();
+      const user = await openDirty();
+      await closeA(user);
+      await user.click(await screen.findByRole("button", { name: "Don't save" }));
+      await waitFor(() => expect(tabNames()).toEqual([]));
+      expect(editorDiscard).toHaveBeenCalledTimes(1);
+    });
   });
 });

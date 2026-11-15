@@ -1,4 +1,5 @@
 import { coordinatorWorkersOf } from "../agents/coordinatorWorkers";
+import { confirmFilesClose } from "../code/filesCloseGuard";
 import { requestThreadControl } from "../composer/threadControlNavigation";
 import type { CodeReviewFileRequest } from "../code/codeReviewNavigation";
 import type { ChatThreadId } from "@octant/contracts/chat";
@@ -695,6 +696,13 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           const closed = displayedDockState.tabs.find((tab) => tab.id === tabId);
           if (closed?.surface === "browser" && dockThread !== undefined) {
             dismissLiveBrowserCard(dockThread.threadId);
+          }
+          if (closed?.surface === "files") {
+            // A Files tool with unsaved edits asks per file before it goes.
+            void confirmFilesClose().then((proceed) => {
+              if (proceed) actions.closeDockTab(tabId);
+            });
+            return;
           }
           actions.closeDockTab(tabId);
         }}

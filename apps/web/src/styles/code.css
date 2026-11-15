@@ -3088,44 +3088,27 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-files-viewer__strip {
   display: flex;
-  height: 32px;
+  height: 36px;
   flex: none;
   align-items: center;
   gap: var(--oct-space-1);
-  padding: 0 var(--oct-space-2) 0 var(--oct-space-3);
+  padding: 0 var(--oct-space-2) 0 0;
+  background: var(--octant-sidebar-fill);
   box-shadow: inset 0 -1px 0 var(--octant-pane-line, var(--octant-border-soft));
 }
 
-.code-files-viewer__tabs,
+/* The strip row draws the bar's background and hairline itself; the tab list
+   inside it is only the scrolling run of tabs. */
+.code-files-viewer__strip > .panel-tabs {
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  box-shadow: none;
+}
+
 .code-files-viewer__strip-fill {
   min-width: 0;
   flex: 1 1 auto;
-}
-
-.code-files-viewer__tabs {
-  overflow: auto;
-  scrollbar-width: none;
-}
-
-.code-files-viewer__tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.code-files-viewer__tab-list {
-  display: flex;
-  gap: var(--oct-space-1);
-}
-
-/* The preview tab is the one the next single click replaces. */
-.code-files-viewer__tab[data-preview="true"] .content-tab__select > span:first-child {
-  font-style: italic;
-}
-
-.code-files-viewer__tab .content-tab__select > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-files-viewer__tree-toggle {

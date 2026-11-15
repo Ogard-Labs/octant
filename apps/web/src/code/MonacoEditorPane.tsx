@@ -119,6 +119,14 @@ export interface MonacoEditorPaneProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Reports whether the buffer holds unsaved edits, so a viewer can keep its tab. */
   readonly onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Hands the viewer this buffer's own Save and Discard, so a tab that closes
+   * with unsaved edits can be saved or dropped through the same paths the
+   * buttons use. `save` answers whether the buffer is clean afterwards.
+   */
+  readonly onRegisterActions?: (
+    actions: { readonly save: () => Promise<boolean>; readonly discard: () => void } | undefined,
+  ) => void;
   /** Offers "Open in main area" in the file menu: the file as a workspace tab. */
   readonly onOpenInMainArea?: () => void;
   /** Language-service timing, for tests. */
@@ -367,6 +375,17 @@ function AvailableEditor(
     setReloadGeneration((value) => value + 1);
     props.onRequestRefresh?.();
   }, [draftKey, props.draftStore, props.onRequestRefresh]);
+
+  const saveAndReport = useRef<() => Promise<boolean>>(async () => true);
+  saveAndReport.current = async () => {
+    await (editorSave.current?.() ?? save());
+    return !dirtyRef.current;
+  };
+  const onRegisterActions = props.onRegisterActions;
+  useEffect(() => {
+    onRegisterActions?.({ save: () => saveAndReport.current(), discard: discardDraftAndReload });
+    return () => onRegisterActions?.(undefined);
+  }, [onRegisterActions, discardDraftAndReload]);
 
   const { checkoutId, path, threadId } = props.file;
   const onOpenFile = props.onOpenFile;

@@ -2,11 +2,14 @@ import type { CodeFileChangeNotice, CodeRelativePath, CodeThreadView } from "@oc
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantIconButton } from "../ui/base/OctantButton";
-import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
-import { PanelRight, PanelRightOpen, X } from "../ui/icons";
+import { PanelTab, PanelTabStrip } from "../shell/PanelTabs";
+import { Code, File, FileText, Image, PanelRight, PanelRightOpen } from "../ui/icons";
 import { pathBasename } from "../lib/fileName";
 import type { CodeFileChange } from "./CodeFileExplorer";
+import { fileKindOf } from "./CodeFileExplorer";
 import { CodeFileExplorerPanel, type CodeFileExplorerPanelProps } from "./CodeFileExplorerPanel";
+import { registerFilesCloseGuard } from "./filesCloseGuard";
+import { UnsavedFileDialog, type UnsavedFileChoice } from "./UnsavedFileDialog";
 import { noticeTouches } from "./useCodeFileChangeWatch";
 import { useCodeEditorFile } from "./useCodeEditorFile";
 import type { CodeController } from "./useCodeController";
@@ -22,6 +25,19 @@ interface OpenFile {
   readonly path: CodeRelativePath;
   /** A preview tab is replaced by the next single click; keeping it makes it stay. */
   readonly preview: boolean;
+}
+
+/** The live editor's own Save and Discard, handed up for a tab that closes dirty. */
+interface EditorActions {
+  readonly save: () => Promise<boolean>;
+  readonly discard: () => void;
+}
+
+function FileTabGlyph(props: { readonly name: string }) {
+  const kind = fileKindOf(props.name);
+  const Glyph =
+    kind === "code" ? Code : kind === "document" ? FileText : kind === "image" ? Image : File;
+  return <Glyph aria-hidden="true" size={14} />;
 }
 
 export interface CodeFilesViewerProps {
@@ -75,21 +91,95 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
     if (width > 0 && width < NARROW_PANE_PX) setTreeOpen(false);
   }, []);
 
-  const close = (path: CodeRelativePath) => {
-    const index = files.findIndex((file) => file.path === path);
-    const remaining = files.filter((file) => file.path !== path);
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const dirtyPaths = useRef(new Set<string>());
+  const [dirtyMarks, setDirtyMarks] = useState<ReadonlySet<string>>(new Set());
+  const actions = useRef<EditorActions | undefined>(undefined);
+  const [asking, setAsking] = useState<{
+    readonly name: string;
+    readonly answer: (choice: UnsavedFileChoice) => void;
+  }>();
+  const registerActions = useCallback((next: EditorActions | undefined) => {
+    actions.current = next;
+  }, []);
+  const setDirty = useCallback((path: CodeRelativePath, dirty: boolean) => {
+    if (dirtyPaths.current.has(String(path)) === dirty) return;
+    if (dirty) dirtyPaths.current.add(String(path));
+    else dirtyPaths.current.delete(String(path));
+    setDirtyMarks(new Set(dirtyPaths.current));
+  }, []);
+
+  const removeTab = useCallback((path: CodeRelativePath) => {
+    const current = filesRef.current;
+    const index = current.findIndex((file) => file.path === path);
+    const remaining = current.filter((file) => file.path !== path);
+    dirtyPaths.current.delete(String(path));
+    setDirtyMarks(new Set(dirtyPaths.current));
     setFiles(remaining);
-    if (active === path) setActive(remaining[Math.min(index, remaining.length - 1)]?.path);
-  };
+    if (activeRef.current === path)
+      setActive(remaining[Math.min(index, remaining.length - 1)]?.path);
+  }, []);
+
+  /**
+   * Whether a tab may close. A file with unsaved edits is brought forward (its
+   * editor owns Save), and the person chooses: Save closes on success and keeps
+   * the tab, with the editor's error, when saving fails; Don't save drops the
+   * edits; Cancel keeps everything.
+   */
+  const mayClose = useCallback(async (path: CodeRelativePath): Promise<boolean> => {
+    if (!dirtyPaths.current.has(String(path))) return true;
+    if (activeRef.current !== path) {
+      setActive(path);
+      for (let waited = 0; waited < 5000 && actions.current === undefined; waited += 25)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      // A reopened editor starts clean and then restores its draft, so the
+      // file counts as clean only if it has not said "dirty" again by then.
+      for (let waited = 0; waited < 1000 && !dirtyPaths.current.has(String(path)); waited += 25)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      if (!dirtyPaths.current.has(String(path))) return true;
+    }
+    const choice = await new Promise<UnsavedFileChoice>((answer) =>
+      setAsking({ name: pathBasename(path), answer }),
+    );
+    setAsking(undefined);
+    if (choice === "cancel") return false;
+    if (choice === "save") return (await actions.current?.save()) === true;
+    actions.current?.discard();
+    return true;
+  }, []);
+
+  const close = useCallback(
+    (path: CodeRelativePath) => {
+      void mayClose(path).then((ok) => {
+        if (ok) removeTab(path);
+      });
+    },
+    [mayClose, removeTab],
+  );
+
+  useEffect(
+    () =>
+      registerFilesCloseGuard(async () => {
+        for (const file of [...filesRef.current]) {
+          if (!(await mayClose(file.path))) return false;
+        }
+        return true;
+      }),
+    [mayClose],
+  );
 
   const keep = useCallback((path: CodeRelativePath) => open(path, true), [open]);
   const changesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(changesTimer.current), []);
   const dirtyKeeps = useCallback(
     (path: CodeRelativePath, dirty: boolean) => {
+      setDirty(path, dirty);
       if (dirty) keep(path);
     },
-    [keep],
+    [keep, setDirty],
   );
 
   const onFilesChanged = useCallback(
@@ -109,44 +199,28 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
           {files.length === 0 ? (
             <span className="code-files-viewer__strip-fill" />
           ) : (
-            <OctantTabs
+            <PanelTabStrip
               className="code-files-viewer__tabs"
-              onValueChange={(value) => {
-                if (typeof value === "string") setActive(value as CodeRelativePath);
-              }}
-              value={active ?? ""}
+              label="Open files"
+              selectedId={active}
             >
-              <OctantTabsList aria-label="Open files" className="code-files-viewer__tab-list">
-                {files.map((file) => {
-                  const name = pathBasename(file.path);
-                  return (
-                    <div
-                      className="content-tab code-files-viewer__tab"
-                      data-preview={file.preview ? "true" : undefined}
-                      key={file.path}
-                      role="presentation"
-                    >
-                      <OctantTabsTab
-                        className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent data-active:bg-transparent data-active:text-inherit"
-                        onDoubleClick={() => keep(file.path)}
-                        title={file.path}
-                        value={file.path}
-                      >
-                        <span>{name}</span>
-                        {file.preview ? <span className="sr-only">, preview</span> : null}
-                      </OctantTabsTab>
-                      <OctantIconButton
-                        className="content-tab__close text-muted-foreground"
-                        label={`Close ${name}`}
-                        onClick={() => close(file.path)}
-                      >
-                        <X aria-hidden="true" size={12} />
-                      </OctantIconButton>
-                    </div>
-                  );
-                })}
-              </OctantTabsList>
-            </OctantTabs>
+              {files.map((file) => (
+                <PanelTab
+                  dirty={dirtyMarks.has(String(file.path))}
+                  icon={<FileTabGlyph name={pathBasename(file.path)} />}
+                  id={String(file.path)}
+                  key={file.path}
+                  label={pathBasename(file.path)}
+                  onClose={() => close(file.path)}
+                  onKeep={() => keep(file.path)}
+                  onSelect={() => setActive(file.path)}
+                  preview={file.preview}
+                  roving={file.path === (active ?? files[0]?.path)}
+                  selected={file.path === active}
+                  title={file.path}
+                />
+              ))}
+            </PanelTabStrip>
           )}
           <OctantIconButton
             aria-pressed={treeOpen}
@@ -171,6 +245,7 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
               key={active}
               onDirty={(dirty) => dirtyKeeps(active, dirty)}
               onOpen={(path) => open(path, false)}
+              onRegisterActions={registerActions}
               onOpenInMainArea={() => props.onOpenInMainArea(active)}
               path={active}
               refreshRef={refreshActive}
@@ -179,6 +254,9 @@ export function CodeFilesViewer(props: CodeFilesViewerProps) {
           )}
         </div>
       </div>
+      {asking === undefined ? null : (
+        <UnsavedFileDialog name={asking.name} onChoose={asking.answer} />
+      )}
       <aside aria-label="Files" className="code-files-viewer__tree">
         <CodeFileExplorerPanel
           {...props.explorer}
@@ -198,6 +276,7 @@ function ActiveFile(props: {
   readonly hostBridge: OctantHostBridge | undefined;
   readonly onDirty: (dirty: boolean) => void;
   readonly onOpen: (path: CodeRelativePath) => void;
+  readonly onRegisterActions: (actions: EditorActions | undefined) => void;
   readonly onOpenInMainArea: () => void;
   readonly path: CodeRelativePath;
   readonly refreshRef: { current: (() => void) | undefined };
@@ -254,6 +333,7 @@ function ActiveFile(props: {
           )
         }
         onDirtyChange={props.onDirty}
+        onRegisterActions={props.onRegisterActions}
         onOpenFile={(path) => props.onOpen(path as CodeRelativePath)}
         onOpenInMainArea={props.onOpenInMainArea}
         onRequestRefresh={refresh}
