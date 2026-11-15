@@ -541,6 +541,7 @@ html:not([data-octant-reduced-transparency="true"])
   border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
   text-align: left;
 }
 
@@ -562,7 +563,7 @@ html:not([data-octant-reduced-transparency="true"])
 
 .code-file-explorer__entry > svg {
   flex: 0 0 auto;
-  color: var(--oct-meta);
+  color: var(--oct-muted);
 }
 
 .code-file-explorer__entry:hover,

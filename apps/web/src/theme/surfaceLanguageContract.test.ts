@@ -94,10 +94,12 @@ describe("surface language", () => {
     }
     const surface = read("styles/surface.css");
     const role = (name: string) => surface.match(new RegExp(`\\.${name} \\{[^}]*\\}`))?.[0] ?? "";
-    // A name in navigation: the interface size, regular weight, no tracking.
+    // A name in navigation: the interface size, medium weight (the weak
+    // regular names read faint beside their icons, maintainer feedback), no
+    // tracking.
     const name = role("oct-nav-name");
     expect(name).toContain("font-size: var(--oct-text-detail);");
-    expect(name).toContain("font-weight: var(--oct-weight-regular);");
+    expect(name).toContain("font-weight: var(--oct-weight-medium);");
     expect(name).toContain("letter-spacing: var(--oct-tracking-sf-13);");
     // A group label: a quiet 12px caption, not a Section label.
     const group = role("oct-nav-group");

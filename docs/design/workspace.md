@@ -2374,7 +2374,7 @@ width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
 computer, cloud for another host), the thread title as a navigation name (13px,
-regular weight), a chip naming the Project in meta ink, and in Code a second
+medium weight), a chip naming the Project in meta ink, and in Code a second
 chip naming the checkout's branch in the mono identifier face — no provider
 mark. The two chips shrink before the title does. While the host projects the
 thread as executing, a "Running" chip with a small spinner follows the chips.

@@ -375,7 +375,7 @@ half pixel.
 | Reply heading    | 20, 17, 15, 14  | 600    | 1.3     | primary     | Markdown `#` to `####`, 24px above, 12px below                                                                                                          |
 | Section label    | 14              | 600    | 17px    | secondary   | `oct-section-label`                                                                                                                                     |
 | Row label        | 14              | 500    | 17px    | primary     | `oct-row-label`                                                                                                                                         |
-| Navigation name  | 13              | 400    | 16px    | primary     | `oct-nav-name`                                                                                                                                          |
+| Navigation name  | 13              | 500    | 16px    | primary     | `oct-nav-name`                                                                                                                                          |
 | Navigation group | 12              | 400    | 14px    | muted       | `oct-nav-group`                                                                                                                                         |
 | Menu option      | 13              | 500    | 16px    | primary     | `oct-menu-option`                                                                                                                                       |
 | Body             | 13              | 400    | 1.5     | primary     | `body`                                                                                                                                                  |
@@ -391,8 +391,8 @@ half pixel.
   `--oct-text-2xl` 26, `--oct-text-3xl` 36, `--oct-text-4xl` 72. Nothing
   essential is under 12px. Feature CSS reads a token, never
   `calc(N * var(--oct-text-step))`.
-- **Weights**: 400 `--oct-weight-regular` (reading, navigation names), 500
-  `--oct-weight-medium` (labels, controls, menu options), 600
+- **Weights**: 400 `--oct-weight-regular` (reading), 500
+  `--oct-weight-medium` (labels, controls, menu options, names in navigation and list rows), 600
   `--oct-weight-strong` (section labels, card titles, page and dialog titles),
   700 `--oct-weight-title` (the large title only).
 - **Tracking**: the platform's own per size (`--oct-tracking-sf-11` to `-24`,

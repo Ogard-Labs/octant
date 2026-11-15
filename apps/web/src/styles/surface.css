@@ -81,13 +81,14 @@
 
 /* A name in navigation: a thread's title in the sidebar and the title band,
    the account's name, a Settings page. The interface size at regular weight
-   reads as a calm list; the selected row is told by its fill, not its weight. */
+   at medium weight reads as a firm list beside its quieter meta; the selected
+   row is told by its fill, not its weight. */
 .oct-nav-name {
   margin: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-regular);
+  font-weight: var(--oct-weight-medium);
   letter-spacing: var(--oct-tracking-sf-13);
   line-height: var(--oct-line-chrome);
 }

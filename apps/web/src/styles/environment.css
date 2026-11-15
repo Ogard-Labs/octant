@@ -187,7 +187,7 @@ button.environment-link:hover {
   overflow: hidden;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-regular);
+  font-weight: var(--oct-weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
