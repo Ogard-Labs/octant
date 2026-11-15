@@ -813,12 +813,16 @@ export class CodeTurnRunner {
             .send({
               sessionId: input.sessionId,
               prompt: input.prompt,
-              context: [
-                ...(sandboxTurn.summary === ""
-                  ? []
-                  : [{ kind: "instructions" as const, text: sandboxTurn.summary }]),
-                ...(input.context ?? []),
-              ],
+              ...(input.context === undefined && sandboxTurn.summary === ""
+                ? {}
+                : {
+                    context: [
+                      ...(sandboxTurn.summary === ""
+                        ? []
+                        : [{ kind: "instructions" as const, text: sandboxTurn.summary }]),
+                      ...(input.context ?? []),
+                    ],
+                  }),
               attachments: input.attachments ?? [],
               tools: [...(input.appManagedTools?.definitions ?? [])],
             })

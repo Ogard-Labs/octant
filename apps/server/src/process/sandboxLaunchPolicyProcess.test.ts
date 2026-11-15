@@ -62,11 +62,15 @@ function fixture() {
       boundRoot: project,
       temporaryDirectory: scratch,
       networkEgress: "allow",
+      // Match the toolchain read baseline used by the existing native launchers.
+      // Home/private denials and the selected read-only roots still apply last.
+      allowFileReadStar: true,
       sandboxPolicy: selection,
     });
   const run = (script: string, selection = sandboxPolicy) => {
     const prepared = launch(script, selection);
     return spawnSync(prepared.command, [...prepared.args], {
+      cwd: project,
       encoding: "utf8",
       timeout: 10_000,
       env: { PATH: "/usr/bin:/bin", HOME: scratch },
@@ -99,7 +103,14 @@ if cat "$3/outside"; then exit 35; fi
 /bin/sh -c 'printf changed > "$1/outside"' child "$3" || true`;
     writeFileSync(join(project, "workflow"), script);
     const result = run(`/bin/sh ./workflow '${shared}' '${cache}' '${base}'`);
-    expect(result.status, result.stderr).toBe(0);
+    expect(
+      result.status,
+      JSON.stringify({
+        error: result.error?.message,
+        signal: result.signal,
+        stderr: result.stderr,
+      }),
+    ).toBe(0);
     expect(readFileSync(join(project, "result"), "utf8")).toBe("shared input");
     expect(readFileSync(join(cache, "build"), "utf8")).toBe("cache");
     expect(readFileSync(join(shared, "input"), "utf8")).toBe("shared input");
@@ -113,14 +124,22 @@ if cat "$3/outside"; then exit 35; fi
     try {
       const address = server.address();
       if (address === null || typeof address === "string") throw new Error("Expected TCP listener");
-      const command = `/bin/bash -c 'echo hello > /dev/tcp/127.0.0.1/${address.port}'`;
+      const command = `printf network-client-ready; /bin/bash -c 'echo hello > /dev/tcp/127.0.0.1/${address.port}'`;
       const allowed = run(command, {
         ...sandboxPolicy,
         policy: { ...sandboxPolicy.policy, network: "unrestricted" },
       });
-      expect(allowed.status, allowed.stderr).toBe(0);
+      expect(
+        allowed.status,
+        JSON.stringify({
+          error: allowed.error?.message,
+          signal: allowed.signal,
+          stderr: allowed.stderr,
+        }),
+      ).toBe(0);
       const denied = run(command);
       expect(denied.status, denied.stderr).not.toBe(0);
+      expect(denied.stdout).toContain("network-client-ready");
       expect(denied.error).toBeUndefined();
     } finally {
       await new Promise<void>((resolve, reject) =>
@@ -135,17 +154,21 @@ if cat "$3/outside"; then exit 35; fi
     const server = createServer((socket) => socket.destroy());
     await new Promise<void>((resolve) => server.listen(socketPath, resolve));
     try {
-      const command = `/usr/bin/python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("${socketPath}")'`;
+      const command = `/usr/bin/python3 -c 'import socket; print("unix-client-ready", flush=True); s=socket.socket(socket.AF_UNIX); s.connect("${socketPath}")'`;
       const open = run(command, {
         ...sandboxPolicy,
         policy: { ...sandboxPolicy.policy, network: "unrestricted" },
       });
-      expect(open.status, open.stderr).toBe(0);
+      expect(
+        open.status,
+        JSON.stringify({ error: open.error?.message, signal: open.signal, stderr: open.stderr }),
+      ).toBe(0);
       const blocked = run(command, {
         ...sandboxPolicy,
         policy: { ...sandboxPolicy.policy, hostServices: "blocked" },
       });
       expect(blocked.status, blocked.stderr).not.toBe(0);
+      expect(blocked.stdout).toContain("unix-client-ready");
       expect(blocked.error).toBeUndefined();
     } finally {
       await new Promise<void>((resolve, reject) =>
@@ -338,6 +361,7 @@ npm test
       boundRoot: f.project,
       temporaryDirectory: f.scratch,
       networkEgress: "none",
+      allowFileReadStar: true,
       sandboxPolicy: f.sandboxPolicy,
       readRoots: [dirname(dirname(node))],
     });
@@ -347,7 +371,14 @@ npm test
       encoding: "utf8",
       timeout: 20000,
     });
-    expect(result.status, result.stderr).toBe(0);
+    expect(
+      result.status,
+      JSON.stringify({
+        error: result.error?.message,
+        signal: result.signal,
+        stderr: result.stderr,
+      }),
+    ).toBe(0);
     expect(readFileSync(join(f.project, "result"), "utf8")).toBe("changed");
     expect(readFileSync(join(f.project, "installed"), "utf8")).toBe("ready");
     expect(existsSync(join(f.project, ".git", "index.lock"))).toBe(false);
