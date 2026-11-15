@@ -157,6 +157,11 @@ export type CodeTurnEventCategory =
 
 export interface CodeTurnEvent {
   readonly category: CodeTurnEventCategory;
+  /** An approval that asks to change the thread's level rather than to run a tool. */
+  readonly levelChange?: {
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly plan?: string;
+  };
   readonly childObservation?: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   readonly providerKind: ProviderRuntimeEvent["kind"];
   readonly instanceId: ProviderInstanceId;
@@ -256,6 +261,13 @@ export interface CodeTurnRunnerInput {
   readonly nativeSetup?: ProviderNativeSetup;
   /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /**
+   * The runtime started this turn by itself in the thread's kept session
+   * (a background task ended or a watch reported). The turn attaches to what
+   * the runtime is already running instead of sending the prompt, which
+   * only records why the turn exists.
+   */
+  readonly runtimeTurn?: true;
   /**
    * Records that the runtime's own web search, page fetch, or hosted tool put
    * outside content in front of the model. Without it such a call stops the
@@ -496,6 +508,8 @@ export class CodeTurnRunner {
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The host answers the runtime's own asks to plan or to leave Plan.
+        levelChanges: true,
         // The driver still offers its artifact tool only where it would name
         // it for this mode and posture.
         ...(input.thread.documentDelivery === "native-artifacts" ? { nativeArtifacts: true } : {}),
@@ -828,6 +842,15 @@ export class CodeTurnRunner {
             );
           }
           timing = startTurnMetrics(clock());
+          if (input.runtimeTurn === true) {
+            if (connection.attachRuntimeTurn === undefined) {
+              return yield* fail("failed", "This provider cannot open a turn it started itself.");
+            }
+            yield* connection
+              .attachRuntimeTurn(input.sessionId)
+              .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));
+            return;
+          }
           yield* connection
             .send({
               sessionId: input.sessionId,
@@ -1081,6 +1104,14 @@ function normalizeProviderEvent(
         ),
         executionPolicy: input.thread.executionPolicy,
         permissionPersistence: input.thread.permissionPersistence,
+        ...(event.levelChange === undefined
+          ? {}
+          : {
+              levelChange: {
+                kind: event.levelChange.kind,
+                ...(event.levelChange.plan === undefined ? {} : { plan: event.levelChange.plan }),
+              },
+            }),
       });
     case "review-verdict":
       return Effect.succeed({

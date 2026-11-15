@@ -13,6 +13,9 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProviderInstanceId,
+  decodeCodeNativeSessionId,
+  decodeProviderModelId,
+  decodeCodeCheckoutId,
   type CodeConversationTurn,
   type CodeOperationEvent,
   type CodeOperationId,
@@ -144,6 +147,55 @@ describe("CodeOperationEventStore", () => {
     });
     expect(() =>
       decodeCodeOperationEvent({ kind: "runtime-turn-started", trigger: "person" }),
+    ).toThrow();
+    reopened.connection.close();
+  });
+
+  it("replays a thread's adoption of a session begun outside Octant after a restart, and resumes from it", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const firstStore = createStore(first.journal);
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: {
+        kind: "native-session-adopted",
+        nativeSessionId: decodeCodeNativeSessionId("outside-session-1"),
+        providerInstanceId: decodeProviderInstanceId("90000000-0000-4000-8000-000000000041"),
+      },
+    });
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: {
+        kind: "provider-session-ready",
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000042"),
+        providerInstanceId: decodeProviderInstanceId("90000000-0000-4000-8000-000000000041"),
+        modelId: decodeProviderModelId("sonnet"),
+        checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000043"),
+        resumeCursor: { driverKind: "claude", value: "outside-session-1" },
+      },
+    });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const store = createStore(reopened.journal);
+    expect(store.adoptedNativeSession(threadId)).toMatchObject({
+      nativeSessionId: "outside-session-1",
+    });
+    expect(store.providerSessionForThread(threadId, operationId)).toMatchObject({
+      status: "ok",
+      priorTurn: false,
+      session: { resumeCursor: { driverKind: "claude", value: "outside-session-1" } },
+    });
+    expect(() =>
+      decodeCodeOperationEvent({
+        kind: "native-session-adopted",
+        nativeSessionId: "../escape",
+        providerInstanceId: "90000000-0000-4000-8000-000000000041",
+      }),
     ).toThrow();
     reopened.connection.close();
   });

@@ -1746,9 +1746,16 @@ export function decodeMessage(
   throw protocol("Claude returned an unsupported runtime message.");
 }
 
+/**
+ * The runtime's sessions whose own folder is `expectedRoot`. A session's
+ * title (a name the person gave it, or the runtime's summary of its first
+ * prompt) is kept only with `titles`, for the list a person picks a session
+ * from; a resume lookup never carries it.
+ */
 export function decodeSessions(
   value: unknown,
   expectedRoot: string,
+  options: { readonly titles?: true } = {},
 ): readonly ClaudeSessionMetadata[] {
   if (!Array.isArray(value)) throw protocol();
   return value.flatMap((entry) => {
@@ -1763,12 +1770,23 @@ export function decodeSessions(
       throw protocol();
     }
     if (session.cwd !== expectedRoot) return [];
+    // A title or branch the runtime reports oddly is left out, never a reason
+    // to drop the session.
+    const named = typeof session.customTitle === "string" ? session.customTitle.trim() : "";
+    const summary = typeof session.summary === "string" ? session.summary.trim() : "";
+    const title = options.titles === true ? (named.length > 0 ? named : summary).slice(0, 200) : "";
+    const gitBranch =
+      options.titles === true && typeof session.gitBranch === "string"
+        ? session.gitBranch.slice(0, 256)
+        : undefined;
     return [
       {
         sessionId: session.sessionId,
         projectRoot: session.cwd,
         lastModified: session.lastModified,
         ...(session.createdAt === undefined ? {} : { createdAt: session.createdAt }),
+        ...(title.length === 0 ? {} : { title }),
+        ...(gitBranch === undefined || gitBranch.length === 0 ? {} : { gitBranch }),
       },
     ];
   });

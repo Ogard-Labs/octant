@@ -169,6 +169,18 @@ export function stalledTurnLimitMs(
     : settings.stalledTurnLimitMinutes * 60_000;
 }
 
+/**
+ * How long a session left running only background work is kept with no turn
+ * in its thread, in milliseconds; `null` when the setting is Off.
+ */
+export function backgroundSessionIdleLimitMs(
+  settings: Pick<ShellSettings, "backgroundSessionIdleLimitMinutes">,
+): number | null {
+  return settings.backgroundSessionIdleLimitMinutes === null
+    ? null
+    : settings.backgroundSessionIdleLimitMinutes * 60_000;
+}
+
 /** The limit a runner uses when nothing tells it the host's setting. */
 export const DEFAULT_STALLED_TURN_LIMIT_MS = DEFAULT_STALLED_TURN_LIMIT_MINUTES * 60_000;
 

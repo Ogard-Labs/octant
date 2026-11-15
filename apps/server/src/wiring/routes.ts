@@ -86,7 +86,7 @@ export type RoutesDependencies = {
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes" | "nativeBrowserPresentationRoutes"> &
-  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes" | "codeSessionRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
@@ -182,6 +182,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
+    codeSessionRoutes,
     appleToolchainRoutes,
     artifactLibraryRoutes,
     artifactMirrorRoutes,
@@ -337,6 +338,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await chatRoutes(request)) ??
     (await threadMessageQueueRoutes(request)) ??
     (await threadWakeupRoutes(request)) ??
+    (await codeSessionRoutes(request)) ??
     (await threadCheckpointRoutes(request)) ??
     (await scaffoldRoutes(request)) ??
     (await workspacePresetRoutes(request)) ??

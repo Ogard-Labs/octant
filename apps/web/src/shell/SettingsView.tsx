@@ -1295,6 +1295,22 @@ function ActiveSectionContent({
                     }
                   />
                 </SettingRow>
+                <SettingRow
+                  description="Stops a provider session left running only background work, such as a dev server, after its thread has had no turn for this long; its live tasks stop with it."
+                  focused={focusedSetting === settingId("background-session-idle-limit")}
+                  label="Background work limit"
+                  scope="host"
+                  settingId="background-session-idle-limit"
+                >
+                  <ProviderToolCallPauseLimitSelect
+                    id="background-session-idle-limit"
+                    label="Background work limit"
+                    minutes={props.settings.backgroundSessionIdleLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ backgroundSessionIdleLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
               </div>
             </SettingsSection>
           </div>
@@ -2427,8 +2443,13 @@ function BrowserTransferLimitSelect(props: {
 
 const PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES: ReadonlyArray<number> = [30, 60, 120, 240, 480, 1440];
 
-/** How long one provider tool call may pause the stalled-turn limit, plus Off. */
+/**
+ * How long one provider tool call may pause the stalled-turn limit, plus Off.
+ * The background work limit offers the same lengths under its own name.
+ */
 function ProviderToolCallPauseLimitSelect(props: {
+  readonly id?: string;
+  readonly label?: string;
   readonly minutes: number | null;
   readonly onChange: (minutes: number | null) => void;
 }) {
@@ -2440,8 +2461,8 @@ function ProviderToolCallPauseLimitSelect(props: {
         );
   return (
     <OctantSelectField
-      aria-label="Tool-call pause limit"
-      id="provider-tool-call-pause-limit"
+      aria-label={props.label ?? "Tool-call pause limit"}
+      id={props.id ?? "provider-tool-call-pause-limit"}
       onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
       options={[
         ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),

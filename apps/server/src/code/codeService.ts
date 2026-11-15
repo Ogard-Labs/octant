@@ -925,8 +925,13 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 /** A thread without the two choices a mode change states afresh. */
 function withoutAccessChoices(
   thread: CodeThread,
-): Omit<CodeThread, "autoApprove" | "fullAccessSandbox"> {
-  const { autoApprove: _autoApprove, fullAccessSandbox: _fullAccessSandbox, ...rest } = thread;
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy"> {
+  const {
+    autoApprove: _autoApprove,
+    fullAccessSandbox: _fullAccessSandbox,
+    planReturnPolicy: _planReturnPolicy,
+    ...rest
+  } = thread;
   return rest;
 }
 
@@ -2360,6 +2365,20 @@ export class CodeService {
           thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
         };
       }
+      // A return level only labels where an agent's approved plan takes the
+      // thread back to; it never reaches Full access by that route.
+      if (
+        command.kind === "change-code-thread-access" &&
+        command.planReturnPolicy !== undefined &&
+        (command.executionPolicy !== "plan" ||
+          command.planReturnPolicy === "full-access" ||
+          command.planReturnPolicy === "plan")
+      ) {
+        throw this.#failure(
+          "invalid",
+          "A thread returns from Plan only to a level below Full access.",
+        );
+      }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "set-code-thread-restart-continuation") {
         const off = !command.continueAfterRestart;
@@ -2793,6 +2812,19 @@ export class CodeService {
                           ...withoutAccessChoices(current),
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
+                          // Where an agent's approved plan returns the thread:
+                          // kept only while it stays in Plan, and never Full
+                          // access, which only the person chooses.
+                          ...(command.executionPolicy === "plan" &&
+                          (command.planReturnPolicy ??
+                            (current.executionPolicy === "plan"
+                              ? current.planReturnPolicy
+                              : undefined)) !== undefined
+                            ? {
+                                planReturnPolicy:
+                                  command.planReturnPolicy ?? current.planReturnPolicy,
+                              }
+                            : {}),
                           // Store `true` when enabled; drop the field when disabled so
                           // a journal written before the flag existed replays as false.
                           // A posture-only change omits the field and keeps the current value.

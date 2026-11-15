@@ -217,6 +217,7 @@ export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
 export * from "./threadWakeups";
+export * from "./codeSessions";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

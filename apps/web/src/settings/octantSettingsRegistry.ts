@@ -850,6 +850,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "longest tool call pause stalled turn limit provider tool started never finished running hung stuck build test cap bound two hours off",
         },
         {
+          id: settingId("background-session-idle-limit"),
+          label: "Background work limit",
+          scope: "host",
+          keywords:
+            "background task command dev server watch monitor live tasks session kept after turn idle stop limit hours off",
+        },
+        {
           id: settingId("opencode-managed-update"),
           label: "OpenCode update",
           scope: "host",

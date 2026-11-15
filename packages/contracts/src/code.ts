@@ -409,6 +409,13 @@ export const CodeThread = Schema.Struct({
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
   /**
+   * The level the thread returns to when its agent asks to leave Plan and the
+   * person approves. Recorded only when the thread entered Plan at its
+   * agent's request (`EnterPlanMode`) and dropped when it leaves Plan; never
+   * Full access, which only the person chooses. Absent on every other thread.
+   */
+  planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
    * The profile this thread runs under, recorded so the thread can say which
    * working mode produced its posture. Optional so a journal written before
    * profiles bound threads replays as "no profile" rather than being rejected.
@@ -975,6 +982,12 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
+    /**
+     * Set only with `executionPolicy: "plan"` when the person approved the
+     * agent's own ask to plan: the level the thread returns to when the
+     * person later approves its plan. The host refuses Full access here.
+     */
+    planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
     /**

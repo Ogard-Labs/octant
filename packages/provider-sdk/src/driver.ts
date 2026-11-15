@@ -139,6 +139,46 @@ export interface ProviderSessionStart {
   readonly compactionPoint?: ProviderCompactionPoint;
   /** The host's schedule for this session's thread; see {@link ProviderWakeupSchedule}. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /**
+   * The host keeps this session past its turn while the runtime runs
+   * background work (see {@link ProviderConnection.backgroundWork}): a turn
+   * completes when the model's reply is done, and a turn the runtime starts
+   * by itself afterwards waits for the host to open one for it with
+   * {@link ProviderConnection.attachRuntimeTurn}. Absent, a driver that holds
+   * background work keeps the turn that started it open until the work ends.
+   */
+  readonly outlivesTurn?: boolean;
+  /**
+   * The host answers the runtime's own asks to change the thread's level
+   * (`approval-request` with `levelChange`): it changes the level from the
+   * next session when the person approves, and ends the turn. A driver offers
+   * its runtime's plan-mode tools only to a session that carries this, and
+   * never lets the runtime switch its own mode.
+   */
+  readonly levelChanges?: boolean;
+}
+
+/** One background task a session's runtime still runs, as the person may see it. */
+export interface ProviderBackgroundTask {
+  readonly taskId: string;
+  readonly description?: string;
+}
+
+/**
+ * What a session the host keeps past its turn is doing between turns. A
+ * driver reports a new value whenever one of these changes.
+ */
+export interface ProviderBackgroundWork {
+  readonly tasks: ReadonlyArray<ProviderBackgroundTask>;
+  /** The runtime is running a turn: one the host sent, or one it started itself. */
+  readonly turnRunning: boolean;
+  /**
+   * The runtime started a turn by itself while no host turn was open; its
+   * events wait, unread, until the host attaches a turn to it.
+   */
+  readonly runtimeTurnWaiting: boolean;
+  /** The session ended; no later value follows. */
+  readonly ended: boolean;
 }
 
 /**
@@ -245,6 +285,10 @@ export interface ProviderSessionResume {
   readonly compactionPoint?: ProviderCompactionPoint;
   /** As on {@link ProviderSessionStart}; restated on every resume. */
   readonly wakeups?: ProviderWakeupSchedule;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly outlivesTurn?: boolean;
+  /** As on {@link ProviderSessionStart}; restated on every resume. */
+  readonly levelChanges?: boolean;
 }
 
 export interface ProviderSessionCompactionRequest {
@@ -299,7 +343,53 @@ export interface ProviderUserInputAnswer {
   readonly answer: string;
 }
 
+/** A session the runtime keeps for this account and folder, begun outside Octant. */
+export interface ProviderNativeSession {
+  readonly nativeSessionId: string;
+  /** The runtime's own title for it: a name the person gave it, or its summary. */
+  readonly title?: string;
+  /** When the runtime last wrote it, in milliseconds since the epoch. */
+  readonly lastModified: number;
+  readonly gitBranch?: string;
+}
+
+/**
+ * The runtime's own sessions a thread may be started from. `list` names the
+ * sessions of the instance's account in one folder, newest first, leaving out
+ * any an Octant thread already holds. `adopt` records that an Octant session
+ * resumes one of them and answers the cursor that resumes it; it refuses a
+ * session another Octant thread holds, or one in another folder.
+ */
+export interface ProviderNativeSessions {
+  readonly list: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+  }) => Effect.Effect<ReadonlyArray<ProviderNativeSession>, ProviderFailure>;
+  readonly adopt: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly projectRoot: string;
+    readonly mode: "work" | "code";
+    readonly sessionId: ProviderSessionId;
+    readonly nativeSessionId: string;
+    readonly modelId: ProviderModelId;
+  }) => Effect.Effect<ProviderResumeCursor, ProviderFailure>;
+  /**
+   * Withdraws an adoption the host could not record (the thread changed
+   * before it committed): removes the record `adopt` wrote for that Octant
+   * session, so the runtime's session is offered and adoptable again. A
+   * session another Octant session now holds is left as it is. Absent, a
+   * driver has nothing to withdraw.
+   */
+  readonly release?: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly nativeSessionId: string;
+    readonly sessionId: ProviderSessionId;
+  }) => Effect.Effect<void, ProviderFailure>;
+}
+
 export interface ProviderDriver {
+  /** Starting a thread from the runtime's own sessions; absent, a driver offers none. */
+  readonly nativeSessions?: ProviderNativeSessions;
   /** A verified read adapter exists; acquiring still checks the exact runtime version. */
   readonly fileReviewReads?: true;
   readonly cloudSessions?: CloudSessionDriver;
@@ -475,4 +565,25 @@ export interface ProviderConnection {
     input: ProviderUserInputAnswer,
   ) => Effect.Effect<void, ProviderFailure>;
   readonly answerTool: (input: ProviderToolAnswer) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * What a session started with `outlivesTurn` runs between turns, and a way
+   * to hear each change. Present only on a connection whose runtime can keep
+   * background work past a turn; undefined for a session it does not hold.
+   * `watch` answers a function that stops listening.
+   */
+  readonly backgroundWork?: (sessionId: ProviderSessionId) =>
+    | {
+        readonly current: () => ProviderBackgroundWork;
+        readonly watch: (listener: (work: ProviderBackgroundWork) => void) => () => void;
+      }
+    | undefined;
+  /**
+   * Opens the host's turn on a turn the runtime started by itself
+   * (`runtimeTurnWaiting`): the events it held go out on this connection's
+   * subscription, opened by `runtime-turn-started`, and the turn then runs
+   * and ends like one the host sent. Fails when no such turn waits.
+   */
+  readonly attachRuntimeTurn?: (
+    sessionId: ProviderSessionId,
+  ) => Effect.Effect<void, ProviderFailure>;
 }
