@@ -2392,6 +2392,34 @@ describe("WorkTurnService", () => {
       });
     });
 
+    it("releases the session's claim when the thread changed before the adoption could be recorded", async () => {
+      const release = vi.fn((_input: { readonly sessionId: unknown }) => Effect.void);
+      const adopt = vi.fn((_input: { readonly sessionId: unknown }) => Effect.succeed(cursor));
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+        }),
+        recordAdoptedSession: () => ({
+          status: "refused",
+          message: "This thread changed. Try again.",
+        }),
+      });
+
+      const result = await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(result).toEqual({
+        kind: "work-native-session-refused",
+        message: "This thread changed. Try again.",
+      });
+      // The claim released is exactly the one this adoption wrote.
+      expect(release).toHaveBeenCalledWith({
+        instanceId: ids.provider,
+        nativeSessionId: "outside-1",
+        sessionId: adopt.mock.calls[0]?.[0].sessionId,
+      });
+    });
+
     it("refuses the first turn once the thread moved to another model than the session it adopted", async () => {
       const fixture = serviceFixture({
         adoptedSession: () => ({

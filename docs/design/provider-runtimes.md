@@ -1062,7 +1062,12 @@ match; a thread moved to another provider, model or folder before its first
 turn is refused with a sentence saying so, rather than starting fresh and
 dropping the conversation. While a Work adoption runs, a message sent to the
 thread is refused with a note to send again, and the adoption checks again
-that the thread is empty just before it journals. Its picker and details row
+that the thread is empty just before it journals. The driver claims the
+session (its resume record) before the thread records the adoption, so an
+adoption the thread then refuses (it changed meanwhile, or could not be
+marked) gives the claim back through the driver's `release`, which removes
+the record only while it still names this adoption's Octant session; the
+session is offered and adoptable again. Its picker and details row
 are Code's, above the Work composer.
 
 #### Wake-ups the model schedules

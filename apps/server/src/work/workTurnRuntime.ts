@@ -8,6 +8,7 @@ import {
   observeTurnMetrics,
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   isNativeHarnessDriverKind,
+  projectExtraFolderRoots,
   markThreadToolStepOutsideContent,
   markThreadToolStepRoutine,
   outsideContentRecordedOnly,
@@ -38,6 +39,7 @@ import {
   DEFAULT_WORK_ACCESS,
   type WorkAccess,
   type WorkTurnFailure,
+  type Project,
   type WorkThread,
   type WorkThreadId,
   type WorkTurnRequestId,
@@ -60,6 +62,7 @@ import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/ap
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import type { OutlivingSessions } from "../providers/outlivingSessions";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
 import {
@@ -249,13 +252,32 @@ export function workSessionKey(threadId: WorkThreadId): string {
 
 /**
  * The terms a Work thread's session is started on: its level, its provider
- * and model, and its Project and folder. A kept session started on other
- * terms is stopped, so it never goes on acting as the thread no longer is.
- * Undefined when the thread can run no turn.
+ * and model, and the folder authority its Project grants it (the Project's
+ * current binding and root, the thread's approved working folder, and the
+ * extra folders). A kept session started on other terms is stopped, so it
+ * never goes on acting as the thread no longer is or reaching a folder the
+ * Project no longer grants. Undefined when the thread can run no turn: it is
+ * archived or Done, or its Project is gone, archived or no longer grants its
+ * working folder.
  */
-export function workSessionTerms(thread: WorkThread): string | undefined {
+export function workSessionTerms(
+  thread: WorkThread,
+  project: Project | undefined,
+): string | undefined {
   if (thread.lifecycle !== "active" || thread.completionConfirmed === true) return undefined;
+  if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
   return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+    [...projectExtraFolderRoots(project)].sort(),
     thread.access,
     thread.fullAccessSandbox === true,
     String(thread.providerInstanceId),

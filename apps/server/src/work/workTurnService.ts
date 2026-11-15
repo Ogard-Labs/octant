@@ -1145,26 +1145,45 @@ export class WorkTurnService {
       );
       if (adopted._tag === "Left")
         return { kind: "work-native-session-refused", message: adopted.left.message };
-      // The thread must still be empty when the adoption commits. Nothing
-      // yields from here to the journal append, so no turn slips in.
-      const occupied = this.#conversationRefusal(target.thread);
-      if (occupied !== undefined)
-        return { kind: "work-native-session-refused", message: occupied.message };
-      const recorded = record(target.thread, {
-        nativeSessionId,
-        providerSessionId,
-        resumeCursor: adopted.right,
-        providerInstanceId: target.thread.providerInstanceId,
-        modelId: target.thread.modelId,
-        bindingRevisionId: target.thread.bindingRevisionId,
-        workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-        ...(target.thread.workingFolderId === undefined
-          ? {}
-          : { workingFolderId: target.thread.workingFolderId }),
-      });
-      if (recorded.status === "refused")
-        return { kind: "work-native-session-refused", message: recorded.message };
-      return { kind: "work-native-session-adopted", threadId, nativeSessionId };
+      // The provider claimed the session for this thread before the thread
+      // could record it. An adoption that is not recorded gives the claim
+      // back, or the session could never be offered or adopted again.
+      let committed = false;
+      const giveBack = () =>
+        Effect.runPromise(
+          (
+            target.nativeSessions.release?.({
+              instanceId: target.thread.providerInstanceId,
+              nativeSessionId,
+              sessionId: providerSessionId,
+            }) ?? Effect.void
+          ).pipe(Effect.catchAll(() => Effect.void)),
+        );
+      try {
+        // The thread must still be empty when the adoption commits. Nothing
+        // yields from here to the journal append, so no turn slips in.
+        const occupied = this.#conversationRefusal(target.thread);
+        if (occupied !== undefined)
+          return { kind: "work-native-session-refused", message: occupied.message };
+        const recorded = record(target.thread, {
+          nativeSessionId,
+          providerSessionId,
+          resumeCursor: adopted.right,
+          providerInstanceId: target.thread.providerInstanceId,
+          modelId: target.thread.modelId,
+          bindingRevisionId: target.thread.bindingRevisionId,
+          workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          ...(target.thread.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: target.thread.workingFolderId }),
+        });
+        if (recorded.status === "refused")
+          return { kind: "work-native-session-refused", message: recorded.message };
+        committed = true;
+        return { kind: "work-native-session-adopted", threadId, nativeSessionId };
+      } finally {
+        if (!committed) await giveBack();
+      }
     } finally {
       this.#adoptingThreads.delete(key);
     }
@@ -2780,7 +2799,12 @@ export class WorkTurnService {
         command: input.command,
         providerSessionId: input.providerSessionId,
         ...(input.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
-        ...sessionTermsOption(input.thread),
+        ...sessionTermsOption(
+          input.thread,
+          input.thread === undefined
+            ? undefined
+            : this.#persistence.readProject(input.thread.projectId),
+        ),
         ...(this.#outsideContentMarks === undefined
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
@@ -4025,7 +4049,10 @@ function wakeupsOption(wakeups: ProviderWakeupSchedule | undefined): {
 }
 
 /** The thread's terms a kept session is held to; see {@link workSessionTerms}. */
-function sessionTermsOption(thread: WorkThread | undefined): { readonly sessionTerms?: string } {
-  const terms = thread === undefined ? undefined : workSessionTerms(thread);
+function sessionTermsOption(
+  thread: WorkThread | undefined,
+  project: Project | undefined,
+): { readonly sessionTerms?: string } {
+  const terms = thread === undefined ? undefined : workSessionTerms(thread, project);
   return terms === undefined ? {} : { sessionTerms: terms };
 }

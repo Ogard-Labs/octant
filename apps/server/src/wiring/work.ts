@@ -387,7 +387,9 @@ export function wireWork(deps: WorkDependencies) {
         if (!key.startsWith("work:")) return undefined;
         try {
           const thread = workThreadProjection.read(decodeWorkThreadId(key.slice("work:".length)));
-          return thread === undefined ? undefined : workSessionTerms(thread);
+          return thread === undefined
+            ? undefined
+            : workSessionTerms(thread, persistence.readProject(thread.projectId));
         } catch {
           return undefined;
         }
@@ -395,15 +397,19 @@ export function wireWork(deps: WorkDependencies) {
       onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
       onError: (message, error) => console.error(`[live tasks] ${message}`, error),
     });
-    // Every change to a Work thread passes through the journal (its level,
-    // provider or model, its folder, a move, an archive, a Done mark, a
-    // deletion), so a kept session started on terms the thread no longer has
-    // is stopped here rather than from each command's path, judged from the
-    // committed change rather than the projection it has not reached yet.
+    // Every change to a Work thread or its Project passes through the journal
+    // (its level, provider or model, its folder, a move, an archive, a Done
+    // mark, a deletion; the Project's relink, archive or extra folders), so a
+    // kept session started on terms the thread no longer has is stopped here
+    // rather than from each command's path, judged from the committed change
+    // rather than the Work projection it has not reached yet.
     const unsubscribeKeptWorkSessionTerms = persistence.journal.subscribeCommitted((append) => {
-      void stopKeptSessionsOfChangedWorkThreads(append, outlivingWorkSessions).catch(
-        (error: unknown) =>
-          console.error("[live tasks] A changed thread's session did not stop.", error),
+      void stopKeptSessionsOfChangedWorkThreads(append, {
+        keeper: outlivingWorkSessions,
+        readThread: (threadId) => workThreadProjection.read(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+      }).catch((error: unknown) =>
+        console.error("[live tasks] A changed thread's session did not stop.", error),
       );
     });
     yield* Effect.addFinalizer(() =>
