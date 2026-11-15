@@ -406,7 +406,13 @@ export class TerminalProcessPort {
         }
         throw error;
       });
+    // The shell's own exit, remembered: a close that comes after it must not
+    // wait for an exit event that already fired. Measured on windows-2025, a
+    // PowerShell that ran its command and exited left close() waiting out its
+    // whole timeout and then reporting that the tree did not exit.
+    let shellExited = false;
     pty.onExit(() => {
+      shellExited = true;
       releaseOwnership();
       void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
     });
@@ -434,7 +440,7 @@ export class TerminalProcessPort {
       resume: () => pty.resume(),
       close: () => {
         releaseOwnership();
-        closeOperation ??= this.#close(pty);
+        closeOperation ??= this.#close(pty, () => shellExited);
         return closeOperation.then(async () => {
           await receiptReady.catch(() => undefined);
           await receipt.remove();
@@ -574,8 +580,9 @@ export class TerminalProcessPort {
     });
   }
 
-  async #close(pty: PtyProcess): Promise<void> {
-    if (this.#dependencies.platform === "win32") return await this.#closeWindowsTree(pty);
+  async #close(pty: PtyProcess, shellExited: () => boolean): Promise<void> {
+    if (this.#dependencies.platform === "win32")
+      return await this.#closeWindowsTree(pty, shellExited);
     // The shell gives every job a process group of its own, so ending the
     // shell's group left a job that had outlived its parent running: measured
     // on macOS 27, a command's orphaned child survived the close. Every
@@ -598,7 +605,10 @@ export class TerminalProcessPort {
    * program it started through the tree stop, where a signal to the negated
    * pid reached nothing.
    */
-  async #closeWindowsTree(pty: PtyProcess): Promise<void> {
+  async #closeWindowsTree(pty: PtyProcess, shellExited: () => boolean): Promise<void> {
+    // A shell that already exited has no tree left to reach: taskkill finds
+    // children through their parent, which is gone.
+    if (shellExited()) return;
     // Listening before the stop: a shell that ends at once would otherwise
     // report its exit before anyone waited for it.
     const exited = this.#dependencies.waitForExit(pty, this.#dependencies.gracefulTimeoutMs);

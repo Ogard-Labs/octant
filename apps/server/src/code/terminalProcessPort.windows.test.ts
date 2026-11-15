@@ -103,6 +103,32 @@ describe("a Code terminal on a Windows host", () => {
     expect(stopWindowsTree).toHaveBeenCalledWith(pty.pid);
   });
 
+  it("closes a Windows terminal whose shell already exited without waiting for an exit that already happened", async () => {
+    const pty = fakePty();
+    const stopWindowsTree = vi.fn(async () => "stopped" as const);
+    const port = new TerminalProcessPort({
+      platform: "win32",
+      spawn: () => pty,
+      stopWindowsTree,
+      gracefulTimeoutMs: 60_000,
+      processIdentity: async () => "fixture",
+      confinement: confinementThatMustNotRun(),
+    });
+    const handle = port.start({
+      shell: POWERSHELL,
+      command: "exit 3",
+      cwd: "C:\\fixture\\project",
+      stateScope: "repository",
+      environment: {},
+      columns: 80,
+      rows: 24,
+      executionPolicy: "full-access",
+    });
+    pty.exit();
+    await handle.close();
+    expect(stopWindowsTree).not.toHaveBeenCalled();
+  });
+
   it("refuses a shell other than PowerShell or Command Prompt rather than handing it POSIX arguments", () => {
     const port = new TerminalProcessPort({
       platform: "win32",
@@ -157,6 +183,37 @@ describe("a Code terminal on a Windows host", () => {
       } finally {
         await handle.close();
       }
+    },
+    60_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "ends a live interactive PowerShell and reports its exit when the terminal closes",
+    async () => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-windows-terminal-"));
+      directories.push(directory);
+      const handle = new TerminalProcessPort({
+        receiptDirectory: join(directory, "receipts"),
+      }).start({
+        shell: terminalShellFor({ platform: "win32", windowsShell: undefined }),
+        cwd: directory,
+        stateScope: "windows-terminal-live",
+        environment: {
+          SYSTEMROOT: process.env.SystemRoot ?? "C:\\Windows",
+          PATH: process.env.PATH ?? "",
+        },
+        columns: 80,
+        rows: 24,
+        executionPolicy: "full-access",
+      });
+      let exited = false;
+      handle.onExit(() => {
+        exited = true;
+      });
+      await handle.receiptReady;
+      expect(exited).toBe(false);
+      await handle.close();
+      await vi.waitFor(() => expect(exited).toBe(true), { timeout: 10_000 });
     },
     60_000,
   );
