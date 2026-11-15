@@ -1516,11 +1516,11 @@ function TerminalWorkspaceSurface(
         eyebrow="Code terminal"
         message={
           rebindRefusal ??
-          "The Project now binds a different checkout, so Octant kept this thread fail-closed rather than move its authority on its own. Put the thread on the Project's current checkout to start repository processes again."
+          "Octant could not read this thread's checkout: the Project may now bind a different one, or its folder could not be read. Octant kept the thread fail-closed rather than move its authority on its own. Put the thread on the Project's current checkout to start repository processes again."
         }
         role="alert"
         state="warning"
-        title="Repository checkout changed"
+        title="Repository checkout unavailable"
       />
     );
   }

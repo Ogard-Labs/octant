@@ -391,7 +391,8 @@ describe("CodeService reads", () => {
     // refresh used to append identical events until one dogfooding host's
     // journal grew by ~21k events in days — enough to exhaust the bounded
     // conversation replay scan. Unavailable is already the answer, so bootstrap
-    // must not probe the filesystem or append again.
+    // must not append again, and the folder is looked at no more than once per
+    // bound.
     const unavailable = decodeCodeCheckoutIdentity({ ...checkout, availability: "unavailable" });
     const superseding = decodeCodeCheckoutIdentity({
       ...checkout,
@@ -405,11 +406,44 @@ describe("CodeService reads", () => {
     });
 
     const result = await fixture.service.bootstrap(ids.window);
+    await fixture.service.bootstrap(ids.window);
 
-    expect(fixture.checkouts.observe).not.toHaveBeenCalled();
+    expect(fixture.checkouts.observe).toHaveBeenCalledTimes(1);
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
     expect(result.checkouts).toContainEqual(
       expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+  });
+
+  it("brings a checkout back from Unavailable once its folder reads again, after the bound", async () => {
+    let at = Date.parse(now);
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    const fixture = serviceFixture({
+      threads: [thread()],
+      checkout: waiting,
+      clock: () => new Date(at).toISOString(),
+    });
+    fixture.checkouts.observe.mockRejectedValueOnce(
+      new Error("Code Project binding is unavailable."),
+    );
+    const first = await fixture.service.bootstrap(ids.window);
+    expect(first.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+    // The journal now says Unavailable.
+    fixture.persistence.readCodeCheckout.mockReturnValue(
+      decodeCodeCheckoutIdentity({ ...checkout, availability: "unavailable" }),
+    );
+
+    at += 5_000;
+    await fixture.service.bootstrap(ids.window);
+    expect(fixture.checkouts.observe).toHaveBeenCalledTimes(1);
+
+    at += 60_000;
+    const later = await fixture.service.bootstrap(ids.window);
+    expect(fixture.checkouts.observe).toHaveBeenCalledTimes(2);
+    expect(later.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "available" }),
     );
   });
 
@@ -5582,6 +5616,7 @@ function serviceFixture(
     readonly events?: EventEnvelope[];
     readonly checkout?: typeof checkout;
     readonly observedCheckout?: typeof checkout;
+    readonly clock?: () => string;
     readonly allCheckouts?: ReadonlyArray<CodeCheckoutIdentity>;
     readonly activity?: ReturnType<CodePersistencePort["readCodeThreadActivity"]>;
     readonly approve?: boolean;
@@ -5708,7 +5743,7 @@ function serviceFixture(
     tests,
     content,
     uuid: () => "00000000-0000-4000-8000-000000001099",
-    clock: () => now,
+    clock: options.clock ?? (() => now),
     workingDirectories,
     onWorkingDirectoryChanged,
     onThreadArchived,

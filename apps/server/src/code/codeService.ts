@@ -335,6 +335,9 @@ function sameHead(current: CodeCheckoutHead, observed: CodeCheckoutHead): boolea
  * host's journal by ~21k identical "unavailable" observations of a single
  * checkout in days, enough to exhaust the bounded conversation replay scan.
  */
+/** How long an unavailable checkout waits before bootstrap looks at its folder again. */
+const UNAVAILABLE_CHECKOUT_RECHECK_MS = 45_000;
+
 function repeatsJournaledCheckout(
   current: CodeCheckoutIdentity | undefined,
   observed: CodeCheckoutIdentity,
@@ -1169,6 +1172,16 @@ export class CodeService {
     return { query: trimmed, hits, truncated: found.truncated };
   }
 
+  /** Host clock time of each Project's last checkout observation from bootstrap. */
+  readonly #lastCheckoutProbe = new Map<string, number>();
+
+  #recheckDue(projectId: string): boolean {
+    const last = this.#lastCheckoutProbe.get(projectId);
+    return (
+      last === undefined || Date.parse(this.#clock()) - last >= UNAVAILABLE_CHECKOUT_RECHECK_MS
+    );
+  }
+
   async bootstrap(authenticatedWindowId: WindowId): Promise<CodeBootstrap> {
     const [threads, pullRequests] = await Promise.all([
       this.#visibleThreads(authenticatedWindowId),
@@ -1191,7 +1204,17 @@ export class CodeService {
       // that used to call this — walks the filesystem while the person is
       // switching threads. Waiting is the only state whose next fact is still
       // on disk.
-      if (persisted.availability !== "waiting") {
+      // An unavailable checkout of the Project's own folder is asked again
+      // once per bound: the folder may have been unreadable only for a moment,
+      // and nothing else would ever notice it came back.
+      if (
+        persisted.availability !== "waiting" &&
+        !(
+          persisted.availability === "unavailable" &&
+          persisted.kind === "existing-worktree" &&
+          this.#recheckDue(String(thread.projectId))
+        )
+      ) {
         recoveredCheckouts.set(String(persisted.id), persisted);
         continue;
       }
@@ -1221,6 +1244,7 @@ export class CodeService {
           const projectId = String(thread.projectId);
           if (!observedExistingCheckouts.has(projectId)) {
             observedExistingCheckouts.set(projectId, undefined);
+            this.#lastCheckoutProbe.set(projectId, Date.parse(this.#clock()));
             try {
               const prepared = await this.#checkouts.observe(
                 authenticatedWindowId,
