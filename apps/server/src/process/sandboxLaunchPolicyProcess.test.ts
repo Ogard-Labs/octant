@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { ToolEgressLaunch, ToolEgressRuleId } from "@octant/contracts";
 import { startToolEgressProxy } from "../harness/nativeHarnessEgressProxy";
 import { configureSandboxRestrictionsAuthority, trackSandboxChild } from "./sandboxRuntimePolicy";
-import { spawnSync, spawn } from "node:child_process";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { createServer, connect as netConnect } from "node:net";
 import {
   existsSync,
@@ -332,6 +332,10 @@ s=socket.socket(); s.connect(("127.0.0.1", 3128)); s.sendall(b"GET http://allowe
     const f = fixture();
     const node = process.execPath;
     const npm = join(dirname(node), "npm");
+    const git =
+      process.platform === "darwin"
+        ? execFileSync("/usr/bin/xcrun", ["--find", "git"], { encoding: "utf8" }).trim()
+        : "/usr/bin/git";
     if (!existsSync(npm))
       throw new Error("The native workflow requires npm beside the test runtime");
     writeFileSync(
@@ -350,10 +354,10 @@ s=socket.socket(); s.connect(("127.0.0.1", 3128)); s.sendall(b"GET http://allowe
 npm install --offline --no-audit --no-fund --cache "$TMPDIR/npm"
 node -e 'const f=require("fs");f.writeFileSync("result.new","changed");f.renameSync("result.new","result")'
 npm test
-/usr/bin/git init -q
-/usr/bin/git add package.json package-lock.json result installed
-/usr/bin/git -c user.name=Sandbox -c user.email=sandbox@example.invalid commit -qm 'Allowed workflow'
-/usr/bin/git diff --exit-code
+"$SANDBOX_NATIVE_GIT" init -q
+"$SANDBOX_NATIVE_GIT" add package.json package-lock.json result installed
+"$SANDBOX_NATIVE_GIT" -c user.name=Sandbox -c user.email=sandbox@example.invalid commit -qm 'Allowed workflow'
+"$SANDBOX_NATIVE_GIT" diff --exit-code
 `;
     const launch = makeProcessConfinementLive().prepare({
       executable: "/bin/sh",
@@ -367,7 +371,12 @@ npm test
     });
     const result = spawnSync(launch.command, [...launch.args], {
       cwd: f.project,
-      env: { PATH: `${dirname(node)}:/usr/bin:/bin`, HOME: f.scratch, TMPDIR: f.scratch },
+      env: {
+        PATH: `${dirname(node)}:/usr/bin:/bin`,
+        HOME: f.scratch,
+        TMPDIR: f.scratch,
+        SANDBOX_NATIVE_GIT: git,
+      },
       encoding: "utf8",
       timeout: 20000,
     });

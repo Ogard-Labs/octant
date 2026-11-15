@@ -1,11 +1,11 @@
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   sandboxAuthorityDirectory,
   sandboxNetworkLimitsOn,
   sandboxNetworkSnapshot,
 } from "./sandboxRuntimePolicy";
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import {
   decodeSandboxPolicySelection,
   type SandboxPolicySelection,
@@ -100,9 +100,34 @@ export function compileSandboxLaunchPolicy(
   try {
     const directory = (path: string) => {
       const canonical = realpathSync(path);
-      const stat = statSync(canonical);
+      const stat = statSync(canonical, { bigint: true });
       if (!stat.isDirectory() || canonical === "/") throw new Error("Not a grantable directory");
-      return { path: canonical, device: stat.dev, inode: stat.ino };
+      return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
+    };
+    const privateWrite = (path: string) => {
+      try {
+        const canonical = realpathSync(path);
+        const stat = statSync(canonical, { bigint: true });
+        if (!stat.isDirectory() && !stat.isFile()) throw new Error("Invalid private storage");
+        return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
+      } catch (error) {
+        if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+        // Providers name exact transcripts before creating them. Pin their existing
+        // parent without promoting a file grant into a grant on that directory.
+        try {
+          lstatSync(path);
+        } catch (missing) {
+          if (!(missing instanceof Error) || !("code" in missing) || missing.code !== "ENOENT")
+            throw missing;
+          const parent = directory(dirname(path));
+          return {
+            path: join(parent.path, basename(path)),
+            device: parent.device,
+            inode: `missing:${parent.inode}`,
+          };
+        }
+        throw new Error("Unresolvable private storage link");
+      }
     };
     if (launch.writeBoundRoot === false && selection.policy.filesystem.readWriteRoots.length > 0) {
       return {
@@ -168,7 +193,7 @@ export function compileSandboxLaunchPolicy(
     const writable = [
       ...(launch.writeBoundRoot === false ? [] : boundRoots),
       directory(launch.temporaryDirectory),
-      ...(launch.additionalWriteRoots ?? []).map(directory),
+      ...(launch.additionalWriteRoots ?? []).map(privateWrite),
     ];
     const administrationRoots =
       platform === "linux"
@@ -210,8 +235,8 @@ export function compileSandboxLaunchPolicy(
       };
     const readRoots = (launch.readRoots ?? []).map((path) => {
       const canonical = realpathSync(path);
-      const stat = statSync(canonical);
-      return { path: canonical, device: stat.dev, inode: stat.ino };
+      const stat = statSync(canonical, { bigint: true });
+      return { path: canonical, device: String(stat.dev), inode: String(stat.ino) };
     });
     if (
       readOnly.some((root) =>

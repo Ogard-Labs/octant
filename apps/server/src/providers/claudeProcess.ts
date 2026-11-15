@@ -1145,6 +1145,7 @@ function confineClaudeLaunch(
       }
     });
     const launch = options.confinement.prepare({
+      sandboxProviderChannel: true,
       executable: spawnOptions.command,
       args: spawnOptions.args,
       boundRoot,

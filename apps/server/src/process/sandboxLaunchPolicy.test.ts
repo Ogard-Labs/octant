@@ -1,4 +1,13 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  statSync,
+  writeFileSync,
+  mkdtempSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,6 +95,75 @@ describe("sandbox launch policy", () => {
     expect(changedLaunch.status === "admitted" && changedLaunch.receipt.reuseKey).not.toBe(
       result.receipt.reuseKey,
     );
+  });
+
+  it("accepts unchanged folder identities recorded with native bigint stats", () => {
+    const { input, selection } = fixture();
+    // Container lower layers can use inode identities beyond Number's exact range.
+    const folder = realpathSync(existsSync("/opt") ? "/opt" : input.boundRoot);
+    const identities = [input.boundRoot, folder].map((path) => {
+      const stat = statSync(path, { bigint: true });
+      return { path, identity: `${stat.dev}:${stat.ino}` };
+    });
+    const compiled = compileSandboxLaunchPolicy(
+      {
+        ...input,
+        sandboxPolicy: {
+          ...selection,
+          policy: {
+            ...selection.policy,
+            filesystem: { ...selection.policy.filesystem, readWriteRoots: [folder] },
+          },
+          context: { ...selection.context, rootIdentities: identities },
+        },
+      },
+      "linux",
+    );
+    expect(compiled.status).toBe("admitted");
+  });
+
+  it("admits exact private state files without granting their containing folder", () => {
+    const { base, input, selection } = fixture();
+    const account = join(base, "account.json");
+    const transcript = join(base, "new-transcript.jsonl");
+    writeFileSync(account, "scoped state");
+    const compiled = compileSandboxLaunchPolicy(
+      {
+        ...input,
+        additionalWriteRoots: [account, transcript],
+        sandboxPolicy: selection,
+      },
+      "linux",
+    );
+    expect(compiled).toMatchObject({
+      status: "admitted",
+      input: {
+        additionalWriteRoots: [account, transcript, ...selection.policy.filesystem.readWriteRoots],
+      },
+    });
+    expect(
+      compileSandboxLaunchPolicy(
+        {
+          ...input,
+          sandboxPolicy: {
+            ...selection,
+            policy: {
+              ...selection.policy,
+              filesystem: { ...selection.policy.filesystem, readWriteRoots: [account] },
+            },
+          },
+        },
+        "linux",
+      ).status,
+    ).toBe("refused");
+    const dangling = join(base, "dangling");
+    symlinkSync(join(base, "missing", "outside"), dangling);
+    expect(
+      compileSandboxLaunchPolicy(
+        { ...input, additionalWriteRoots: [dangling], sandboxPolicy: selection },
+        "linux",
+      ).status,
+    ).toBe("refused");
   });
 
   it("keeps folder grants separate from provider sign-in exemptions", () => {

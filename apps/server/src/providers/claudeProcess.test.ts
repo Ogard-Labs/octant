@@ -19,6 +19,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ProviderFailure } from "@octant/contracts";
+import { decodeSandboxPolicySelection } from "@octant/contracts/sandbox-policy";
+import { compileSandboxLaunchPolicy } from "../process/sandboxLaunchPolicy";
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -553,6 +555,53 @@ describe("Claude runtime confinement", () => {
       `proxy=${network.environment.HTTPS_PROXY}\n`,
       `proxy=${network.environment.HTTPS_PROXY}\n`,
     ]);
+  });
+
+  it("keeps the brokered model channel available while selected policy denies tool networking", async () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+    const endpoint = { kind: "loopback", port: 47004 } as const;
+    const sandboxPolicy = decodeSandboxPolicySelection({
+      policy: {
+        schemaVersion: 1,
+        revision: 1,
+        filesystem: { readOnlyRoots: [], readWriteRoots: [], protectedPaths: [] },
+        network: "deny",
+        credentials: "existing-policy",
+        hostServices: "existing-policy",
+      },
+      context: {
+        root: realpathSync(target.root),
+        hostId: "host",
+        projectId: "20000000-0000-4000-8000-000000000001",
+        checkoutId: "checkout",
+        sessionId: "epoch:session",
+        provider: "claude",
+      },
+    });
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "full-access",
+      sandboxPolicy,
+      network: { endpoint, environment: { HTTPS_PROXY: "http://octant:token@127.0.0.1:47004" } },
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test"],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    try {
+      const launch = confinement.prepared[0];
+      if (launch === undefined) throw new Error("Expected a selected launch");
+      expect(compileSandboxLaunchPolicy(launch, "linux")).toMatchObject({
+        status: "admitted",
+        input: { networkEgress: { kind: "proxied", endpoint } },
+      });
+    } finally {
+      child.kill("SIGTERM");
+      await waitForExit(child);
+    }
   });
 
   it("gives a Plan turn a temporary directory only that launch can name, and removes it after the runtime exits", async () => {
