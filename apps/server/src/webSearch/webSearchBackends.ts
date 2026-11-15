@@ -15,7 +15,7 @@ export interface WebSearchInput {
 
 export interface WebSearchAnswer {
   readonly query: string;
-  readonly backend: "octant";
+  readonly backend: "searxng";
   readonly results: ReadonlyArray<WebSearchResult>;
 }
 
@@ -44,7 +44,7 @@ export async function searchWebSearchBackends(input: {
   }).search(input.search);
   return {
     query: found.query,
-    backend: "octant",
+    backend: "searxng",
     results: found.results.map((result) => ({
       title: result.title,
       url: result.url,

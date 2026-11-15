@@ -76,20 +76,12 @@ export const ThreadWorkItemId = brandedUuid("ThreadWorkItemId");
 export type ThreadWorkItemId = typeof ThreadWorkItemId.Type;
 
 /**
- * The research route. `octant` is Octant's own `web-search` over the host's
- * backend list; it was stored as `searxng` while SearXNG was the only backend,
- * so a stored `searxng` (on a thread, as Chat's default, or in a journaled
- * event) still decodes, as `octant`, and the next write stores the new value.
+ * The research route. `searxng` is Octant's own `web-search` over the host's
+ * backend list, whatever backends it holds; the value keeps its name from when
+ * SearXNG was the only backend so stored threads, settings, and older clients
+ * read it unchanged, and the UI labels it "Octant web search".
  */
-export const ChatResearchRouting = Schema.transform(
-  Schema.Literal("automatic", "octant", "searxng", "provider-native"),
-  Schema.Literal("automatic", "octant", "provider-native"),
-  {
-    strict: true,
-    decode: (routing) => (routing === "searxng" ? "octant" : routing),
-    encode: (routing) => routing,
-  },
-);
+export const ChatResearchRouting = Schema.Literal("automatic", "searxng", "provider-native");
 export type ChatResearchRouting = typeof ChatResearchRouting.Type;
 
 export const CHAT_ATTACHMENT_MEDIA_TYPES = [
@@ -256,8 +248,8 @@ export const ChatCitation = Schema.Struct({
   attemptId: ChatAttemptId,
   sourceTitle: Schema.NonEmptyTrimmedString,
   sourceUrl: Schema.NonEmptyTrimmedString,
-  /** `searxng` is how a citation read before Octant's own search had more backends. */
-  backend: Schema.Literal("octant", "searxng", "provider-native"),
+  /** `searxng` is Octant's own search, whichever of the host's backends answered. */
+  backend: Schema.Literal("searxng", "provider-native"),
   snippetRef: Schema.optional(ChatContentReference),
   retrievedAt: UtcTimestamp,
 }).annotations(strict);
@@ -1167,7 +1159,7 @@ export const ChatBootstrap = Schema.Struct({
   threads: Schema.Array(ChatThread),
   /**
    * Whether the host's data policy leaves one of its web search backends
-   * eligible, so the `octant` research route can be ready. Absent from a host
+   * eligible, so the `searxng` research route can be ready. Absent from a host
    * that predates the backend list, where Chat's SearXNG address decides.
    */
   webSearchReady: Schema.optional(Schema.Boolean),

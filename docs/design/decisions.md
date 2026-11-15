@@ -607,7 +607,7 @@ Octant's own `web-search` searches an ordered list of backends the person sets u
 - A query moves to the next backend only when one did not answer, inside a 20-second budget; an empty result does not move on.
 - The policy changes only from a local window or a device the host's own person paired, and is journaled; an organization-set policy is outside the release boundary.
 - The native harness offers a provider's own search only on Anthropic's and OpenAI's own APIs, capped at one search per request, withheld from a tainted thread below Full access, and marking the thread as outside content.
-- Outside Any, the policy turns a vendor runtime's `webTools` off and shows it locked; it adds no second switch beside Chat's research route, whose `searxng` value becomes `octant`.
+- Outside Any, the policy turns a vendor runtime's `webTools` off and shows it locked; it adds no second switch beside Chat's research route, whose `searxng` value stays on the wire and reads as "Octant web search".
 - A stored SearXNG address migrates to the first entry under Any; all four delivery slices, provider search in the harness included, are one delivery.
 
 Status: Partly built. Since: 2026-11-14. Detail: [Web search backends and data policy](web-search-backends.md).

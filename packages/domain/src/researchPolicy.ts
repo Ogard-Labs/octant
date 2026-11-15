@@ -1,6 +1,6 @@
 import type { ChatResearchRouting } from "@octant/contracts/chat";
 
-export type ResearchBackend = "octant" | "provider-native";
+export type ResearchBackend = "searxng" | "provider-native";
 
 export type ResearchBackendDecision =
   | { readonly kind: "disabled" }
@@ -33,7 +33,7 @@ function selectOctant(input: ResearchBackendInput): ResearchBackendDecision {
   if (!isSupported(input.appManagedTools)) {
     return { kind: "unavailable", reason: "app-managed-tools-unsupported" };
   }
-  return { kind: "selected", backend: "octant" };
+  return { kind: "selected", backend: "searxng" };
 }
 
 function selectNative(input: ResearchBackendInput): ResearchBackendDecision {
@@ -48,7 +48,7 @@ export function resolveResearchBackend(input: ResearchBackendInput): ResearchBac
     return { kind: "disabled" };
   }
 
-  if (input.routing === "octant") {
+  if (input.routing === "searxng") {
     return selectOctant(input);
   }
 

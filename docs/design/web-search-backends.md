@@ -12,7 +12,7 @@ harness refuses on a tainted thread stay in
 
 Status: partly built. Built: the settings contract and its journaled
 `/api/host-control/web-search` route, the eligibility policy, the research
-route's rename to `octant`, and the migration; `web-search` searches the first
+route's "Octant web search" label, and the migration; `web-search` searches the first
 eligible backend, and the only kind so far is `searxng`. Not built: the vendor
 backends, their credential broker namespace and the fallback (slice 2),
 Settings › Web search (slice 3), and a provider's own search in the native
@@ -143,17 +143,22 @@ the failure kind, so the person can see where a query went.
 
 ## Research route
 
-Chat's research route keeps its three values, with `searxng` renamed `octant`,
-because the route now means Octant's own `web-search` over the backend list,
-whatever the backends are:
+Chat's research route keeps its three values. The `searxng` value now means
+Octant's own `web-search` over the backend list, whatever the backends are, so
+the UI labels it "Octant web search"; the value itself stays `searxng` on the
+wire and in storage, as a citation's `backend` does, so stored threads and
+settings and an older client read it unchanged. Rationale: renaming the value
+would need a decoder for the old one and would break a mobile client that
+predates it, for no gain the label does not already give.
 
-- `octant` offers `web-search` when an eligible backend exists.
+- `searxng` (Octant web search) offers `web-search` when an eligible backend
+  exists.
 - `provider-native` offers the provider's own search when the provider supports
   it and the policy allows it (below).
 - `automatic` keeps the order Architecture's Web search section gives
   between the two, counting a route as ready only when the policy allows it.
   A person who wants their own backends ahead of a provider's search chooses
-  `octant`.
+  Octant web search.
 
 A native harness thread in Work and Code follows `automatic`. A turn offers
 one search, never `web-search` beside a provider's own. Under a policy that
@@ -287,8 +292,8 @@ and the policy set to Any, so a host that searched before searches the same
 way after. The host reads that entry from Chat settings until the person first
 saves a list; the save journals the migrated list as the change's previous
 value, and from then on the saved list alone decides. A host with no SearXNG address gets an empty list. A stored research
-route of `searxng`, on a thread or as Chat's default, reads as `octant`; the
-decoder accepts the old value and the next write stores the new one.
+route of `searxng`, on a thread or as Chat's default, keeps its value and now
+searches the backend list.
 
 ## Delivery
 
@@ -296,7 +301,7 @@ The four slices together are one delivery: the feature is not done until all
 four land. Each slice lands on its own and keeps today's behavior until the
 next one:
 
-1. Settings contract, the eligibility policy, the research route rename, and
+1. Settings contract, the eligibility policy, the research route's "Octant web search" label, and
    the migration; `web-search` reads the list, holding only SearXNG.
 2. The credential broker namespace for search keys, and the Staan, Mojeek,
    Linkup, Brave, and Exa backends with the fallback budget and the journaled

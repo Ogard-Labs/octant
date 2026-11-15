@@ -43,7 +43,7 @@ function renderComposer(
       value: "provider-a",
     },
     research: {
-      backend: { kind: "selected", backend: "octant" },
+      backend: { kind: "selected", backend: "searxng" },
       enabled: false,
       routing: "automatic",
     },
@@ -91,7 +91,7 @@ describe("ChatComposer", () => {
         onSend: vi.fn(async () => true),
         provider: { options: [{ id: "provider-a", label: "Provider A" }], value: "provider-a" },
         research: {
-          backend: { kind: "selected", backend: "octant" },
+          backend: { kind: "selected", backend: "searxng" },
           enabled: false,
           routing: "automatic",
         },
@@ -378,7 +378,7 @@ describe("ChatComposer", () => {
       research: {
         backend: { kind: "unavailable", reason: "SearXNG is not configured." },
         enabled: true,
-        routing: "octant",
+        routing: "searxng",
       },
     });
 

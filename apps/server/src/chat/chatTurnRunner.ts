@@ -327,7 +327,7 @@ export interface ChatTurnRunnerInput {
   readonly persistResponse: (text: string) => Effect.Effect<ChatContentReference, ChatFailure>;
   readonly persistCitation?: (
     event: Extract<ProviderRuntimeEvent, { readonly kind: "citation" }>,
-    backend: "octant" | "provider-native",
+    backend: "searxng" | "provider-native",
   ) => Effect.Effect<ChatCitationId, ChatFailure>;
   readonly clock?: () => string;
   readonly ambiguousRecovery?: ChatAttemptOutcome;
@@ -485,8 +485,8 @@ export class ChatTurnRunner {
         });
       const answeredToolRequestIds = new Set<string>();
       const answeredApprovalRequestIds = new Set<string>();
-      const selectedResearchBackend: "octant" | "provider-native" =
-        input.researchRoute.kind === "ready" ? input.researchRoute.backend : "octant";
+      const selectedResearchBackend: "searxng" | "provider-native" =
+        input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
       let responseText = "";
       let parkedQuestionRequestId: string | undefined;

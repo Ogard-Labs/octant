@@ -5,7 +5,7 @@ import { createWebSearchTools } from "./webSearchTools";
 function searchReturning() {
   return vi.fn(async (input: { readonly query: string; readonly limit: number }) => ({
     query: input.query,
-    backend: "octant" as const,
+    backend: "searxng" as const,
     results: [{ title: "Octant", url: "https://example.com/octant", snippet: "A workspace." }],
   }));
 }

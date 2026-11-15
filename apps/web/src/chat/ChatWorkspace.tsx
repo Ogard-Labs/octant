@@ -2206,13 +2206,13 @@ function researchBackend(
   const webSearchReady =
     controller.bootstrap?.webSearchReady ??
     controller.bootstrap?.settings.searxngBaseUrl !== undefined;
-  if (view.thread.researchRouting === "octant") {
+  if (view.thread.researchRouting === "searxng") {
     return !webSearchReady || !effectiveAppManagedTools
       ? {
           kind: "unavailable",
           reason: "No web search backend is ready for this provider under the data policy.",
         }
-      : { kind: "selected", backend: "octant" };
+      : { kind: "selected", backend: "searxng" };
   }
   if (view.thread.researchRouting === "provider-native") {
     return observation?.capabilities.nativeWebResearch === "supported"
@@ -2220,7 +2220,7 @@ function researchBackend(
       : { kind: "unavailable", reason: "Provider-native research is unsupported." };
   }
   if (webSearchReady && effectiveAppManagedTools) {
-    return { kind: "selected", backend: "octant" };
+    return { kind: "selected", backend: "searxng" };
   }
   return observation?.capabilities.nativeWebResearch === "supported"
     ? { kind: "selected", backend: "provider-native" }

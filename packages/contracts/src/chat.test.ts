@@ -120,16 +120,16 @@ const settingsFixture = {
 describe("chat contracts", () => {
   it("decodes the exact ChatResearchRouting values and rejects unknown routing", () => {
     expect(decodeChatResearchRouting("automatic")).toBe("automatic");
-    expect(decodeChatResearchRouting("octant")).toBe("octant");
+    expect(decodeChatResearchRouting("searxng")).toBe("searxng");
     expect(decodeChatResearchRouting("provider-native")).toBe("provider-native");
     expect(() => decodeChatResearchRouting("default")).toThrow();
   });
 
-  it("reads a stored searxng research route as octant and writes octant back", () => {
-    expect(decodeChatResearchRouting("searxng")).toBe("octant");
+  it("keeps searxng as the research route on the wire, so an older client decodes it unchanged", () => {
+    expect(() => decodeChatResearchRouting("octant")).toThrow();
     const stored = decodeChatSettings({ ...settingsFixture, defaultResearchRouting: "searxng" });
-    expect(stored.defaultResearchRouting).toBe("octant");
-    expect(Schema.encodeSync(ChatSettings)(stored).defaultResearchRouting).toBe("octant");
+    expect(stored.defaultResearchRouting).toBe("searxng");
+    expect(Schema.encodeSync(ChatSettings)(stored).defaultResearchRouting).toBe("searxng");
   });
 
   it("decodes the exact ChatAttemptOutcome values and rejects unknown outcomes", () => {

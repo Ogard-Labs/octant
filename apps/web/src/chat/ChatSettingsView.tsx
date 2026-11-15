@@ -334,7 +334,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             }}
             options={[
               { id: "automatic", label: "Automatic" },
-              { id: "octant", label: "Octant web search" },
+              { id: "searxng", label: "Octant web search" },
               { id: "provider-native", label: "Provider-native" },
             ]}
             value={draft.defaultResearchRouting}

@@ -1235,12 +1235,8 @@ function CitationList(props: { readonly citations: ChatThreadView["citations"] }
   return (
     <ul aria-label="Sources" className="chat-transcript__citations">
       {props.citations.map((citation) => {
-        const backend =
-          citation.backend === "octant"
-            ? "Octant web search"
-            : citation.backend === "searxng"
-              ? "SearXNG"
-              : "Provider-native";
+        // `searxng` is the wire value of Octant's own search, whatever backend answered.
+        const backend = citation.backend === "searxng" ? "Octant web search" : "Provider-native";
         const label = `${citation.sourceTitle} · ${backend}`;
         const sourceUrl = safeCitationUrl(citation.sourceUrl);
         return (

@@ -4997,11 +4997,11 @@ unless the call asks for 1 to 10. It opens no page.
 
 - **Where.** A Chat thread is offered it on every provider while its research
   is on and its research route is ready through Octant's own backends (the
-  `octant` route, stored as `searxng` before the backend list and still read
-  that way); a provider-native route uses the provider's own search instead.
-  Automatic routing picks the provider's own search first and Octant's own
-  backends only when the provider has none, so a fresh install searches
-  without an endpoint. The native harness offers the
+  `searxng` route value, labelled "Octant web search"); a provider-native
+  route uses the provider's own search instead. Automatic routing picks the
+  provider's own search first and Octant's own backends only when the
+  provider has none, so a fresh install searches without an endpoint. The
+  native harness offers the
   same definition as its own tool in Work and Code, and in Chat under the
   same research grant ([Native harness](#native-harness)). A harness Chat
   thread gets it once, from the harness's own tool set: the turn adds no second

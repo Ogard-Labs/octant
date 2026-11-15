@@ -25,7 +25,7 @@ describe("ResearchRouter.resolve", () => {
     expect(
       router.resolve(
         input({
-          routing: "octant",
+          routing: "searxng",
           webSearchReady: false,
         }),
       ),
@@ -35,7 +35,7 @@ describe("ResearchRouter.resolve", () => {
   it("returns a SearXNG executor and attribution for selected SearXNG routing", () => {
     const searxngSearch = vi.fn(async () => ({
       query: "Octant",
-      backend: "octant" as const,
+      backend: "searxng" as const,
       results: [],
     }));
     const router = new ResearchRouter({
@@ -43,13 +43,13 @@ describe("ResearchRouter.resolve", () => {
       providerNativeExecute: vi.fn(),
     });
 
-    const resolved = router.resolve(input({ routing: "octant" }));
+    const resolved = router.resolve(input({ routing: "searxng" }));
     expect(resolved).toMatchObject({
       kind: "ready",
-      backend: "octant",
+      backend: "searxng",
       attribution: "Octant web search",
     });
-    if (resolved.kind !== "ready" || resolved.backend !== "octant") {
+    if (resolved.kind !== "ready" || resolved.backend !== "searxng") {
       throw new Error("expected ready SearXNG decision");
     }
 
@@ -99,7 +99,7 @@ describe("ResearchRouter.resolve", () => {
     expect(
       router.resolve(
         input({
-          routing: "octant",
+          routing: "searxng",
           appManagedTools: "unsupported",
           nativeResearch: "supported",
         }),
@@ -130,6 +130,6 @@ describe("ResearchRouter.resolve", () => {
     });
     expect(
       router.resolve(input({ routing: "automatic", nativeResearch: "unsupported" })),
-    ).toMatchObject({ kind: "ready", backend: "octant" });
+    ).toMatchObject({ kind: "ready", backend: "searxng" });
   });
 });

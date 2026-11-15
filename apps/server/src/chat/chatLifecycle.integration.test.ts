@@ -353,7 +353,7 @@ function createFixture(behaviors?: {
           ambiguousReservationTtlMs: 60_000,
         }),
         researchRouter: new ResearchRouter({
-          webSearch: { search: async () => ({ query: "x", backend: "octant", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
             query: "x",
             backend: "provider-native",
@@ -890,7 +890,7 @@ describe("Chat lifecycle integration", () => {
       threadId: created.thread.id,
       expectedVersion: handedOff.thread.version,
       researchEnabled: true,
-      researchRouting: "octant",
+      researchRouting: "searxng",
     });
     if (searxng.kind !== "thread-updated") throw new Error("Expected a research update.");
     const beforeRefusal = fixture.service.read(created.thread.id);

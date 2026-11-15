@@ -1749,7 +1749,7 @@ describe("ChatProjection", () => {
             attemptId: `85000000-0000-4000-8000-${"1".padStart(12, "0")}`,
             sourceTitle: "Source",
             sourceUrl: "https://example.com/",
-            backend: "octant",
+            backend: "searxng",
             retrievedAt: now,
           }),
         );

@@ -68,7 +68,7 @@ describe("ChatSettingsView", () => {
       defaultProviderInstanceId: providerB as never,
       defaultModelId: "model-b-plus" as never,
       defaultResearchEnabled: true,
-      defaultResearchRouting: "octant",
+      defaultResearchRouting: "searxng",
       searxngBaseUrl: "https://search.example/",
       defaultPersonalityInstructions: "Be calm and precise.",
       providerFallback: {

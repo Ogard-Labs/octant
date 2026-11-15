@@ -711,7 +711,7 @@ function openFixture(options?: {
     return submitCapacity(request);
   };
   const researchRouter = new ResearchRouter({
-    webSearch: { search: async () => ({ query: "x", backend: "octant", results: [] }) },
+    webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
     ...(options?.providerNativeExecute === undefined
       ? {}
       : { providerNativeExecute: options.providerNativeExecute }),
@@ -7301,7 +7301,7 @@ describe("ChatService", () => {
       threadId: created.thread.id,
       expectedVersion: created.thread.version,
       researchEnabled: true,
-      researchRouting: "octant",
+      researchRouting: "searxng",
     });
     expect(configured.kind).toBe("thread-updated");
     if (configured.kind !== "thread-updated") throw new Error("Expected thread-updated result.");

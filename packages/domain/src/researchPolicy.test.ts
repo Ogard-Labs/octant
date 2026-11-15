@@ -29,7 +29,7 @@ describe("research backend routing", () => {
   it("automatic falls back to an eligible web search backend when the provider has no search of its own", () => {
     expect(resolveResearchBackend(input({ nativeResearch: "unsupported" }))).toEqual({
       kind: "selected",
-      backend: "octant",
+      backend: "searxng",
     });
   });
 
@@ -66,7 +66,7 @@ describe("research backend routing", () => {
     expect(
       resolveResearchBackend(
         input({
-          routing: "octant",
+          routing: "searxng",
           webSearchReady: false,
           appManagedTools: "supported",
         }),
@@ -81,7 +81,7 @@ describe("research backend routing", () => {
     expect(
       resolveResearchBackend(
         input({
-          routing: "octant",
+          routing: "searxng",
           webSearchReady: true,
           appManagedTools: "unsupported",
         }),
@@ -109,7 +109,7 @@ describe("research backend routing", () => {
   it("explicit unavailable backends never silently fall through to the other backend", () => {
     const octant = resolveResearchBackend(
       input({
-        routing: "octant",
+        routing: "searxng",
         webSearchReady: true,
         appManagedTools: "unsupported",
         nativeResearch: "supported",

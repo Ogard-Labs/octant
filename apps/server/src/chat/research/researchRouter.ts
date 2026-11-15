@@ -23,7 +23,7 @@ export type ResearchRouteDecision =
   | ResearchBackendDecision
   | {
       readonly kind: "ready";
-      readonly backend: "octant";
+      readonly backend: "searxng";
       readonly attribution: string;
       readonly execute: (input: ResearchExecuteInput) => Promise<ResearchExecutionResult>;
     }
@@ -55,10 +55,10 @@ export class ResearchRouter {
       return decision;
     }
 
-    if (decision.backend === "octant") {
+    if (decision.backend === "searxng") {
       return {
         kind: "ready",
-        backend: "octant",
+        backend: "searxng",
         attribution: "Octant web search",
         execute: (executeInput) => this.dependencies.webSearch.search(executeInput),
       };

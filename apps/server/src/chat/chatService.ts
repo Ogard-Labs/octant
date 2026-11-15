@@ -5935,7 +5935,7 @@ export class ChatService {
     hostAppTools: AppManagedToolSet | undefined,
   ): AppManagedToolSet | undefined {
     if (!thread.researchEnabled) return undefined;
-    if (researchRoute.kind !== "ready" || researchRoute.backend !== "octant") return undefined;
+    if (researchRoute.kind !== "ready" || researchRoute.backend !== "searxng") return undefined;
     if (hostAppTools?.definitions.includes(WEB_SEARCH_TOOL_DEFINITION) === true) return undefined;
     const tools = createWebSearchTools(researchRoute.execute);
     const record = this.#recordExternalContentIngestion;
@@ -6397,7 +6397,9 @@ export class ChatService {
         ),
     );
     const researchEntries =
-      thread.researchEnabled && researchRoute.kind === "ready" && researchRoute.backend === "octant"
+      thread.researchEnabled &&
+      researchRoute.kind === "ready" &&
+      researchRoute.backend === "searxng"
         ? [
             this.#contextEntry(thread, "octant-tools", RESEARCH_TOOL_NAME, 24, "compressible", {
               kind: "tool",
