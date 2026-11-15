@@ -243,7 +243,7 @@ describe("queued turn admission", () => {
           ambiguousReservationTtlMs: 60_000,
         }),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "", backend: "searxng", results: [] }) },
         }),
         turnTimeoutMs: 5_000,
         nativeHarness: {
