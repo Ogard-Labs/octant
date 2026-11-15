@@ -328,13 +328,19 @@ export interface MobileCodeConversationTurn {
   readonly assistant: ReadonlyArray<string>;
   /** The routines the turn's tool calls created, for the receipt cards under it. */
   readonly routines: ReadonlyArray<ThreadRoutineReceipt>;
+  /**
+   * The provider usage limit a waiting turn stopped at, so the phone can offer
+   * to resume it at reset. Absent on every other turn.
+   */
+  readonly usageLimit?: NonNullable<CodeConversationTurn["failure"]>["usageLimit"];
   readonly updatedAt: string;
 }
 
 /**
- * How many of a Code thread's newest turns the phone shows. The phone has no
- * way to load earlier turns, and a live turn re-reads this page on a short
- * cadence, so the page stays small.
+ * How many of a Code thread's turns the phone shows: the newest, or those
+ * ending at a message search hit. The phone has no way to load earlier turns,
+ * and a live turn re-reads this page on a short cadence, so the page stays
+ * small.
  */
 export const MOBILE_CODE_CONVERSATION_TURNS = 20;
 
@@ -342,10 +348,12 @@ export const MOBILE_CODE_CONVERSATION_TURNS = 20;
 const MAX_MOBILE_FORWARD_PAGES = 100;
 
 export interface MobileCodeConversation {
-  /** The thread's newest turns, oldest first. */
+  /** One contiguous run of the thread's turns, oldest first: its newest unless `hasLater`. */
   readonly turns: ReadonlyArray<MobileCodeConversationTurn>;
   /** The thread has turns older than the first one here. */
   readonly hasEarlier: boolean;
+  /** The thread has turns newer than the last one here: the run ends at an earlier turn. */
+  readonly hasLater: boolean;
 }
 
 /**
@@ -358,8 +366,16 @@ export interface MobileCodeConversation {
 export async function loadMobileCodeConversation(
   transport: MobileRemoteTransport,
   threadId: string,
+  options: {
+    /**
+     * Read the page that ends with this provider turn instead of the newest
+     * (a message search hit older than the newest page). A host that no
+     * longer holds the turn, or has no window read, answers the newest.
+     */
+    readonly through?: string;
+  } = {},
 ): Promise<MobileCodeConversation> {
-  const read = await readNewestCodeTurns(transport, threadId);
+  const read = await readCodeTurns(transport, threadId, options.through);
   const kept: CodeConversationTurn[] = [];
   const wanted: Array<{ operationId: string; contentId: string }> = [];
   for (const turn of [...read.turns].reverse()) {
@@ -405,27 +421,48 @@ export async function loadMobileCodeConversation(
       routines: threadRoutineReceipts(
         (turn.steps ?? []).flatMap((step) => (step.kind === "tool" ? [step] : [])),
       ),
+      ...(turn.status === "waiting" && turn.failure?.usageLimit !== undefined
+        ? { usageLimit: turn.failure.usageLimit }
+        : {}),
       updatedAt: turn.updatedAt,
     })),
     hasEarlier: read.hasEarlier || kept.length < read.turns.length,
+    hasLater: read.hasLater,
   };
 }
 
 /**
- * The thread's newest page of turns from the window read. A host without that
- * route answers 404; its forward read lists turns oldest first, so it is
- * walked to the end and only its tail is kept.
+ * A page of the thread's turns from the window read: the newest, or the one
+ * ending with `through`. An anchor the thread no longer holds (409) falls back
+ * to the newest page. A host without the window route answers 404; its
+ * forward read lists turns oldest first, so it is walked to the end and only
+ * its tail is kept.
  */
-async function readNewestCodeTurns(
+async function readCodeTurns(
   transport: MobileRemoteTransport,
   threadId: string,
-): Promise<{ readonly turns: ReadonlyArray<CodeConversationTurn>; readonly hasEarlier: boolean }> {
+  through: string | undefined,
+): Promise<{
+  readonly turns: ReadonlyArray<CodeConversationTurn>;
+  readonly hasEarlier: boolean;
+  readonly hasLater: boolean;
+}> {
   const path = `/api/code/threads/${encodeURIComponent(threadId)}/conversation`;
-  const response = await transport.authenticatedFetch({
+  let response = await transport.authenticatedFetch({
     method: "GET",
     path: `${path}/window`,
-    query: `?limit=${MOBILE_CODE_CONVERSATION_TURNS}`,
+    query:
+      through === undefined
+        ? `?limit=${MOBILE_CODE_CONVERSATION_TURNS}`
+        : `?limit=${MOBILE_CODE_CONVERSATION_TURNS}&through=${encodeURIComponent(through)}`,
   });
+  if (through !== undefined && response.status === 409) {
+    response = await transport.authenticatedFetch({
+      method: "GET",
+      path: `${path}/window`,
+      query: `?limit=${MOBILE_CODE_CONVERSATION_TURNS}`,
+    });
+  }
   if (response.status !== 404) {
     const window = await decodeJson(
       response,
@@ -435,7 +472,7 @@ async function readNewestCodeTurns(
     if (String(window.threadId) !== threadId) {
       throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
     }
-    return { turns: window.turns, hasEarlier: window.hasEarlier };
+    return { turns: window.turns, hasEarlier: window.hasEarlier, hasLater: window.hasLater };
   }
   const turns: CodeConversationTurn[] = [];
   let listed = 0;
@@ -463,7 +500,7 @@ async function readNewestCodeTurns(
     }
     cursor = page.nextCursor;
   }
-  return { turns, hasEarlier: listed > turns.length };
+  return { turns, hasEarlier: listed > turns.length, hasLater: false };
 }
 
 function stagedCodeAttachmentIds(ids: ReadonlyArray<string>): ReadonlyArray<CodeAttachmentId> {

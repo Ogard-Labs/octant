@@ -1524,8 +1524,8 @@ describe("WorkspaceView subagent tray", () => {
         chatClient={chatClient}
         chatReadCursorStore={createChatReadCursorStore()}
         mode="chat"
-        onChatTurnRevealed={onChatTurnRevealed}
-        revealChatTurn={{ threadId: ids.thread as never, turnId: hitTurnId as never }}
+        onTurnRevealed={onChatTurnRevealed}
+        revealTurn={{ mode: "chat", threadId: ids.thread as never, turnId: hitTurnId as never }}
       />,
     );
 

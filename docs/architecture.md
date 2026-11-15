@@ -1950,8 +1950,11 @@ except where a bullet says otherwise.
   can see when it was used; a Code window, which is counted by part, counts
   it with Octant's instructions.
 - **Written instructions.** Instructions the person writes for Octant itself,
-  per person, per Project, and for coordinator threads, beside each
-  provider's own instruction files, are designed, not built
+  per person, per Project, and for coordinator threads, travel beside each
+  provider's own instruction files as standing blocks placed before person
+  memory. Unlike person memory they reach every turn, including the turns the
+  host starts as itself. The person's own text is built; the Settings field,
+  Project instructions, and orchestration are designed, not built
   ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
@@ -8500,14 +8503,16 @@ prompt is therefore built to be appended, never rewritten:
   - _Every other runtime_, and Codex or Claude Code below those releases:
     the sections, then `Current request:` and the request, in one message
     (`renderProviderTurnPrompt`). Octant Harness instead makes `instructions`
-    and `skill-instructions` its system prompt and renders the rest this way.
+    and `skill-instructions` its system prompt, followed by
+    `person-instructions`, and renders the rest this way.
   - _Measured_ against local stand-in endpoints (Codex 0.120.0 through
     0.164.0; Claude Code 2.1.211 and 2.1.318): placement, persistence across
     resume and compaction, size limits, and that consecutive requests share a
     byte-identical prefix apart from the newest turn.
 - **Only what is new.** Standing blocks (`instructions` and
   `skill-instructions`, which carry Octant's instructions and skills,
-  `project-memory` and `work-item`) that the session
+  `person-instructions`, the person's own instructions for Octant, keyed so an
+  edit is a revision, `project-memory` and `work-item`) that the session
   already holds are left out of the turn; per-turn blocks (messages, summaries,
   mentions, issue context, handoffs, and `turn-instructions`, Octant's
   instructions for one turn alone) are always sent. A new session, including

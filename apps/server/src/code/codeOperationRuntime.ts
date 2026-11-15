@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
@@ -746,6 +747,13 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: CodeThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   /**
    * The active Project memory entries this thread's turn carries, as a Chat
    * or Work turn in the Project does. Absent gives none.
@@ -5538,6 +5546,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         tool: line.tool,
       })),
     ];
+    // After Octant's own instructions and before person memory, and counted
+    // with Octant's instructions as person memory is.
+    const instructionBlocks =
+      this.#options.octantInstructionBlocks?.({ thread: active.thread }) ?? [];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,
       windowId: active.windowId,
@@ -5568,6 +5580,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const fullContext = [
       ...harnessContext,
       ...hostGuidance,
+      ...instructionBlocks,
       ...personMemory,
       ...projectMemory,
       ...(context ?? []),
@@ -5598,6 +5611,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               : []),
             ...sentNow([
               ...hostGuidance,
+              ...instructionBlocks,
               ...personMemory,
               ...projectMemory,
               ...(active.sentContext?.instructions ?? []),
