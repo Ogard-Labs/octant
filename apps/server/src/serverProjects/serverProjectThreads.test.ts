@@ -236,6 +236,25 @@ describe.skipIf(!canRunThrowawaySshd)("a server Project's turn", () => {
     ).not.toContain("bash");
   });
 
+  it("reads a protected file on the server at Full access, and refuses it and a provider sign-in below", async () => {
+    mkdirSync(join(folder, ".aws"), { recursive: true });
+    mkdirSync(join(folder, ".codex"), { recursive: true });
+    writeFileSync(join(folder, ".aws", "credentials"), "[default]\n");
+    writeFileSync(join(folder, ".codex", "auth.json"), "{}\n");
+    let level: ProviderExecutionPolicy = "full-access";
+    const { call } = turn({ level: () => level });
+    expect(await call("read", { path: ".aws/credentials" })).toMatchObject({
+      result: { lines: ["[default]", ""] },
+    });
+    expect(JSON.stringify(await call("read", { path: ".codex/auth.json" }))).toContain(
+      "protected-file",
+    );
+    level = "approval-gated";
+    expect(JSON.stringify(await call("read", { path: ".aws/credentials" }))).toContain(
+      "protected-file",
+    );
+  });
+
   it("runs nothing anywhere when the connection cannot be made", async () => {
     let alias = sshd.alias;
     const { call, recorded } = turn({ level: () => "full-access", alias: () => alias });
