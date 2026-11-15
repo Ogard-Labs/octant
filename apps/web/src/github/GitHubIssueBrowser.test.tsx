@@ -132,6 +132,16 @@ async function selectFirstRepository() {
 }
 
 describe("GitHubIssueBrowser", () => {
+  it("puts the back control among the list head's trailing actions, after the title, as the pull request list does", () => {
+    const readCatalogue = vi.fn(async () => ({ kind: "recent-repositories", rows: [] }) as const);
+    render(<GitHubIssueBrowser client={makeClient(readCatalogue)} onClose={() => undefined} />);
+
+    const title = screen.getByRole("heading", { name: "Issues" });
+    const back = screen.getByRole("button", { name: "Back to workspace" });
+    expect(back.closest(".pr-page__list-actions")).not.toBeNull();
+    expect(title.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("opens on every recent repository, attributes each row, and sorts across them", async () => {
     const readCatalogue = vi.fn(async (request: GithubCatalogueReadRequest) => {
       if (request.kind === "recent-repositories") {
