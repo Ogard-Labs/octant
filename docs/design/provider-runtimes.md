@@ -130,7 +130,14 @@ switch. Codex starts
 with no `skills.config` rules, no per-name `mcp_servers` switch-off,
 plugins and apps on in Chat, and an app-server that has no subagent
 switches, at every level; a subagent's requests come back on its own thread
-id and are answered through the parent's session. Each runtime's own web
+id and are answered through the parent's session. With Run as itself off for
+the account, the resolved setup has `subagents` off in Chat, in Plan, and at
+Guarded, Accept edits, and Reviewed, unless the thread chose On or the Project
+trusts Codex; Full access in Work and Code still turns it on, and a thread's
+Off keeps it off everywhere. Where `subagents` is off, Codex's app-server is
+leased with `features.multi_agent=false`, `features.multi_agent_v2=false`, and,
+from 0.145.0, `agents.enabled=false` (`codexAppServerArgs`), so Codex's own
+subagents never start. Each runtime's own web
 search and fetch run only where the setup has `webTools` on: Claude Code gains
 `WebSearch` and `WebFetch`, Codex starts without `web_search = "disabled"`,
 OpenCode stops denying `websearch` and `webfetch`, and Mistral Vibe launches
@@ -1666,6 +1673,12 @@ absent rather than imitating them:
   about what it keeps or drops, so `promptRetention` is absent and Octant
   never estimates the window. Resume is `precise` only where the agent
   advertises `loadSession` or session resume.
+
+Octant turns on no ACP agent's own subagents but Mistral Vibe's. Every other
+profile reports `nativeSetup.subagents` unsupported and is not a key
+provider, so no setup reaches it, and none sets `childRunMetaKey`, the
+field that names a child session Octant could show as a child run. Devin
+launches with `subagents_enabled: false` and Grok with `GROK_SUBAGENTS=0`.
 
 An agent whose shell runs in-process and sends no `session/request_permission`
 or `terminal/*` request before a command leaves Octant nothing to ask about.

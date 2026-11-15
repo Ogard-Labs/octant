@@ -174,7 +174,7 @@ describe("ProviderRoutes", () => {
     },
   );
 
-  it("lets a local window set a thread's native setup, refuses a paired device, and refuses a thread whose provider cannot", async () => {
+  it("lets a local window or a device the host's person paired set a thread's native setup, refuses any other device, and refuses a thread whose provider cannot", async () => {
     const threadId = "80000000-0000-4000-8000-000000000050";
     const choices = new Map<string, string>();
     const set = vi.fn(
@@ -213,6 +213,25 @@ describe("ProviderRoutes", () => {
     });
     expect((await route(remote))?.status).toBe(401);
     expect(set).not.toHaveBeenCalled();
+
+    const personPaired = post({ ...setBody, choice: "on" });
+    bindPrincipalRouteContext(personPaired, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000054",
+        admittedBy: "host-person",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    const fromPersonPaired = await route(personPaired);
+    expect(fromPersonPaired?.status).toBe(200);
+    expect(await fromPersonPaired?.json()).toEqual({ threadId, choice: "on" });
 
     const local = await route(post(setBody, { "x-octant-window-capability": capability }));
     expect(local?.status).toBe(200);
