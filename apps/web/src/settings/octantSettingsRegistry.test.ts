@@ -255,6 +255,7 @@ describe("octantSettingsRegistry", () => {
       "automatic-model-decision-review",
       "stalled-turn-limit",
       "provider-tool-call-pause-limit",
+      "background-session-idle-limit",
       "opencode-managed-update",
       "provider-display-name",
       "provider-binary-path",

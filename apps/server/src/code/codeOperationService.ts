@@ -1095,6 +1095,8 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+    /** The window that answered, which a level change acts for. */
+    readonly windowId?: WindowId;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -4477,6 +4479,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             approvalId: command.approvalId,
             decision: command.decision,
+            windowId,
           }),
         );
       case "force-stop-provider-turn":

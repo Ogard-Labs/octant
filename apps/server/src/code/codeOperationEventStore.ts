@@ -654,6 +654,37 @@ export class CodeOperationEventStore {
   }
 
   /**
+   * The session begun outside Octant that the thread was started from, as
+   * its adoption journaled it. Undefined for any other thread, or when the
+   * record does not decode.
+   */
+  adoptedNativeSession(
+    threadId: CodeThreadId,
+  ): Extract<CodeOperationEvent, { readonly kind: "native-session-adopted" }> | undefined {
+    try {
+      const envelope = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "native-session-adopted",
+        limit: 1,
+      })[0];
+      if (
+        envelope === undefined ||
+        envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
+        envelope.eventVersion !== 1
+      )
+        return undefined;
+      const frame = decodeCodeOperationEventFrame(envelope.payload);
+      return String(frame.threadId) === String(threadId) &&
+        frame.event.kind === "native-session-adopted"
+        ? frame.event
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * The provider session the thread's newest turn ran on, as its
    * `provider-session-ready` recorded it. A running turn records it before its
    * first message is sent. Undefined when none was recorded or the record does

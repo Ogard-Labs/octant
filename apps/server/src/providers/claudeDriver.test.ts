@@ -6,6 +6,7 @@ import {
   type PermissionPersistence,
   type ProviderContextBlock,
   type ProviderFailure,
+  type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
@@ -16,6 +17,7 @@ import {
   renderProviderTurnPrompt,
 } from "@octant/provider-sdk/chat-conformance";
 import type {
+  ProviderBackgroundWork,
   ProviderWakeup,
   ProviderWakeupRequest,
   ProviderWakeupSchedule,
@@ -282,6 +284,9 @@ function harness(
         sessions.set(copied, { sessionId: copied, projectRoot: root, lastModified: 11 });
         return copied;
       }),
+    ),
+    listSessions: vi.fn(({ projectRoot: root }) =>
+      Effect.succeed([...sessions.values()].filter((session) => session.projectRoot === root)),
     ),
   };
   const process: ClaudeProcessPort = {
@@ -6672,6 +6677,268 @@ describe("Claude session copies for a fork or rewind", () => {
   });
 });
 
+describe("Claude's own plan mode as level changes", () => {
+  async function askedLevelChange(
+    executionPolicy: "full-access" | "plan",
+    toolName: "EnterPlanMode" | "ExitPlanMode",
+    input: Readonly<Record<string, unknown>>,
+  ) {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy, levelChanges: true }),
+    );
+    const seen: ProviderRuntimeEvent[] = [];
+    const scope = Effect.runSync(Scope.make());
+    const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+    Effect.runFork(Stream.runForEach(events, (event) => Effect.sync(() => seen.push(event))));
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const preTool = await open.preToolUse({
+      sessionId: "sdk-session-1",
+      projectRoot,
+      toolName,
+      input,
+      toolUseId: "level-1",
+      signal,
+    });
+    const decision = open.canUseTool({ toolName, input, toolUseId: "level-1", signal });
+    await vi.waitFor(() =>
+      expect(seen.some((event) => event.kind === "approval-request")).toBe(true),
+    );
+    return { f, acquired, open, preTool, decision, seen, scope };
+  }
+
+  it("puts Claude's ask to plan to the person even at Full access and never lets it switch its own mode", async () => {
+    const { acquired, open, preTool, decision, seen, scope } = await askedLevelChange(
+      "full-access",
+      "EnterPlanMode",
+      {},
+    );
+    expect(open.withheldTools).not.toContain("EnterPlanMode");
+    expect(open.withheldTools).toContain("ExitPlanMode");
+    expect(preTool).toEqual({ behavior: "ask" });
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "enter-plan" } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: true,
+      }),
+    );
+    await expect(decision).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("next turn runs in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("offers a Plan session only the read-only tools and the ask to leave Plan, which carries the plan", async () => {
+    const plan = "1. Read the login test.\n2. Fix the race.";
+    const { acquired, open, decision, seen, scope } = await askedLevelChange(
+      "plan",
+      "ExitPlanMode",
+      { plan },
+    );
+    expect(open.tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "ExitPlanMode"]));
+    for (const writer of ["Edit", "Write", "NotebookEdit", "EnterPlanMode"]) {
+      expect(open.tools).not.toContain(writer);
+    }
+    const request = seen.find((event) => event.kind === "approval-request");
+    expect(request).toMatchObject({ levelChange: { kind: "exit-plan", plan } });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({
+        sessionId,
+        requestId: request?.kind === "approval-request" ? request.requestId : "",
+        approved: false,
+      }),
+    );
+    await expect(decision).resolves.toMatchObject({
+      behavior: "deny",
+      message: expect.stringContaining("kept this thread in Plan"),
+    });
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await acquired.close();
+  });
+
+  it("withholds both plan-mode tools from a session whose host does not answer level changes", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    expect(f.opens[0]?.withheldTools).toEqual(
+      expect.arrayContaining(["EnterPlanMode", "ExitPlanMode"]),
+    );
+    await acquired.close();
+  });
+});
+
+describe("Claude sessions started outside Octant", () => {
+  const outside = "outside-session-1";
+
+  it("lists this folder's sessions an Octant thread does not hold, newest first", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    f.sessions.set(outside, {
+      sessionId: outside,
+      projectRoot,
+      lastModified: 50,
+      title: "Fix the login test",
+    });
+    f.sessions.set("older-outside", { sessionId: "older-outside", projectRoot, lastModified: 20 });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 90,
+    });
+
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    // The session Octant started (sdk-session-1) is left out.
+    expect(listed).toEqual([
+      { nativeSessionId: outside, lastModified: 50, title: "Fix the login test" },
+      { nativeSessionId: "older-outside", lastModified: 20 },
+    ]);
+    await acquired.close();
+  });
+
+  it("takes up a session begun outside Octant so the thread's next turn resumes it", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const cursor = await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    expect(cursor).toMatchObject({
+      driverKind: "claude",
+      value: outside,
+      binding: { sessionId, projectRoot, mode: "code" },
+    });
+    expect(f.resumeIdentities.get(outside)).toMatchObject({
+      octantSessionId: sessionId,
+      sdkSessionId: outside,
+      projectRoot,
+      authentication: "subscription",
+    });
+
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: cursor,
+        executionPolicy: "approval-gated",
+      }),
+    );
+    expect(f.opens.at(-1)?.resumeSessionId).toBe(outside);
+    await acquired.close();
+  });
+
+  it("refuses a session another Octant thread holds, or one from another folder", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    const adopt = (nativeSessionId: string) =>
+      Effect.runPromise(
+        Effect.flip(
+          f.driver.nativeSessions!.adopt({
+            instanceId,
+            projectRoot,
+            mode: "code",
+            sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"),
+            nativeSessionId,
+            modelId,
+          }),
+        ),
+      );
+    await expect(adopt("sdk-session-1")).resolves.toMatchObject({
+      message: "That Claude session already belongs to an Octant thread.",
+    });
+    f.sessions.set("elsewhere", {
+      sessionId: "elsewhere",
+      projectRoot: "/tmp/other",
+      lastModified: 1,
+    });
+    await expect(adopt("elsewhere")).resolves.toMatchObject({ category: "stale-resume" });
+    expect(f.resumeIdentities.get("sdk-session-1")?.octantSessionId).toBe(sessionId);
+    await acquired.close();
+  });
+
+  it("lets only one of two threads adopting the same session at once take it up", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    const adopt = (threadSession: string) =>
+      Effect.runPromiseExit(
+        f.driver.nativeSessions!.adopt({
+          instanceId,
+          projectRoot,
+          mode: "code",
+          sessionId: decodeProviderSessionId(threadSession),
+          nativeSessionId: outside,
+          modelId,
+        }),
+      );
+    const [first, second] = await Promise.all([
+      adopt("80000000-0000-4000-8000-000000000801"),
+      adopt("80000000-0000-4000-8000-000000000802"),
+    ]);
+    expect([first, second].filter(Exit.isSuccess)).toHaveLength(1);
+    expect(f.resumeIdentityPort.put).toHaveBeenCalledTimes(1);
+    expect(String(f.resumeIdentities.get(outside)?.octantSessionId)).toBe(
+      "80000000-0000-4000-8000-000000000801",
+    );
+  });
+
+  it("offers a session again once an adoption the host could not record is released, and never releases another thread's", async () => {
+    const f = harness();
+    f.sessions.set(outside, { sessionId: outside, projectRoot, lastModified: 50 });
+    await Effect.runPromise(
+      f.driver.nativeSessions!.adopt({
+        instanceId,
+        projectRoot,
+        mode: "code",
+        sessionId,
+        nativeSessionId: outside,
+        modelId,
+      }),
+    );
+    // Another Octant session's release leaves this claim where it is.
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({
+        instanceId,
+        nativeSessionId: outside,
+        sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000803"),
+      }),
+    );
+    expect(f.resumeIdentities.get(outside)?.octantSessionId).toBe(sessionId);
+
+    await Effect.runPromise(
+      f.driver.nativeSessions!.release!({ instanceId, nativeSessionId: outside, sessionId }),
+    );
+    expect(f.resumeIdentities.get(outside)).toBeUndefined();
+    const listed = await Effect.runPromise(
+      f.driver.nativeSessions!.list({ instanceId, projectRoot }),
+    );
+    expect(listed.map((session) => session.nativeSessionId)).toEqual([outside]);
+  });
+});
+
 describe("Claude exact resume", () => {
   it("cancels and joins a resume held before SDK initialization", async () => {
     const f = harness();
@@ -8095,6 +8362,248 @@ describe("Claude background work", () => {
     await collected;
     expect(seen.map((event) => event.kind)).toEqual(["usage", "completed"]);
     await acquired.close();
+  });
+
+  describe("in a session the host keeps past its turn", () => {
+    async function startKeptTurn(executionPolicy: ProviderExecutionPolicy = "approval-gated") {
+      const f = harness();
+      const acquired = await acquire(f.driver, "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy,
+          outlivesTurn: true,
+        }),
+      );
+      const seen: ProviderRuntimeEvent[] = [];
+      // Subscribes before it returns, as a turn runner does before it sends.
+      const follow = async () => {
+        const scope = Effect.runSync(Scope.make());
+        const events = await Effect.runPromise(Scope.extend(acquired.connection.subscribe, scope));
+        const done = Effect.runPromise(
+          Stream.runForEach(
+            events.pipe(
+              Stream.filter((event) => event.sessionId === sessionId),
+              Stream.takeUntil((event) =>
+                ["completed", "failed", "interrupted", "waiting"].includes(event.kind),
+              ),
+            ),
+            (event) => Effect.sync(() => seen.push(event)),
+          ).pipe(Effect.ensuring(Scope.close(scope, Exit.void))),
+        );
+        return { done };
+      };
+      const collected = (await follow()).done;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "start the dev server",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      const query = f.queries[0]!;
+      await query.emit(state("running"));
+      const watched = acquired.connection.backgroundWork?.(sessionId);
+      const reported: ProviderBackgroundWork[] = [];
+      watched?.watch((work) => reported.push(work));
+      return { acquired, query, seen, collected, follow, watched, reported, open: f.opens[0]! };
+    }
+
+    it("keeps a background task's lifecycle through the person's next turn, so its progress and end still map", async () => {
+      const { acquired, query, seen, collected, follow } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      const started = seen.find((event) => event.kind === "task-progress");
+
+      // The person sends while the dev server from the last turn still runs.
+      const next = (await follow()).done;
+      const before = seen.length;
+      await Effect.runPromise(
+        acquired.connection.send({
+          sessionId,
+          prompt: "check the logs",
+          attachments: [],
+          tools: [],
+        }),
+      );
+      await query.emit(state("running"));
+      await query.emit({
+        kind: "task",
+        sessionId: sdk,
+        subtype: "task_progress",
+        taskId: "bash-1",
+        description: "npm test",
+        usage: { totalTokens: 0, toolUses: 0, durationMs: 5_000 },
+      });
+      await query.emit(backgroundEnded);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await next;
+
+      const turn = seen.slice(before);
+      expect(turn.filter((event) => event.kind === "failed")).toEqual([]);
+      expect(turn.at(-1)).toMatchObject({ kind: "completed" });
+      // Both reports name the row the task's start opened.
+      const rows = turn.flatMap((event) => (event.kind === "task-progress" ? [event.taskId] : []));
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(new Set(rows)).toEqual(
+        new Set([started?.kind === "task-progress" ? started.taskId : "missing"]),
+      );
+      await acquired.close();
+    });
+
+    it("answers none of a runtime-started turn's tool calls until the host attaches a turn to it", async () => {
+      const { acquired, query, collected, follow, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      let answered = false;
+      const decision = open
+        .preToolUse({
+          sessionId: sdk,
+          projectRoot,
+          toolName: "Bash",
+          input: { command: "rm -rf build" },
+          toolUseId: "runtime-bash",
+          signal: new AbortController().signal,
+        })
+        .then((value) => {
+          answered = true;
+          return value;
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Full access would allow it unasked, but the host has not admitted the turn.
+      expect(answered).toBe(false);
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "allow" });
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      await acquired.close();
+    });
+
+    it("refuses a held runtime-turn tool call when the session is stopped before the host attaches", async () => {
+      const { acquired, query, collected, open } = await startKeptTurn("full-access");
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      const decision = open.preToolUse({
+        sessionId: sdk,
+        projectRoot,
+        toolName: "Bash",
+        input: { command: "npm start" },
+        toolUseId: "runtime-start",
+        signal: new AbortController().signal,
+      });
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      await expect(decision).resolves.toMatchObject({ behavior: "deny" });
+      await acquired.close();
+    });
+
+    it("keeps a runtime-started turn that finishes before the host attaches, and reads it whole on attach", async () => {
+      const { acquired, query, seen, collected, follow, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      // Still waiting for the host, so the keeper opens a turn rather than stop it.
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: true, ended: false });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      expect(watched?.current()).toMatchObject({ runtimeTurnWaiting: false });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("completes the person's turn when the reply is done while its background command keeps running", async () => {
+      const { acquired, query, seen, collected, watched } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      expect(seen.at(-1)).toMatchObject({ kind: "completed" });
+      expect(watched?.current()).toMatchObject({
+        tasks: [{ taskId: "bash-1", description: "npm test" }],
+        runtimeTurnWaiting: false,
+        ended: false,
+      });
+      expect(query.close).not.toHaveBeenCalled();
+      await acquired.close();
+    });
+
+    it("holds a turn the runtime starts by itself until the host attaches one, then reads it from its start", async () => {
+      const { acquired, query, seen, collected, follow, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+      await collected;
+      seen.length = 0;
+
+      await query.emit(backgroundEnded);
+      await query.emit(state("running"));
+      await query.emit(text("The server stopped."));
+      expect(watched?.current()).toMatchObject({ tasks: [], runtimeTurnWaiting: true });
+      expect(reported.some((work) => work.runtimeTurnWaiting)).toBe(true);
+      // The person cannot send into a turn the runtime is running unseen.
+      await expect(
+        Effect.runPromise(
+          Effect.flip(
+            acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
+          ),
+        ),
+      ).resolves.toMatchObject({ category: "unavailable" });
+
+      const runtimeTurn = (await follow()).done;
+      await Effect.runPromise(acquired.connection.attachRuntimeTurn!(sessionId));
+      await query.emit(completed(sdk));
+      await runtimeTurn;
+      const kinds = seen.map((event) => event.kind);
+      expect(kinds[0]).toBe("runtime-turn-started");
+      expect(kinds).toContain("text-delta");
+      expect(kinds.at(-1)).toBe("completed");
+      const sequences = seen.map((event) => event.sequence);
+      expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
+      await expect(
+        Effect.runPromise(Effect.flip(acquired.connection.attachRuntimeTurn!(sessionId))),
+      ).resolves.toMatchObject({ category: "protocol" });
+      await acquired.close();
+    });
+
+    it("stops the background command with the session when the person stops the thread", async () => {
+      const { acquired, query, collected, watched, reported } = await startKeptTurn();
+      await query.emit(backgroundStarted);
+      await query.emit(completed(sdk));
+      await collected;
+      await Effect.runPromise(acquired.connection.stop(sessionId));
+      expect(query.close).toHaveBeenCalled();
+      expect(reported.at(-1)).toMatchObject({ ended: true });
+      expect(watched?.current().ended).toBe(true);
+      await acquired.close();
+    });
   });
 });
 

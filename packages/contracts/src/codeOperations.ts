@@ -1882,8 +1882,21 @@ const ApprovalEvent = Schema.Struct({
     "git-push",
     "pull-request-create",
     "provider-tool",
+    "level-change",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * With `level-change`: the level the agent asks the thread to move to, and
+   * the plan it asks the person to approve when it asks to leave Plan. An
+   * approval changes the thread's level from its next turn; the turn that
+   * asked ends. Absent on every other approval.
+   */
+  levelChange: Schema.optional(
+    Schema.Struct({
+      to: ProviderExecutionPolicy,
+      plan: Schema.optional(CodeEvidenceReference),
+    }).annotations(strict),
+  ),
   /**
    * Legacy mark from approvals for physical-device and distribution effects,
    * which no longer exist. Nothing sets or reads it now. It stays in the schema
@@ -2020,6 +2033,16 @@ const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
   .annotations(strict)
   .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
 /**
+ * A provider runtime's own id for a session it keeps, as it lists it. Opaque
+ * and path-free, so it can name the session and nothing else.
+ */
+export const CodeNativeSessionId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+);
+export type CodeNativeSessionId = typeof CodeNativeSessionId.Type;
+export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(CodeNativeSessionId);
+
+/**
  * The runtime started a turn by itself inside this one: background work the
  * turn started finished or reported, and the runtime woke the model to act on
  * it. What follows in the operation is the runtime's turn, not the person's;
@@ -2033,6 +2056,19 @@ const RuntimeTurnStartedEvent = Schema.Struct({
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
   result: CodeOperationResult,
+}).annotations(strict);
+/**
+ * The person started this thread from a provider session begun outside
+ * Octant, on the same account and folder. Journaled ahead of the
+ * `provider-session-ready` that records its resume cursor, in an operation
+ * of its own that holds no turn. Only the runtime's own session id is kept,
+ * never its title or history. Absent from every thread journaled before
+ * adoption existed.
+ */
+const NativeSessionAdoptedEvent = Schema.Struct({
+  kind: Schema.Literal("native-session-adopted"),
+  nativeSessionId: CodeNativeSessionId,
+  providerInstanceId: ProviderInstanceId,
 }).annotations(strict);
 
 const ProviderSessionReadyEvent = Schema.Struct({
@@ -2286,6 +2322,7 @@ export const CodeOperationEvent = Schema.Union(
   ChildActivityEvent,
   ProviderRetryEvent,
   RuntimeTurnStartedEvent,
+  NativeSessionAdoptedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;

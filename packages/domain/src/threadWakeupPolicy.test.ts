@@ -34,6 +34,26 @@ describe("thread wake-up policy", () => {
     expect(planDelayedWakeup({ delaySeconds: "soon", now })).toMatchObject({ status: "refused" });
   });
 
+  it("finds a later minute, never an earlier one, when asked during the repeated hour of a daylight-saving fall-back", () => {
+    const previousZone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      const parsed = parseWakeupCron("*/5 * * * *");
+      if (parsed.status !== "parsed") throw new Error("Expected a parsed expression");
+      // 06:30Z on 1 November 2026 is 01:30 in New York's second, standard-time 01:00 hour.
+      expect(nextWakeupCronFire(parsed.cron, new Date("2026-11-01T06:30:00Z"))).toEqual(
+        new Date("2026-11-01T06:35:00Z"),
+      );
+      // The last minute of the first, daylight-time 01:00 hour moves on into the second.
+      expect(nextWakeupCronFire(parsed.cron, new Date("2026-11-01T05:58:00Z"))).toEqual(
+        new Date("2026-11-01T06:00:00Z"),
+      );
+    } finally {
+      if (previousZone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousZone;
+    }
+  });
+
   it("finds the next local minute a cron expression matches, reading both day fields as either", () => {
     const parsed = parseWakeupCron("30 14 * * *");
     if (parsed.status !== "parsed") throw new Error("Expected a parsed expression");

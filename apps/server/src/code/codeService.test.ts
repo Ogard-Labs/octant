@@ -2329,6 +2329,46 @@ describe("CodeService commands", () => {
       });
     });
 
+    it("records where an agent's approved plan returns a thread, and never Full access", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-code-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1 as never,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+          planReturnPolicy: "full-access",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      const planned = await fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        planReturnPolicy: "auto-accept-edits",
+      });
+      expect(planned).toMatchObject({
+        thread: { executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" },
+      });
+      const inPlan = serviceFixture({
+        threads: [thread({ executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      const back = await inPlan.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "auto-accept-edits",
+        permissionPersistence: "current-session",
+      });
+      expect("thread" in back ? back.thread : undefined).not.toHaveProperty("planReturnPolicy");
+    });
+
     it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
       const raised = serviceFixture({
         threads: [thread({ executionPolicy: "full-access" })],

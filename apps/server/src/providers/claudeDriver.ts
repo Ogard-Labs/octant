@@ -41,6 +41,8 @@ import type {
   ProviderSessionCompaction,
   ProviderSessionForkRequest,
   ProviderWakeupSchedule,
+  ProviderBackgroundWork,
+  ProviderNativeSession,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -302,22 +304,6 @@ const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write", "NotebookEdit"]);
  */
 const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "Monitor", "TaskOutput", "TaskStop"]);
 /**
- * Claude Code's built-in tools a Work or Code session outside Plan does not
- * hold. Octant adds to Claude Code and does not take its core features away
- * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
- * built-in set except this list, and each entry is here only because it
- * would break a rule the server enforces.
- */
-const CLAUDE_WITHHELD_TOOLS = [
-  // The thread's mode is the server's. Claude switching its own permission
-  // mode would leave the posture Octant granted mid-session; Plan is a
-  // thread mode with its own read-only tool set, not a runtime switch. A Plan
-  // session holds the plan tool to hand its plan over; outside Plan there is
-  // no plan to hand over and nothing to leave.
-  "EnterPlanMode",
-  CLAUDE_PLAN_EXIT_TOOL,
-] as const;
-/**
  * Claude Code's tools that move the session's working directory into a git
  * worktree and back. They take the rule for a tool the gate has no rule of
  * its own for: each asks below Full access. A worktree outside the Project's
@@ -368,6 +354,18 @@ export function claudeWorktreeTarget(
  * that fires in a later session Octant never sees. A session without such a
  * schedule (Chat, Plan, a single-use session) does not hold them.
  */
+/**
+ * Claude Code's own plan-mode tools. The thread's level is the server's, so
+ * the runtime never switches its own mode: each call is put to the person as
+ * a level change instead (`approval-request` with `levelChange`), and the
+ * call itself is always refused with what the person decided. An approved
+ * change applies from the thread's next session, because Plan's read-only
+ * rule rests on the tool set and sandbox profile a session launches with. A
+ * session whose host does not answer level changes holds neither tool.
+ */
+export const CLAUDE_ENTER_PLAN_TOOL = "EnterPlanMode";
+export const CLAUDE_EXIT_PLAN_TOOL = CLAUDE_PLAN_EXIT_TOOL;
+const CLAUDE_LEVEL_CHANGE_TOOLS = new Set<string>([CLAUDE_ENTER_PLAN_TOOL, CLAUDE_EXIT_PLAN_TOOL]);
 const CLAUDE_WAKEUP_TOOLS = new Set<string>([
   "ScheduleWakeup",
   "CronCreate",
@@ -446,8 +444,12 @@ const CLAUDE_WEB_TOOLS = new Set<string>(["WebSearch", "WebFetch"]);
 const CLAUDE_NATIVE_SESSION_TOOLS = new Set<string>([CLAUDE_SUBAGENT_TOOL, "Skill"]);
 
 /**
- * The built-in tools a session with the full tool set does not hold: the
- * fixed list above, the person's own setup features they turned off,
+ * The built-in tools a Work or Code session outside Plan does not hold.
+ * Octant adds to Claude Code and does not take its core features away
+ * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
+ * built-in set except this list, and each entry is here only because it
+ * would break a rule the server enforces: the plan-mode tools unless the host
+ * answers level changes, the person's own setup features they turned off,
  * Claude's Artifact tool unless the session offers it, and the wake-up tools
  * unless the host keeps a schedule for the session's thread.
  */
@@ -455,9 +457,15 @@ export function claudeWithheldTools(
   setup: ProviderNativeSetup | undefined,
   offersArtifacts: boolean,
   schedulesWakeups = false,
+  levelChanges = false,
 ): readonly string[] {
   return [
-    ...CLAUDE_WITHHELD_TOOLS,
+    // The thread's mode is the server's: Claude never switches its own
+    // permission mode. Where the host answers level changes, the agent outside
+    // Plan may ask to plan; leaving Plan is asked from a Plan session, which
+    // holds `ExitPlanMode` in its read-only list either way. Elsewhere there
+    // is no plan to hand over and nothing to leave outside Plan.
+    ...(levelChanges ? [CLAUDE_EXIT_PLAN_TOOL] : [...CLAUDE_LEVEL_CHANGE_TOOLS]),
     ...(schedulesWakeups ? [] : [...CLAUDE_WAKEUP_TOOLS]),
     // A workflow starts agents, so it rides the subagent switch. Starting
     // one asks below Full access, unlike `Agent`: its script runs as
@@ -639,6 +647,7 @@ const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
   CLAUDE_ARTIFACT_TOOL,
   CLAUDE_WORKFLOW_TOOL,
   ...CLAUDE_WAKEUP_TOOLS,
+  ...CLAUDE_LEVEL_CHANGE_TOOLS,
 ]);
 
 /**
@@ -1278,8 +1287,8 @@ interface SessionState {
   releasePromise?: Promise<void>;
   /** The compaction `compact` asked for, until the runtime reports how it ended. */
   compaction?: ClaudePendingCompaction | undefined;
-  /** The runtime's background tasks still running, by its own task id. */
-  readonly backgroundTasks: Set<string>;
+  /** The runtime's background tasks still running, by its own task id, with what each does. */
+  readonly backgroundTasks: Map<string, string | undefined>;
   /** Whether the person's current turn started any background task. */
   startedBackgroundWork: boolean;
   /** Whether this runtime reports when it goes idle (`session_state_changed`). */
@@ -1287,7 +1296,75 @@ interface SessionState {
   heldTurn?: ClaudeHeldTurn | undefined;
   /** The person's turn's latest usage report as published, for a held turn to build on. */
   turnUsage?: ClaudeUsageEvent | undefined;
+  /**
+   * The host keeps this session past its turn (`outlivesTurn`): a turn is not
+   * held for background work, and a turn the runtime starts by itself waits
+   * in {@link runtimeTurn} for the host to attach one.
+   */
+  readonly outlivesTurn: boolean;
+  /** Whether the runtime last said it was idle; true until it says otherwise. */
+  runtimeIdle: boolean;
+  /** A turn the runtime started by itself while no host turn was open. */
+  runtimeTurn?: ClaudeRuntimeTurn | undefined;
+  readonly backgroundWatchers: Set<(work: ProviderBackgroundWork) => void>;
+  /** The value last told to the watchers, so a repeat is not told again. */
+  reportedBackgroundWork?: string;
 }
+
+/**
+ * A turn the runtime started by itself in a session the host keeps past its
+ * turn (maintainer decision, 2026-11-14). Its events wait here until the
+ * host opens a turn for it and attaches, so the host's turn reads them from
+ * the first; the runtime's own approvals wait on the same gate meanwhile.
+ */
+interface ClaudeRuntimeTurn {
+  attached: boolean;
+  /**
+   * The runtime finished the turn before the host attached one. It still
+   * waits, its events held, until the host attaches and reads it whole or
+   * the session is stopped; dropping it lost the turn and stranded the
+   * host's attach.
+   */
+  completed: boolean;
+  readonly waiting: Array<ProviderRuntimeEvent>;
+  /** More events arrived before the host attached than are held. */
+  overflowed: boolean;
+  /** Settles true when the host attaches, false when the session ends first. */
+  readonly opened: DeferredValue<boolean>;
+}
+
+/** What the runtime is told after the person answered its ask to change the thread's level. */
+function claudeLevelChangeAnswer(toolName: string, approved: boolean): string {
+  if (!approved) {
+    return toolName === CLAUDE_ENTER_PLAN_TOOL
+      ? "The person kept this thread at its level. Continue without planning mode."
+      : "The person kept this thread in Plan. Keep planning read-only, or revise the plan.";
+  }
+  return toolName === CLAUDE_ENTER_PLAN_TOOL
+    ? "The person approved planning first. Octant ends this turn now; the thread's next turn runs in Plan, read-only. Stop here."
+    : "The person approved the plan. Octant ends this turn now; the thread's next turn runs at its earlier level to carry the plan out. Stop here.";
+}
+
+/** Whether the runtime reports that one of its tasks ended. */
+function endsBackgroundTask(
+  message: ClaudeDecodedMessage,
+): message is Extract<ClaudeDecodedMessage, { readonly kind: "task" }> {
+  return (
+    message.kind === "task" &&
+    (message.subtype === "task_notification" ||
+      (message.subtype === "task_updated" &&
+        (message.status === "completed" ||
+          message.status === "failed" ||
+          message.status === "killed")))
+  );
+}
+
+/**
+ * How many events a turn the runtime started by itself may hold before the
+ * host attaches a turn to it; past it the turn cannot be shown whole, so the
+ * attach fails and the session is stopped.
+ */
+const MAX_WAITING_RUNTIME_TURN_EVENTS = 1_024;
 
 /**
  * A person's turn the runtime finished while background work it started
@@ -2263,6 +2340,170 @@ function forkClaudeSession(
   });
 }
 
+/** How many of the account's sessions in a folder a thread is offered to start from. */
+const MAX_OFFERED_NATIVE_SESSIONS = 50;
+
+/**
+ * The account's own Claude Code sessions a thread may be started from
+ * (maintainer decision, 2026-11-14). Only a session whose folder is the
+ * thread's is listed, and one an Octant session already resumes is left out:
+ * adopting it would point its resume record at another thread and strand the
+ * first. Adopting writes the same resume record a session Octant started
+ * writes, so the thread's next turn resumes it through the ordinary checks.
+ */
+function makeClaudeNativeSessions(
+  options: ClaudeDriverOptions,
+  listSessions: NonNullable<ClaudeAgentSdkPort["listSessions"]>,
+): NonNullable<ProviderDriver["nativeSessions"]> {
+  const controller = () => new AbortController().signal;
+  const configDirectory =
+    options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory };
+  // Only these sentences reach the person; anything else thrown on the way
+  // is reduced to one generic sentence.
+  const refusals = new WeakSet<ProviderFailure>();
+  const refuse = (category: ProviderFailure["category"], message: string) => {
+    const refusal = failure(category, message);
+    refusals.add(refusal);
+    return refusal;
+  };
+  const heldByOctant = (sdkSessionId: string) =>
+    options.resumeIdentityPort
+      .lookup({ providerInstanceId: options.instanceId, sdkSessionId }, controller())
+      .then((identity) => identity !== undefined);
+  return {
+    list: ({ instanceId, projectRoot }) =>
+      instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : listSessions({ projectRoot, ...configDirectory }).pipe(
+            Effect.flatMap((sessions) =>
+              Effect.tryPromise({
+                try: async () => {
+                  const newest = [...sessions].sort(
+                    (left, right) => right.lastModified - left.lastModified,
+                  );
+                  const offered: ProviderNativeSession[] = [];
+                  for (const session of newest) {
+                    if (offered.length >= MAX_OFFERED_NATIVE_SESSIONS) break;
+                    if (await heldByOctant(session.sessionId)) continue;
+                    offered.push({
+                      nativeSessionId: session.sessionId,
+                      lastModified: session.lastModified,
+                      ...(session.title === undefined ? {} : { title: session.title }),
+                      ...(session.gitBranch === undefined ? {} : { gitBranch: session.gitBranch }),
+                    });
+                  }
+                  return offered;
+                },
+                catch: () => failure("unavailable", "Claude's sessions could not be read."),
+              }),
+            ),
+          ),
+    adopt: (input) =>
+      Effect.tryPromise({
+        try: () =>
+          adoptingOneAtATime(`${String(options.instanceId)}\u0000${input.nativeSessionId}`, () =>
+            adoptOnce(input),
+          ),
+        catch: (error) =>
+          typeof error === "object" && error !== null && refusals.has(error as ProviderFailure)
+            ? (error as ProviderFailure)
+            : failure("unavailable", "The Claude session could not be taken up."),
+      }),
+    // Taken in turn with adoptions of the same session, so a release never
+    // removes a record a later adoption wrote.
+    release: (input) =>
+      input.instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.tryPromise({
+            try: () =>
+              adoptingOneAtATime(
+                `${String(options.instanceId)}\u0000${input.nativeSessionId}`,
+                async () => {
+                  const held = await options.resumeIdentityPort.lookup(
+                    { providerInstanceId: options.instanceId, sdkSessionId: input.nativeSessionId },
+                    controller(),
+                  );
+                  if (
+                    held === undefined ||
+                    String(held.octantSessionId) !== String(input.sessionId)
+                  )
+                    return;
+                  await options.resumeIdentityPort.remove(
+                    { providerInstanceId: options.instanceId, sdkSessionId: input.nativeSessionId },
+                    controller(),
+                  );
+                },
+              ),
+            catch: () => failure("unavailable", "The Claude session could not be released."),
+          }),
+  };
+  async function adoptOnce(
+    input: Parameters<NonNullable<ProviderDriver["nativeSessions"]>["adopt"]>[0],
+  ) {
+    if (input.instanceId !== options.instanceId) {
+      throw refuse("invalid-configuration", "Provider instance does not match driver.");
+    }
+    if (await heldByOctant(input.nativeSessionId)) {
+      throw refuse("unavailable", "That Claude session already belongs to an Octant thread.");
+    }
+    const found = await Effect.runPromise(
+      options.sdk.findSession({
+        sessionId: input.nativeSessionId,
+        projectRoot: input.projectRoot,
+        ...configDirectory,
+      }),
+    );
+    if (found === undefined || found.projectRoot !== input.projectRoot) {
+      throw refuse(
+        "stale-resume",
+        "That Claude session is not one of this folder's on this account.",
+      );
+    }
+    await options.resumeIdentityPort.put(
+      {
+        providerInstanceId: options.instanceId,
+        octantSessionId: input.sessionId,
+        sdkSessionId: input.nativeSessionId,
+        projectRoot: input.projectRoot,
+        modelId: input.modelId,
+        authentication: options.authentication,
+      },
+      controller(),
+    );
+    return {
+      driverKind: "claude" as const,
+      value: input.nativeSessionId,
+      binding: providerResumeBinding({
+        instanceId: options.instanceId,
+        sessionId: input.sessionId,
+        projectRoot: input.projectRoot,
+        mode: input.mode,
+        modelId: input.modelId,
+      }),
+    };
+  }
+}
+
+/**
+ * Adoptions of one native session waiting their turn, by instance and session
+ * id. The check that no Octant thread holds the session and the resume record
+ * that then claims it are one step: two threads adopting the same session at
+ * once both passed the check before either wrote, and the second record left
+ * the first thread resuming a session it no longer owned.
+ */
+const adoptionsInFlight = new Map<string, Promise<unknown>>();
+
+async function adoptingOneAtATime<A>(key: string, adopt: () => Promise<A>): Promise<A> {
+  const before = adoptionsInFlight.get(key) ?? Promise.resolve();
+  const mine = before.catch(() => undefined).then(adopt);
+  adoptionsInFlight.set(key, mine);
+  try {
+    return await mine;
+  } finally {
+    if (adoptionsInFlight.get(key) === mine) adoptionsInFlight.delete(key);
+  }
+}
+
 export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
   const factories: ConnectionFactories = {
@@ -2292,6 +2533,9 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
       })
         ? CLAUDE_ARTIFACT_TOOL
         : undefined,
+    ...(options.sdk.listSessions === undefined
+      ? {}
+      : { nativeSessions: makeClaudeNativeSessions(options, options.sdk.listSessions) }),
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     forkSession: (input) => forkClaudeSession(options, input),
@@ -2374,7 +2618,47 @@ function makeConnection(
       });
 
     const publish = (event: ProviderRuntimeEvent) => {
+      // A turn the runtime started by itself is read from its first event
+      // once the host has opened a turn for it.
+      const state = sessions.get(event.sessionId);
+      const waiting = state?.runtimeTurn;
+      if (state !== undefined && waiting !== undefined && !waiting.attached) {
+        if (waiting.waiting.length < MAX_WAITING_RUNTIME_TURN_EVENTS) {
+          waiting.waiting.push(event);
+          return;
+        }
+        // A turn that cannot be shown whole never runs on unseen: the
+        // session ends here, and the host's attach is refused.
+        if (!waiting.overflowed) {
+          waiting.overflowed = true;
+          closeAfterPublishedTerminal(state);
+        }
+        return;
+      }
       Effect.runFork(PubSub.publish(events, event));
+    };
+    const backgroundWorkOf = (state: SessionState): ProviderBackgroundWork => ({
+      tasks: [...state.backgroundTasks].map(([taskId, description]) =>
+        description === undefined ? { taskId } : { taskId, description },
+      ),
+      turnRunning: state.pendingTurns > 0 || (state.reportsSessionState && !state.runtimeIdle),
+      runtimeTurnWaiting: state.runtimeTurn !== undefined && !state.runtimeTurn.attached,
+      ended: state.terminal || state.releasing || state.released,
+    });
+    /** Tells the host what a kept session runs now, when that changed. */
+    const reportBackgroundWork = (state: SessionState) => {
+      if (!state.outlivesTurn || state.backgroundWatchers.size === 0) return;
+      const work = backgroundWorkOf(state);
+      const key = JSON.stringify(work);
+      if (key === state.reportedBackgroundWork) return;
+      state.reportedBackgroundWork = key;
+      for (const watcher of [...state.backgroundWatchers]) {
+        try {
+          watcher(work);
+        } catch {
+          // A watcher that throws cannot change how the session runs.
+        }
+      }
     };
     const deactivate = (state: SessionState) => {
       if (!state.active) return;
@@ -2418,6 +2702,8 @@ function makeConnection(
       if (state.released) return;
       state.releasePromise ??= (async () => {
         state.releasing = true;
+        // A tool call held for the host's attach is refused, never left waiting.
+        state.runtimeTurn?.opened.resolve(false);
         // A stop or teardown mid-compaction ends the request with it; the
         // runtime may already have rewritten the session.
         settleCompaction(state);
@@ -2441,6 +2727,8 @@ function makeConnection(
           if (state.terminal && sessions.get(state.sessionId) === state) {
             sessions.delete(state.sessionId);
           }
+          reportBackgroundWork(state);
+          state.backgroundWatchers.clear();
         }
         if (releaseFailure !== undefined) throw releaseFailure;
       })();
@@ -2531,6 +2819,25 @@ function makeConnection(
       makeTaskId: factories.makeTaskId,
       makeToolCallId: factories.makeToolCallId,
     });
+    /**
+     * The next turn's event context on the same runtime session, numbered on
+     * from `previous`. Background tasks a turn started outlive it (a dev
+     * server, a watch, a workflow), so their lifecycle carries over: a task's
+     * progress and end must find the row its start opened, or the mapper
+     * reads them as an invalid transition and fails the turn. Everything
+     * else in the context is the turn's own; approvals, questions, pre-tool
+     * grants and the task list live on the session.
+     */
+    const continueEventContext = (
+      state: SessionState,
+      previous: ClaudeEventContext,
+      claudeSessionId: string,
+      sequence: number,
+    ): ClaudeEventContext => {
+      const next = makeEventContext(state, claudeSessionId, sequence);
+      for (const [taskId, task] of previous.taskIds) next.taskIds.set(taskId, task);
+      return next;
+    };
     const admitToolUse = (state: SessionState, toolUseId: string): boolean => {
       if (state.observedToolUseIds.has(toolUseId)) return true;
       forgetSettledToolUses(state, factories.maxTrackedToolUses);
@@ -2576,8 +2883,7 @@ function makeConnection(
         steered: false,
         usageBase: state.turnUsage,
       };
-      state.context = makeEventContext(state, previous.claudeSessionId, sequence);
-      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      state.context = continueEventContext(state, previous, previous.claudeSessionId, sequence);
       settleHeldTurn(state);
     };
     const releaseHeldTurn = (state: SessionState, held: ClaudeHeldTurn) => {
@@ -2668,7 +2974,55 @@ function makeConnection(
         occurredAt: factories.clock() as UtcTimestamp,
       });
     };
+    /**
+     * The runtime started a turn by itself in a kept session with no host
+     * turn open: a background task ended or a watch reported. Its events are
+     * numbered on from the last turn's and wait for the host's turn, and it
+     * passes the same gate at the same level as a turn the host sent.
+     */
+    const openIdleRuntimeTurn = (state: SessionState) => {
+      const previous = state.context;
+      if (previous === undefined || state.claudeSessionId === undefined) return;
+      // The runtime started another turn while the last one it finished by
+      // itself still waits for the host. The host reads one runtime turn per
+      // attach, so the session ends rather than run a turn nobody can read.
+      if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+        closeAfterPublishedTerminal(state);
+        return;
+      }
+      state.context = continueEventContext(
+        state,
+        previous,
+        state.claudeSessionId,
+        previous.sequence,
+      );
+      state.terminalResult = deferred<void>();
+      state.pendingTurns = 1;
+      state.hookDeliveries.push({ viaHook: false, delivered: false });
+      state.appToolsEnabled = false;
+      state.outputAccepted = true;
+      state.runtimeTurn = {
+        attached: false,
+        completed: false,
+        waiting: [],
+        overflowed: false,
+        opened: deferred<boolean>(),
+      };
+      publish({
+        kind: "runtime-turn-started",
+        trigger: "background-task",
+        instanceId: options.instanceId,
+        sessionId: state.sessionId,
+        correlationId: state.correlationId,
+        sequence: state.context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
+    };
     const handleMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
+      handleSessionMessage(state, message);
+      reportBackgroundWork(state);
+    };
+    const handleSessionMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
       if (state.terminal) return;
       if (state.context === undefined) {
         if (
@@ -2720,6 +3074,11 @@ function makeConnection(
       }
       if (message.kind === "session-state") {
         state.reportsSessionState = true;
+        state.runtimeIdle = message.state === "idle";
+        if (state.outlivesTurn) {
+          if (message.state !== "idle" && state.pendingTurns === 0) openIdleRuntimeTurn(state);
+          return;
+        }
         const held = state.heldTurn;
         if (held === undefined) return;
         if (message.state === "idle") {
@@ -2728,6 +3087,21 @@ function makeConnection(
         } else if (!held.runtimeTurnOpen) {
           openRuntimeTurn(state, held);
         }
+        return;
+      }
+      if (
+        state.outlivesTurn &&
+        state.pendingTurns === 0 &&
+        state.compaction === undefined &&
+        CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)
+      ) {
+        openIdleRuntimeTurn(state);
+      }
+      // Between turns of a kept session no turn shows what the runtime
+      // reports; a task's end only changes what runs, which the host reads
+      // from the session's background work.
+      if (state.outlivesTurn && state.context.terminal) {
+        if (endsBackgroundTask(message)) state.backgroundTasks.delete(message.taskId);
         return;
       }
       if (state.heldTurn !== undefined && CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)) {
@@ -2749,7 +3123,10 @@ function makeConnection(
         }
       }
       if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
-        state.backgroundTasks.add(message.taskId);
+        state.backgroundTasks.set(
+          message.taskId,
+          message.description ?? state.backgroundTasks.get(message.taskId),
+        );
         state.startedBackgroundWork = true;
       }
       // A resumed session's stored task list opens its first turn.
@@ -2776,6 +3153,7 @@ function makeConnection(
         if (
           mapped.event.kind === "completed" &&
           state.pendingTurns > 0 &&
+          !state.outlivesTurn &&
           (state.heldTurn !== undefined ||
             (state.startedBackgroundWork &&
               (state.backgroundTasks.size > 0 || state.reportsSessionState)))
@@ -2793,6 +3171,13 @@ function makeConnection(
         if (isTerminalEvent(mapped.event)) {
           state.heldTurn = undefined;
           state.turnUsage = undefined;
+          // A runtime turn the host has not attached yet keeps waiting, with
+          // its terminal event held, until the host attaches and reads it.
+          if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+            state.runtimeTurn.completed = true;
+          } else {
+            state.runtimeTurn = undefined;
+          }
           state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
@@ -2800,8 +3185,9 @@ function makeConnection(
           state.hookDeliveries.shift();
           if (mapped.event.kind === "completed") {
             if (state.pendingTurns > 0) {
-              state.context = makeEventContext(
+              state.context = continueEventContext(
                 state,
+                state.context,
                 state.claudeSessionId!,
                 state.context.sequence,
               );
@@ -2818,14 +3204,7 @@ function makeConnection(
         }
         state.outputAccepted = true;
       }
-      if (
-        message.kind === "task" &&
-        (message.subtype === "task_notification" ||
-          (message.subtype === "task_updated" &&
-            (message.status === "completed" ||
-              message.status === "failed" ||
-              message.status === "killed")))
-      ) {
+      if (endsBackgroundTask(message)) {
         // A task that ended hands the model a notice, so the runtime starts
         // a turn for it unless the turn running now takes it in.
         if (state.backgroundTasks.delete(message.taskId) && state.heldTurn !== undefined) {
@@ -2903,6 +3282,8 @@ function makeConnection(
         readonly nativeSetup?: ProviderNativeSetup;
         readonly compactionPoint?: ProviderCompactionPoint;
         readonly wakeups?: ProviderWakeupSchedule;
+        readonly outlivesTurn?: boolean;
+        readonly levelChanges?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -3071,6 +3452,12 @@ function makeConnection(
           mode,
           executionPolicy: input.executionPolicy,
         });
+        // A session whose host answers level changes puts Claude's own
+        // `EnterPlanMode` and, from Plan, `ExitPlanMode` to the person as level
+        // changes; asking changes nothing in this session. Plan holds
+        // `ExitPlanMode` in its read-only list either way.
+        const levelChanges =
+          input.levelChanges === true && input.singleUse !== true && mode !== "chat";
         const executionOptions: ClaudeExecutionOptions = offersArtifacts
           ? {
               ...baseExecutionOptions,
@@ -3082,7 +3469,7 @@ function makeConnection(
         // A single-use session starts no later turn, so it schedules none.
         const wakeups = input.singleUse === true ? undefined : input.wakeups;
         const withheldTools = executionOptions.fullToolSet
-          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined)
+          ? claudeWithheldTools(nativeSetup, offersArtifacts, wakeups !== undefined, levelChanges)
           : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
@@ -3179,7 +3566,9 @@ function makeConnection(
             if (refusal !== undefined) return deny(refusal);
           }
           if (
-            (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            (input.executionPolicy === "full-access" &&
+              request.toolName !== "AskUserQuestion" &&
+              !CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) ||
             // Auto-accept edits covers exactly the file writes the gate above
             // already proved to be inside the Project. Shell, network, and
             // every other tool still ask, and so does a read or an edit
@@ -3398,8 +3787,10 @@ function makeConnection(
           }
           // The plan already reached the thread as the reply's text from the
           // call's transcript block. Granting the call would let Claude Code
-          // leave plan mode for one that edits, so it is always refused.
-          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL) {
+          // leave plan mode for one that edits, so it is always refused; where
+          // the host answers level changes, the person is asked first whether
+          // to leave Plan, and the call is refused with their answer below.
+          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL && !levelChanges) {
             return deny(CLAUDE_PLAN_CAPTURED_MESSAGE);
           }
           // Checked here, before any posture: Full access answers "allow" in
@@ -3525,6 +3916,9 @@ function makeConnection(
           };
           // A publish asks under every posture below Full access, which asks
           // nobody; the path checks above still refuse a file outside the Project.
+          // A level change is the person's at every level, Full access and
+          // Plan included; the call reaches `canUseTool` and is put to them.
+          if (CLAUDE_LEVEL_CHANGE_TOOLS.has(request.toolName)) return askThroughGrant();
           const decide = (): ClaudePreToolDecision | Promise<ClaudePreToolDecision> =>
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
@@ -3617,7 +4011,36 @@ function makeConnection(
           if (answer.answered && call !== undefined) call.answeredByOctant = true;
           return denyClaudeToolRequest(activeState, toolUseId, answer.message);
         };
+        // A turn the runtime started by itself runs at the level the host
+        // admits it at, so none of its calls is answered, Full access's
+        // unasked allow included, until the host has opened a turn for it at
+        // the thread's current level and attached. A session the host stops
+        // first refuses the call.
+        // Undefined when nothing holds the call, so an ordinary call reaches
+        // its gate in the same tick as before.
+        const heldForRuntimeTurn = (signal: AbortSignal): Promise<boolean> | undefined => {
+          const activeState = callbackState;
+          const runtimeTurn = activeState?.runtimeTurn;
+          if (activeState === undefined || runtimeTurn === undefined || runtimeTurn.attached) {
+            return undefined;
+          }
+          const aborted = new Promise<false>((resolve) => {
+            if (signal.aborted) resolve(false);
+            else signal.addEventListener("abort", () => resolve(false), { once: true });
+          });
+          return Promise.race([runtimeTurn.opened.promise, aborted]).then(
+            (opened) => !opened || signal.aborted || !gateStillOpen(activeState),
+          );
+        };
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
+          const held = heldForRuntimeTurn(request.signal);
+          if (held !== undefined && (await held)) {
+            return denyClaudeToolRequest(
+              callbackState,
+              request.toolUseId,
+              "Claude's own turn ended before Octant opened it.",
+            );
+          }
           const decision = await gateToolUse(request);
           if (
             decision.behavior !== "allow" ||
@@ -3629,6 +4052,14 @@ function makeConnection(
           return answerWakeupCall(request.toolUseId, request.toolName, request.input, wakeups);
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
+          const held = heldForRuntimeTurn(request.signal);
+          if (held !== undefined && (await held)) {
+            return denyClaudeToolRequest(
+              callbackState,
+              request.toolUseId,
+              "Claude's own turn ended before Octant opened it.",
+            );
+          }
           const decision = await gatePreToolUse(request);
           if (
             decision.behavior === "deny" ||
@@ -3784,9 +4215,12 @@ function makeConnection(
           active: true,
           releasing: false,
           released: false,
-          backgroundTasks: new Set(),
+          backgroundTasks: new Map(),
           startedBackgroundWork: false,
           reportsSessionState: false,
+          outlivesTurn: input.outlivesTurn === true && input.singleUse !== true,
+          runtimeIdle: true,
+          backgroundWatchers: new Set(),
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
@@ -3992,6 +4426,8 @@ function makeConnection(
                 ? {}
                 : { compactionPoint: input.compactionPoint }),
               ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+              ...(input.outlivesTurn === true ? { outlivesTurn: true } : {}),
+              ...(input.levelChanges === true ? { levelChanges: true } : {}),
             },
             signal,
             input.resumeCursor.value,
@@ -4049,6 +4485,12 @@ function makeConnection(
             failure("unsupported", "Claude takes JPEG, PNG, GIF and WebP images only."),
           );
         }
+        // The runtime's own turn is the host's to open first.
+        if (state.runtimeTurn !== undefined && !state.runtimeTurn.attached) {
+          return Effect.fail(
+            failure("unavailable", "Claude started a turn of its own after its background work."),
+          );
+        }
         // The runtime may still start turns of its own inside the held one,
         // so the message is steered into it rather than refused. The turn's
         // context goes inline in the steered text, as on a runtime too old
@@ -4071,8 +4513,15 @@ function makeConnection(
         const delivery = { viaHook: message.context !== undefined, delivered: false };
         const withImages = images.length === 0 ? message : { ...message, images };
         return Effect.sync(() => {
+          // A session kept past its turn may still run background tasks the
+          // last turn started; their progress and end arrive in this turn.
           if (state.context?.terminal === true && state.pendingTurns === 0) {
-            state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
+            state.context = continueEventContext(
+              state,
+              state.context,
+              state.claudeSessionId!,
+              state.context.sequence,
+            );
           }
           if (state.pendingTurns === 0) {
             state.terminalResult = deferred<void>();
@@ -4081,6 +4530,7 @@ function makeConnection(
           state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
           state.hookDeliveries.push(delivery);
+          reportBackgroundWork(state);
         }).pipe(
           Effect.zipRight(
             state.query.send({
@@ -4196,7 +4646,12 @@ function makeConnection(
           // A finished turn closed its event context; the compaction's own
           // events are numbered on from it, as the next turn's would be.
           if (state.context?.terminal === true && state.claudeSessionId !== undefined) {
-            state.context = makeEventContext(state, state.claudeSessionId, state.context.sequence);
+            state.context = continueEventContext(
+              state,
+              state.context,
+              state.claudeSessionId,
+              state.context.sequence,
+            );
           } else if (state.context !== undefined) {
             state.context.compactionRequested = true;
           }
@@ -4298,6 +4753,57 @@ function makeConnection(
           }
           await release(state);
         }),
+      backgroundWork: (sessionId) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || !state.outlivesTurn) return undefined;
+        return {
+          current: () => backgroundWorkOf(state),
+          watch: (listener) => {
+            if (state.released) {
+              listener(backgroundWorkOf(state));
+              return () => undefined;
+            }
+            state.backgroundWatchers.add(listener);
+            return () => {
+              state.backgroundWatchers.delete(listener);
+            };
+          },
+        };
+      },
+      attachRuntimeTurn: (sessionId) =>
+        Effect.suspend(() => {
+          const state = sessions.get(sessionId);
+          const waiting = state?.runtimeTurn;
+          if (state !== undefined && waiting?.overflowed === true) {
+            return Effect.promise(async () => {
+              state.runtimeTurn = undefined;
+              closeAfterPublishedTerminal(state);
+              await release(state);
+            }).pipe(
+              Effect.zipRight(
+                Effect.fail(
+                  failure(
+                    "protocol",
+                    "Claude's own turn sent more than Octant holds before it opened.",
+                  ),
+                ),
+              ),
+            );
+          }
+          if (state === undefined || state.terminal || waiting === undefined || waiting.attached) {
+            return Effect.fail(failure("protocol", "No turn Claude started by itself is waiting."));
+          }
+          return Effect.sync(() => {
+            waiting.attached = true;
+            for (const event of waiting.waiting.splice(0)) {
+              Effect.runFork(PubSub.publish(events, event));
+            }
+            // A turn the runtime already finished is over once it is read.
+            if (waiting.completed && state.runtimeTurn === waiting) state.runtimeTurn = undefined;
+            waiting.opened.resolve(true);
+            reportBackgroundWork(state);
+          });
+        }),
       approvalCall: ({ sessionId, requestId }) =>
         sessions.get(sessionId)?.pendingApprovals.get(requestId)?.call,
       answerApproval: (answer) =>
@@ -4317,6 +4823,15 @@ function makeConnection(
             state.pendingApprovals.delete(answer.requestId);
             freeAuthoritySlot(state);
             state.settledToolUseIds.add(pending.providerToolUseId);
+            // The runtime never switches its own mode: the call is refused
+            // with what the person decided, and the host changes the level.
+            if (CLAUDE_LEVEL_CHANGE_TOOLS.has(pending.toolName)) {
+              pending.decision.resolve({
+                behavior: "deny",
+                message: claudeLevelChangeAnswer(pending.toolName, answer.approved),
+              });
+              return;
+            }
             if (answer.approved) {
               let persistence: PermissionPersistence = "project-default";
               try {

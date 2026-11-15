@@ -269,6 +269,9 @@ export interface ClaudeSessionMetadata {
   readonly projectRoot: string;
   readonly lastModified: number;
   readonly createdAt?: number;
+  /** The name the person gave the session, or else the runtime's summary of it. */
+  readonly title?: string;
+  readonly gitBranch?: string;
 }
 
 export type ClaudeJsonValue =
@@ -660,6 +663,14 @@ export interface ClaudeAgentSdkPort {
     readonly upToMessageId: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * The account's sessions whose own folder is `projectRoot`, as the runtime
+   * lists them. A port without it offers no session to start a thread from.
+   */
+  readonly listSessions?: (input: {
+    readonly projectRoot: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<ReadonlyArray<ClaudeSessionMetadata>, ProviderFailure>;
 }
 
 // Mutable because the SDK's `SDKUserMessage` content is; the port builds a
@@ -2049,6 +2060,18 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       });
       return Effect.acquireRelease(acquire, (query, _exit) => query.close());
     },
+    listSessions: ({ projectRoot, configDirectory }) =>
+      Effect.tryPromise({
+        try: async () =>
+          decodeSessions(
+            await withClaudeAccountDirectory(configDirectory, () =>
+              sdk.listSessions({ dir: projectRoot, includeWorktrees: false }),
+            ),
+            projectRoot,
+            { titles: true },
+          ),
+        catch: (error) => sanitizeFailure(error, "session lookup"),
+      }),
     findSession: ({ sessionId, projectRoot, configDirectory }) =>
       Effect.tryPromise({
         try: async () => {

@@ -223,6 +223,7 @@ describe("shell settings policy", () => {
       autoCompactLimitPercent: null,
       stalledTurnLimitMinutes: 30,
       providerToolCallPauseLimitMinutes: 120,
+      backgroundSessionIdleLimitMinutes: 120,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
       navigatorAssistant: {},
       // Voice starts unconfigured: no transcription or synthesis endpoint.

@@ -556,13 +556,13 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                                 | Why                                                                                                                                     |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's; Plan is a thread mode with its own read-only list, which holds `ExitPlanMode` (see below) |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                  |
-| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                           |
-| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)            |
-| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                              |
+| Withheld                                                 | Why                                                                                                                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's: both in a session whose host does not answer level changes (Work, child runs), and `ExitPlanMode` outside Plan everywhere; Plan's read-only list holds `ExitPlanMode` (see below) |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                                                                                                          |
+| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                                                                                                                   |
+| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)                                                                                                    |
+| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                                                                                                                      |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
 inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
@@ -795,9 +795,79 @@ as a `local_bash` task: the decoder reads its `task_started`,
 `task-progress` row, as it does a subagent's. When such a task ends, or a
 watch prints a line, the runtime wakes the model and starts a turn by itself.
 
-A session lasts one person's turn, so the driver holds that turn open
-instead of letting such a turn start after the runner has stopped the
-session. When the runtime's result arrives while a background task the turn
+In Code the session outlives its turn (maintainer decision, 2026-11-14). The
+turn completes when the model's reply is done; the background tasks keep
+running and show as live tasks above the thread's composer, with Stop. The
+host keeps the session (`OutlivingSessions`) and starts every Code session
+with `outlivesTurn`, which tells the driver not to hold the turn. When the
+runtime then starts a turn by itself while the thread is idle, the driver
+holds that turn's events, and every one of its tool calls waits unanswered
+(Full access's unasked allow included, and refused if the session stops
+first), until the host opens a runtime-started turn for the thread: an ordinary Code turn started
+as the host at the thread's own level, whose recorded prompt says why it
+exists and is never sent. That turn reattaches to the kept session with
+`attachRuntimeTurn` instead of sending, reads the held events from their
+`runtime-turn-started` event (`trigger: "background-task"`), and is journaled
+and replayed like any other turn, the frame keeping the runtime as its
+origin. A turn the runtime finishes before the host attaches still waits,
+its events held, and is read whole on attach; a second turn the runtime
+starts before the first was attached stops the session, because one attach
+reads one turn. A person's send is refused while such a turn waits to be
+opened, and a turn needing a session started differently (another level,
+model, or tool set) stops the kept one, and its tasks, first. Between turns the runtime's
+own task frames are not shown in any turn; a task's end only changes the
+live tasks.
+
+The kept session is always stopped, never orphaned: when its last task has
+ended and no turn runs (after up to 5 seconds for the turn the runtime
+starts for that task's end, which reaches the host first), when the person
+stops the thread (Stop on the live tasks, or a Stop with no turn running),
+when the person changes the thread so it would start a session on other
+terms (its level or how asks are answered, its provider or model, its
+checkout or folder) or archives, moves, or deletes it, or when the thread's
+Project is relinked, archived, or loses an extra folder or the thread's
+working folder, read from the journal (a Project change touches no thread, so
+every kept session of that Project is judged again against the Project as
+the append committed it), so a session never goes on acting at the level it
+launched with or reaching a folder its Project no longer grants,
+after the background work limit with no turn in the thread (a host setting:
+2 hours by default, Off for no bound), when the host cannot open the
+runtime's turn (the thread was archived, or stayed busy for 20 tries), when
+the turn the host opened has not taken the session up within 60 seconds,
+when a turn ends without settling its session, before a requested compaction
+resumes the same native session on a connection of its own (so two processes
+never write one history, and the next turn resumes what the compaction left),
+and at shutdown. A session is held to the Project as it stood when its turn
+took its folders, read in the same step, so a folder removed while the turn
+starts makes the session's terms differ and it is not kept. A session being
+stopped stays in the way until its runtime and tasks are gone: the thread's
+next turn waits for it rather than resume the same history on a new
+connection, and a second Stop answers once it has stopped; shutdown waits for
+it too. A turn the person sends on a kept session carries the lifecycle of the
+background tasks the earlier turns started, as a runtime-started turn does,
+so a task's progress and end still name the row its start opened; the turn's
+own call and checklist state starts afresh, and approvals, questions and the
+task list live on the session. A runtime-started turn sends nothing, so it acknowledges nothing as
+sent: it carries no fork merged back into the thread and journals no delivery
+for one (the merge goes with the person's next turn), it leaves the
+held-context record as the session's last sent turn left it, so no standing
+block it would have carried counts as held, and it counts no context copy of
+its own. It opens only on the session the thread's last turn left, as it
+stands: a thread with no turn of its own yet, or one whose next turn would
+need a provider switch, a rewind or a fork handoff, refuses it before
+anything is journaled. A
+runtime-started turn holds at most 1,024 events before it is opened; the
+event past that stops the session at once and the host's attach is
+refused. Rationale: settling the person's
+turn keeps a dev server from holding it open forever, and opening the
+runtime's turn through the thread's ordinary admission reuses the gate, the
+journal, the stop and replay unchanged rather than adding a turn kind.
+
+Work and other callers (a child run, a single-use session) still keep the
+earlier lifecycle: a session lasts one person's turn, so the driver holds
+that turn open instead of letting such a turn start after the runner has
+stopped the session (a Work session that outlives its turn is not built
+yet). When the runtime's result arrives while a background task the turn
 started still runs, or before the runtime says it is idle, the completion is
 held. Each turn the runtime then starts is folded into the person's turn,
 opened by a `runtime-turn-started` event (`trigger: "background-task"`); its
@@ -839,16 +909,6 @@ the next turn as it does for any running turn. A `Monitor` call that asks for a 
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.
-Rationale: holding the person's turn keeps one journaled turn per send and
-reuses the gate, the stop, and the session's one-turn lifetime unchanged; a
-host-side runner for turns that start on an idle thread would add a second
-turn lifecycle the thread model does not have. Decided and not built yet
-(maintainer decision, 2026-11-14): the person's turn completes when the
-model's reply is done while background tasks keep running and show as tasks
-in the thread, and a task's end opens a new runtime-started turn rather than
-reopening the old one; stopping the thread still ends every background task.
-It needs the session to outlive the person's turn and that host-side runner,
-so the hold above stays until both exist.
 
 #### Workflows
 
@@ -891,6 +951,83 @@ source's own folder, mode and sign-in: a fork onto its own worktree, a turn
 with no anchor, or a failed copy goes back with the text handoff
 ([Architecture: native session anchors](../architecture.md#native-session-anchors)).
 `rewindFiles` is not used; files go back through Octant's checkpoints.
+
+#### Plan mode as level changes
+
+Claude Code's own plan-then-approve works in Code (maintainer decision,
+2026-11-14). The thread's level stays the server's: the runtime never
+switches its own permission mode. A Code session starts with
+`levelChanges`, and then outside Plan holds `EnterPlanMode`; a Plan
+session's `ExitPlanMode`, which Plan holds to hand its plan over (see
+[Native plan capture](#native-plan-capture)), is then asked rather than only
+refused. Each call is put to the person at every level, Full access
+and Plan included, as an `approval-request` with `levelChange`
+(`enter-plan`, or `exit-plan` with the plan, at most 32,768 characters);
+the person's own permission rules never answer it, and Octant Shield never
+reviews it. The call itself is always refused with what the person decided.
+Code journals the ask as an `approval-requested` with action `level-change`,
+the level it would move to, and the plan as evidence. On approval the host
+changes the level through the thread's ordinary access command, for the
+window that approved and journaled as the person's like any level change,
+then ends the turn that asked: Plan's read-only rule rests on the tool set
+and sandbox profile a session launches with, so the new level applies from
+the next turn's session and never inside the one that asked. A kept session
+started at the old level is stopped before that turn too. The level an
+approval applies is worked out when the person answers, from the thread as
+it is then, so a level lowered while the ask was open is the one a plan
+returns to. Entering Plan
+records the level it left as the thread's `planReturnPolicy` (Full access
+is recorded as approval-gated, because only the person chooses Full access),
+and an approved plan returns the thread there, or to approval-gated when the
+person put the thread in Plan. A declined ask leaves the level and the turn
+as they were. Work, Chat, and child runs do not answer level changes yet, so
+their sessions hold neither tool.
+
+#### Sessions started outside Octant
+
+An empty Code thread can continue a Claude Code session the person began
+outside Octant, in the same folder on the same account (maintainer decision,
+2026-11-14). The driver's `nativeSessions` lists the account's sessions
+whose own folder is the thread's (the SDK's `listSessions` under the
+account's configuration folder, as the resume lookup reads it), newest
+first, at most 50, leaving out any session an Octant thread already resumes:
+adopting one would point its resume record at another thread and strand the
+first. The check and the resume record it then writes are one step for each
+session: two threads adopting the same session at once take turns, and the
+second is refused. Each carries its title (the name the person gave it, or the runtime's
+summary of its first prompt) and branch for the picker only; a resume lookup
+never reads the title, and nothing journals it. Adopting writes the same
+resume record a session Octant started writes (`ClaudeResumeIdentity`, with
+the thread's new Octant session id, the folder, the model and the sign-in)
+and answers the bound resume cursor, so the thread's next turn resumes it
+through the ordinary exact-resume checks. The host journals the adoption in
+an operation of its own that holds no turn: `native-session-adopted`, naming
+only the runtime's session id, then the `provider-session-ready` with the
+cursor. The session read things Octant never saw, so the thread is marked as
+carrying outside content (`adopted-provider-session`) before anything is
+journaled; a thread that cannot be marked is not adopted. Only the person
+adopts: a window on the host or the host's own paired device, over a Project
+it can open, never the host acting for a routine; a client this host has not
+paired is refused before anything is read. A thread with a message or a
+session of its own is refused, and so is one with a turn admitted or
+running. While the adoption runs, a message sent to the thread is refused
+with a note to send again when it finishes, and the adoption checks again
+that the thread is empty just before it journals: a turn let in meanwhile
+would journal its own session, and the adopted one written after it would
+be the one the next turn resumes, dropping that conversation. The driver
+claims the session (its resume record) before the thread journals the
+adoption, so an adoption the thread then refuses (it changed meanwhile, or
+could not be marked) gives the claim back through the driver's `release`,
+which removes the record only while it still names this adoption's Octant
+session; the session is offered and adoptable again. The adoption's two
+events are journaled as one unit, so a claim given back never leaves half an
+adoption behind. Just before it journals, the adoption reads the thread again
+and refuses (giving the claim back) when its provider, model, Project binding,
+checkout or folder changed while the provider was asked: a session journaled
+for a checkout the thread no longer has could be taken up by neither a send
+nor another adoption. A session still open in a terminal is not
+detected; continuing it in both places writes two branches of one
+conversation. A Work thread cannot be started from a session yet.
 
 #### Wake-ups the model schedules
 
