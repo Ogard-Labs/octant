@@ -798,7 +798,9 @@ describe("agents managed tools", () => {
     });
     expect(Buffer.byteLength(JSON.stringify(outcome.result), "utf8")).toBeLessThanOrEqual(65_536);
     // Only the carried reply is settled as handed back; the other stays owed.
-    expect(settlements.map((command) => String(command.runId))).toEqual([ids.run]);
+    expect(settlements.map((command) => ("runId" in command ? String(command.runId) : ""))).toEqual(
+      [ids.run],
+    );
   });
 
   it("refuses a wait that names both runId and runIds, or repeats a child", async () => {
