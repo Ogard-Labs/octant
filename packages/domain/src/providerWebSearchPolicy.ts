@@ -140,6 +140,35 @@ export function decideProviderOwnSearch(input: {
 }
 
 /**
+ * Whether a provider's own search may serve the research route under the
+ * host's data policy, for any provider that reports one: Chat's research
+ * route and the native harness both read it, so neither offers a search the
+ * policy withholds. Under Any the provider's report stands, as it does for a
+ * vendor runtime whose search Octant cannot name. Under any other policy the
+ * search runs only where `decideProviderOwnSearch` allows it, so a provider
+ * whose search Octant cannot hold to the policy is withheld.
+ */
+export function providerNativeResearchUnderPolicy(input: {
+  readonly nativeResearch: "supported" | "unsupported" | "unavailable";
+  readonly origin: ProviderOwnSearchOrigin | undefined;
+  readonly policy: WebSearchDataPolicy;
+  readonly zdrStated: boolean;
+}): {
+  readonly nativeResearch: "supported" | "unsupported" | "unavailable";
+  readonly withheld: boolean;
+} {
+  if (input.nativeResearch !== "supported" || input.policy === "any") {
+    return { nativeResearch: input.nativeResearch, withheld: false };
+  }
+  const decision = decideProviderOwnSearch({
+    origin: input.origin,
+    policy: input.policy,
+    zdrStated: input.zdrStated,
+  });
+  return { nativeResearch: "supported", withheld: decision.kind !== "allowed" };
+}
+
+/**
  * Whether a native harness turn offers the provider's own search, and how.
  * The research route picks between Octant's own search and the provider's in
  * the order Architecture gives (`resolveResearchBackend`); the data policy
@@ -160,12 +189,19 @@ export function decideHarnessProviderSearch(input: {
   readonly tainted: boolean;
   readonly fullAccess: boolean;
 }): { readonly basicOnly: boolean; readonly withdrawAfterFirstStep: boolean } | undefined {
+  const native = providerNativeResearchUnderPolicy({
+    nativeResearch: input.origin === undefined ? "unsupported" : "supported",
+    origin: input.origin,
+    policy: input.policy,
+    zdrStated: input.zdrStated,
+  });
   const route = resolveResearchBackend({
     researchEnabled: input.research,
     routing: input.routing,
     webSearchReady: input.webSearchReady,
     appManagedTools: "supported",
-    nativeResearch: input.origin === undefined ? "unsupported" : "supported",
+    nativeResearch: native.nativeResearch,
+    nativeResearchWithheld: native.withheld,
   });
   if (route.kind !== "selected" || route.backend !== "provider-native") return undefined;
   const decision = decideProviderOwnSearch({

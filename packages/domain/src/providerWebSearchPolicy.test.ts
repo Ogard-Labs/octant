@@ -4,8 +4,10 @@ import {
   PROVIDER_OWN_SEARCH_OFFERS,
   decideHarnessProviderSearch,
   decideProviderOwnSearch,
+  providerNativeResearchUnderPolicy,
   providerOwnSearchOrigin,
 } from "./providerWebSearchPolicy";
+import { resolveResearchBackend } from "./researchPolicy";
 
 const createdAt = "2026-11-14T12:00:00.000Z";
 
@@ -159,5 +161,44 @@ describe("a native harness turn's provider search", () => {
       basicOnly: true,
       withdrawAfterFirstStep: true,
     });
+  });
+});
+
+describe("a provider's own search on the research route", () => {
+  it("keeps the provider's report under Any and withholds a search the policy cannot hold under any other", () => {
+    const decide = (
+      policy: "any" | "zdr-only" | "eu-only",
+      origin: "anthropic-api" | undefined,
+      zdrStated = false,
+    ) =>
+      providerNativeResearchUnderPolicy({ nativeResearch: "supported", origin, policy, zdrStated });
+    expect(decide("any", undefined)).toEqual({ nativeResearch: "supported", withheld: false });
+    expect(decide("eu-only", "anthropic-api", true)).toEqual({
+      nativeResearch: "supported",
+      withheld: true,
+    });
+    expect(decide("zdr-only", undefined, true).withheld).toBe(true);
+    expect(decide("zdr-only", "anthropic-api", true).withheld).toBe(false);
+    expect(
+      providerNativeResearchUnderPolicy({
+        nativeResearch: "unsupported",
+        origin: undefined,
+        policy: "eu-only",
+        zdrStated: false,
+      }),
+    ).toEqual({ nativeResearch: "unsupported", withheld: false });
+  });
+
+  it("reads a withheld search as unavailable with the data policy as its reason", () => {
+    expect(
+      resolveResearchBackend({
+        researchEnabled: true,
+        routing: "provider-native",
+        webSearchReady: false,
+        appManagedTools: "supported",
+        nativeResearch: "supported",
+        nativeResearchWithheld: true,
+      }),
+    ).toEqual({ kind: "unavailable", reason: "native-research-withheld-by-data-policy" });
   });
 });

@@ -10,7 +10,8 @@ export type ResearchBackendDecision =
       readonly reason:
         | "no-eligible-web-search-backend"
         | "app-managed-tools-unsupported"
-        | "native-research-unsupported";
+        | "native-research-unsupported"
+        | "native-research-withheld-by-data-policy";
     };
 
 export interface ResearchBackendInput {
@@ -20,6 +21,12 @@ export interface ResearchBackendInput {
   readonly webSearchReady: boolean;
   readonly appManagedTools: "supported" | "unsupported" | "unavailable";
   readonly nativeResearch: "supported" | "unsupported" | "unavailable";
+  /**
+   * The provider supports its own search, but the host's web search data
+   * policy withholds it (`providerNativeResearchUnderPolicy`). Absent, nothing
+   * withholds it.
+   */
+  readonly nativeResearchWithheld?: boolean;
 }
 
 function isSupported(value: "supported" | "unsupported" | "unavailable"): value is "supported" {
@@ -39,6 +46,9 @@ function selectOctant(input: ResearchBackendInput): ResearchBackendDecision {
 function selectNative(input: ResearchBackendInput): ResearchBackendDecision {
   if (!isSupported(input.nativeResearch)) {
     return { kind: "unavailable", reason: "native-research-unsupported" };
+  }
+  if (input.nativeResearchWithheld === true) {
+    return { kind: "unavailable", reason: "native-research-withheld-by-data-policy" };
   }
   return { kind: "selected", backend: "provider-native" };
 }
