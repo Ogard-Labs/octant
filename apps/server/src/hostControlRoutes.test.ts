@@ -10,7 +10,8 @@ import {
 import { decideHostMemoryLimits, type PrincipalKind } from "@octant/domain";
 import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { desktopCredentialStore } from "./hostDataMap";
-import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
+import { createWindowsLogonEntryPolicy, type HostRuntimeDiagnostics } from "@octant/host-runtime";
+import { createWindowsUserServiceManager } from "@octant/cli/service-manager";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { decodeWindowId } from "@octant/contracts";
 import {
@@ -216,6 +217,80 @@ describe("host control routes", () => {
     expect(status.policy.kind).toBe("unavailable");
     expect(status.lifecycle.enable.kind).toBe("unavailable");
     expect(status.lifecycle.disable.kind).toBe("unavailable");
+  });
+
+  it("keeps Settings and `octant server` on one Windows logon entry, and refuses a restart nothing would undo", async () => {
+    // One fake Run key serves both the host's reader and the CLI's reg.exe calls.
+    let entry = true;
+    const valueLine = `\r\n    Octant    REG_SZ    "C:\\bun.exe" "server" "start"\r\n`;
+    const cli = createWindowsUserServiceManager({
+      systemRoot: "C:\\Windows",
+      logonCommand: ["C:\\bun.exe", "C:\\octant\\bin.ts", "server", "start"],
+      host: () => ({ command: "C:\\bun.exe", args: [], env: {} }),
+      owner: { observe: async () => ({ status: "absent" }), requestStop: async () => false },
+      logs: async () => ({ entries: [], follow: false }),
+      sleep: async () => undefined,
+      runner: {
+        run: async (_command, args) => {
+          const missing = Object.assign(new Error("value not found"), { code: 1 });
+          if (args[0] === "add") entry = true;
+          if (args[0] === "delete") {
+            const existed = entry;
+            entry = false;
+            if (!existed) throw missing;
+          }
+          if (args[0] === "query" && !entry) throw missing;
+          return { stdout: args[0] === "query" ? valueLine : "", stderr: "" };
+        },
+      },
+    });
+    const { handler, requestOwnerStop } = setup({
+      diagnostics: () => makeDiagnostics("service"),
+      servicePolicy: createWindowsLogonEntryPolicy({
+        systemRoot: "C:\\Windows",
+        query: async () => ({ status: entry ? "present" : "absent" }),
+      }),
+    });
+    const settings = async () =>
+      decodeHostControlStatus(
+        await (await handler(
+          makeRequest("/api/host-control/status", { method: "GET", capability }),
+        ))!.json(),
+      );
+    const toggle = async (action: "enable" | "disable" | "restart") =>
+      decodeHostLifecycleOutcome(
+        await (await handler(
+          makeRequest("/api/host-control/lifecycle", { capability, body: { action } }),
+        ))!.json(),
+      );
+    const agree = async () => {
+      const policy = (await settings()).policy;
+      const installed = (await cli.status()).installed;
+      expect(policy).toMatchObject({ kind: "known", enabled: installed });
+      return installed;
+    };
+
+    expect(await agree()).toBe(true);
+    // A Settings toggle changes nothing, so the two can never drift apart.
+    await expect(toggle("disable")).resolves.toMatchObject({
+      kind: "refused",
+      code: "policy-unavailable",
+      guidance: expect.stringContaining("octant server disable"),
+    });
+    expect(await agree()).toBe(true);
+    await cli.disable();
+    expect(await agree()).toBe(false);
+    await expect(toggle("enable")).resolves.toMatchObject({ kind: "refused" });
+    expect(await agree()).toBe(false);
+    await cli.enable();
+    expect(await agree()).toBe(true);
+
+    await expect(toggle("restart")).resolves.toMatchObject({
+      kind: "refused",
+      code: "restart-unavailable",
+      guidance: expect.stringContaining("octant server restart"),
+    });
+    expect(requestOwnerStop).not.toHaveBeenCalled();
   });
 
   it("fails closed without a window capability, off loopback, or with a query string", async () => {

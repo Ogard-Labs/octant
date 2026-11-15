@@ -18244,9 +18244,14 @@ refuse by name on Windows.
   own `server start`, each argument quoted for Windows' standard argument
   parsing and written by `reg.exe` with an exact argument list. Install and
   enable write it, disable removes it, and uninstall stops the host and
-  removes it. That value is also the CLI's record of automatic startup on
-  Windows: the host's native service-policy record admits a write only from
-  the profile's claimed owner, so the CLI never writes it. Start launches the server entry hidden and detached and returns
+  removes it. That value is the one record of automatic startup on Windows.
+  The host reads it for Settings, so Settings and `octant server status`
+  always agree; the host never writes it (only the CLI knows the command it
+  records), so Settings' enable and disable report unavailable there and name
+  `octant server enable` and `octant server disable`. Settings' restart is
+  unavailable too and names `octant server restart`: a drain would leave the
+  host down until sign-in, since the value restarts nothing. The host's
+  native service-policy record is not consulted on Windows. Start launches the server entry hidden and detached and returns
   once the native pipe authenticates its owner, or fails when the process
   exits first. Stop sends the authenticated graceful stop and, only when the
   owner outlives it by ten seconds, ends the owner's whole process tree with

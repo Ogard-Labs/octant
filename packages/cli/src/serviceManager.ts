@@ -6,7 +6,13 @@ import { dirname, isAbsolute, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { HostRuntimePaths, HostLogReadResult, HostLogReadOptions } from "@octant/host-runtime";
-import { BoundedHostLogStore } from "@octant/host-runtime";
+import {
+  BoundedHostLogStore,
+  isWindowsSystemRoot,
+  windowsLogonEntryPresent,
+  WINDOWS_LOGON_ENTRY_KEY as WINDOWS_RUN_KEY,
+  WINDOWS_LOGON_ENTRY_VALUE as WINDOWS_RUN_VALUE,
+} from "@octant/host-runtime";
 
 const execFileAsync = promisify(execFile);
 const LAUNCHD_LABEL = "app.octant.server";
@@ -591,8 +597,6 @@ function isMissing(error: unknown): boolean {
   );
 }
 
-const WINDOWS_RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-const WINDOWS_RUN_VALUE = "Octant";
 const WINDOWS_POLL_MS = 250;
 const WINDOWS_START_ATTEMPTS = 120;
 const WINDOWS_GRACEFUL_STOP_ATTEMPTS = 40;
@@ -752,9 +756,7 @@ export function createWindowsUserServiceManager(
         ),
         options.owner.observe(),
       ]);
-      const installed =
-        value !== undefined &&
-        new RegExp(`^\\s+${WINDOWS_RUN_VALUE}\\s+REG_SZ\\s+\\S`, "m").test(value.stdout);
+      const installed = value !== undefined && windowsLogonEntryPresent(value.stdout);
       return {
         kind: "run-key",
         installed,
@@ -795,14 +797,7 @@ export function quoteWindowsCommandLine(args: readonly string[]): string {
     .join(" ");
 }
 
-/** A drive-absolute, normalized Windows folder with no quote or line break. */
-export function isWindowsSystemRoot(value: string): boolean {
-  return (
-    /^[A-Za-z]:\\[^"]*$/.test(value) &&
-    !["\0", "\r", "\n"].some((character) => value.includes(character)) &&
-    win32.normalize(value) === value
-  );
-}
+export { isWindowsSystemRoot };
 
 /** The System32 folder of a drive-absolute Windows folder, or a refusal. */
 export function windowsSystem32(systemRoot: string): string {
