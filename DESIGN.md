@@ -1284,7 +1284,8 @@ menu whose rows carry a description, an icon or a colour mark stays Octant's
 own and looks the same in the desktop app, a browser and the phone: the mode
 switcher, reply detail, the provider's own setup, the dock's named choice, add
 tool and more tools, the device switcher, the Project sort, colour and view
-pickers, a plan task's status, the composer's attach and mode menus, thread
+pickers, a plan task's status, the composer's attach and mode menus and every
+dropdown in the composer (`OctantSelectField` with `native={false}`), thread
 actions and Open in. Searchable pickers and popovers with embedded controls
 stay renderer surfaces too. Such a menu passes `native={false}` to
 `OctantMenu` or `OctantMenuRoot`.

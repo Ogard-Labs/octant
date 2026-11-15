@@ -175,6 +175,28 @@ describe("native dropdown menus", () => {
     );
   });
 
+  it("opens a select that opts out in the page, as the composer's dropdowns do", async () => {
+    const popup = vi.fn(async () => ({ kind: "dismissed" }));
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { popupNativeMenu: popup },
+    });
+    render(
+      <OctantSelectField
+        aria-label="Research routing"
+        native={false}
+        options={[
+          { id: "auto", label: "Automatic" },
+          { id: "web", label: "Web only" },
+        ]}
+        value="auto"
+      />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Research routing" }));
+    expect(await screen.findByRole("option", { name: "Web only" })).toBeInTheDocument();
+    expect(popup).not.toHaveBeenCalled();
+  });
+
   it("preserves checked choices, keyboard opening, and existing change callbacks", async () => {
     const radio = vi.fn();
     const check = vi.fn();

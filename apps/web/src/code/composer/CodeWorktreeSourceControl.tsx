@@ -99,6 +99,7 @@ export function CodeWorktreeSourceControl(props: CodeWorktreeSourceControlProps)
         <span className="oct-menu-option">Remote</span>
         <OctantSelectField
           aria-label="Remote"
+          native={false}
           disabled={
             props.disabled === true || props.onSelectRemote === undefined || !remoteChoosable
           }

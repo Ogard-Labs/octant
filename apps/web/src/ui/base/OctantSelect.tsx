@@ -62,6 +62,11 @@ export interface OctantSelectFieldProps {
   readonly placeholder?: ReactNode;
   readonly triggerClassName?: string;
   readonly value?: string;
+  /**
+   * `false` keeps Octant's own list in the desktop app, for a select that
+   * stands beside Octant's own menus (the composer's) and should look like them.
+   */
+  readonly native?: boolean;
 }
 
 /**
@@ -123,7 +128,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
     if (props.value === undefined) setUncontrolledValue(next);
     props.onValueChange?.(next);
   };
-  if (window.octantHost?.popupNativeMenu !== undefined)
+  if (props.native !== false && window.octantHost?.popupNativeMenu !== undefined)
     return (
       <span className="contents" ref={rootRef}>
         <OctantMenuRoot>

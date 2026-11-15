@@ -788,6 +788,7 @@ export function ChatComposer(props: ChatComposerProps) {
           <label htmlFor={researchRoutingId}>
             <span className="chat-composer__visually-hidden">Research routing</span>
             <OctantSelectField
+              native={false}
               disabled={settingsLocked}
               id={researchRoutingId}
               onValueChange={(value) =>
@@ -837,6 +838,7 @@ export function ChatComposer(props: ChatComposerProps) {
               <label htmlFor={providerId}>
                 <span className="chat-composer__visually-hidden">Provider</span>
                 <OctantSelectField
+                  native={false}
                   disabled={settingsLocked}
                   id={providerId}
                   onValueChange={props.onProviderChange}
@@ -848,6 +850,7 @@ export function ChatComposer(props: ChatComposerProps) {
             <label htmlFor={modelId}>
               <span className="chat-composer__visually-hidden">Model</span>
               <OctantSelectField
+                native={false}
                 disabled={settingsLocked}
                 id={modelId}
                 onValueChange={props.onModelChange}
@@ -883,6 +886,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 <label key={option.id}>
                   <span className="chat-composer__visually-hidden">{option.displayName}</span>
                   <OctantSelectField
+                    native={false}
                     disabled={settingsLocked}
                     onValueChange={(value) =>
                       props.onModelOptionChange?.(
