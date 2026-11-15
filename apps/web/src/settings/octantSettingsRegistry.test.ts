@@ -115,8 +115,9 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("general")?.slice(-4)).toEqual([
+    expect(ids("general")?.slice(-5)).toEqual([
       "user-profile",
+      "your-instructions",
       "host-phone-notifications",
       "host-push-gateway",
       "host-automation-notifications",

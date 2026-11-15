@@ -12,8 +12,9 @@ owns the coordinator role ([Coordinator threads](coordinator-threads.md)).
 Status: partly built. Built: the contracts and journal events, your
 instructions as a `person-instructions` block in Chat, Work, and Code on every
 provider and in Octant Harness's system prompt, the route that changes them,
-the inspector label, and Export my data. Designed, not built: the Settings
-field, Project instructions, and orchestration (delivery slices 2 to 4).
+the inspector label, Export my data, and the Your instructions field in
+Settings › General. Designed, not built: Project instructions and orchestration
+(delivery slices 3 and 4).
 
 ## Why
 
@@ -140,6 +141,11 @@ Settings › General, under Your identity, gains **Your instructions** and
 limit, a line saying what it is for and that a provider's own instruction files
 still apply, and Save. A Project's settings gain **Project instructions**
 beside Project memory. A window that cannot change them shows them read-only.
+The count is the field's length as the limit counts it, and Save stays off
+until the text changed and fits. The likely-secret warning shows while the
+text matches and does not block Save: the person may mean it. A save made
+against a version another window already changed is refused, says so, and the
+field rereads the current text.
 
 ## Delivery
 
