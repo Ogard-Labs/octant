@@ -1674,12 +1674,6 @@ absent rather than imitating them:
   never estimates the window. Resume is `precise` only where the agent
   advertises `loadSession` or session resume.
 
-Octant turns on no ACP agent's own subagents but Mistral Vibe's. Every other
-profile reports `nativeSetup.subagents` unsupported and is not a key
-provider, so no setup reaches it, and none sets `childRunMetaKey`, the
-field that names a child session Octant could show as a child run. Devin
-launches with `subagents_enabled: false` and Grok with `GROK_SUBAGENTS=0`.
-
 An agent whose shell runs in-process and sends no `session/request_permission`
 or `terminal/*` request before a command leaves Octant nothing to ask about.
 Its profile sets `shellWithoutRequest`, and a Work or Code session at Guarded
