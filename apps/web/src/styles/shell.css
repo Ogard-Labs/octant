@@ -2549,7 +2549,8 @@ html[data-octant-density="compact"]
 
   /* Tool tiles are panes of their own (see dock.css). Before any tool is
      open the dock shows its overview cards, and those sit on one pane. */
-  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::before {
+  .shell-frame
+    .right-utility-dock:not(:has(.dock-tiles)):not([data-dock-environment="true"])::before {
     position: absolute;
     z-index: -1;
     inset: var(--oct-title-rail-h) 0 0;
@@ -2573,7 +2574,8 @@ html[data-octant-density="compact"]
     pointer-events: none;
   }
 
-  .shell-frame .right-utility-dock:not(:has(.dock-tiles))::after {
+  .shell-frame
+    .right-utility-dock:not(:has(.dock-tiles)):not([data-dock-environment="true"])::after {
     position: absolute;
     z-index: 4;
     inset: var(--oct-title-rail-h) 0 0;

@@ -35,7 +35,7 @@ import { CodeAttachmentGallery, type CodeAttachmentReader } from "../code/CodeAt
 import type { CodeAttachmentReference } from "@octant/contracts";
 import { CodeCheckoutProvider } from "./CodeCheckoutContext";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
-import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentCard, EnvironmentGroup, EnvironmentRow } from "./EnvironmentGroup";
 import { EnvironmentExtraFolders } from "./EnvironmentExtraFolders";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { countGroupedLocalServerListenersByScope } from "./localServerGroups";
@@ -247,6 +247,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         open={environmentOpen}
         headerContent={
           <section className="environment-checkout" aria-label="Checkout">
+            <p aria-hidden="true" className="environment-card__caption">
+              Changes
+            </p>
             <EnvironmentGitGroup
               {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
               {...(controller.errorMessage === undefined
@@ -259,28 +262,19 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
               failureRef={failure}
               status={controller.status}
             />
-            {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
-              // The two things a checkout's facts lead to, side by side under
-              // them; as full-width rows they read as two more facts.
-              <div className="environment-checkout__actions">
-                {props.onOpenGit === undefined ? null : (
-                  <OctantButton onClick={props.onOpenGit} size="sm" type="button" variant="outline">
-                    <GitCommitHorizontal aria-hidden="true" size={14} />
-                    <span>Commit or push</span>
-                  </OctantButton>
-                )}
-                {props.onCreatePullRequest === undefined ? null : (
-                  <OctantButton
-                    onClick={props.onCreatePullRequest}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    <GitPullRequest aria-hidden="true" size={14} />
-                    <span>Create pull request</span>
-                  </OctantButton>
-                )}
-              </div>
+            {props.onOpenGit === undefined ? null : (
+              <EnvironmentRow
+                icon={GitCommitHorizontal}
+                label="Commit or push"
+                onClick={props.onOpenGit}
+              />
+            )}
+            {props.onCreatePullRequest === undefined ? null : (
+              <EnvironmentRow
+                icon={GitPullRequest}
+                label="Create pull request"
+                onClick={props.onCreatePullRequest}
+              />
             )}
           </section>
         }
@@ -297,6 +291,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 // The folder the thread works in: a separate worktree's own
                 // path, not the repository it was cut from.
                 path: readyObservation.worktreeRoot,
+                checkout:
+                  readyObservation.workingFolder?.kind === "extra"
+                    ? "Shared folder"
+                    : readyObservation.worktreeRoot === readyObservation.repositoryRoot
+                      ? "Main folder"
+                      : "Worktree",
               }),
           ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
           ...(runningServerCounts === undefined ? {} : { runningServerCounts }),

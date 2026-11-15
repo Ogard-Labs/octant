@@ -365,7 +365,7 @@ describe("the public-block visual language", () => {
     // it twice and read stronger than every other edge.
     for (const selector of [
       ".shell-frame > .workspace-layer::after",
-      ".shell-frame .right-utility-dock:not(:has(.dock-tiles))::after",
+      '.shell-frame .right-utility-dock:not(:has(.dock-tiles)):not([data-dock-environment="true"])::after',
     ]) {
       const rule = panel(selector);
       expect(rule, selector).toMatch(/border-left:\s*1px solid var\(--octant-pane-line\)/);

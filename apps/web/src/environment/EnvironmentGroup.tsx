@@ -9,15 +9,73 @@ import { OctantButton } from "../ui/base/OctantButton";
 export function EnvironmentTile(props: { readonly icon: IconComponent }) {
   return (
     <span aria-hidden="true" className="environment-tile">
-      <props.icon size={14} />
+      <props.icon size={16} />
     </span>
   );
 }
 
 /**
- * A captioned card of Environment rows, the Settings kit's grouped card: one
- * surface, hairlines between its rows. Rows used to float on the panel with
- * nothing to say which belonged together.
+ * One Environment row: a 16px glyph, the name, and a plain muted detail at the
+ * trailing edge. With `onClick` it is a button that fills on hover and shows a
+ * chevron there; without, it states a fact. The name gives way first when the
+ * line is short, the detail never. `title` carries what the line cannot hold.
+ */
+export function EnvironmentRow(props: {
+  readonly icon: IconComponent;
+  readonly label: string;
+  readonly detail?: ReactNode;
+  /** Muted text after the name on the same line, cut first when the line is short. */
+  readonly path?: string | undefined;
+  readonly title?: string;
+  readonly ariaLabel?: string;
+  readonly muted?: boolean;
+  readonly onClick?: () => void;
+}) {
+  const content = (
+    <>
+      <EnvironmentTile icon={props.icon} />
+      <span className="environment-row__title">{props.label}</span>
+      {props.path === undefined ? null : (
+        <span className="environment-row__path">
+          <span aria-hidden="true"> · </span>
+          {props.path}
+        </span>
+      )}
+      {props.detail === undefined ? null : (
+        <span className="environment-row__detail">{props.detail}</span>
+      )}
+    </>
+  );
+  if (props.onClick === undefined) {
+    return (
+      <p
+        aria-label={props.ariaLabel}
+        className="environment-row"
+        data-muted={props.muted === true ? "true" : undefined}
+        title={props.title}
+      >
+        {content}
+      </p>
+    );
+  }
+  return (
+    <OctantButton
+      aria-label={props.ariaLabel}
+      className="environment-row environment-link window-no-drag"
+      onClick={props.onClick}
+      title={props.title}
+      type="button"
+      variant="bare"
+    >
+      {content}
+      <ChevronRight aria-hidden="true" className="environment-row__trailing" size={14} />
+    </OctantButton>
+  );
+}
+
+/**
+ * A captioned section of Environment rows: a muted label, then the rows, with
+ * a hairline above the section rather than a box around it.
  */
 export function EnvironmentCard(props: {
   /** Absent for a card that needs no heading of its own. */

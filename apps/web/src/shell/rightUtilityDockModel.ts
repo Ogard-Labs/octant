@@ -134,6 +134,51 @@ export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["brows
 export const WORKBENCH_DOCK_WIDTH = 640;
 
 /**
+ * Every tool has one of two size classes, and this is the one place they are
+ * told apart.
+ *
+ * - **Flexible** tools draw a page, a diff, a device, a shell or a file tree,
+ *   and use whatever room there is: they open at the workbench width and are
+ *   resized between a minimum and the dock's ceiling.
+ * - **Fixed** tools are panels of rows and figures (Vitals, Plan, Agents,
+ *   Delivery and the rest). They always have the compact width and no resize
+ *   handle, whatever opens or closes beside them. Environment is fixed too, as
+ *   its own strip.
+ */
+export const FLEXIBLE_DOCK_SURFACES: ReadonlySet<string> = new Set([
+  "browser",
+  "terminal",
+  "review",
+  "canvas",
+  "document",
+  "files",
+  "ios-simulator",
+  "android-emulator",
+  "desktop",
+]);
+
+/** The width every fixed panel-like tool has. */
+export const COMPACT_DOCK_WIDTH = 360;
+
+/** The narrowest a flexible tool column is resized to. */
+export const FLEXIBLE_DOCK_MIN_WIDTH = 480;
+
+/**
+ * Whether the tool column is fixed: tools are open and every one is a panel.
+ * A flexible tool beside a fixed one gives the column the flexible rules.
+ * Environment is its own strip and does not count.
+ */
+export function dockColumnIsFixed(tabSurfaces: ReadonlyArray<string>): boolean {
+  const tools = tabSurfaces.filter((surface) => surface !== "environment");
+  return tools.length > 0 && !tools.some((surface) => FLEXIBLE_DOCK_SURFACES.has(surface));
+}
+
+/** The smallest a flexible column may be dragged to where the window has room for it. */
+export function flexibleDockMinimum(ceiling: number): number {
+  return Math.min(FLEXIBLE_DOCK_MIN_WIDTH, ceiling);
+}
+
+/**
  * Two columns of tools side by side need two usable widths. At 640px each got
  * about 300px, too narrow for a simulator's device or a page's layout, so a
  * dock showing two tool columns widens to this until the person sizes it. Not
@@ -146,12 +191,13 @@ export const TILED_DOCK_WIDTH = 840;
  * has one width, with no handle, so nothing a tool does beside it moves it.
  * The stylesheet reads it as `--octant-dock-env-width`, set by the shell.
  */
-export const ENVIRONMENT_STRIP_WIDTH = 240;
+export const ENVIRONMENT_STRIP_WIDTH = 300;
 
 /**
  * One width for the tool columns whatever the dock is showing, so a click inside
- * it moves nothing. Any open tool other than Environment holds the workbench
- * width, even while another tab is in front, and it is worked out from the
+ * it moves nothing. A column holding only fixed tools is the compact width, and
+ * a person's dragged width never changes it. Otherwise any open tool holds the
+ * workbench width at least, even while another tab is in front, and it is worked out from the
  * open tabs so a tab restored after a restart gets it too. Environment is its
  * own strip and never asks for tool width.
  */
@@ -163,7 +209,8 @@ export function resolveDockPresentationWidth(input: {
   /** How many columns of tool tiles the dock shows; one when it shows a single tool. */
   readonly tileColumns?: number;
 }): number {
-  if (input.widthChosen) return input.storedWidth;
+  if (dockColumnIsFixed(input.tabSurfaces)) return COMPACT_DOCK_WIDTH;
+  if (input.widthChosen) return Math.max(input.storedWidth, FLEXIBLE_DOCK_MIN_WIDTH);
   const holdsTool = input.tabSurfaces.some((surface) => surface !== "environment");
   const wanted = Math.max(
     holdsTool ? WORKBENCH_DOCK_WIDTH : 0,

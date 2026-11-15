@@ -36,7 +36,7 @@ export function ThreadActivityEnvironment() {
           {action} preview
         </OctantButton>
       ) : (
-        <span className="environment-row__detail">No active session</span>
+        <span className="environment-row__detail">None</span>
       )}
     </section>
   );

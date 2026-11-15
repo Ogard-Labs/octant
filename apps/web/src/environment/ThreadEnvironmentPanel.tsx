@@ -1,4 +1,5 @@
-import { GitBranch } from "../ui/icons";
+import { Folder, GitBranch } from "../ui/icons";
+import { EnvironmentRow } from "./EnvironmentGroup";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
 import { OutsideContentRow } from "../composer/OutsideContentNotice";
 import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
@@ -13,6 +14,8 @@ export interface ThreadEnvironmentSummaryFacts {
   readonly branch?: string;
   /** The checkout's folder on disk, shown under the name. */
   readonly path?: string;
+  /** What kind of checkout the branch is on: a worktree, the main folder or a shared one. */
+  readonly checkout?: string;
   readonly changes?: "clean" | "dirty";
   readonly workingLocation?: string;
   readonly runningServerCount?: number;
@@ -80,12 +83,9 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       className="thread-environment-dock"
       data-environment-status={props.summary.identity.status}
     >
-      {/* The dock strip's tab already says Environment; the header card names
-          what the thread works in — the name on its own line, then where:
-          the branch and the folder — and holds what that checkout has
-          changed. It had carried the name, the branch and a Changes chip, and
-          the section under it then listed the branch and the repository
-          again. */}
+      {/* The strip is named Environment; its first section names what the
+          thread works in (the folder with its path, then the branch) and what
+          that checkout has changed, as rows. */}
       {props.computer === undefined ? null : (
         <div className="thread-environment-dock__computer">{props.computer}</div>
       )}
@@ -94,27 +94,23 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         {/* The whole summary stays one sentence for assistive technology;
             the visible parts are its layout. */}
         <span className="visually-hidden">{sentence}</span>
-        <div className="thread-environment-dock__identity" title={sentence}>
-          <span aria-hidden="true" className="thread-environment-dock__name">
-            {props.summary.identity.label}
-          </span>
-          {headline.branch === undefined && headline.place === undefined ? null : (
-            <span aria-hidden="true" className="thread-environment-dock__meta">
-              {headline.branch === undefined ? null : (
-                <span className="thread-environment-dock__branch">
-                  <GitBranch aria-hidden="true" size={12} />
-                  <span>{headline.branch}</span>
-                </span>
-              )}
-              {headline.branch === undefined || headline.place === undefined ? null : (
-                <span className="thread-environment-dock__separator">·</span>
-              )}
-              {headline.place === undefined ? null : (
-                <span className="thread-environment-dock__place">{headline.place}</span>
-              )}
-            </span>
-          )}
-        </div>
+        <p aria-hidden="true" className="environment-card__caption">
+          Environment
+        </p>
+        <EnvironmentRow
+          icon={Folder}
+          label={props.summary.identity.label}
+          path={headline.place}
+          title={sentence}
+        />
+        {headline.branch === undefined ? null : (
+          <EnvironmentRow
+            detail={props.summary.checkout}
+            icon={GitBranch}
+            label={headline.branch}
+            title={headline.branch}
+          />
+        )}
         {props.headerContent}
       </header>
       <div className="thread-environment-dock__body">
