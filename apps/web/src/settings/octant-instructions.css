@@ -1,0 +1,36 @@
+/* A compound editor stacks its control under the label (Settings layout):
+   the text field takes the row's whole width, with its count and Save on one
+   line beneath it. */
+.octant-instructions-row > .setrow > .setrow-control {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  justify-self: stretch;
+  margin-top: var(--oct-space-3);
+}
+.octant-instructions-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+.octant-instructions-field textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+}
+.octant-instructions-field__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+}
+.octant-instructions-field__count,
+.octant-instructions-field__note {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
+  font-variant-numeric: tabular-nums;
+}
+.octant-instructions-field__count[data-over="true"] {
+  color: var(--oct-danger-fg);
+}

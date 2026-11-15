@@ -94,6 +94,7 @@
     "./agent-grant-client": "./src/agentGrantClient.ts",
     "./person-memory-client": "./src/personMemoryClient.ts",
     "./todo-client": "./src/todoClient.ts",
+    "./octant-instructions-client": "./src/octantInstructionsClient.ts",
     "./protected-files-client": "./src/protectedFilesClient.ts",
     "./archived-worktrees-client": "./src/archivedWorktreesClient.ts",
     "./disk-cleanup-client": "./src/diskCleanupClient.ts",
