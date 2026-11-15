@@ -1277,6 +1277,9 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes:
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
+    ...(match.kind === "exact" && "maxResponseBytes" in match
+      ? { maxResponseBytes: match.maxResponseBytes }
+      : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
