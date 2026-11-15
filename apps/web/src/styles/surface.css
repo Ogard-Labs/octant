@@ -838,6 +838,58 @@
   }
 }
 
+/* The dock beside a start screen is one surface of its own, like the thread
+   list: the sidebar's colour, see-through enough for the ground to show as a
+   blur, under a veil of the ground's own colour. The ground runs to the
+   window's edge there, and a pane on the panes' ordinary fill let its glyphs
+   and cells stand at full strength behind a terminal's head, a tool's rows or
+   a pull request's text. Blurred and dimmed, the ground is a tone, not a
+   pattern, so text keeps its contrast. The tiles and the Environment section
+   inside draw no fill of their own there: the dock's is the one surface. */
+@media (min-width: 681px) {
+  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+    .right-utility-dock::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0;
+    background:
+      linear-gradient(var(--octant-start-pane-veil), var(--octant-start-pane-veil)),
+      var(--octant-start-pane-fill);
+    backdrop-filter: blur(var(--octant-glass-blur)) saturate(120%);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
+    --octant-start-pane-fill: color-mix(
+      in srgb,
+      color-mix(in srgb, var(--octant-panel-opaque) 90%, var(--octant-ground-opaque)) 72%,
+      transparent
+    );
+    --octant-start-pane-veil: color-mix(in srgb, var(--octant-ground-opaque) 30%, transparent);
+  }
+
+  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
+    .right-utility-dock
+    :is(.dock-tile, .dock-env-strip) {
+    background: transparent;
+  }
+
+  /* No see-through surface where the person, or the system, asked for none. */
+  html:is([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
+    --octant-start-pane-fill: var(--octant-panel-opaque);
+    --octant-start-pane-veil: transparent;
+  }
+}
+
+@media (min-width: 681px) and (prefers-reduced-transparency: reduce) {
+  .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) {
+    --octant-start-pane-fill: var(--octant-panel-opaque);
+    --octant-start-pane-veil: transparent;
+  }
+}
+
 @media (min-width: 681px) {
   .app-backdrop[data-placement="welcome"] {
     top: var(--oct-title-rail-h);

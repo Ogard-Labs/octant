@@ -1696,7 +1696,9 @@ application ground; every other page covers it with the reading veil.
   hidden or it is off screen, caps its backing store at twice the display ratio
   and 5 million pixels, waits for idle time and fades in over
   `--oct-motion-ground-in`. Text never sits on it bare: the composer box is
-  opaque on an opaque window, Home masks or dims behind its text, every other
+  opaque on an opaque window, Home masks or dims behind its text, a dock opened
+  beside a start screen is the sidebar's colour over the ground blurred and
+  dimmed, every other
   page lies under the veil. The Home ground fades to the stage colour over the lower 45% in both modes. Reduced
   motion holds a still frame. Increased contrast turns the ground off. Under
   glass the ground lies on the coat, the composer keeps its wash, and the

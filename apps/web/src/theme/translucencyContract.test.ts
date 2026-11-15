@@ -191,6 +191,29 @@ describe("window glass", () => {
     );
   });
 
+  it("lays the dock beside a start screen on the sidebar's colour with the ground blurred and dimmed behind it", () => {
+    const surface = read("styles/surface.css");
+    const rule =
+      /\.shell-frame:has\(main\.workspace\[data-octant-start-only\]:not\(\[hidden\]\)\)\s*\.right-utility-dock::before \{([^}]*)\}/.exec(
+        surface,
+      )?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).toMatch(/backdrop-filter:\s*blur\(var\(--octant-glass-blur\)\)/);
+    expect(rule).toMatch(/var\(--octant-start-pane-veil\)/);
+    expect(rule).toMatch(/var\(--octant-start-pane-fill\)/);
+    // The fill is the sidebar's colour, and reduced transparency keeps it whole.
+    expect(surface).toMatch(
+      /--octant-start-pane-fill: color-mix\(\s*in srgb,\s*color-mix\(in srgb, var\(--octant-panel-opaque\) 90%, var\(--octant-ground-opaque\)\) 72%,/,
+    );
+    expect(surface).toMatch(
+      /data-octant-increased-contrast="true"\]\)\s*\.shell-frame:has\([^{]*\{\s*--octant-start-pane-fill: var\(--octant-panel-opaque\);/,
+    );
+    // The panes inside draw no second fill over it.
+    expect(surface).toMatch(
+      /\.right-utility-dock\s*:is\(\.dock-tile, \.dock-env-strip\) \{\s*background: transparent;/,
+    );
+  });
+
   it("runs a start screen's one ground under the sidebar only where the sidebar's fill is translucent", () => {
     const surface = read("styles/surface.css");
     // One layer in the frame, shown only while a start screen is open, never a second copy.
