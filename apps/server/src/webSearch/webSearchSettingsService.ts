@@ -364,8 +364,14 @@ export class WebSearchSettingsService {
       policy: normalized.settings.policy,
       backends: normalized.settings.backends.map((entry) => {
         const { credentialRef: _ignored, ...rest } = entry;
-        if (!WEB_SEARCH_BACKEND_OFFERS[entry.kind].takesKey) return rest;
         const prior = before.get(String(entry.id));
+        // An entry that keeps its id but moves to a kind that takes no key,
+        // such as a vendor switched to SearXNG, still leaves its old key in the
+        // broker; the id-based sweep below does not see it, since the id stays.
+        if (!WEB_SEARCH_BACKEND_OFFERS[entry.kind].takesKey) {
+          if (prior?.credentialRef !== undefined) staleKeys.push(prior.credentialRef);
+          return rest;
+        }
         // The host keeps an entry's reference; a new address or a new vendor
         // is a new key, as a model endpoint's new address is.
         const kept =

@@ -309,6 +309,27 @@ describe("web search keys", () => {
     expect(stored.size).toBe(0);
   });
 
+  it("deletes the stored key when a keyed entry becomes a SearXNG instance under the same id", async () => {
+    const { keys, stored } = memoryKeys();
+    const { service } = openHarness({ value: undefined }, { keys });
+    await service.set({ settings: { policy: "any", backends: [braveEntry] } }, "local-window");
+    await service.setKey({ entryId: braveEntry.id, key: "brave-key" }, "local-window");
+    expect(stored.size).toBe(1);
+
+    await service.set(
+      {
+        settings: {
+          policy: "any",
+          backends: [{ ...braveEntry, kind: "searxng", address: "https://search.example" }],
+        },
+      },
+      "local-window",
+    );
+
+    expect(stored.size).toBe(0);
+    expect(service.read().settings.backends[0]?.credentialRef).toBeUndefined();
+  });
+
   it("leaves no key behind when the entry's address changes while its key is being stored", async () => {
     const { keys, stored } = memoryKeys();
     let release = () => {};
