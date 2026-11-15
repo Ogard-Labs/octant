@@ -63,6 +63,7 @@ export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
   { method: "GET", path: "/api/host/resources" },
   { method: "POST", path: "/api/code/local-servers/commands" },
   { method: "GET", path: "/api/todos" },
+  { method: "GET", path: "/api/todos/changes" },
   { method: "POST", path: "/api/todos/commands" },
 ];
 

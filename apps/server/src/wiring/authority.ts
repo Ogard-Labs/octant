@@ -136,6 +136,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
   const todos = new TodoStore({
+    defaultActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     journal: persistence.journal,
     uuid: randomUUID,
     clock: () => decodeUtcTimestamp(new Date().toISOString()),
@@ -373,7 +374,11 @@ export function wireAuthority(deps: AuthorityDependencies) {
     store: personMemory,
     windowAuthorityStore,
   });
-  const todoRoutes = createTodoRouteHandler({ store: todos, windowAuthorityStore });
+  const todoRoutes = createTodoRouteHandler({
+    store: todos,
+    feed: machineChangeFeed,
+    windowAuthorityStore,
+  });
   const octantInstructionsRoutes = createOctantInstructionsRouteHandler({
     store: octantInstructions,
     windowAuthorityStore,

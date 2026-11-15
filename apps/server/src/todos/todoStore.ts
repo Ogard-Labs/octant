@@ -100,6 +100,7 @@ export interface TodoStoreDependencies {
   readonly clock: () => UtcTimestamp;
   /** This host's stable id, which names its own Projects in a to-do's links. */
   readonly hostId: () => StableHostId;
+  readonly defaultActor: EventActor;
   readonly defaultListHost?: () => Extract<TodoListHostChoice, { kind: "other-host" }> | undefined;
 }
 
@@ -160,7 +161,10 @@ export class TodoStore {
 
   #effectiveListHost(): TodoListHostChoice {
     if (this.#listHost.version !== 0 || this.#todos.size > 0) return this.#listHost.choice;
-    return this.#defaultListHost?.() ?? this.#listHost.choice;
+    const choice = this.#defaultListHost?.();
+    if (choice === undefined) return this.#listHost.choice;
+    this.chooseListHost({ kind: "choose-todo-list-host", choice }, this.#dependencies.defaultActor);
+    return this.#listHost.choice;
   }
 
   listHost(): TodoListHostView {

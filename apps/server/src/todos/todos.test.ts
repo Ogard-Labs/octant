@@ -20,6 +20,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { createRemoteRoutePolicy } from "../remoteRoutePolicy";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
+import { MachineChangeFeed } from "../machineChangeFeed";
 import { createTodoRouteHandler } from "./todoRoutes";
 import { registerTodoEvents, TodoStore } from "./todoStore";
 
@@ -78,12 +79,20 @@ function host(
       uuid: () => crypto.randomUUID(),
       clock: () => decodeUtcTimestamp(START),
       hostId: () => decodeStableHostId(HOST_ID),
+      defaultActor: actor,
       ...(defaultListHost === undefined ? {} : { defaultListHost }),
     });
   const store = start();
   const windows = new WindowAuthorityStore();
   windows.register({ windowId, capability, now: 0 });
-  const routes = createTodoRouteHandler({ store, windowAuthorityStore: windows, now: () => 0 });
+  const feed = new MachineChangeFeed();
+  journal.subscribeCommitted((append) => feed.publishCommitted(append));
+  const routes = createTodoRouteHandler({
+    store,
+    feed,
+    windowAuthorityStore: windows,
+    now: () => 0,
+  });
 
   const fromWindow = (path: string, body?: unknown) =>
     routes(
@@ -253,6 +262,7 @@ describe("the person's to-do list", () => {
     const h = host();
     const response = await createTodoRouteHandler({
       store: h.store,
+      feed: new MachineChangeFeed(),
       windowAuthorityStore: new WindowAuthorityStore(),
       now: () => 0,
     })(new Request("http://127.0.0.1/api/todos"));
@@ -370,6 +380,31 @@ describe("the person's to-do list", () => {
     expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
   });
 
+  it("notifies a paired device when the list changes and refuses other devices", async () => {
+    const h = host();
+    const first = await h.fromDevice("host-person", "/api/todos/changes");
+    const cursor = await first?.json();
+    expect(cursor).toMatchObject({ changed: true });
+    const waiting = h.fromDevice(
+      "host-person",
+      `/api/todos/changes?afterSequence=${cursor.sequence}&epoch=${cursor.epoch}`,
+    );
+    await h.fromWindow("/api/todos/commands", { kind: "add-todo", todoId: TODO_1, title: "Live" });
+    const updated = await (await waiting)?.json();
+    expect(updated).toMatchObject({ changed: true });
+    const replay = await h.fromDevice(
+      "host-person",
+      `/api/todos/changes?afterSequence=${cursor.sequence}&epoch=${cursor.epoch}`,
+    );
+    expect(await replay?.json()).toMatchObject({ changed: true, sequence: updated.sequence });
+    const restarted = await h.fromDevice(
+      "host-person",
+      "/api/todos/changes?afterSequence=0&epoch=old-process",
+    );
+    expect(await restarted?.json()).toMatchObject({ changed: true });
+    expect((await h.fromDevice("hub-roster", "/api/todos/changes"))?.status).toBe(403);
+  });
+
   it("uses the hub by default without hiding an existing list or overriding an explicit choice", async () => {
     let joined = false;
     const hub = {
@@ -381,6 +416,8 @@ describe("the person's to-do list", () => {
     expect(h.store.listHost().choice).toEqual({ kind: "this-host" });
     joined = true;
     expect(h.store.listHost().choice).toEqual(hub);
+    joined = false;
+    expect(h.start().listHost().choice).toEqual(hub);
     expect(
       (
         await h.fromWindow("/api/todos/commands", {

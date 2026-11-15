@@ -1,7 +1,8 @@
-import type { TodoClient } from "@octant/client-runtime/todo-client";
+import type { TodoClient, TodoChangeCursor } from "@octant/client-runtime/todo-client";
 import type { TodoCommand, TodoListView, TodoRefused } from "@octant/contracts/todos";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
+import { waitForReconnect } from "../lib/waitForReconnect";
 
 export type TodoListRead =
   | { readonly status: "loading" }
@@ -43,6 +44,10 @@ export function useTodoList(
      * screen with this reason, and no change is sent.
      */
     readonly unreachable?: string;
+    readonly waitForChange?: (
+      cursor: TodoChangeCursor | undefined,
+      signal: AbortSignal,
+    ) => Promise<TodoChangeCursor & { readonly changed: boolean }>;
   },
 ): TodoList {
   const [read, setRead] = useState<TodoListRead>({ status: "loading" });
@@ -93,7 +98,32 @@ export function useTodoList(
     },
     [client, unreachable],
   );
-  useVisibleRefresh(refresh, revision, REREAD_MS);
+  const [remoteRevision, setRemoteRevision] = useState(0);
+  useVisibleRefresh(refresh, (revision ?? 0) + remoteRevision, REREAD_MS);
+  const waitForChange = where?.waitForChange;
+  useEffect(() => {
+    if (waitForChange === undefined || unreachable !== undefined) return;
+    const controller = new AbortController();
+    void (async () => {
+      let cursor: TodoChangeCursor | undefined;
+      while (!controller.signal.aborted) {
+        try {
+          const result = await waitForChange(cursor, controller.signal);
+          if (controller.signal.aborted) return;
+          cursor = result;
+          if (result.changed) {
+            setRemoteRevision((current) => current + 1);
+            await waitForReconnect(controller.signal, 100);
+          }
+        } catch {
+          if (controller.signal.aborted) return;
+          cursor = undefined;
+          await waitForReconnect(controller.signal, 1000);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [waitForChange, unreachable]);
 
   const change = useCallback(
     async (command: TodoCommand): Promise<TodoChangeOutcome> => {

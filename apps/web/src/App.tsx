@@ -371,6 +371,7 @@ import { useProjectController } from "./projects/useProjectController";
 import { countTodos, todoListIsReadOnly } from "./todos/todoListModel";
 import {
   createTodoClient,
+  createTodoChangeClient,
   type TodoClient,
   type TodoListHostClient,
 } from "@octant/client-runtime/todo-client";
@@ -2776,6 +2777,7 @@ function LaunchedShell(
     readonly client: TodoClient | undefined;
     readonly remote: boolean;
     readonly unreachable?: string;
+    readonly waitForChange?: ReturnType<typeof createTodoChangeClient>;
   } => {
     if (todoListChoiceKey === "this-host") {
       return { client: launchedClients.todoClient, remote: false };
@@ -2809,14 +2811,15 @@ function LaunchedShell(
             : `${name} cannot be reached, so nothing can be changed.`,
       };
     }
+    // The session owns the destination and strips the local window capability.
+    const options = {
+      baseUrl: "http://127.0.0.1",
+      fetch: createRemoteProductFetch({ bridge: slot.bridge }),
+      windowCapability: "",
+    };
     return {
-      client: createTodoClient({
-        // The remote session owns the destination; the base URL only shapes
-        // the path, and no window capability leaves this computer.
-        baseUrl: "http://127.0.0.1",
-        fetch: createRemoteProductFetch({ bridge: slot.bridge }),
-        windowCapability: "",
-      }),
+      client: createTodoClient(options),
+      waitForChange: createTodoChangeClient(options),
       remote: true,
     };
     // The transport slot changes in place; the revision says when to look again.
@@ -2829,11 +2832,12 @@ function LaunchedShell(
   ]);
   const todoList = useTodoList(
     todoListSource.client,
-    // Another computer's changes do not reach this host's feed; its list is
-    // read again on the slow timer and after each change sent from here.
     todoListSource.remote ? undefined : machineChanges.todos,
     {
       key: todoListChoiceKey,
+      ...(todoListSource.waitForChange === undefined
+        ? {}
+        : { waitForChange: todoListSource.waitForChange }),
       ...(todoListSource.unreachable === undefined
         ? {}
         : { unreachable: todoListSource.unreachable }),

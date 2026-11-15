@@ -28,9 +28,9 @@ list on is built: this host, or a computer this window is paired with, saved
 on this host and refused once this host keeps a to-do. A window reaches a list
 on another computer through its own pairing with it, shows the last list
 read-only when that computer cannot be reached, and keeps quick adds as
-unsent drafts on the device. Not built yet: the hub as the default list host,
-Start into another host's Project, and a list host's changes reaching windows
-on other computers as they happen (they read it every 30 seconds). The phone
+unsent drafts on the device. In progress: defaulting an empty list to the hub and sending list-change notices
+to windows on paired computers; these need end-to-end verification. Not built
+yet: Start into another host's Project. The phone
 screen is built: Inbox › To-dos lists the connected computer's open and done
 to-dos, adds one with quick add, ticks one off or opens it again, and starts a
 thread from one.
@@ -102,10 +102,10 @@ Every person has one **list host**.
 
 - **Default.** A host that belongs to a hub uses the hub as its list host; a
   phone or browser that joined a hub as a guest uses the hub. A host in no hub
-  uses itself, and a phone paired with it uses that host. Built so far: every
-  host uses itself until the person chooses; the hub default is not built,
-  because applied to a host that already keeps to-dos it would show an empty
-  list in place of the person's own.
+  uses itself, and a phone paired with it uses that host. In progress: an
+  empty spoke records its hub as the default when first read or changed; a
+  host that already keeps to-dos stays on itself, and an explicit choice wins.
+  A window reaches that hub through its own pairing.
 - **Choosing.** Settings › To-dos › Keep the list on names the list host: this
   host, the hub, or a computer this host is paired with. In the first version
   the choice can change only while this host's own list is empty; moving a

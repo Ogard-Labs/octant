@@ -1145,6 +1145,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/todos/changes",
+    methods: ["GET"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/todos",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,

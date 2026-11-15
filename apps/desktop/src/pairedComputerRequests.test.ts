@@ -199,6 +199,7 @@ describe("a window's request to a paired computer", () => {
         "GET /api/host/resources",
         "POST /api/code/local-servers/commands",
         "GET /api/todos",
+        "GET /api/todos/changes",
         "POST /api/todos/commands",
       ],
     );
