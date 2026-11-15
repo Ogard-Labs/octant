@@ -161,6 +161,7 @@ const STANDING_CONTEXT_KINDS: ReadonlySet<ProviderContextBlock["kind"]> = new Se
   "skill-instructions",
   "person-instructions",
   "project-instructions",
+  "orchestration-instructions",
   "person-memory",
   "project-memory",
   "work-item",

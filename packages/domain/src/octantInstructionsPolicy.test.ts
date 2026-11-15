@@ -6,6 +6,8 @@ import {
   personInstructionsBlockText,
   PROJECT_INSTRUCTIONS_PREAMBLE,
   projectInstructionsBlockText,
+  ORCHESTRATION_INSTRUCTIONS_PREAMBLE,
+  orchestrationInstructionsBlockText,
 } from "./octantInstructionsPolicy";
 import { looksLikeSecret } from "./secretShapedTextPolicy";
 
@@ -36,6 +38,14 @@ describe("Octant instructions policy", () => {
     );
     expect(PROJECT_INSTRUCTIONS_PREAMBLE).toContain("after the person's own instructions");
     expect(PROJECT_INSTRUCTIONS_PREAMBLE).toContain("grant no permission");
+  });
+
+  it("sends orchestration after a preamble that leaves the start setting and bounds in charge", () => {
+    expect(orchestrationInstructionsBlockText("")).toBeUndefined();
+    expect(orchestrationInstructionsBlockText("Split.")).toBe(
+      `${ORCHESTRATION_INSTRUCTIONS_PREAMBLE}\n\nSplit.`,
+    );
+    expect(ORCHESTRATION_INSTRUCTIONS_PREAMBLE).toContain("start setting and bounds");
   });
 
   it("says the text is for Octant, that a provider's own files come first, and that it grants nothing", () => {

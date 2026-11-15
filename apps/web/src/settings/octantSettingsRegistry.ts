@@ -205,6 +205,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "instructions rules system prompt custom instructions providers models canvas routines board",
         },
         {
+          id: settingId("orchestration-instructions"),
+          label: "Orchestration",
+          scope: "host",
+          keywords:
+            "orchestration coordinator planner workers instructions delegate providers models",
+        },
+        {
           id: settingId("host-phone-notifications"),
           label: "Phone notifications",
           scope: "host",

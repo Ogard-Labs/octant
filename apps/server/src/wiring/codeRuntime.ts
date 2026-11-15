@@ -748,8 +748,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         },
         conversationInputTransfer,
         shield: hostShield,
-        octantInstructionBlocks: ({ thread }) =>
-          octantInstructions.contextBlocks({ projectId: String(thread.projectId) }),
+        octantInstructionBlocks: ({ thread, orchestrates }) =>
+          octantInstructions.contextBlocks({ projectId: String(thread.projectId), orchestrates }),
         personMemoryBlock: ({ thread, windowId }) =>
           personMemoryAccess.blockFor({
             mode: "code",
