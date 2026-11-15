@@ -86,6 +86,8 @@ async function searchOne(
   let key: string | undefined;
   if (offer.takesKey) {
     key = await routing.resolveKey?.(entry).catch(() => undefined);
+    // The turn may have stopped while the broker answered; nothing is sent then.
+    if (routing.search.signal?.aborted === true) throw new WebSearchInterrupted();
     if (key === undefined) return { kind: "failed", failure: "needs-key" };
   }
   const lifecycle = new AbortController();
@@ -154,12 +156,23 @@ export async function searchWebSearchBackends(routing: WebSearchRouting): Promis
     });
   let stopped = false;
   for (const entry of routing.backends) {
+    if (routing.search.signal?.aborted === true) {
+      report();
+      throw new WebSearchInterrupted();
+    }
     const remaining = deadline - now();
     if (stopped || remaining <= 0) {
       failed.push({ entryId: entry.id, backend: entry.kind, failure: "not-tried" });
       continue;
     }
-    const outcome = await searchOne(entry, routing, Math.min(backendTimeout, remaining));
+    let outcome: BackendOutcome;
+    try {
+      outcome = await searchOne(entry, routing, Math.min(backendTimeout, remaining));
+    } catch (error) {
+      // The backends already asked are journaled even when the turn stops.
+      if (error instanceof WebSearchInterrupted) report();
+      throw error;
+    }
     if (outcome.kind === "answered") {
       report(entry);
       return { query: routing.search.query, backend: "searxng", results: outcome.results };

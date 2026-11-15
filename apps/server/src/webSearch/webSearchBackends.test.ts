@@ -143,6 +143,35 @@ describe("web search fallback", () => {
     await expect(run).rejects.toBeInstanceOf(WebSearchInterrupted);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("sends no query when the turn is cancelled while a key is being read, and records what was tried", async () => {
+    const controller = new AbortController();
+    const fetch = vi.fn<Fetch>(async () => new Response("down", { status: 503 }));
+    const { run, routed } = route([searx, brave, searxTwo], fetch, {
+      search: { query: "octant", limit: 5, signal: controller.signal },
+      resolveKey: async () => {
+        controller.abort();
+        return "key";
+      },
+    });
+    await expect(run).rejects.toBeInstanceOf(WebSearchInterrupted);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(routed).toEqual([
+      { failed: [{ entryId: searx.id, backend: "searxng", failure: "network" }] },
+    ]);
+  });
+
+  it("sends nothing when the turn was cancelled before the search began", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const fetch = vi.fn<Fetch>(async () => answer("one"));
+    const { run, routed } = route([searx], fetch, {
+      search: { query: "octant", limit: 5, signal: controller.signal },
+    });
+    await expect(run).rejects.toBeInstanceOf(WebSearchInterrupted);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(routed).toEqual([{ failed: [] }]);
+  });
 });
 
 describe("search vendors", () => {
