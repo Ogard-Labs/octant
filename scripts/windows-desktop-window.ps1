@@ -6,6 +6,16 @@ param([Parameter(Mandatory=$true)][int]$OwnedPid,
   [int]$ParentPid = 0, [string]$ParentExecutable = '', [string]$ParentBirth = '',
   [string]$ChildExecutable = '')
 $ErrorActionPreference = 'Stop'
+# A probe killed by its caller's limit leaves no stdout, so three host-only
+# failures in one day said only that 8 seconds passed. Each stage writes how
+# long this process had been alive when it finished, so a killed probe's
+# stderr names the stage that was slow: PowerShell start, compiling the type
+# below, or a process-tree query.
+function Write-OctantStage([string]$Name) {
+  $octantAlive = [int](([DateTime]::Now - [Diagnostics.Process]::GetCurrentProcess().StartTime).TotalMilliseconds)
+  [Console]::Error.WriteLine("octant-stage $Name $octantAlive")
+}
+Write-OctantStage 'started'
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -88,6 +98,7 @@ public static class OctantDesktopWindow {
   }
 }
 '@
+Write-OctantStage 'compiled'
 try {
   if (-not [OctantDesktopWindow]::ImageComparisonControl()) { throw 'Owned image comparison control failed' }
   if ($Mode -eq 'exited') {
@@ -98,10 +109,12 @@ try {
   if ($Mode -eq 'host-only') {
     if ($ParentPid -le 0 -or -not $ParentExecutable -or -not $ParentBirth -or -not $ExpectedBirth) { throw 'Supply the owned launch ancestry' }
     [void][OctantDesktopWindow]::Run($OwnedPid, $Executable, $ExpectedBirth, $false)
-    $octantServerInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnedPid"
+    $octantServerInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$OwnedPid" -OperationTimeoutSec 10
+    Write-OctantStage 'server-ancestry'
     if ($null -eq $octantServerInfo -or $octantServerInfo.ParentProcessId -le 0) { throw 'Owned server ancestry unavailable' }
     $octantGuiPid = [int]$octantServerInfo.ParentProcessId
-    $octantGuiInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$octantGuiPid"
+    $octantGuiInfo = Get-CimInstance Win32_Process -Filter "ProcessId=$octantGuiPid" -OperationTimeoutSec 10
+    Write-OctantStage 'gui-ancestry'
     if ($null -eq $octantGuiInfo -or $octantGuiInfo.ParentProcessId -ne $ParentPid) { throw 'Owned GUI ancestry changed' }
     [void][OctantDesktopWindow]::Run($ParentPid, $ParentExecutable, $ParentBirth, $false)
     if ([OctantDesktopWindow]::Run($octantGuiPid, $Executable, '', $false)) { throw 'The host-only launch opened an ordinary window' }

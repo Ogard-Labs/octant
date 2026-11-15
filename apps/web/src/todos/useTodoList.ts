@@ -20,9 +20,9 @@ export interface TodoList {
 }
 
 /**
- * Other windows and the person's phone change the list too, and nothing tells
- * this window yet (live updates are later work in docs/design/todos.md), so the
- * list is read again while the window is visible.
+ * Other windows and the person's phone change the list too. The host's change
+ * feed says so, and the list is read again on each change; the slow read while
+ * the window is visible covers a feed that dropped and is reconnecting.
  */
 const REREAD_MS = 30_000;
 
@@ -31,7 +31,11 @@ function messageOf(error: unknown, fallback: string): string {
 }
 
 /** The person's to-do list on this host, shared by the sidebar badge and the To-dos page. */
-export function useTodoList(client: TodoClient | undefined): TodoList {
+export function useTodoList(
+  client: TodoClient | undefined,
+  /** The host's to-do change count; a new value reads the list again. */
+  revision?: number,
+): TodoList {
   const [read, setRead] = useState<TodoListRead>({ status: "loading" });
   // A read that started before a change answered must not put the older list
   // back: each change's answer is the list as the host left it.
@@ -58,7 +62,7 @@ export function useTodoList(client: TodoClient | undefined): TodoList {
     },
     [client],
   );
-  useVisibleRefresh(refresh, undefined, REREAD_MS);
+  useVisibleRefresh(refresh, revision, REREAD_MS);
 
   const change = useCallback(
     async (command: TodoCommand): Promise<TodoChangeOutcome> => {

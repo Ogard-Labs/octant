@@ -54,7 +54,10 @@ import {
   permissionModeOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
-import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
+import {
+  automationServerProviderChoices,
+  buildAutomationEditorCatalog,
+} from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
@@ -366,7 +369,26 @@ import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
 import { countTodos } from "./todos/todoListModel";
-import type { TodosPageProps } from "./todos/TodosView";
+import type { TodoClient } from "@octant/client-runtime/todo-client";
+import type { TodoUnlinkedStart, TodosPageProps } from "./todos/TodosView";
+import { todoThreadStates, type TodoStartTarget } from "./todos/todoThreadModel";
+import {
+  decodeTodoCommand,
+  type Todo,
+  type TodoListView,
+  type TodoThreadLink,
+} from "@octant/contracts/todos";
+
+/** A to-do whose Start opened the current new-thread draft. */
+interface TodoStartInProgress {
+  readonly todoId: string;
+  readonly title: string;
+  readonly mode: OctantMode;
+  /** The Project the draft is for; absent for a Chat start in no Project. */
+  readonly projectId?: string;
+  /** The draft it opened, as `pane:surface`, once that draft is in front. */
+  readonly draft?: string;
+}
 import { useTodoList } from "./todos/useTodoList";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
@@ -617,6 +639,7 @@ export interface AppProps {
   readonly planClient?: PlanClient;
   readonly shellClient?: ShellClient;
   readonly shipClient?: ShipClient;
+  readonly todoClient?: TodoClient;
   readonly canvasClient?: CanvasClient;
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
@@ -1043,6 +1066,7 @@ function LaunchedShell(
     [props.launch.serverUrl, props.launch.windowId],
   );
   function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
+    if (todoStartRef.current !== undefined) setTodoStart(undefined);
     const target = paneId ?? controller.workspace?.activePaneIds[mode];
     if (target !== undefined) {
       const paneKey = String(target);
@@ -1087,6 +1111,19 @@ function LaunchedShell(
   const [inboxOpen, setInboxOpen] = useState(false);
   // The person's to-do list spans every mode, as the Inbox does.
   const [todosOpen, setTodosOpen] = useState(false);
+  // The to-do the open new-thread draft was started from. Any other new draft
+  // clears it (resetNewTaskDraft), and the thread that draft creates is linked
+  // to the to-do. Held in a ref too: the create handlers are async and read it
+  // after their own awaits.
+  const [todoStart, setTodoStartState] = useState<TodoStartInProgress>();
+  const todoStartRef = useRef<TodoStartInProgress>(undefined);
+  function setTodoStart(start: TodoStartInProgress | undefined): void {
+    todoStartRef.current = start;
+    setTodoStartState(start);
+  }
+  const [unlinkedTodoStarts, setUnlinkedTodoStarts] = useState<
+    ReadonlyMap<string, TodoUnlinkedStart>
+  >(() => new Map());
   // Like the Inbox, what finished and waits for a look spans the window, so
   // moving between modes keeps the page; its list follows the active mode's
   // To review count.
@@ -1688,6 +1725,7 @@ function LaunchedShell(
         navigatorAssistantClient: props.navigatorAssistantClient,
         planClient: props.planClient,
         shipClient: props.shipClient,
+        todoClient: props.todoClient,
         workThreadClient: props.workThreadClient,
         workTurnClient: props.workTurnClient,
       }),
@@ -1712,6 +1750,7 @@ function LaunchedShell(
       props.planClient,
       props.projectWindowCapability,
       props.shipClient,
+      props.todoClient,
       props.workThreadClient,
       props.workTurnClient,
     ],
@@ -2695,7 +2734,10 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
-  const todoList = useTodoList(launchedClients.todoClient);
+  const todoList = useTodoList(launchedClients.todoClient, machineChanges.todos);
+  const todoListHostIdRef = useRef<TodoListView["hostId"]>(undefined);
+  todoListHostIdRef.current =
+    todoList.read.status === "loading" ? undefined : todoList.read.view?.hostId;
   const todosCount =
     todoList.read.status === "loading" || todoList.read.view === undefined
       ? 0
@@ -2710,10 +2752,29 @@ function LaunchedShell(
   const [todoQuickAddOpen, setTodoQuickAddOpen] = useState(false);
   const openTodoQuickAdd = () => setTodoQuickAddOpen(true);
   useNewTodoShortcut(openTodoQuickAdd);
+  const todoThreadRows = useMemo(
+    () =>
+      todoThreadStates([
+        { mode: "chat", rows: chatController.navigation },
+        { mode: "work", rows: workNavigation.navigation },
+        { mode: "code", rows: codeController.navigation },
+      ]),
+    [chatController.navigation, workNavigation.navigation, codeController.navigation],
+  );
   const todosPage: TodosPageProps = {
     list: todoList,
     projects: todoProjects,
     onClose: () => setTodosOpen(false),
+    start: {
+      threadStates: todoThreadRows,
+      onStart: (todo, target) => void startTodo(todo, target),
+      onOpenThread: (link, title) => void openTodoThread(link, title),
+      unlinked: unlinkedTodoStarts,
+      onLink: (todoId) => {
+        const started = unlinkedTodoStarts.get(todoId);
+        if (started !== undefined) void recordTodoLink(todoId, started);
+      },
+    },
   };
   const inboxAttentionItems = useMemo(
     () =>
@@ -3978,6 +4039,10 @@ function LaunchedShell(
     ...codeProviderChoices.map(
       (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
     ),
+    "harness",
+    ...[...codeProviderGroups, ...workProviderGroups]
+      .filter((group) => group.runtime === "octant-harness")
+      .map((group) => String(group.instance.id)),
   ].join("\0");
   const automationCatalogCodeBootstrapKey =
     codeController.bootstrap === undefined
@@ -4019,6 +4084,16 @@ function LaunchedShell(
         ...(codeController.bootstrap === undefined
           ? {}
           : { codeBootstrap: codeController.bootstrap }),
+        // The host lists its server catalog only to its own person, so a
+        // restricted device's lists are empty and its editor offers none.
+        serverProjects: {
+          code: serverCodeProjects.projects,
+          work: serverCodeProjects.workProjects,
+        },
+        serverProviderChoicesByMode: automationServerProviderChoices(
+          [...codeProviderGroups, ...workProviderGroups],
+          { work: workProviderChoices, code: codeProviderChoices },
+        ),
       }),
     // Content keys keep the memo referentially stable across renders that only
     // allocate new Project/profile/provider array wrappers with identical facts.
@@ -4027,6 +4102,8 @@ function LaunchedShell(
       automationCatalogProfileKey,
       automationCatalogProjectKey,
       automationCatalogProviderKey,
+      serverCodeProjects.projects,
+      serverCodeProjects.workProjects,
       localHost?.displayName,
       props.launch.windowId,
     ],
@@ -5752,6 +5829,36 @@ function LaunchedShell(
         );
   const historyPaneId = historyPane?.paneId;
   const historyTabId = historyPane?.surface.id;
+  // A to-do's source belongs to the one draft its Start opened: the first
+  // draft in front for the same mode and Project. That may be a draft that was
+  // already open, which Start reuses with the same pane and surface, so the
+  // check also runs when the source is set. Leaving that draft for anything
+  // else drops the source, so a later send elsewhere is never linked.
+  const frontSurface = historyPane?.surface;
+  const frontDraft =
+    frontSurface?.kind === "draft-thread"
+      ? `${String(historyPane?.paneId ?? "")}:${String(frontSurface.id)}`
+      : undefined;
+  const frontDraftProjectId =
+    frontSurface?.kind === "draft-thread" && frontSurface.projectId !== undefined
+      ? String(frontSurface.projectId)
+      : undefined;
+  const frontPlace = `${activeMode}:${String(historyPaneId ?? "")}:${String(historyTabId ?? "")}`;
+  useEffect(() => {
+    const start = todoStartRef.current;
+    if (start === undefined) return;
+    if (start.draft === undefined) {
+      if (
+        frontDraft !== undefined &&
+        activeMode === start.mode &&
+        frontDraftProjectId === start.projectId
+      ) {
+        setTodoStart({ ...start, draft: frontDraft });
+      }
+      return;
+    }
+    if (frontDraft !== start.draft || activeMode !== start.mode) setTodoStart(undefined);
+  }, [frontPlace, todoStart]);
   // Review and the archive are reader pages too, opened from elsewhere than the
   // sidebar; without their own place, Back skipped straight past them.
   const historyPage: WindowPage | undefined = reviewOpen
@@ -6567,6 +6674,94 @@ function LaunchedShell(
     setTodosOpen(true);
   }
 
+  /**
+   * Start: the ordinary new-thread draft for the chosen Project (its type is
+   * the mode) or Chat, with the to-do's title and notes as the prompt. Nothing
+   * starts until the person sends; the host that owns the Project decides.
+   */
+  async function startTodo(todo: Todo, target: TodoStartTarget): Promise<void> {
+    const project =
+      target.kind === "chat"
+        ? undefined
+        : projectController.allProjects.find(
+            (candidate) => String(candidate.id) === target.projectId,
+          );
+    if (target.kind === "project" && project === undefined) return;
+    const mode: OctantMode = project?.type ?? "chat";
+    closeWorkspaceReaders();
+    setDraftError(undefined);
+    setDraftPendingMessage(undefined);
+    resetNewTaskDraft(mode);
+    setPendingDraftPrompt(todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`);
+    setTodoStart({
+      todoId: String(todo.id),
+      title: todo.title,
+      mode,
+      ...(project === undefined ? {} : { projectId: String(project.id) }),
+    });
+    // A Chat start files the thread in no Project, so the draft must not keep
+    // the Project the last Chat draft chose.
+    if (project === undefined) setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
+    await controller.openDraftThread(mode, project?.id);
+  }
+
+  /**
+   * Taken when a draft is sent: the to-do source of the draft in front, if
+   * that draft is the one its Start opened. Read before the create awaits, so
+   * a Start pressed while the create is in flight cannot take this thread.
+   */
+  function todoStartOfSentDraft(mode: string): TodoStartInProgress | undefined {
+    const start = todoStartRef.current;
+    if (start === undefined || start.mode !== mode || start.draft === undefined) return undefined;
+    return start.draft === frontDraft ? start : undefined;
+  }
+
+  /** Called by each create path once the host answered with its thread. */
+  function linkStartedTodo(
+    start: TodoStartInProgress | undefined,
+    mode: OctantMode,
+    threadId: string,
+  ): void {
+    if (start === undefined || start.mode !== mode) return;
+    if (todoStartRef.current === start) setTodoStart(undefined);
+    void recordTodoLink(start.todoId, { threadId, mode });
+  }
+
+  async function recordTodoLink(todoId: string, started: TodoUnlinkedStart): Promise<void> {
+    // The list as it is now, not as it was when the create started.
+    const hostId = todoListHostIdRef.current;
+    let saved = false;
+    if (hostId !== undefined) {
+      try {
+        const outcome = await todoList.change(
+          decodeTodoCommand({
+            kind: "link-todo-thread",
+            todoId,
+            thread: { hostId, threadId: started.threadId, mode: started.mode },
+          }),
+        );
+        saved = outcome.status === "saved";
+      } catch {
+        saved = false;
+      }
+    }
+    setUnlinkedTodoStarts((current) => {
+      const next = new Map(current);
+      if (saved) next.delete(todoId);
+      else next.set(todoId, started);
+      return next;
+    });
+  }
+
+  async function openTodoThread(link: TodoThreadLink, title: string): Promise<void> {
+    closeWorkspaceReaders();
+    const threadId = String(link.threadId);
+    if (link.mode === "chat") await controller.openChatThread(decodeChatThreadId(threadId), title);
+    else if (link.mode === "work")
+      await controller.openWorkThread(decodeWorkThreadId(threadId), title);
+    else await controller.openCodeThread(decodeCodeThreadId(threadId), title);
+  }
+
   // The To review tile, the start screen's review card, and the palette all
   // land on the one page that lists the threads the tile counted.
   function openReview() {
@@ -6770,6 +6965,7 @@ function LaunchedShell(
     draftProjectId?: ProjectId,
     plannerReview?: PlannerProposalReview,
   ): Promise<boolean> {
+    const sentFromTodo = todoStartOfSentDraft("code");
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -6928,6 +7124,7 @@ function LaunchedShell(
         );
         return false;
       }
+      linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
@@ -7078,6 +7275,7 @@ function LaunchedShell(
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
     workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ): Promise<boolean | void> {
+    const sentFromTodo = todoStartOfSentDraft(mode);
     const paneToReset =
       initiatingPaneId ??
       (mode === "chat" || mode === "work" || mode === "code"
@@ -7112,6 +7310,7 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
+        linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
         // Clear the pane that submitted this create. Welcome panes cannot
         // become active, and another Chat pane can be current by the time
         // create finishes, so the caller passes the submitting pane.
@@ -7319,6 +7518,7 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
+        linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
         firstPromptAnnouncedFor = created.thread.id;
         codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
         await controller.openCodeThread(
@@ -7410,6 +7610,7 @@ function LaunchedShell(
           setDraftError("The task could not be created.");
           return false;
         }
+        linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
         await controller.openWorkThread(
           created.thread.id,
           created.thread.title,
@@ -8149,6 +8350,14 @@ function LaunchedShell(
                         : { pendingDraftCoordinator })}
                       pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                       {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
+                      {...(todoStart?.draft === undefined || todoStart.draft !== frontDraft
+                        ? {}
+                        : {
+                            draftTodoSource: {
+                              title: todoStart.title,
+                              onRemove: () => setTodoStart(undefined),
+                            },
+                          })}
                       {...(pendingIssue === undefined ? {} : { pendingIssue })}
                       presentedLayout={controller.presentedLayout}
                       activeProject={projectController.activeProject}

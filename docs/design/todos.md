@@ -18,10 +18,14 @@ The list on one host is built: its events, the list rebuilt from them, the
 `/api/todos` read and command routes, version-checked edits, and the refusals
 for every caller but the person. The To-dos destination is built on that host:
 the page, quick add, filters, editing in place, reordering, the sidebar row and
-its badge, and New to-do in the command palette and on a shortcut. Not built
-yet: Start and a row's thread state, the list host setting, reaching a list on
-another host, live updates to other clients (a window reads the list again
-every 30 seconds while it is visible), and the phone screen.
+its badge, and New to-do in the command palette and on a shortcut. Start is
+built for this host's Projects and Chat: the draft with its source, the link,
+Link again, the thread state on a row, and Tick off. Every window on the list
+host follows changes as they happen: each change publishes the host's `todos`
+change topic, and a window reads the list again on it (and every 30 seconds
+while visible, for a feed that is reconnecting). Not built yet: the list host
+setting, reaching a list on another host, Start into another host's Project,
+and the phone screen.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
@@ -160,8 +164,11 @@ option.
    person picks one; with none, Start offers Chat or a Project.
 2. **The draft.** Start opens the ordinary new-thread draft for that Project
    on that Project's host, with the to-do's title (and notes, under it) in the
-   prompt and the to-do named as the draft's source, the way an issue is
-   attached as Create from context. The mode follows the Project (a Code
+   prompt and the to-do named as the draft's source: a "From to-do" label
+   beside Create from, which the person can remove to leave an ordinary
+   draft. Opening any other new-thread draft drops it too. The window keeps
+   the source; the host's create command carries nothing about it. The mode
+   follows the Project (a Code
    Project starts a Code thread, a Work Project a Work thread, no Project a
    Chat thread); provider, model, access level, checkout and worktree are the
    draft's usual choices. Nothing starts until the person sends.
@@ -170,12 +177,17 @@ option.
    mode, provider and guardrail level. The list host takes no part in
    creating the thread and gains nothing on the Project's host.
 4. **The link.** When the thread exists, the client sends
-   `todo.thread-linked@1` to the list host. If the list host refuses or cannot
+   `todo.thread-linked@1` to the list host. The link is made where the create
+   command answered with the thread, before its first turn starts, so a turn
+   that fails to start still leaves a linked thread. If the list host refuses or cannot
    be reached, the row says "Thread started, not linked" with a Link button;
    the thread itself is unaffected.
 5. **State.** The row shows the newest linked thread's state (Running,
    Waiting on you, PR #n, Done) by joining the link to that host's read model
-   in the client. No host projects another host's threads.
+   in the client. No host projects another host's threads. Done wins, then a
+   running turn, then a wait on the person, then the first pull request of a
+   Code thread; otherwise the row says Started. The state opens the thread; a
+   thread this window does not list reads Started.
 6. **Done.** Only the person ticks a to-do off. When its newest thread is
    Done the row offers Tick off. An agent never changes a to-do, as it never
    marks a thread Done.

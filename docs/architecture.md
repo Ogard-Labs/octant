@@ -5987,8 +5987,8 @@ ls-remote` against the thread's remote and the GitHub reads they already
   refreshes. Hidden-thread filtering still precedes the service's result limit. An image job queued or finished journals on its own `image-jobs`
   topic, so a thread's generated-image list re-reads when the agent's image
   tool completes a job rather than on its idle cadence. Captures, tool
-  approvals, follow-up offers and message queues use their own metadata-only
-  Machine change topics. Feed sequences are per process, so every frame also
+  approvals, follow-up offers, message queues and the person's to-do list use
+  their own metadata-only Machine change topics. Feed sequences are per process, so every frame also
   carries the host process's epoch, minted at start, and a client resumes
   with both (`afterSequence` and `epoch`). A cursor from another process gets
   `snapshot-required` whatever its sequence, since a restart's changes are
@@ -12881,11 +12881,14 @@ effective, which already means installed, trusted, and enabled at the plugin
 and the component; installation, trust, and enablement stay separate steps,
 and discovery or a catalog listing offers nothing. The one runtime theme
 authority applies a listed theme as it applies a built-in preset, and token
-export draws it the same way. Switching the plugin off, or removing it, takes
-its themes out of the pickers at once; a stored choice that names one then
-draws the default theme and the picker shows the default. The stored choice
-is kept, as disabling a plugin preserves its selections, so turning the plugin
-back on restores the theme. _Rationale:_ rewriting the setting on disable
+export draws it the same way. The server checks the person's semantic colour
+overrides against the selected theme as the renderer resolves it, reading the
+effective plugin themes from that same snapshot, so an override that fails
+contrast on a selected plugin theme is refused before it is stored. Switching
+the plugin off, or removing it, takes its themes out of the pickers at once; a
+stored choice that names one then draws the default theme and the picker shows
+the default. The stored choice is kept, as disabling a plugin preserves its
+selections, so turning the plugin back on restores the theme. _Rationale:_ rewriting the setting on disable
 would lose the person's choice to a reversible switch, and the default is
 already what a missing preset draws.
 

@@ -233,6 +233,11 @@ export interface AutomationProjectOption {
   readonly mode: AutomationMode;
   readonly projectVersion: AutomationDefinitionDraft["projectVersion"];
   readonly binding: AutomationBindingReceipt;
+  /**
+   * Where a Project on one of the person's servers lives (`alias:folder`).
+   * Absent for a Project of this host's own catalog.
+   */
+  readonly serverLocation?: string;
 }
 
 export interface AutomationExecutionProfileOption {

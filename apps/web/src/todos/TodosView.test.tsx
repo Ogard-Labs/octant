@@ -17,8 +17,8 @@ import {
 } from "@octant/domain/todo-policy";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-import { TodosView } from "./TodosView";
+import { describe, expect, it, vi } from "vitest";
+import { TodosView, type TodoStartProps } from "./TodosView";
 import { useTodoList } from "./useTodoList";
 
 const HOST = decodeStableHostId("11111111-1111-4111-8111-111111111111");
@@ -65,12 +65,34 @@ function fakeHost() {
   return { client, apply, view };
 }
 
-function Page(props: { readonly client: TodoClient }) {
-  const list = useTodoList(props.client);
+function Page(props: {
+  readonly client: TodoClient;
+  readonly start?: TodoStartProps;
+  readonly revision?: number;
+}) {
+  const list = useTodoList(props.client, props.revision);
   return (
-    <TodosView list={list} onClose={() => undefined} projects={[{ id: WEB, name: "Octant web" }]} />
+    <TodosView
+      list={list}
+      onClose={() => undefined}
+      projects={[{ id: WEB, name: "Octant web" }]}
+      {...(props.start === undefined ? {} : { start: props.start })}
+    />
   );
 }
+
+function startProps(overrides: Partial<TodoStartProps> = {}): TodoStartProps {
+  return {
+    threadStates: new Map(),
+    onStart: vi.fn(),
+    onOpenThread: vi.fn(),
+    unlinked: new Map(),
+    onLink: vi.fn(),
+    ...overrides,
+  };
+}
+
+const THREAD = "00000000-0000-4000-8000-0000000000d1";
 
 function rowTitles(): ReadonlyArray<string> {
   return within(screen.getByRole("list", { name: "To-dos" }))
@@ -223,5 +245,95 @@ describe("the To-dos page", () => {
     await screen.findByText("Second");
     expect(host.view().todos.map((todo) => todo.title)).toEqual(["Second", "First", "Third"]);
     expect(rowTitles()).toEqual(["Second", "First", "Third"]);
+  });
+});
+
+describe("starting from a to-do", () => {
+  it("starts in the to-do's only Project at once, and offers Chat or a Project when it has none", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Loose end",
+    });
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Web fix",
+      projects: [{ hostId: HOST, projectId: WEB, name: "Octant web" }],
+    });
+    const start = startProps();
+    render(<Page client={host.client} start={start} />);
+
+    await user.click(await screen.findByRole("button", { name: "Start Web fix" }));
+    expect(start.onStart).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Web fix" }), {
+      kind: "project",
+      projectId: String(WEB),
+      name: "Octant web",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Start Loose end" }));
+    const choices = await screen.findAllByRole("menuitem");
+    expect(choices.map((choice) => choice.textContent)).toEqual(["Chat", "Octant web"]);
+    await user.click(choices[0] ?? document.body);
+    expect(start.onStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Loose end" }),
+      {
+        kind: "chat",
+      },
+    );
+  });
+
+  it("shows the newest thread's state, opens it, and offers Tick off once it is done", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const todoId = crypto.randomUUID();
+    host.apply({ kind: "add-todo", todoId, title: "Ship it" });
+    host.apply({
+      kind: "link-todo-thread",
+      todoId,
+      thread: { hostId: HOST, threadId: THREAD, mode: "code" },
+    });
+    const done = new Map([
+      [`code:${THREAD}`, { phase: "done" as const, label: "Done", title: "Ship the fix" }],
+    ]);
+    const start = startProps({ threadStates: done });
+    render(<Page client={host.client} start={start} />);
+
+    await user.click(await screen.findByRole("button", { name: "Done: open Ship the fix" }));
+    expect(start.onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD, mode: "code" }),
+      "Ship the fix",
+    );
+    await user.click(screen.getByRole("button", { name: "Tick off" }));
+    expect(await screen.findByText("No to-do matches these filters.")).toBeVisible();
+    expect(host.view().todos[0]?.state).toBe("done");
+  });
+
+  it("says when a started thread was not linked, and links it again on request", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const todoId = crypto.randomUUID();
+    host.apply({ kind: "add-todo", todoId, title: "Write notes" });
+    const start = startProps({ unlinked: new Map([[todoId, { threadId: THREAD, mode: "chat" }]]) });
+    render(<Page client={host.client} start={start} />);
+
+    expect(await screen.findByText("Thread started, not linked")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Link" }));
+    expect(start.onLink).toHaveBeenCalledWith(todoId);
+  });
+});
+
+describe("a change made elsewhere", () => {
+  it("shows a to-do another device added as soon as the host says the list changed", async () => {
+    const host = fakeHost();
+    const view = render(<Page client={host.client} revision={0} />);
+    expect(await screen.findByText(/Write down what you mean to do/)).toBeVisible();
+
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Added on the phone" });
+    view.rerender(<Page client={host.client} revision={1} />);
+
+    expect(await screen.findByRole("checkbox", { name: "Added on the phone" })).toBeVisible();
   });
 });

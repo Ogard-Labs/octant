@@ -12,7 +12,7 @@ import {
   type ThemeFailure,
   type ThemeSettings,
 } from "@octant/contracts";
-import { resolveEffectiveTokens } from "@octant/theme";
+import { resolveEffectiveTokens, type ThemePreset } from "@octant/theme";
 import { Schema } from "effect";
 import {
   ConcurrencyConflict,
@@ -34,16 +34,27 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
  * mode a scoped override names. Resolving one mode alone skipped a dark-only
  * override while the theme followed the system, so the server accepted a
  * colour the renderer then dropped in dark mode.
+ *
+ * The overrides are checked against the theme the person selected, including
+ * an effective plugin theme; checking against the default alone accepted a
+ * colour the renderer then dropped on the plugin theme's surfaces. A selected
+ * plugin theme that is not effective resolves to the default, as it draws.
  */
-function overridesDroppedInAnyShownMode(settings: ThemeSettings): boolean {
+function overridesDroppedInAnyShownMode(
+  settings: ThemeSettings,
+  contributedThemes: ReadonlyArray<ThemePreset>,
+): boolean {
   const modes = new Set<"light" | "dark" | undefined>([undefined]);
   for (const entry of settings.semanticOverrides) {
     if (entry.mode !== undefined) modes.add(entry.mode);
   }
   return [...modes].some(
     (mode) =>
-      resolveEffectiveTokens(mode === undefined ? settings : { ...settings, mode }, false)
-        .droppedOverrides.length > 0,
+      resolveEffectiveTokens(
+        mode === undefined ? settings : { ...settings, mode },
+        false,
+        contributedThemes,
+      ).droppedOverrides.length > 0,
   );
 }
 
@@ -65,6 +76,8 @@ export class ThemeService implements ThemeServiceApi {
       readonly persistence: PersistenceService;
       readonly uuid: () => string;
       readonly clock: () => string;
+      /** The plugin themes the renderer may draw: effective components only. */
+      readonly contributedThemes: () => ReadonlyArray<ThemePreset>;
     },
   ) {}
 
@@ -101,7 +114,7 @@ export class ThemeService implements ThemeServiceApi {
         });
       }
       const settings = command.settings;
-      if (overridesDroppedInAnyShownMode(settings)) {
+      if (overridesDroppedInAnyShownMode(settings, this.options.contributedThemes())) {
         throw new ThemeServiceError({
           category: "invalid",
           message: "One or more semantic color overrides fail contrast or role validation.",
