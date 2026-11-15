@@ -529,6 +529,7 @@ import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
+import { sidebarThreadsWithWorkers } from "./code/coordinatorWorkerListing";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -5123,6 +5124,8 @@ function LaunchedShell(
             title: thread.title,
             projectId: String(thread.projectId),
             providerInstanceId: String(thread.providerInstanceId),
+            ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
+            ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
             // The lifecycle used to ride along as a badge on every row, which
             // said "active" beside almost every thread and told the reader
             // nothing. The status dot carries it instead.
@@ -5169,9 +5172,16 @@ function LaunchedShell(
           awaitingInput: thread.activity === "attention",
         }),
       }));
+    // Workers the person has not asked to see in the sidebar stay out of the
+    // list but still count on their coordinator's row. Everything else that
+    // reads Code threads (Needs you, search, the Agents dock) keeps the full list.
+    const codeSidebarThreads = sidebarThreadsWithWorkers(
+      codeProjectThreads,
+      codeController.bootstrap?.settings,
+    );
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
-      codeThreads: codeProjectThreads,
+      codeThreads: codeSidebarThreads,
       workThreads: workProjectThreads,
     });
 
@@ -5247,6 +5257,7 @@ function LaunchedShell(
     }
     return {
       codeProjectThreads,
+      codeSidebarThreads,
       liveThreadTitles,
       markedChatNavigation,
       markedThreadGroups,
@@ -5259,6 +5270,7 @@ function LaunchedShell(
   }, [
     activeMode,
     chatController.navigation,
+    codeController.bootstrap?.settings,
     codeController.navigation,
     codeController.status,
     codeProviderRequestsByThreadId,
@@ -6184,6 +6196,14 @@ function LaunchedShell(
             mode: "code" as const,
             threadId: String(thread.id),
             title: thread.title,
+            ...(thread.coordinatorThreadId === undefined
+              ? {}
+              : {
+                  workerOf:
+                    codeController.bootstrap?.threads.find(
+                      (candidate) => String(candidate.id) === String(thread.coordinatorThreadId),
+                    )?.title ?? "its coordinator",
+                }),
             ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
             // A Code thread also reports run states (`interrupted`, `waiting`).
             // Search only distinguishes live from archived, so a running thread
@@ -8354,6 +8374,9 @@ function LaunchedShell(
                       threadBoardAvailable={threadBoardAvailable}
                       codeBoardProjects={codeBoardProjects}
                       codeNavigationRows={codeController.navigation}
+                      {...(codeController.bootstrap?.settings === undefined
+                        ? {}
+                        : { codeWorkerListingSettings: codeController.bootstrap.settings })}
                       codePullRequestsOpen={codePullRequestsOpen}
                       codeProviderGroups={codeProviderGroups}
                       codeThreads={codeController.bootstrap?.threads}

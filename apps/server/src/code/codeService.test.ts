@@ -1126,6 +1126,35 @@ describe("CodeService commands", () => {
     expect(cleared).not.toHaveProperty("settings.shieldModel");
   });
 
+  it("keeps where coordinators' workers are listed, per Project, across later settings changes", async () => {
+    const fixture = serviceFixture();
+    const project = "00000000-0000-4000-8000-0000000000b1";
+    const chosen = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      coordinatorWorkerListing: { sidebar: true, board: false },
+      coordinatorWorkerListingByProject: { [project]: { sidebar: false, board: true } } as never,
+    });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(chosen.settings.coordinatorWorkerListing).toEqual({ sidebar: true, board: false });
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+    });
+    expect(later).toMatchObject({
+      settings: {
+        coordinatorWorkerListing: { sidebar: true, board: false },
+        coordinatorWorkerListingByProject: { [project]: { sidebar: false, board: true } },
+      },
+    });
+  });
+
   it("keeps the Git requirement a window asks for when it still sends the old default-folder switch", async () => {
     const fixture = serviceFixture();
 

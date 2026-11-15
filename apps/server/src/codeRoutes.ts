@@ -821,6 +821,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               (command.kind === "update-code-settings" &&
                 (command.coordinatorStarting !== undefined ||
                   command.coordinatorStartingByProject !== undefined ||
+                  command.coordinatorWorkerListing !== undefined ||
+                  command.coordinatorWorkerListingByProject !== undefined ||
                   command.coordinatorOpenWorkerLimit !== undefined)))
           ) {
             return failureResponse(

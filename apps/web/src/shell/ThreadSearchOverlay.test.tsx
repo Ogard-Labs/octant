@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadSearchOverlay } from "./ThreadSearchOverlay";
@@ -54,6 +54,23 @@ describe("ThreadSearchOverlay", () => {
       /\.thread-search\s*\{[^}]*--octant-dialog-width:\s*520px;[^}]*max-height:/s,
     );
     expect(componentStyles).not.toMatch(/\.thread-search\s*\{[^}]*\bwidth:\s*min\(/s);
+  });
+
+  it("finds a coordinator's worker and marks it as that coordinator's worker", async () => {
+    renderOverlay({
+      mode: "code",
+      threads: [
+        thread({ threadId: "w1", mode: "code", title: "Release fix", workerOf: "Backlog" }),
+        thread({ threadId: "t5", mode: "code", title: "Release docs" }),
+      ],
+    });
+    const worker = (await screen.findByText("Release fix")).closest("[role=option]");
+    expect(worker).not.toBeNull();
+    expect(
+      within(worker as HTMLElement).getByRole("img", { name: "Worker of Backlog" }),
+    ).toBeVisible();
+    const ordinary = screen.getByText("Release docs").closest("[role=option]");
+    expect(within(ordinary as HTMLElement).queryByRole("img")).toBeNull();
   });
 
   it("offers existing shell actions as compact quick actions", async () => {

@@ -45,6 +45,7 @@ import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
 import { CodeTestPane } from "./CodeTestPane";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
+import type { CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import type { CodeThreadControllers } from "./codeThreadControllers";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -200,6 +201,8 @@ export interface CodeWorkspaceProps {
   readonly coordinatorProposals?: ReactNode;
   /** A coordinator thread's workers' pending requests, as rows at the end of its transcript. */
   readonly coordinatorWorkerAsks?: ReactNode;
+  /** A coordinator thread's workers, as cards in its transcript. */
+  readonly coordinatorWorkers?: CoordinatorWorkersSource;
   readonly onNewThreadInProject?: (
     projectId: import("@octant/contracts/projects").ProjectId,
   ) => void;
@@ -287,6 +290,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.coordinatorWorkerAsks === undefined
           ? {}
           : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
+        {...(props.coordinatorWorkers === undefined
+          ? {}
+          : { coordinatorWorkers: props.coordinatorWorkers })}
         {...(props.approvals?.updateAnchor === undefined
           ? {}
           : { updateApprovalAnchor: props.approvals.updateAnchor })}
