@@ -206,7 +206,7 @@ function MoreTools(props: {
   const shown = props.tools.some((tool) => tool.pressed);
   const groups = groupDockTools(props.tools);
   return (
-    <OctantMenuRoot native={false}>
+    <OctantMenuRoot>
       <OctantTooltip label="More tools">
         <OctantMenuTrigger
           render={

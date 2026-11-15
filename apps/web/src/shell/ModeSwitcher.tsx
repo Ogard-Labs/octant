@@ -117,7 +117,6 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
       </div>
     ) : (
       <OctantMenu
-        native={false}
         items={items}
         onValueChange={(value) => {
           const mode = modes.find((candidate) => candidate === value);

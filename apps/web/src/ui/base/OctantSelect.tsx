@@ -62,11 +62,6 @@ export interface OctantSelectFieldProps {
   readonly placeholder?: ReactNode;
   readonly triggerClassName?: string;
   readonly value?: string;
-  /**
-   * `false` keeps Octant's own list in the desktop app, for a select that
-   * stands beside Octant's own menus (the composer's) and should look like them.
-   */
-  readonly native?: boolean;
 }
 
 /**
@@ -128,63 +123,6 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
     if (props.value === undefined) setUncontrolledValue(next);
     props.onValueChange?.(next);
   };
-  if (props.native !== false && window.octantHost?.popupNativeMenu !== undefined)
-    return (
-      <span className="contents" ref={rootRef}>
-        <OctantMenuRoot>
-          <OctantMenuTrigger
-            aria-label={props["aria-label"]}
-            data-testid={props["data-testid"]}
-            id={props.id}
-            disabled={props.disabled}
-            className={cn(
-              fieldPaint,
-              "flex h-[round(2.154rem,2px)] w-full items-center justify-between gap-2 px-2 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-(--oct-disabled-opacity) window-no-drag",
-              props.triggerClassName,
-              props.className,
-            )}
-          >
-            {/* The same one-line ellipsis as the web trigger below. */}
-            <span className="min-w-0 truncate">{selectedOption?.label ?? props.placeholder}</span>
-            <ChevronDown aria-hidden="true" size={16} />
-          </OctantMenuTrigger>
-          <OctantMenuPortal>
-            <OctantMenuPositioner>
-              <OctantMenuPopup>
-                <OctantMenuRadioGroup
-                  value={encodeSelectValue(selectedId)}
-                  onValueChange={(value) => {
-                    if (typeof value === "string") changeValue(decodeSelectValue(value));
-                  }}
-                >
-                  {segmentOptions(props.options).map((segment, index) => (
-                    <OctantMenuGroup key={index}>
-                      {segment.group === undefined ? null : (
-                        <OctantMenuGroupLabel>{segment.group}</OctantMenuGroupLabel>
-                      )}
-                      {segment.options.map((option) => (
-                        <OctantMenuRadioItem
-                          key={encodeSelectValue(option.id)}
-                          value={encodeSelectValue(option.id)}
-                          disabled={option.disabled}
-                          title={option.disabledReason}
-                          closeOnClick
-                        >
-                          {option.label}
-                        </OctantMenuRadioItem>
-                      ))}
-                    </OctantMenuGroup>
-                  ))}
-                </OctantMenuRadioGroup>
-              </OctantMenuPopup>
-            </OctantMenuPositioner>
-          </OctantMenuPortal>
-        </OctantMenuRoot>
-        {props.name === undefined ? null : (
-          <input name={props.name} type="hidden" value={selectedId} />
-        )}
-      </span>
-    );
   return (
     <span className="contents" ref={rootRef}>
       <AuthoredSelect

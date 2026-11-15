@@ -48,7 +48,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
 
   return (
     <span className="dock-utility-launcher">
-      <OctantMenuRoot native={false}>
+      <OctantMenuRoot>
         <OctantMenuTrigger aria-label="Add tool" className="shell-icon-button window-no-drag">
           <Plus aria-hidden="true" size={16} />
         </OctantMenuTrigger>

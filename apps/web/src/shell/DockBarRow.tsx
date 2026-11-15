@@ -192,7 +192,7 @@ function ChoiceMenu(props: { readonly choice: DockBarChoice }) {
   const current = choice.options.find((option) => option.id === choice.value);
   const name = `${current?.label ?? choice.label}, ${choice.label}`;
   return (
-    <OctantMenuRoot native={false}>
+    <OctantMenuRoot>
       <OctantMenuTrigger aria-label={name} className="dock-bar-named window-no-drag" title={name}>
         <span className="dock-bar-named__label">{current?.label}</span>
         <ChevronDown aria-hidden="true" size={12} />

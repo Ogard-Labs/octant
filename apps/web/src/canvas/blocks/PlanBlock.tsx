@@ -250,7 +250,6 @@ function PlanStatusMark({
   if (setStatus === undefined) return mark;
   return (
     <OctantMenu
-      native={false}
       items={STATUS_ORDER.map((status) => {
         const StatusIcon = STATUS_ICON[status];
         return {

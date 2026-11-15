@@ -56,7 +56,6 @@ export function ThreadReplyDetailMenu(props: {
   const levelLabel = REPLY_DETAIL_LABELS[state.level];
   return (
     <OctantMenu
-      native={false}
       items={[
         {
           value: USE_DEFAULT,

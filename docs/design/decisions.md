@@ -490,7 +490,7 @@ Status: Built. Since: —. Detail: [Architecture: Process topology](../architect
 
 ### Desktop menu bar and context menus
 
-The menu bar is the closed-window fleet roster, read from the host rather than from open windows. Native context menus carry presentation and opaque action IDs only.
+The menu bar is the closed-window fleet roster, read from the host rather than from open windows. Context menus carry presentation and opaque action IDs only; every menu but the code editor's text-editing one is drawn by the renderer, never the system (maintainer decision, 2026-11-15).
 
 - The roster has three sections, Needs you, Working and Done since you looked, with at most six rows each; a row names the thread title, mode and Project.
 - The menu bar raises no notifications, and thread titles never enter the public health response or redacted diagnostics.

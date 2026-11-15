@@ -268,7 +268,6 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   return (
     <div className="chat-workspace__thread-actions">
       <OctantMenu
-        native={false}
         items={items}
         onValueChange={(value) => {
           if (value === "copy-conversation") copyConversation();

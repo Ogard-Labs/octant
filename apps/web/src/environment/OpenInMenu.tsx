@@ -75,7 +75,6 @@ export function OpenInMenu(props: OpenInMenuProps) {
   const menu = (
     <div className="open-in-menu window-no-drag">
       <OctantMenu
-        native={false}
         items={visible.map((entry) => {
           const Icon = APPLICATION_ICONS[entry.id];
           return {

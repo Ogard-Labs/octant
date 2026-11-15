@@ -1,5 +1,4 @@
-import { useContext, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { Native } from "./NativeContextMenu";
+import { useRef, useState, type ReactElement, type ReactNode } from "react";
 import {
   PreviewCard,
   PreviewCardPopup,
@@ -48,15 +47,10 @@ function beside(trigger: Element | null) {
  * lets it hold actions. Content that only describes belongs in a tooltip.
  */
 export function OctantPreviewCard(props: OctantPreviewCardProps) {
-  const nativeMenu = useContext(Native);
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLAnchorElement>(null);
-  const menuOpen = nativeMenu?.open === true;
-  useEffect(() => {
-    if (menuOpen) setOpen(false);
-  }, [menuOpen]);
   return (
-    <PreviewCard open={open && !menuOpen} onOpenChange={(next) => setOpen(next && !menuOpen)}>
+    <PreviewCard open={open} onOpenChange={setOpen}>
       <PreviewCardTrigger
         closeDelay={150}
         delay={props.delay ?? 350}

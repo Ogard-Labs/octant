@@ -105,7 +105,7 @@ export function ThreadNativeSetupControl(props: {
   if (services === undefined || !eligible) return null;
   const selected = OPTIONS.find((option) => option.id === choice) ?? DEFAULT_OPTION;
   return (
-    <OctantMenuRoot native={false}>
+    <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label="Provider’s own setup"
         aria-description={selected.detail}

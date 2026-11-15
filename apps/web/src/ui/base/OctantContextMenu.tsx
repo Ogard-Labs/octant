@@ -11,7 +11,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "./NativeContextMenu";
+} from "../shadcn/context-menu";
 import { menuIconColumn } from "../shadcn/menu-row";
 import { cn } from "../shadcn/utils";
 import type { OctantMenuItem } from "./OctantMenu";

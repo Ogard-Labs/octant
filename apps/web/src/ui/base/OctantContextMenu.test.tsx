@@ -28,7 +28,7 @@ describe("OctantContextMenu", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("opens nothing for an empty item list, on the web and on the desktop's native path", async () => {
+  it("opens nothing for an empty item list, in a browser and in the desktop app", async () => {
     const user = userEvent.setup();
     const { unmount } = render(
       <OctantContextMenu items={[]} onValueChange={vi.fn()} triggerClassName="recipe-trigger">

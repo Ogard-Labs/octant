@@ -942,8 +942,8 @@ is costly to render mounts only while open.
 - **Tokens.** At least 12rem wide, `--oct-radius-lg`, 4px padding, the float
   and `--octant-shadow-pop`, at `--oct-z-popup`; check and submenu chevron 14px.
 - **Accessibility.** `aria-haspopup="menu"` and `aria-expanded` on the trigger;
-  an item's description is `aria-describedby`. In the desktop app it is the
-  system's menu (see [Native menus](#native-menus)). Right click is never the
+  an item's description is `aria-describedby`. It is Octant's own menu in the
+  desktop app too (see [Native menus](#native-menus)). Right click is never the
   only route to an action.
 
 ### OctantDialog
@@ -1040,7 +1040,7 @@ is costly to render mounts only while open.
 - **States.** Highlighted row `--octant-float-hover`; a chosen radio carries a
   check, never a fill; disabled 0.75. Glass: dense float.
 - **Accessibility.** Opens on the current choice; a pick closes the menu and
-  returns focus. In the desktop app it is the system's menu.
+  returns focus. It is Octant's own list in the desktop app too.
 - **Don't** size a menu's rows from a feature stylesheet.
 
 ### OctantMenuIconSlot
@@ -1084,7 +1084,7 @@ is costly to render mounts only while open.
 - **Tokens.** At most 320px, 12px padding, `--oct-radius-lg`, the float and
   `--octant-shadow-pop`, 8px from its trigger, at `--oct-z-popup`; opens after
   350ms, closes 150ms after the pointer leaves.
-- **States.** Held closed while a native menu is open. Glass: dense float (it
+- **States.** Glass: dense float (it
   opens on every row crossing, so it never cuts or re-composites the page).
 - **Accessibility.** `role="group"` named by `label`; no focus edge on the card.
 
@@ -1248,10 +1248,9 @@ is costly to render mounts only while open.
 
 ### Native menus
 
-`NativeContextMenu` and `NativeDropdownMenu` swap a web menu for the system's
-own in the desktop app. They render items into a hidden element, read their
-kinds and show the system menu at the pointer or anchored to the trigger; a
-selection clicks the original element. The system owns their look.
+The code editor's right-click menu (`code/nativeEditorMenu.ts`) is the one
+system menu: it carries text editing, where a Mac person expects the system's
+own items. Every other menu, dropdown and select is Octant's own.
 
 ### Helpers
 
@@ -1277,18 +1276,12 @@ the navigation group role (12px, sentence case, muted, never mono), and the row
 the keyboard is on takes `--oct-fill-4` with no border; the Enter hint says
 what it will do.
 
-**Native menus.** In the desktop app right-click menus and plain dropdowns
-(one line per row: filters, sorts with no description, action lists, Settings
-selects) are the system's own. A system menu shows a row's label alone, so any
-menu whose rows carry a description, an icon or a colour mark stays Octant's
-own and looks the same in the desktop app, a browser and the phone: the mode
-switcher, reply detail, the provider's own setup, the dock's named choice, add
-tool and more tools, the device switcher, the Project sort, colour and view
-pickers, a plan task's status, the composer's attach and mode menus and every
-dropdown in the composer (`OctantSelectField` with `native={false}`), thread
-actions and Open in. Searchable pickers and popovers with embedded controls
-stay renderer surfaces too. Such a menu passes `native={false}` to
-`OctantMenu` or `OctantMenuRoot`.
+**Native menus.** Every menu, dropdown, select and right-click menu is
+Octant's own, in the desktop app as in a browser and on the phone, so a row
+keeps its description, icon and colour mark everywhere and there is one menu to
+build and test (maintainer decision, 2026-11-15). A system menu showed a row's
+label alone and ran label and detail together. The code editor's text-editing
+right-click menu stays the system's.
 
 **Composer popups.** Every popup the composer opens (Project, base branch,
 checkout, Create from…, access, model) is the float at `--oct-radius-lg` with
