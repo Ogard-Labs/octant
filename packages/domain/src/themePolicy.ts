@@ -6,6 +6,7 @@ import type {
 } from "@octant/contracts/theme";
 import { getZenBuiltinBackground } from "@octant/contracts/zen";
 import { resolveTypographyProjection } from "@octant/theme/typography";
+import { asciiCell } from "./asciiPrint";
 
 export type EffectiveThemeMode = "light" | "dark";
 
@@ -86,7 +87,7 @@ export interface ResolvedAppBackground {
   readonly backgroundLightUrl: string | null;
   /** Whether the selected built-in asset, the character field, or Flowing is allowed to move. */
   readonly backgroundAnimated: boolean;
-  /** How the picture is printed: as it is, pixelated, or dithered. */
+  /** How the picture is printed: as it is, pixelated, dithered, or in characters. */
   readonly effect: {
     readonly kind: AppBackgroundEffect;
     readonly cell: number;
@@ -122,7 +123,8 @@ export function resolveAppBackground(
     ? { kind: "dither" as const, cell: 2, levels: 4 }
     : {
         kind: background.effect ?? ("none" as const),
-        cell: background.effectCell,
+        cell:
+          background.effect === "ascii" ? asciiCell(background.effectCell) : background.effectCell,
         levels: background.effectTones,
       };
   const tuning = {
@@ -147,9 +149,12 @@ export function resolveAppBackground(
   // A drawn field moves unless a person chose Still; a printed picture moves
   // only when a person chose Wave, since prints were still before the choice.
   const fieldMoves = motionAllowed && background.motion !== "still";
+  // An ASCII print has no wave: a ring pushing through characters read as
+  // the glyphs flickering, so it stays still whatever Motion says.
   const printMoves =
     motionAllowed &&
     effect.kind !== "none" &&
+    effect.kind !== "ascii" &&
     (background.motion === "wave" || background.motion === "pulse");
   if (background.kind === "builtin") {
     const preset = getZenBuiltinBackground(background.presetId);

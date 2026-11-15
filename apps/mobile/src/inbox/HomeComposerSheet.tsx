@@ -15,8 +15,8 @@ const MOBILE_CREATE_MODES: ReadonlyArray<{
   readonly label: string;
   readonly icon: MobileIconName;
 }> = [
-  { id: "chat", label: "Chat", icon: "chatbubble-outline" },
-  { id: "work", label: "Work", icon: "briefcase-outline" },
+  { id: "chat", label: "No folder", icon: "chatbubble-outline" },
+  { id: "work", label: "In a folder", icon: "folder-outline" },
   { id: "code", label: "Code", icon: "code-slash" },
 ];
 

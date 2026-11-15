@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bayerThreshold, clampEffect, coverFit, sourceKey } from "./groundPrint";
+import { ASCII_RAMP } from "@octant/domain/ascii-print";
+import { asciiGlyphRows, bayerThreshold, clampEffect, coverFit, sourceKey } from "./groundPrint";
 
 /** The desktop's own function, copied as the oracle for the port. */
 function desktopBayerThreshold(x: number, y: number): number {
@@ -36,6 +37,19 @@ describe("ground print", () => {
     const seen = new Set<number>();
     for (let y = 0; y < 8; y += 1) for (let x = 0; x < 8; x += 1) seen.add(bayerThreshold(x, y));
     expect(seen.size).toBe(64);
+  });
+
+  it("never prints ASCII smaller than a glyph can read", () => {
+    expect(clampEffect({ kind: "ascii", cell: 2, levels: 4 }).cell).toBe(10);
+    expect(clampEffect({ kind: "ascii", cell: 10, levels: 4 }).cell).toBe(10);
+  });
+
+  it("hands the shader the desktop's glyph table, five rows per character", () => {
+    const rows = asciiGlyphRows();
+    expect(rows).toHaveLength(ASCII_RAMP.length * 5);
+    // The space is blank and every row fits five pixels.
+    expect(rows.slice(0, 5)).toEqual([0, 0, 0, 0, 0]);
+    expect(rows.every((row) => Number.isInteger(row) && row >= 0 && row < 32)).toBe(true);
   });
 
   it("keeps the dials on whole numbers from 2 to 16", () => {
