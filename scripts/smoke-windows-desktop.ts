@@ -63,6 +63,13 @@ const PROOF_BUDGET_MS = 75000;
 // seconds counts as nothing observed, so 12 seconds held at most two looks.
 const HOST_READY_LIMIT_MS = 40000;
 const RENDERED_WINDOW_LIMIT_MS = 30000;
+// One answer from the native process probe that is asked once rather than
+// polled. Its fixed 8 seconds was the only limit in the cold phase that did
+// not leave room for a slow runner: three host-only identity probes were
+// killed with nothing on stdout in one day, each on a runner whose Nightly
+// phase took 28 to 29 seconds where 23 of 24 passing runs took 17 to 23, and
+// each with more than 50 seconds of the phase budget still unused.
+const NATIVE_PROBE_LIMIT_MS = 20000;
 function check(value: boolean, name: string) {
   if (!value) throw Error(`Windows desktop proof failed: ${name}`);
   checks.push(name);
@@ -189,6 +196,26 @@ async function window(child: ChildProcess, close = false, requireRendered = fals
     "visibleOwnedWindow" in value &&
     value.visibleOwnedWindow === true &&
     (!requireRendered || ("renderedWelcome" in value && value.renderedWelcome === true))
+  );
+}
+function nativeProbeLimit() {
+  const limit = Math.min(NATIVE_PROBE_LIMIT_MS, begin + PROOF_BUDGET_MS - Date.now());
+  if (limit <= 0) throw Error("The native process probe has no proof budget left.");
+  return limit;
+}
+// Turns a failed one-shot probe into an error that names how far it got. Only
+// the probe's own stage lines are kept from its stderr.
+function nativeProbeFailure(name: string, limit: number, error: unknown) {
+  const killed = typeof error === "object" && error !== null && "killed" in error && error.killed;
+  const stderr =
+    typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
+  const stages = stderr
+    .split(/\r?\n/)
+    .filter((line) => /^octant-stage [a-z-]+ \d+$/.test(line))
+    .join(", ");
+  return Error(
+    `${name} ${killed ? `did not answer within ${limit} ms` : "was refused"} (${stages || "no stage reached"}).`,
+    { cause: error },
   );
 }
 async function observeColdHostWindow(nightly: ChildProcess) {
@@ -433,6 +460,7 @@ async function coldHostIdentity(nightly: ChildProcess) {
   )
     throw Error("The cold native owner could not be observed.");
   const owner = found.attachment.owner;
+  const limit = nativeProbeLimit();
   const result = await run(
     "powershell.exe",
     [
@@ -455,8 +483,10 @@ async function coldHostIdentity(nightly: ChildProcess) {
       "-ParentBirth",
       parentBirth,
     ],
-    { timeout: 8000, maxBuffer: 8192 },
-  );
+    { timeout: limit, maxBuffer: 8192 },
+  ).catch((error: unknown) => {
+    throw nativeProbeFailure("The exact cold host process observation", limit, error);
+  });
   const value: unknown = JSON.parse(result.stdout);
   if (
     typeof value !== "object" ||
@@ -475,6 +505,7 @@ async function coldHostIdentity(nightly: ChildProcess) {
   return { pid: value.pid, birth: value.birth };
 }
 async function coldHostExited(owner: { readonly pid: number; readonly birth: string }) {
+  const limit = nativeProbeLimit();
   const result = await run(
     "powershell.exe",
     [
@@ -491,8 +522,10 @@ async function coldHostExited(owner: { readonly pid: number; readonly birth: str
       "-ExpectedBirth",
       owner.birth,
     ],
-    { timeout: 8000, maxBuffer: 8192 },
-  );
+    { timeout: limit, maxBuffer: 8192 },
+  ).catch((error: unknown) => {
+    throw nativeProbeFailure("The exact cold host exit observation", limit, error);
+  });
   const value: unknown = JSON.parse(result.stdout);
   return (
     typeof value === "object" &&
@@ -632,7 +665,11 @@ try {
     // Joining the Nightly client does not join its separately launched host.
     // Wait for that exact host to exit before reading projections: Windows
     // can refuse opening a file while shutdown has marked it for deletion.
-    await until("the exact cold-launched Stable process exited", () => coldHostExited(cold), 8000);
+    await until(
+      "the exact cold-launched Stable process exited",
+      () => coldHostExited(cold),
+      NATIVE_PROBE_LIMIT_MS,
+    );
     check(true, "the cold-launched Stable process exited before owned job cleanup");
     await stopped(first.probe.url);
   } else {
