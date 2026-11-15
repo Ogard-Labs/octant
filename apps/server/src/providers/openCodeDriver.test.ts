@@ -2819,6 +2819,29 @@ describe("OpenCode driver", () => {
     }
   });
 
+  it("keeps a person's own read deny of an env example over OpenCode's exception and protected files last", () => {
+    const own = {
+      rules: [
+        { action: "read", resource: "*", effect: "allow" },
+        { action: "read", resource: "*.env.example", effect: "deny" },
+      ],
+      toolServers: false,
+    } as const;
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const protectedPaths = [join(homedir(), ".ssh")];
+    for (const policy of ["approval-gated", "plan"] as const) {
+      const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
+        (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
+      );
+      const beta = betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths);
+      for (const rules of [legacy, beta]) {
+        expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("deny");
+        // The person's own allow-everything never reopens a protected file.
+        expect(lastMatch(rules, "read", key), policy).toBe("deny");
+      }
+    }
+  });
+
   it("keeps a person's own web-fetch deny in Plan while Plan's edits stay denied over their allow", () => {
     const own = {
       rules: [

@@ -3174,7 +3174,9 @@ const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 /**
  * OpenCode's own default agent refuses `.env` files but not their examples;
  * its rules come before Octant's, so the read allow above would otherwise
- * take that protection away. These come after everything else.
+ * take that protection away. These sit with the level's allows, under the
+ * person's own rules: a person's explicit deny of `.env.example`, or allow of
+ * a `.env` file, still wins, as it would over OpenCode's own default.
  */
 const OPENCODE_ENV_READ_RULES: ReadonlyArray<PermissionV2Rule> = [
   { action: "read", resource: "*.env", effect: "deny" },
@@ -3258,7 +3260,7 @@ export function permissionRules(
   // its denies, so Plan's denials and the outside-directory refusal stand.
   rules = insertBeforeFirstDeny(
     rules,
-    own.rules.map((rule) => ({
+    [...OPENCODE_ENV_READ_RULES, ...own.rules].map((rule) => ({
       permission: rule.action,
       pattern: rule.resource,
       action: rule.effect,
@@ -3278,10 +3280,7 @@ export function permissionRules(
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
-  for (const rule of [
-    ...OPENCODE_ENV_READ_RULES,
-    ...openCodeProtectedReadRefusals(protectedPaths),
-  ]) {
+  for (const rule of openCodeProtectedReadRefusals(protectedPaths)) {
     rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
   if (managedToolServerName === undefined) return rules;
@@ -3352,12 +3351,16 @@ export function betaAgentPermissionRules(
     ...PROJECT_READ_TOOLS.map((action) => ({ action, resource: "*", effect: "allow" as const })),
     ...posture,
   ];
-  rules = insertBeforeFirstDeny(rules, ownRules, (rule) => rule.effect === "deny");
+  rules = insertBeforeFirstDeny(
+    rules,
+    [...OPENCODE_ENV_READ_RULES, ...ownRules],
+    (rule) => rule.effect === "deny",
+  );
   // Work follows the posture as Code does; only Plan denies the shell.
   for (const resource of extraFolderPatterns(extraFolders)) {
     rules.push({ action: "external_directory", resource, effect: "allow" });
   }
-  return [...rules, ...OPENCODE_ENV_READ_RULES, ...openCodeProtectedReadRefusals(protectedPaths)];
+  return [...rules, ...openCodeProtectedReadRefusals(protectedPaths)];
 }
 
 /**
