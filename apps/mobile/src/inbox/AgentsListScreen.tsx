@@ -25,7 +25,7 @@ import { useTheme, type ThemeColors } from "../../design-system";
 import { ListRow, ListSection, NavBar, SegmentedControl, ToolbarButton } from "../ui/NativeChrome";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { HomeComposerSheet } from "./HomeComposerSheet";
-import { sectionForAgentRow } from "./agentsListPresentation";
+import { searchHitsBesideList, sectionForAgentRow } from "./agentsListPresentation";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
 
@@ -95,20 +95,6 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       controller.abort();
     };
   }, [query, searchOpen, transports]);
-  // A host title match for a thread the list already holds is the row the
-  // in-place title filter shows; listing it again under the hits repeats it.
-  const threadHits = useMemo(
-    () =>
-      messageHits.filter(
-        (hit) =>
-          hit.field !== "title" ||
-          !rows.some(
-            (row) =>
-              row.hostId === hit.hostId && row.mode === hit.mode && row.threadId === hit.threadId,
-          ),
-      ),
-    [messageHits, rows],
-  );
   // The filter switches in place, and the navigator holds the choice, so the
   // list comes back on the same view after a thread is opened and closed.
   const view = props.view;
@@ -237,6 +223,15 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       .map((section) => ({ title: section.title, rows: searchedRows(section.rows) }))
       .filter((section) => section.rows.length > 0);
   }, [grouped, hostLabel, query, view]);
+  // The filtered list already shows its own title matches; the hits add the rest.
+  const threadHits = useMemo(
+    () =>
+      searchHitsBesideList(
+        messageHits,
+        sections.flatMap((section) => section.rows),
+      ),
+    [messageHits, sections],
+  );
 
   const viewOptions: ReadonlyArray<{ readonly id: AgentListView; readonly label: string }> = [
     { id: "all", label: MOBILE_COPY.statusAllShort },

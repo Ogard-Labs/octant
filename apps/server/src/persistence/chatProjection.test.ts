@@ -9,6 +9,7 @@ import {
   type ChatSettings,
   type ChatThread,
 } from "@octant/contracts";
+import { CANVAS_SCHEMA_VERSION } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
@@ -750,6 +751,108 @@ describe("ChatProjection", () => {
     expect(searchThreads(connection, "neutral", visible, 50).matches).toEqual([
       expect.objectContaining({ field: "title", anchorId: "" }),
     ]);
+    // Research notes are part of the reply the thread shows.
+    const researchId = "82000000-0000-4000-8000-000000000071";
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 2 + deltas.length,
+        events: [
+          pending("chat.attempt-updated@1", {
+            kind: "attempt-updated",
+            attempt: {
+              ...attempt,
+              outcome: "streaming",
+              researchRef: {
+                contentId: researchId,
+                digest: digest("lemur census notes"),
+                byteLength: "lemur census notes".length,
+              },
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: researchId,
+            threadId: ids.thread,
+            role: "research",
+            body: "lemur census notes",
+            digest: digest("lemur census notes"),
+            byteLength: "lemur census notes".length,
+          });
+        },
+      },
+    );
+    expect(
+      searchThreads(connection, "lemur census", visible, 50).matches.map((match) => match.anchorId),
+    ).toEqual([ids.turn]);
+
+    // A rewind removes the turns it names and never a Canvas the thread made.
+    const canvasId = "82000000-0000-4000-8000-000000000072";
+    store.append({
+      aggregate: { aggregateType: "canvas", aggregateId: canvasId },
+      expectedVersion: 0,
+      events: [
+        pending("canvas.created@1", {
+          canvasId,
+          version: {
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            canvasId,
+            versionId: "82000000-0000-4000-8000-000000000073",
+            sequence: 1,
+            definition: {
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              title: "Habitat map",
+              provenance: {
+                mode: "chat",
+                hostId: "local",
+                projectId: null,
+                threadId: ids.thread,
+                actor: { kind: "system", actorId: ids.actor },
+                providerInstanceId: ids.provider,
+                modelId: "model-a",
+                createdAt: now,
+              },
+              sourceManifest: [],
+              blocks: [
+                {
+                  blockId: "intro",
+                  schemaVersion: CANVAS_SCHEMA_VERSION,
+                  kind: "rich-text",
+                  text: "Wetland corridors",
+                },
+              ],
+            },
+            createdBy: { kind: "system", actorId: ids.actor },
+            createdAt: now,
+          },
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 3 + deltas.length,
+      events: [
+        pending("chat.thread-rewound@1", {
+          kind: "thread-rewound",
+          thread: thread({ version: 4 + deltas.length }),
+          rewindId: "82000000-0000-4000-8000-000000000074",
+          fromTurnId: ids.turn,
+          removedTurnIds: [ids.turn],
+          rewoundAt: now,
+        }),
+      ],
+    });
+    expect(searchThreads(connection, "lemur census", visible, 50).matches).toEqual([]);
+    expect(
+      searchThreads(connection, "wetland corridors", visible, 50).matches.map((match) => [
+        match.field,
+        match.anchorId,
+      ]),
+    ).toEqual([["canvas", canvasId]]);
+
     // An attachment's file name joins its turn's prompt; a purged one leaves it.
     const attachment = (status: "finalized" | "purged") =>
       pending("chat.attachment-updated@1", {
@@ -768,7 +871,7 @@ describe("ChatProjection", () => {
       });
     store.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
-      expectedVersion: 2 + deltas.length,
+      expectedVersion: 4 + deltas.length,
       events: [attachment("finalized")],
     });
     expect(
@@ -779,13 +882,13 @@ describe("ChatProjection", () => {
     ).toEqual([[ids.turn, "prompt"]]);
     store.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
-      expectedVersion: 3 + deltas.length,
+      expectedVersion: 5 + deltas.length,
       events: [attachment("purged")],
     });
     expect(searchThreads(connection, "budget-q3", visible, 50).matches).toEqual([]);
     store.append({
       aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
-      expectedVersion: 4 + deltas.length,
+      expectedVersion: 6 + deltas.length,
       events: [
         pending("chat.deleted@1", { kind: "deleted", threadId: ids.thread, deletedAt: now }),
       ],

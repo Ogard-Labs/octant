@@ -159,7 +159,7 @@ export class ThreadSearchProjection implements Projection {
         const prompt = readChatContent(connection, String(turn.userMessageRef.contentId));
         index.putPart({ ...at, field: "prompt" }, "prompt", 0, prompt?.body ?? "");
         for (const attempt of turn.attempts) {
-          for (const ref of attempt.responseRefs) {
+          for (const ref of chatReplyRefs(attempt)) {
             index.addChatReply(at, String(ref.contentId));
           }
           index.putChatToolSteps(at, attempt.toolSteps ?? []);
@@ -172,7 +172,7 @@ export class ThreadSearchProjection implements Projection {
         const threadId = String(attempt.threadId);
         const turnId = String(attempt.turnId);
         const at = { mode: "chat", threadId, turnKey: turnId, anchorId: turnId } as const;
-        for (const ref of attempt.responseRefs) index.addChatReply(at, String(ref.contentId));
+        for (const ref of chatReplyRefs(attempt)) index.addChatReply(at, String(ref.contentId));
         index.putChatToolSteps(at, attempt.toolSteps ?? []);
         return;
       }
@@ -391,7 +391,7 @@ export class ThreadSearchProjection implements Projection {
       ),
       turnKeysOf: connection.prepare(`
         SELECT DISTINCT turn_key FROM thread_search_document
-        WHERE mode = ? AND thread_id = ? AND field != 'title'
+        WHERE mode = ? AND thread_id = ? AND field NOT IN ('title', 'canvas')
       `),
       codeTurnStart: connection.prepare(`
         SELECT start_sequence FROM thread_search_document
@@ -761,6 +761,20 @@ function canvasBlockText(blocks: unknown): ReadonlyArray<string> {
   };
   visit(blocks, false);
   return words;
+}
+
+/**
+ * The content an attempt's reply shows: its response pieces and, when it ran
+ * research, the research notes, as the thread view and Chat's own message
+ * search read them.
+ */
+function chatReplyRefs(attempt: {
+  readonly responseRefs: ReadonlyArray<{ readonly contentId: unknown }>;
+  readonly researchRef?: { readonly contentId: unknown } | undefined;
+}): ReadonlyArray<{ readonly contentId: unknown }> {
+  return attempt.researchRef === undefined
+    ? attempt.responseRefs
+    : [...attempt.responseRefs, attempt.researchRef];
 }
 
 function toolStepText(step: ThreadToolStep): string {
