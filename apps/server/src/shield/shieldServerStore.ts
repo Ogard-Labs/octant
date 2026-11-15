@@ -49,7 +49,7 @@ import {
 } from "@octant/domain/shield-server-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import { redactSecretShaped } from "../providers/providerApprovalCall";
+import { redactSecretShaped } from "@octant/domain/secret-shaped-text-policy";
 
 /**
  * The servers a person registered with Octant Shield, journaled and rebuilt

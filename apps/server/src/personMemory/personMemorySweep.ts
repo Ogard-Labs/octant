@@ -20,7 +20,7 @@ import {
   personMemoryDistillationAllowed,
   personMemoryDistillPrompt,
 } from "@octant/domain/person-memory-policy";
-import { redactSecretShaped } from "../providers/providerApprovalCall";
+import { redactSecretsAndPrivateKeys } from "@octant/domain/secret-shaped-text-policy";
 import type { PersonMemoryStore } from "./personMemoryStore";
 
 /** Once an hour is often enough to learn from threads a person put away. */
@@ -101,12 +101,9 @@ export type PersonMemoryDistillOutcome =
   | "not-allowed"
   | "skipped";
 
-const PRIVATE_KEY_BLOCK =
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
-
 /** Secret-shaped text and private-key blocks, replaced before a model sees them and before storage. */
 export function redactForPersonMemory(text: string): string {
-  return redactSecretShaped(text.replaceAll(PRIVATE_KEY_BLOCK, "[redacted]"));
+  return redactSecretsAndPrivateKeys(text);
 }
 
 /**

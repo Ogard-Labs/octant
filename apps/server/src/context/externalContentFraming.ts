@@ -15,6 +15,7 @@ export const INSTRUCTION_CONTEXT_SECTIONS = [
   "provider-framing",
   "octant-policy",
   "user-instructions",
+  "person-instructions",
   "project-instructions",
   "extension-instructions",
   "octant-tools",
