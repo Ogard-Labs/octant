@@ -96,10 +96,6 @@ export const decodeThreadWakeup = Schema.decodeUnknownSync(ThreadWakeup);
  */
 export const THREAD_WAKEUP_TURN_HEADING = "Wake-up you scheduled earlier in this thread:";
 
-export function threadWakeupTurnPrompt(prompt: string): string {
-  return `${THREAD_WAKEUP_TURN_HEADING}\n\n${prompt}`;
-}
-
 export const THREAD_WAKEUP_AGGREGATE = "thread-wakeup" as const;
 export const THREAD_WAKEUP_CHANGED = "thread-wakeup.changed@1" as const;
 

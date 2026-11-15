@@ -24,7 +24,7 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
   THREAD_WAKEUP_AGGREGATE,
   THREAD_WAKEUP_CHANGED,
-  threadWakeupTurnPrompt,
+  THREAD_WAKEUP_TURN_HEADING,
   UtcTimestamp,
   WorkThreadUpdated,
   type EventActor,
@@ -107,6 +107,15 @@ export interface ThreadWakeupServiceOptions {
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const BUSY_RETRY_MS = 15_000;
 const REPLAY_PAGE = 1_000;
+
+/**
+ * The prompt a wake-up's turn starts with: the host's heading, so the agent and
+ * the transcript read it as a turn the runtime asked for earlier, then what
+ * the agent asked to be told.
+ */
+function threadWakeupTurnPrompt(prompt: string): string {
+  return `${THREAD_WAKEUP_TURN_HEADING}\n\n${prompt}`;
+}
 
 interface Held {
   wakeup: ThreadWakeup;
