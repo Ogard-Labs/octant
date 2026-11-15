@@ -1,5 +1,6 @@
 import {
   ActorId,
+  AggregateId,
   CorrelationId,
   EventId,
   LOCAL_HOST_ID,
@@ -29,7 +30,7 @@ import {
   webSearchSettingsFromChatAddress,
   type PrincipalKind,
 } from "@octant/domain";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import type { SearxngFetch } from "../chat/research/searxngClient";
 import { SearxngEndpointRejected, validateSearxngEndpoint } from "../chat/research/searxngEndpoint";
 import { readAggregateVersion } from "../persistence/chatProjection";
@@ -52,6 +53,10 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const decodeAggregateId = Schema.decodeUnknownSync(Schema.UUID.pipe(Schema.brand("AggregateId")));
+const decodeAggregateIdOption = Schema.decodeUnknownOption(AggregateId);
+const decodeToolCallIdOption = Schema.decodeUnknownOption(
+  Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+);
 
 /** The id the entry migrated from Chat's SearXNG address keeps once saved. */
 export const MIGRATED_SEARXNG_ENTRY_ID = decodeWebSearchBackendId(
@@ -220,13 +225,24 @@ export class WebSearchSettingsService {
         }
         if (routed.answeredBy !== undefined)
           this.#refusedKeys.delete(String(routed.answeredBy.entryId));
-        this.#journalRouted(routed);
+        this.#journalRouted(routed, input);
       },
     });
   }
 
-  #journalRouted(routed: Omit<WebSearchCallRouted, "kind" | "routedAt">): void {
+  #journalRouted(
+    routed: Omit<WebSearchCallRouted, "kind" | "routedAt" | "threadId" | "toolCallId">,
+    call: Pick<WebSearchInput, "threadId" | "toolCallId">,
+  ): void {
     const routedAt = decodeTimestamp(this.#clock());
+    const threadId =
+      call.threadId === undefined
+        ? undefined
+        : Option.getOrUndefined(decodeAggregateIdOption(call.threadId));
+    const toolCallId =
+      call.toolCallId === undefined
+        ? undefined
+        : Option.getOrUndefined(decodeToolCallIdOption(call.toolCallId));
     try {
       this.#journal.append({
         aggregate: {
@@ -247,7 +263,13 @@ export class WebSearchSettingsService {
             correlationId: decodeCorrelationId(this.#uuid()),
             actor: { kind: "system" as const, actorId: decodeActorId(LOCAL_ACTOR_ID) },
             occurredAt: routedAt,
-            payload: { kind: "web-search-call-routed", ...routed, routedAt },
+            payload: {
+              kind: "web-search-call-routed",
+              ...(threadId === undefined ? {} : { threadId }),
+              ...(toolCallId === undefined ? {} : { toolCallId }),
+              ...routed,
+              routedAt,
+            },
           },
         ],
       });

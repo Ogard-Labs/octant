@@ -5937,7 +5937,7 @@ export class ChatService {
     if (!thread.researchEnabled) return undefined;
     if (researchRoute.kind !== "ready" || researchRoute.backend !== "searxng") return undefined;
     if (hostAppTools?.definitions.includes(WEB_SEARCH_TOOL_DEFINITION) === true) return undefined;
-    const tools = createWebSearchTools(researchRoute.execute);
+    const tools = createWebSearchTools(researchRoute.execute, thread.id);
     const record = this.#recordExternalContentIngestion;
     // What a search returns was written by others, so a result marks the
     // thread as the harness's own search does.

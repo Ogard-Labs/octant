@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { UtcTimestamp } from "./events";
+import { AggregateId, UtcTimestamp } from "./events";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -163,10 +163,15 @@ export const WEB_SEARCH_CALL_ROUTED_EVENT_NAME = "web-search.call-routed@1";
 /**
  * Where one query went: the backend that answered, if any, and each one that
  * failed or was not tried. The query itself stays with the thread's own tool
- * call; this record names only backends, for the person to read.
+ * call; this record names only backends, for the person to read, and the
+ * thread and tool call it belongs to, so it reads beside that call.
  */
 export const WebSearchCallRouted = Schema.Struct({
   kind: Schema.Literal("web-search-call-routed"),
+  /** The thread whose turn searched; absent only for a search no thread made. */
+  threadId: Schema.optional(AggregateId),
+  /** The provider's id for the tool call, as the thread's tool row carries it, when it gave one. */
+  toolCallId: Schema.optional(BoundedText),
   answeredBy: Schema.optional(
     Schema.Struct({ entryId: WebSearchBackendId, backend: WebSearchBackendKind }).annotations(
       strict,

@@ -21,6 +21,10 @@ export interface WebSearchInput {
   readonly query: string;
   readonly limit: number;
   readonly signal?: AbortSignal;
+  /** The thread whose tool call searched, so the routing record reads beside it. */
+  readonly threadId?: string;
+  /** The provider's id for that tool call. Neither id reaches a backend. */
+  readonly toolCallId?: string;
 }
 
 export interface WebSearchAnswer {

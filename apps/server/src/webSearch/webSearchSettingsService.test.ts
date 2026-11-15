@@ -287,7 +287,7 @@ describe("web search keys", () => {
     expect(stored.size).toBe(0);
   });
 
-  it("journals the backend that answered and the one that refused its key, and reads that entry as Needs key", async () => {
+  it("journals the backend that answered and the one that refused its key with the thread's tool call, and reads that entry as Needs key", async () => {
     const { keys } = memoryKeys();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input instanceof Request ? input.url : input);
@@ -316,7 +316,13 @@ describe("web search keys", () => {
     );
     await service.setKey({ entryId: braveEntry.id, key: "revoked" }, "local-window");
 
-    const answer = await service.search({ query: "octant", limit: 5 });
+    const threadId = "00000000-0000-4000-8000-0000000000c7";
+    const answer = await service.search({
+      query: "octant",
+      limit: 5,
+      threadId,
+      toolCallId: "toolu_search_1",
+    });
     expect(answer.results.map((result) => result.url)).toEqual(["https://example.com/octant"]);
     const routed = journal.replayAggregateType({
       aggregateType: "web-search-calls",
@@ -326,6 +332,8 @@ describe("web search keys", () => {
     expect(routed.map((event) => event.payload)).toEqual([
       {
         kind: "web-search-call-routed",
+        threadId,
+        toolCallId: "toolu_search_1",
         answeredBy: { entryId: searx.id, backend: "searxng" },
         failed: [{ entryId: braveEntry.id, backend: "brave", failure: "key-refused" }],
         routedAt: expect.any(String),

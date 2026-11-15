@@ -152,6 +152,7 @@ describe("native harness composition", () => {
 
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {
     let searxngBaseUrl: string | undefined;
+    const asked: Array<{ readonly threadId?: string; readonly toolCallId?: string }> = [];
     const fetch = vi.fn(
       async (_input: RequestInfo | URL) =>
         new Response(
@@ -181,13 +182,15 @@ describe("native harness composition", () => {
         harnessWebSearch({
           readEligible: () =>
             webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID).backends,
-          search: (input) =>
-            searchWebSearchBackends({
+          search: (input) => {
+            asked.push(input);
+            return searchWebSearchBackends({
               backends: webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID)
                 .backends,
               search: input,
               fetch,
-            }),
+            });
+          },
         }),
       hostId: authority.hostId,
       readThreadTaint: () => false,
@@ -201,6 +204,7 @@ describe("native harness composition", () => {
       nextTurn()?.execute({
         name: "web-search",
         inputJson: JSON.stringify({ query: "octant" }),
+        toolCallId: "toolu_search_1",
       });
 
     const unset = nextTurn()?.definitions.map((definition) => definition.name);
@@ -212,6 +216,8 @@ describe("native harness composition", () => {
       result: { query: "octant", results: [{ url: "https://example.com/octant" }] },
     });
     expect(String(fetch.mock.calls.at(-1)?.[0])).toMatch(/^https:\/\/search\.example\.test\//);
+    // Where the query went is journaled with the thread's own tool call.
+    expect(asked.at(-1)).toMatchObject({ threadId: thread.id, toolCallId: "toolu_search_1" });
 
     searxngBaseUrl = "https://other.example.test";
     await search();

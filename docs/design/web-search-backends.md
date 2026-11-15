@@ -150,8 +150,9 @@ walks. Under Any, the list may still mix regions; the person orders it.
 
 Each call journals the backend that answered and each one that failed, with
 the failure kind, so the person can see where a query went. The record
-(`web-search.call-routed@1`) names entries and failure kinds only; the query
-stays with the thread's own tool call. A vendor's refusal of the query itself
+(`web-search.call-routed@1`) names entries and failure kinds, and the thread
+and the provider's tool call id it belongs to, so it reads beside that call;
+the query stays with the thread's own tool call. A vendor's refusal of the query itself
 (an HTTP 4xx other than a refused key or a rate limit) is an answer and does
 not move on. Which entry's key was refused is held in memory, so after a
 restart the next search learns it again.
