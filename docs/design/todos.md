@@ -30,8 +30,10 @@ on another computer through its own pairing with it, shows the last list
 read-only when that computer cannot be reached, and keeps quick adds as
 unsent drafts on the device. Not built yet: the hub as the default list host,
 Start into another host's Project, a list host's changes reaching windows on
-other computers as they happen (they read it every 30 seconds), and the phone
-screen.
+other computers as they happen (they read it every 30 seconds), and Start
+from the phone. The phone screen is built: Inbox › To-dos lists the connected
+computer's open and done to-dos, adds one with quick add, and ticks one off or
+opens it again.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
@@ -249,7 +251,12 @@ A to-do may be started again; each start adds a link.
 - **Everywhere else.** The command palette offers New to-do and Open To-dos.
   New to-do, also on Mod+Shift+L (Settings › Keybindings), opens quick
   add in a dialog over the current page. The phone app shows the
-  list with quick add, Tick off and Start.
+  list with quick add, Tick off and Start. Built on the phone: Inbox ›
+  To-dos, from the computer the phone is connected to, with the open to-dos,
+  then those done, a quick add line (title only), and a tap that ticks one
+  off or opens it again; dropped to-dos stay off the phone. The phone reads
+  the list again every 30 seconds while it is in front. Start from the phone
+  is not built yet.
 - **Empty.** One sentence: what goes here and that a to-do can be handed to
   an agent.
 
