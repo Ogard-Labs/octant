@@ -3248,7 +3248,7 @@ describe("Claude execution policy", () => {
     },
   );
 
-  it("holds a second question until the first is settled and settles both when the session ends", async () => {
+  it("holds a second question until the first is answered, then puts it to the person", async () => {
     const f = harness();
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -3256,59 +3256,62 @@ describe("Claude execution policy", () => {
     );
     const open = f.opens[0]!;
     const signal = new AbortController().signal;
+    const observed: ProviderRuntimeEvent[] = [];
+    const subscriber = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          observed.push(event);
+        }),
+      ),
+    );
+    const questions = () =>
+      observed.filter(
+        (event): event is Extract<ProviderRuntimeEvent, { kind: "user-input-request" }> =>
+          event.kind === "user-input-request",
+      );
     const questionInput = (question: string) => ({
       questions: [{ question, options: [{ label: "Yes" }], multiSelect: false }],
     });
+    const ask = async (input: ReturnType<typeof questionInput>, toolUseId: string) => {
+      await open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "AskUserQuestion",
+        input,
+        toolUseId,
+        signal,
+      });
+      return open.canUseTool({ toolName: "AskUserQuestion", input, toolUseId, signal });
+    };
     const firstInput = questionInput("First?");
-    await open.preToolUse({
-      sessionId: "sdk-session-1",
-      projectRoot,
-      toolName: "AskUserQuestion",
-      input: firstInput,
-      toolUseId: "question-cap-1",
-      signal,
-    });
-    const first = open.canUseTool({
-      toolName: "AskUserQuestion",
-      input: firstInput,
-      toolUseId: "question-cap-1",
-      signal,
-    });
+    const first = ask(firstInput, "question-cap-1");
+    await vi.waitFor(() => expect(questions()).toHaveLength(1));
     const secondInput = questionInput("Second?");
-    await open.preToolUse({
-      sessionId: "sdk-session-1",
-      projectRoot,
-      toolName: "AskUserQuestion",
-      input: secondInput,
-      toolUseId: "question-cap-2",
-      signal,
-    });
-    const second = open.canUseTool({
-      toolName: "AskUserQuestion",
-      input: secondInput,
-      toolUseId: "question-cap-2",
-      signal,
-    });
+    const second = ask(secondInput, "question-cap-2");
     const secondOutcome = await Promise.race([
       second,
       new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 0)),
     ]);
-
+    // Only one question set is put to the person at a time.
     expect(secondOutcome).toBe("pending");
+    expect(questions()).toHaveLength(1);
+    expect(questions()[0]).toMatchObject({ prompt: "First?" });
+
+    await Effect.runPromise(
+      acquired.connection.answerUserInput({
+        sessionId,
+        requestId: questions()[0]!.requestId,
+        answer: "Yes",
+      }),
+    );
+    await expect(first).resolves.toMatchObject({ behavior: "allow" });
+    // Once the first is answered, the second is published for an answer.
+    await vi.waitFor(() => expect(questions()).toHaveLength(2));
+    expect(questions()[1]).toMatchObject({ prompt: "Second?" });
     expect(f.queries[0]?.close).not.toHaveBeenCalled();
     await acquired.close();
-    await expect(first).resolves.toMatchObject({ behavior: "deny" });
     await expect(second).resolves.toMatchObject({ behavior: "deny" });
-    const late = await Effect.runPromise(
-      Effect.exit(
-        acquired.connection.answerUserInput({
-          sessionId,
-          requestId: "request-1",
-          answer: "Yes",
-        }),
-      ),
-    );
-    expect(String(late)).toContain("protocol");
+    await Effect.runPromise(Fiber.join(subscriber));
   });
 
   it("keeps user questions interactive in Full access without creating an approval", async () => {
