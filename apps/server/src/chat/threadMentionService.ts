@@ -705,6 +705,27 @@ export function codeMentionWithinReach(input: {
 }
 
 /**
+ * Whether a window reaches a mentioned Chat thread's Project for a composer,
+ * as a window showing that composer alone would: a Chat composer reaches its
+ * own Project (`null` for an unscoped Chat), any other composer the window's
+ * Chat lead. A Chat thread opens only in a window whose Chat layout shows its
+ * Project, so without this a Chat pane of another Project would make its
+ * threads attachable from the composer beside it.
+ */
+export function chatMentionWithinReach(input: {
+  readonly workspace: WindowWorkspace;
+  /** The composer's Chat Project; `undefined` when the composer is not a Chat thread. */
+  readonly readerChatProjectId: ProjectId | null | undefined;
+  readonly mentionedProjectId: ProjectId | null;
+}): boolean {
+  const reach =
+    input.readerChatProjectId === undefined
+      ? input.workspace.contextByMode.chat.projectId
+      : input.readerChatProjectId;
+  return String(reach) === String(input.mentionedProjectId);
+}
+
+/**
  * Read the `#thread` mentions a turn names, on the window the turn was sent
  * from.
  *

@@ -39,6 +39,7 @@ import {
   threadMentionContextResolver,
   type ThreadMentionDirectory,
   type ThreadMentionDirectoryThread,
+  chatMentionWithinReach,
   codeMentionWithinReach,
 } from "./threadMentionService";
 import { defaultWindowWorkspace } from "@octant/domain/shell-policy";
@@ -1609,6 +1610,74 @@ describe("a Code mention's reach in a window showing several Projects", () => {
       codeMentionWithinReach({
         workspace,
         readerCodeProjectId: undefined,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("a Chat mention's reach in a window showing several Projects", () => {
+  const leadProject = decodeProjectId("00000000-0000-4000-8000-000000000b01");
+  const paneProject = decodeProjectId("00000000-0000-4000-8000-000000000b02");
+  const base = defaultWindowWorkspace(windowId);
+  const workspace = {
+    ...base,
+    contextByMode: {
+      ...base.contextByMode,
+      chat: { ...base.contextByMode.chat, projectId: leadProject },
+    },
+  };
+
+  it("reaches a Chat composer's own Project and no other pane's", () => {
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: paneProject,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: paneProject,
+        mentionedProjectId: leadProject,
+      }),
+    ).toBe(false);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: leadProject,
+        mentionedProjectId: paneProject,
+      }),
+      "the lead's composer does not reach the pane beside it",
+    ).toBe(false);
+  });
+
+  it("reaches only the Chat lead for a composer that is not a Chat thread", () => {
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: undefined,
+        mentionedProjectId: leadProject,
+      }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: undefined,
+        mentionedProjectId: paneProject,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps an unscoped Chat thread within reach of an unscoped composer only", () => {
+    expect(
+      chatMentionWithinReach({ workspace, readerChatProjectId: null, mentionedProjectId: null }),
+    ).toBe(true);
+    expect(
+      chatMentionWithinReach({
+        workspace,
+        readerChatProjectId: null,
         mentionedProjectId: paneProject,
       }),
     ).toBe(false);
