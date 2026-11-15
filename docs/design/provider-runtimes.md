@@ -186,9 +186,8 @@ the person turns it off per account or per thread
 person turned off carries none of it below Full access, and never the
 runtime's own web search and fetch: `webTools` resolves off in every mode and
 at every level, Full access, a trusted Project, and the thread's On included
-(maintainer decision, 2026-11-15). Claude Code honors it by never offering
-`WebSearch` and `WebFetch`; Codex, OpenCode outside Plan, and Mistral Vibe do
-not yet switch their own web search off.
+(maintainer decision, 2026-11-15). Each driver honors it with the web-tools
+switch in the table above.
 
 Plan's read-only rule, Chat's withheld filesystem and shell, and the
 provider's telemetry and self-update channels stay off at every
