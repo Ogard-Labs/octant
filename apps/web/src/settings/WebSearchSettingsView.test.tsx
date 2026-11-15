@@ -3,7 +3,7 @@ import type {
   SetWebSearchSettingsRequest,
   WebSearchSettingsView as WebSearchSettingsViewValue,
 } from "@octant/contracts/web-search";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
@@ -82,14 +82,17 @@ describe("Settings › Web search", () => {
     render(<WebSearchSettingsView client={client()} />);
     const brave = await screen.findByRole("group", { name: "2. Brave Search setting" });
     await user.click(brave.querySelector("button[aria-expanded]") as HTMLElement);
+    // The statement's own label names it, so the terms and the reason a
+    // statement is not offered are read with the checkbox.
     expect(
-      screen.getByRole("checkbox", {
-        name: "Brave Search processes my queries only in the EU or UK",
+      within(brave).getByRole("checkbox", {
+        name: "This vendor processes my queries only in the EU or UK — not offered: Not offered",
       }),
     ).toBeDisabled();
-    expect(screen.getByText(/not offered: Not offered/)).toBeVisible();
     expect(
-      screen.getByRole("checkbox", { name: "Brave Search keeps no record of my queries" }),
+      within(brave).getByRole("checkbox", {
+        name: /^This vendor keeps no record of my queries \(.+\)$/,
+      }),
     ).toBeEnabled();
   });
 
@@ -129,7 +132,7 @@ describe("Settings › Web search", () => {
     render(<WebSearchSettingsView client={host} />);
     const brave = await screen.findByRole("group", { name: "2. Brave Search setting" });
     await user.click(brave.querySelector("button[aria-expanded]") as HTMLElement);
-    await user.click(screen.getByRole("button", { name: "Move Brave Search up" }));
+    await user.click(screen.getByRole("button", { name: "Move 2. Brave Search up" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(
@@ -161,20 +164,41 @@ describe("Settings › Web search", () => {
     expect(screen.getByRole("button", { name: "Discard changes" })).toBeVisible();
   });
 
+  it("names each entry's controls by position when two entries share a kind", async () => {
+    const user = userEvent.setup();
+    const host = client();
+    render(<WebSearchSettingsView client={host} newId={() => newId} />);
+    await chooseSelectFieldOption(
+      user,
+      await screen.findByRole("combobox", { name: "Backend kind" }),
+      "SearXNG",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Backend address" }),
+      "https://other.search.example/",
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const second = screen.getByRole("group", { name: "3. SearXNG setting" });
+    await user.click(second.querySelector("button[aria-expanded]") as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "Remove 3. SearXNG" }));
+    expect(screen.queryByRole("group", { name: "3. SearXNG setting" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "1. SearXNG setting" })).toBeVisible();
+  });
+
   it("sends a saved entry's key to the host and never shows it back", async () => {
     const user = userEvent.setup();
     const host = client();
     render(<WebSearchSettingsView client={host} />);
     const brave = await screen.findByRole("group", { name: "2. Brave Search setting" });
     await user.click(brave.querySelector("button[aria-expanded]") as HTMLElement);
-    const key = screen.getByLabelText("Brave Search API key");
+    const key = screen.getByLabelText("2. Brave Search API key");
     expect(key).toHaveAttribute("type", "password");
     await user.type(key, "brave-secret");
     await user.click(screen.getByRole("button", { name: "Save key" }));
     await waitFor(() =>
       expect(host.setWebSearchKey).toHaveBeenCalledWith({ entryId: braveId, key: "brave-secret" }),
     );
-    expect(screen.getByLabelText("Brave Search API key")).toHaveValue("");
+    expect(screen.getByLabelText("2. Brave Search API key")).toHaveValue("");
   });
 
   it("asks for a new entry's key only once the list holding it is saved", async () => {
@@ -188,7 +212,7 @@ describe("Settings › Web search", () => {
     await user.click(screen.getByRole("button", { name: "Add" }));
     const exa = screen.getByRole("group", { name: "3. Exa setting" });
     await user.click(exa.querySelector("button[aria-expanded]") as HTMLElement);
-    expect(screen.getByLabelText("Exa API key")).toBeDisabled();
+    expect(screen.getByLabelText("3. Exa API key")).toBeDisabled();
   });
 
   it("says where web search is set when this window has no host to ask", () => {

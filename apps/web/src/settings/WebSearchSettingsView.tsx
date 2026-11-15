@@ -297,6 +297,9 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
             const offer = WEB_SEARCH_BACKEND_OFFERS[entry.kind];
             const saved = savedIds.has(id);
             const entryDirty = dirty || !saved;
+            // Two entries can share a kind (two SearXNG instances), so each
+            // control names its entry by position as well as by vendor.
+            const entryName = `${index + 1}. ${offer.label}`;
             return (
               <SettingsCompactRow
                 detail={
@@ -305,7 +308,6 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                     {entry.kind === "searxng" ? <p>{SEARXNG_WARNING}</p> : null}
                     <label className="web-search-settings__statement">
                       <OctantCheckbox
-                        aria-label={`${offer.label} keeps no record of my queries`}
                         checked={entry.statesZdr}
                         disabled={busy || !offer.zdr.offered}
                         onChange={() => updateEntry(id, { statesZdr: !entry.statesZdr })}
@@ -319,7 +321,6 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                     </label>
                     <label className="web-search-settings__statement">
                       <OctantCheckbox
-                        aria-label={`${offer.label} processes my queries only in the EU or UK`}
                         checked={entry.statesEuProcessing}
                         disabled={busy || !offer.euProcessing.offered}
                         onChange={() =>
@@ -339,7 +340,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                     {offer.takesKey ? (
                       <div className="web-search-settings__key">
                         <OctantInput
-                          aria-label={`${offer.label} API key`}
+                          aria-label={`${entryName} API key`}
                           autoComplete="off"
                           disabled={busy || entryDirty}
                           onChange={(event) => {
@@ -372,7 +373,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                     ) : null}
                     <div className="web-search-settings__actions">
                       <OctantButton
-                        aria-label={`Move ${offer.label} up`}
+                        aria-label={`Move ${entryName} up`}
                         disabled={busy || index === 0}
                         onClick={() => move(index, -1)}
                         size="sm"
@@ -382,7 +383,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                         Move up
                       </OctantButton>
                       <OctantButton
-                        aria-label={`Move ${offer.label} down`}
+                        aria-label={`Move ${entryName} down`}
                         disabled={busy || index === draft.backends.length - 1}
                         onClick={() => move(index, 1)}
                         size="sm"
@@ -392,7 +393,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                         Move down
                       </OctantButton>
                       <OctantButton
-                        aria-label={`Remove ${offer.label}`}
+                        aria-label={`Remove ${entryName}`}
                         disabled={busy}
                         onClick={() =>
                           replace({
@@ -410,7 +411,7 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
                   </div>
                 }
                 key={id}
-                label={`${index + 1}. ${offer.label}`}
+                label={entryName}
                 meta={stateText(states.get(id), entryDirty)}
                 metaWraps
               >
