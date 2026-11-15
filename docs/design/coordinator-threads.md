@@ -99,9 +99,17 @@ make changes itself.
   Orchestration text, which no ordinary thread gets; the text guides when and
   how it starts workers and grants nothing
   ([Octant instructions](octant-instructions.md)).
-- **It is set apart in the workspace.** A coordinator sits in its own section
-  at the top of its Project, with its workers folded under it
-  ([Workspace: Coordinators](workspace.md#coordinators)).
+- **It is set apart in the workspace, and its workers live inside it.** A
+  coordinator sits in its own section at the top of its Project. Its workers are
+  not part of the thread list: by default they are not listed in the sidebar or
+  on the board, and a person reaches them from the coordinator's Workers panel,
+  the worker cards in its transcript, and Needs you. The **Show workers**
+  setting lists them in the sidebar, on the board, or both, outside the
+  coordinator, as a view preference with no authority (maintainer decision,
+  2026-11-15; [Workspace: Coordinators](workspace.md#coordinators)). A worker is
+  still an ordinary Code thread on its own worktree, with its own delivery
+  target, review, and Done, and a person can open, stop, or archive it from the
+  panel or from the worker itself.
 
 Rationale: a thread that may start other threads without asking, whose context
 keeps growing and keeps reading what its workers wrote, is the worst place to
@@ -455,9 +463,10 @@ reaches the person through the coordinator they are already talking to.
   `ask-user`, and `send` the worker what the person decided, but a pending
   approval stays the person's.
 - **Needs you.** A worker's request stays a Needs you row naming the worker,
-  with "via" its coordinator beside it, in Needs you and the Inbox. The board's
-  and Review's embedded rows show no thread title, and a board card names the
-  coordinator itself.
+  with the worker mark and "via" its coordinator beside it, in Needs you and the
+  Inbox, whatever the Show workers setting says: requests are never hidden. The
+  board's and Review's embedded rows show no thread title, and a board card
+  names the coordinator itself.
 - **Where the composer's list and the rows come from.** The window's existing
   pending-requests read, filtered to the coordinator's workers in the window's
   thread list, so a window sees no request it could not already see. The
@@ -472,7 +481,8 @@ worker's subagents under it ([Workspace: Coordinators](workspace.md#coordinators
 
 - **The workers come from the window.** The rows are the workers in the
   window's own thread list, with the state that list shows, so the dock names no
-  thread the sidebar does not.
+  thread this window could not already list. The coordinator's Workers panel
+  reads the same list.
 - **Their subagents come from one host read.** `GET
 /api/agent-runs/coordinator-graph` answers for one coordinator: per worker,
   that worker's child runs as facts (task, role, state, the route that ran it,
@@ -549,7 +559,13 @@ first request that failed before any work moving the worker, the marks
 expiring after 5 minutes, and the role card not marking. For the workers' subagents: the graph read
 refused for a window that does not hold the coordinator and for a thread that is
 not a coordinator, before any run is read; and its answer carrying no reply,
-result, recovery text or version. Rendered checks cover the sidebar section, the
-folded workers, the composer's worker requests, the worker request rows in the
+result, recovery text or version. For where workers appear: with Show workers off no worker
+row is listed in the sidebar and no worker card on the board, while the
+coordinator row's counts and the Needs you rows still carry every request; with
+it on, rows and cards carry the worker mark; a Project's choice beats Settings;
+the Workers panel's sections and row opening; a transcript card following the
+worker's live state; and an open worker not being added to the sidebar. Rendered
+checks cover the sidebar section, the Workers panel at desktop and phone width,
+the composer's worker requests, the worker request rows in the
 thread view, and the dock's worker rows and
 graphs.

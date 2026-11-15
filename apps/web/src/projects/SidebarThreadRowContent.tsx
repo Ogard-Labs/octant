@@ -1,5 +1,6 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import { Bot, Check, Folder, GitBranch, GitPullRequest, Network } from "lucide-react";
+import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
 import type { ReactNode } from "react";
 import { ProjectIcon } from "./ProjectIcon";
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
@@ -34,6 +35,12 @@ export function SidebarThreadRowContent(props: {
   readonly coordinator?: boolean;
   /** A worker's coordinator, named as a fact beneath the title. */
   readonly coordinatorName?: string;
+  /**
+   * The thread is a worker of the coordinator with this title, listed outside
+   * that coordinator: it wears the worker mark, the coordinator mark's smaller
+   * pair, instead of its provider's.
+   */
+  readonly workerOf?: string;
   readonly projectName?: string;
   /** The Project the chip names; absent for "No Project", which keeps the glyph and asks for nothing. */
   readonly projectId?: string;
@@ -64,7 +71,11 @@ export function SidebarThreadRowContent(props: {
           alike, so alignment holds there too. */}
       {props.coordinator === true ? (
         <span className="sidebar-navigation__thread-provider" title="Coordinator">
-          <Network aria-label="Coordinator" role="img" size={14} />
+          <CoordinatorMark />
+        </span>
+      ) : props.workerOf !== undefined ? (
+        <span className="sidebar-navigation__thread-provider" title={`Worker of ${props.workerOf}`}>
+          <WorkerMark coordinatorName={props.workerOf} />
         </span>
       ) : props.provider === undefined ? (
         <span aria-hidden="true" className="sidebar-navigation__thread-provider" />

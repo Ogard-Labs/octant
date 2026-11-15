@@ -24,6 +24,15 @@
   color: var(--oct-fg-2);
 }
 
+/* The worker mark is 14px inside the row's 16px mark slot. */
+.pending-request__mark--worker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
 /* Block, not the button recipe's inline-flex: a flex container wraps its text
    in an anonymous item that text-overflow never reaches, so a long thread
    title was cut off mid-letter with no ellipsis. */

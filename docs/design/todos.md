@@ -29,11 +29,11 @@ on this host and refused once this host keeps a to-do. A window reaches a list
 on another computer through its own pairing with it, shows the last list
 read-only when that computer cannot be reached, and keeps quick adds as
 unsent drafts on the device. Not built yet: the hub as the default list host,
-Start into another host's Project, a list host's changes reaching windows on
-other computers as they happen (they read it every 30 seconds), and Start
-from the phone. The phone screen is built: Inbox › To-dos lists the connected
-computer's open and done to-dos, adds one with quick add, and ticks one off or
-opens it again.
+Start into another host's Project, and a list host's changes reaching windows
+on other computers as they happen (they read it every 30 seconds). The phone
+screen is built: Inbox › To-dos lists the connected computer's open and done
+to-dos, adds one with quick add, ticks one off or opens it again, and starts a
+thread from one.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
@@ -255,8 +255,13 @@ A to-do may be started again; each start adds a link.
   To-dos, from the computer the phone is connected to, with the open to-dos,
   then those done, a quick add line (title only), and a tap that ticks one
   off or opens it again; dropped to-dos stay off the phone. The phone reads
-  the list again every 30 seconds while it is in front. Start from the phone
-  is not built yet.
+  the list again every 30 seconds while it is in front. A long press on an
+  open to-do offers Start: it opens the Inbox's new-thread sheet with the
+  title and notes as the prompt and a removable "From to-do" label, in the
+  to-do's first Project on the computer new threads go to (its type is the
+  mode), or Chat when none is there. When the computer answers with the
+  thread, the phone links it; a link the list did not take reads "Thread
+  started, not linked" on the row, and the same long press offers Link.
 - **Empty.** One sentence: what goes here and that a to-do can be handed to
   an agent.
 

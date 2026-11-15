@@ -46,6 +46,9 @@ export function HomeComposerSheet(props: {
   readonly onRefreshHost?: (() => void) | undefined;
   /** Dictation through the host; absent while the host is not ready for it. */
   readonly voice?: ComposerVoice | undefined;
+  /** Where the draft came from ("From to-do"); removing it leaves an ordinary draft. */
+  readonly sourceLabel?: string | undefined;
+  readonly onRemoveSource?: (() => void) | undefined;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(
@@ -223,6 +226,28 @@ export function HomeComposerSheet(props: {
           </Text>
         </View>
       </View>
+
+      {props.sourceLabel === undefined ? null : (
+        <View style={styles.context} testID="mobile-home-composer-source">
+          <View style={styles.contextItem}>
+            <Ionicons color={colors.textTertiary} name="checkmark-circle-outline" size={16} />
+            <Text numberOfLines={1} style={styles.contextText}>
+              {props.sourceLabel}
+            </Text>
+            {props.onRemoveSource === undefined ? null : (
+              <Pressable
+                accessibilityLabel={`Remove ${props.sourceLabel}`}
+                accessibilityRole="button"
+                hitSlop={10}
+                onPress={props.onRemoveSource}
+                testID="mobile-home-composer-source-remove"
+              >
+                <Ionicons color={colors.textTertiary} name="close-circle" size={16} />
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
 
       {props.placementDisabledReason === undefined ? null : (
         <View>

@@ -729,6 +729,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "coordinator coordinators workers start without asking propose for approval planner proposals",
         },
         {
+          id: settingId("code-coordinator-show-workers"),
+          label: "Show workers",
+          scope: "mode",
+          keywords: "coordinator coordinators workers show list sidebar board hide visible inside",
+        },
+        {
           id: settingId("code-coordinator-open-workers"),
           label: "Open workers per coordinator",
           scope: "mode",
