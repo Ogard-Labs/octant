@@ -16,6 +16,7 @@ import {
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
 import {
+  MODEL_ROLE_NEEDS,
   suggestModelRoles,
   type PickerGroup,
   type PickerModel,
@@ -99,6 +100,15 @@ const EDITABLE_JOBS = NativeHarnessJob.literals.filter(
 const STALE_MESSAGE = "Changed elsewhere. Reloaded; make your change again.";
 
 /** The roles, by their Settings names, that list a model from this endpoint. */
+
+/**
+ * Only the roles the suggestion policy knows get Suggest: an Advisor or a
+ * custom role had the button and opened an empty preview whose Use these
+ * could never be pressed.
+ */
+const SUGGESTABLE_ROLE_IDS: ReadonlySet<string> = new Set(
+  MODEL_ROLE_NEEDS.map((need) => need.roleId),
+);
 export function nativeHarnessSlotsUsing(
   configuration: NativeHarnessRoutingConfiguration,
   providerInstanceId: string,
@@ -303,7 +313,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       hostId={props.hostId}
       key={role.id}
       onChange={(next) => void commit(withSlot(role.id, next))}
-      {...(hasModels ? { onSuggest: () => suggest([role.id]) } : {})}
+      {...(hasModels && SUGGESTABLE_ROLE_IDS.has(role.id)
+        ? { onSuggest: () => suggest([role.id]) }
+        : {})}
       readiness={readiness}
       {...(props.onVerifyTools === undefined ? {} : { onVerifyTools: props.onVerifyTools })}
       role={role}

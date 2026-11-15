@@ -13,7 +13,12 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import { suggestModelRoles, type PickerGroup, type RoleSuggestion } from "@octant/domain";
+import {
+  MODEL_ROLE_NEEDS,
+  suggestModelRoles,
+  type PickerGroup,
+  type RoleSuggestion,
+} from "@octant/domain";
 import { roomOf } from "../usage/providerRoom";
 import { useProviderRooms } from "../usage/useProviderRooms";
 import { ModelRoleEditor } from "../harness/ModelRoleEditor";
@@ -283,7 +288,9 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
                   value={chosen ? CHOOSE : USE_SETTINGS}
                 />
               }
-              {...(chosen ? { onSuggest: () => suggestFor(role.id) } : {})}
+              {...(chosen && MODEL_ROLE_NEEDS.some((need) => need.roleId === role.id)
+                ? { onSuggest: () => suggestFor(role.id) }
+                : {})}
               readOnly={!chosen}
               role={role}
               slot={chosen ? own : hostSlot(role.id)}
