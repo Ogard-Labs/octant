@@ -100,7 +100,7 @@ describe("surface language", () => {
     const name = role("oct-nav-name");
     expect(name).toContain("font-size: var(--oct-text-detail);");
     expect(name).toContain("font-weight: var(--oct-weight-medium);");
-    expect(name).toContain("letter-spacing: var(--oct-tracking-sf-13);");
+    expect(name).toContain("letter-spacing: var(--oct-tracking-sf-14);");
     // A group label: a quiet 12px caption, not a Section label.
     const group = role("oct-nav-group");
     expect(group).toContain("font-size: var(--oct-text-xs);");
@@ -110,7 +110,7 @@ describe("surface language", () => {
     const activity = role("oct-activity-line");
     expect(activity).toContain("font-size: var(--oct-text-detail);");
     expect(activity).toContain("color: var(--oct-meta);");
-    // A menu option: 13px at medium weight.
+    // A menu option: the interface size at medium weight.
     const option = role("oct-menu-option");
     expect(option).toContain("font-size: var(--oct-text-detail);");
     expect(option).toContain("font-weight: var(--oct-weight-medium);");

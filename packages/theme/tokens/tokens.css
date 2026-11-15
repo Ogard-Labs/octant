@@ -166,13 +166,13 @@
   --oct-text-detail: calc(13 * var(--oct-text-step));
   --oct-text-lg: calc(17 * var(--oct-text-step));
   --oct-text-sm: calc(14 * var(--oct-text-step));
-  --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
+  --oct-text-step: calc(var(--octant-ui-font-size, 14px) / 13);
   --oct-text-xl: calc(20 * var(--oct-text-step));
   --oct-text-xs: calc(12 * var(--oct-text-step));
   --oct-transcript-font-size: 13px;
   --octant-editor-font-size: 13px;
   --octant-terminal-font-size: 12px;
-  --octant-ui-font-size: 13px;
+  --octant-ui-font-size: 14px;
   /* ── Type: weights ── */
   --oct-weight-medium: 500;
   --oct-weight-regular: 400;

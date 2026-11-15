@@ -111,17 +111,17 @@
   --oct-font-mono:
     "Geist Mono Variable", "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   /* The interface scale is the size the user chose, not a frozen ladder.
-     Every step keeps the ratio it has to the 13px default, so the whole
+     Every step keeps the ratio it has to the 13px reference size, so the whole
      scale moves together when the setting changes. Freezing these was why
      Appearance's interface font size reached almost nothing: the ladder
      carried the great majority of the app's text and none of it could hear
      the setting.
 
-     `--oct-text-step` is 1px at the default size, which lets each step remain
-     an intentional design token while the compact default still reaches the
-     whole interface. Feature CSS reads the tokens below rather than authoring
+     `--oct-text-step` is 14/13 at the 14px default and 1 at 13px, which lets each
+     step remain an intentional design token while the default still reaches
+     the whole interface. Feature CSS reads the tokens below rather than authoring
      `calc(N * step)` so the scale has one edit point. */
-  --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
+  --oct-text-step: calc(var(--octant-ui-font-size, 14px) / 13);
   --oct-text-xs: calc(12 * var(--oct-text-step));
   --oct-text-sm: calc(14 * var(--oct-text-step));
   --oct-text-base: calc(15 * var(--oct-text-step));
@@ -176,7 +176,7 @@
      tracking from the text system; a web view draws the same face with none.
      The platform's published macOS tracking table, in thousandths of an em:
      +6 at 11, 0 at 12, -6 at 13, -11 at 14, -16 at 15, -20 at 16, -26 at 17,
-     -23 at 20, +3 at 24, +8 at 26. The body takes the 13px value and a
+     -23 at 20, +3 at 24, +8 at 26. The body takes the 14px value (the default interface size) and a
      smaller or larger role names its own, because letter-spacing inherits as a
      length, not as em. */
   --oct-tracking-sf-11: 0.006em;
@@ -500,7 +500,7 @@ body {
   font-family: var(--oct-font-body);
   font-size: var(--oct-text-base);
   line-height: var(--oct-leading-body);
-  letter-spacing: var(--oct-tracking-sf-13);
+  letter-spacing: var(--oct-tracking-sf-14);
   text-rendering: optimizeLegibility;
   /* No antialiased smoothing: on macOS it thins light text on a dark ground,
      which read as washed out next to native apps. */

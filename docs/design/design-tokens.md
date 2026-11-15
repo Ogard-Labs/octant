@@ -92,7 +92,7 @@ when the original was an expression.
 
 Values the app does not make theme-dependent (the type scale, spacing, radii,
 motion) are the same in both modes. The interface size is a user setting in the
-app; the export is the default 13px, and `--oct-text-step` carries the ratio, so
+app; the export is the default 14px, and `--oct-text-step` (14/13 there) carries the ratio, so
 a consumer that sets `--octant-ui-font-size` scales the whole type ramp.
 
 ## Loading the tokens
@@ -144,7 +144,7 @@ them; a value change is a change here, then a re-copy.
 Reach for a role, not a number. The rules below are DESIGN.md's; the section
 that owns each is named.
 
-**Type** ([Scale](../../DESIGN.md#scale)). The interface is 13px in the platform
+**Type** ([Scale](../../DESIGN.md#scale)). The interface is 14px by default in the platform
 face; code and identifiers use `--oct-font-mono`. There are eight roles and the
 export carries each recipe as `--oct-role-<role>-{family,size,weight,tracking,leading}`:
 title, title-hero, page-title, section-label, row-label, row-detail, meta,
@@ -259,7 +259,7 @@ its own colour.
 Source: [Scale](../../DESIGN.md#scale),
 [Spacing](../../DESIGN.md#spacing).
 
-- The interface is 13px; a row label is 14px at medium weight; metadata is 12px
+- The interface is 14px by default; a row label is 14px at medium weight; metadata is 12px
   and nothing essential sits under 12px.
 - Controls are 28px tall by default (20, 24, 28 and 32 across the sizes), rows
   32px, a menu row 28px, the title band 38px. A page that sets a bigger control

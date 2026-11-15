@@ -43,11 +43,11 @@ describe("native feel", () => {
     }
   });
 
-  it("gives the body the 13px tracking and each interface role its own size's tracking", () => {
-    expect(rule(octant, "body")).toContain("letter-spacing: var(--oct-tracking-sf-13);");
-    expect(rule(surface, ".oct-nav-name")).toContain("var(--oct-tracking-sf-13)");
+  it("gives the body the 14px tracking and each interface role its own size's tracking", () => {
+    expect(rule(octant, "body")).toContain("letter-spacing: var(--oct-tracking-sf-14);");
+    expect(rule(surface, ".oct-nav-name")).toContain("var(--oct-tracking-sf-14)");
     expect(rule(surface, ".oct-nav-group")).toContain("var(--oct-tracking-sf-12)");
-    expect(rule(surface, ".oct-menu-option")).toContain("var(--oct-tracking-sf-13)");
+    expect(rule(surface, ".oct-menu-option")).toContain("var(--oct-tracking-sf-14)");
     expect(rule(surface, ".oct-row-label")).toContain("var(--oct-tracking-sf-14)");
     expect(rule(surface, ".oct-meta")).toContain("var(--oct-tracking-sf-12)");
     expect(rule(surface, ".oct-page-title")).toContain("var(--oct-tracking-sf-26)");

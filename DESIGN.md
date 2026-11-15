@@ -96,7 +96,7 @@ one decorative thing is the [application ground](docs/design/application-ground.
 
 ## Foundations
 
-Sizes are at the default 13px interface size. Type and control heights scale
+Sizes are written at the 13px reference size; the default interface size is 14px (maintainer request 2026-11-15: text read weak beside its icons at 13px), so every type token is drawn 14/13 larger. Type and control heights scale
 with the Appearance interface size; spacing, icons and radii do not.
 
 ### Colour roles and surfaces
@@ -337,20 +337,20 @@ Code, paths and identifiers use Geist Mono (`'Geist Mono Variable', 'SF Mono',
 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace`); the terminal
 defaults to 12px at 1.4 with ligatures off, the editor to 13px at 1.5.
 `text-rendering: optimizeLegibility` and `font-synthesis: none` (no synthetic
-bold) hold everywhere; every size at the default interface size is a whole pixel
-(`calc(N * --oct-text-step)` with the step 1), and letter-spacing is normal on
+bold) hold everywhere; every size is `calc(N * --oct-text-step)` with the step 14/13 at the
+default interface size and 1 at 13px, and letter-spacing is normal on
 the body.
 
 **Native type.** A native Mac app gets SF's size-specific tracking and optical
 size from the text system; a web view gets neither unless it asks. The body
-takes the 13px tracking (`--oct-tracking-sf-13`, -0.006em) and `font-optical-sizing:
+takes the 14px tracking (`--oct-tracking-sf-14`, -0.011em), the default interface size, and `font-optical-sizing:
 auto`; a role at another size names its own token (`--oct-tracking-sf-11` to
 `-26`, the platform face's own tracking from the platform's published macOS
 table, in thousandths of an em: +6 at 11, 0 at 12, -6 at 13, -11 at 14, -16 at
 15, -20 at 16, -26 at 17, -23 at 20, +3 at 24, +8 at 26), because letter-spacing inherits as a
 length. Code, the terminal and the editor keep normal tracking. A line of chrome
 (a sidebar row, a menu option, a button, a label) is as tall as a native one,
-16px at 13px (`--oct-line-chrome`, 1.23) and 14px at 12px (`-sm`, 1.2), in whole
+17px at the 14px default, 16px at 13px (`--oct-line-chrome`, 1.23) and 14px at 12px (`-sm`, 1.2), in whole
 pixels; reading text keeps its airier leading. Weights follow the platform:
 regular for body and rows, medium where it marks a label or a row's title, strong
 for headings, and 700 nowhere in chrome.
@@ -636,7 +636,7 @@ failed, never painted.
 | Accent                | Swatches and a custom colour                                                   | `--octant-accent`, `-foreground`, `--octant-primary-foreground` |
 | Glass                 | Off, Subtle, Strong; Tint                                                      | [Translucency](#translucency)                                   |
 | Density               | Comfortable (default), Compact                                                 | Below                                                           |
-| Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 13 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
+| Interface font        | System (default), Geist, a custom stack; size 12 to 16 in steps, 14 by default | `--octant-ui-font-*`, `--oct-text-step`                         |
 | Smooth text           | On (default on a Mac), off; hidden off a Mac                                   | `data-octant-font-smoothing`; grayscale smoothing on the root   |
 | Transcript            | Small, Medium, Large; Narrow, Medium, Wide                                     | `--oct-transcript-font-size`; the column measure                |
 | Code, terminal        | Family, size, line height, ligatures                                           | `--octant-editor-*`, `--octant-terminal-*`                      |
