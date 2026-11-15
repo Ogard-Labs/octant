@@ -166,6 +166,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
   readonly planClient: PlanClient | undefined;
   readonly shipClient: ShipClient | undefined;
+  readonly todoClient?: TodoClient | undefined;
   readonly workThreadClient: WorkThreadClient | undefined;
   readonly workTurnClient: WorkTurnClient | undefined;
 }
@@ -415,7 +416,7 @@ export function createLaunchedShellClients(
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
-    todoClient: createTodoClient(port),
+    todoClient: options.todoClient ?? createTodoClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),
