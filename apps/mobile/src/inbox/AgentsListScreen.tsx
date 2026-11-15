@@ -95,6 +95,20 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       controller.abort();
     };
   }, [query, searchOpen, transports]);
+  // A host title match for a thread the list already holds is the row the
+  // in-place title filter shows; listing it again under the hits repeats it.
+  const threadHits = useMemo(
+    () =>
+      messageHits.filter(
+        (hit) =>
+          hit.turnId !== undefined ||
+          !rows.some(
+            (row) =>
+              row.hostId === hit.hostId && row.mode === hit.mode && row.threadId === hit.threadId,
+          ),
+      ),
+    [messageHits, rows],
+  );
   // The filter switches in place, and the navigator holds the choice, so the
   // list comes back on the same view after a thread is opened and closed.
   const view = props.view;
@@ -421,20 +435,24 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
       <ScrollView contentContainerStyle={styles.list} contentInsetAdjustmentBehavior="automatic">
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
-        {!loading && sections.length === 0 && messageHits.length === 0 ? (
+        {!loading && sections.length === 0 && threadHits.length === 0 ? (
           <Text style={styles.help}>
             {transports.length === 0 ? MOBILE_COPY.inboxEmpty : "No threads here yet"}
           </Text>
         ) : null}
-        {messageHits.length > 0 ? (
+        {threadHits.length > 0 ? (
           <ListSection testID="mobile-agents-message-hits" title={MOBILE_COPY.searchMessages}>
-            {messageHits.map((hit, index) => (
+            {threadHits.map((hit, index) => (
               <ListRow
-                detail={formatScreenshotSafeLabel(hit.snippet)}
+                detail={formatScreenshotSafeLabel(
+                  hit.field === "tool"
+                    ? `${MOBILE_COPY.searchToolOutput} · ${hit.snippet}`
+                    : hit.snippet,
+                )}
                 icon={modeIcon(hit.mode)}
-                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId}`}
+                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId ?? "title"}`}
                 label={formatScreenshotSafeLabel(hit.title)}
-                last={index === messageHits.length - 1}
+                last={index === threadHits.length - 1}
                 onPress={() =>
                   props.onOpenThread(
                     rows.find(

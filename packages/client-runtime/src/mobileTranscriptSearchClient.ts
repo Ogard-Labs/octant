@@ -2,6 +2,8 @@ import {
   ChatTranscriptSearch,
   CodeTranscriptSearch,
   MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH,
+  ThreadSearch,
+  type ThreadSearchField,
   WorkTranscriptSearch,
   decodeHostAnswer,
 } from "@octant/contracts";
@@ -10,16 +12,18 @@ import type { MobileRemoteTransport } from "./mobileInboxClient";
 export type MobileTranscriptMode = "chat" | "work" | "code";
 
 /**
- * One message match, enough to open its thread at the turn that holds it.
- * `turnId` is the id the mode's transcript keys a turn by: the Chat or Work
- * turn id, or the operation of a Code provider turn.
+ * One match, enough to open its thread at the turn that holds it. `turnId` is
+ * the id the mode's transcript keys a turn by: the Chat or Work turn id, or
+ * the operation of a Code provider turn. A title match names no turn.
  */
 export interface MobileTranscriptHit {
   readonly hostId: string;
   readonly mode: MobileTranscriptMode;
   readonly threadId: string;
   readonly title: string;
-  readonly turnId: string;
+  readonly turnId?: string;
+  /** Where the host found the text; absent from a host that predates search across modes. */
+  readonly field?: ThreadSearchField;
   readonly snippet: string;
 }
 
@@ -42,10 +46,11 @@ type ModeSearch =
 const MODES: ReadonlyArray<MobileTranscriptMode> = ["chat", "work", "code"];
 
 /**
- * Searches the text of Chat, Work, and Code messages on one host, the reads
- * the desktop's thread search uses. Each mode answers on its own: a host that
- * predates Work or Code message search still returns its Chat matches, and
- * the search is unavailable only when no mode answered.
+ * Searches one host's Chat, Work, and Code threads at once: titles, messages,
+ * and tool output, through the host's search across modes, the read the
+ * desktop's thread search uses. A host that predates it answers through each
+ * mode's message search instead, and each mode answers on its own there: the
+ * search is unavailable only when no mode answered.
  */
 export async function searchMobileTranscripts(
   transport: MobileRemoteTransport,
@@ -54,6 +59,16 @@ export async function searchMobileTranscripts(
 ): Promise<MobileTranscriptSearch> {
   const trimmed = query.trim().slice(0, MAX_CHAT_TRANSCRIPT_SEARCH_QUERY_LENGTH);
   if (trimmed.length === 0) return { status: "ready", hits: [], truncated: false };
+  const across = await searchAcrossModes(transport, trimmed, signal);
+  if (across.status === "ready") {
+    return { status: "ready", hits: across.hits, truncated: across.truncated };
+  }
+  if (across.status === "refused") {
+    return {
+      status: "unavailable",
+      message: "This host does not share message search with paired devices.",
+    };
+  }
   const results = await Promise.all(
     MODES.map((mode) => searchMode(transport, mode, trimmed, signal)),
   );
@@ -71,6 +86,51 @@ export async function searchMobileTranscripts(
     truncated: answered.some((result) => result.truncated),
     hits: answered.flatMap((result) => result.hits),
   };
+}
+
+/**
+ * The host's search across modes. A host that predates it answers
+ * `unavailable` (no such route), and so does any other failure, so the caller
+ * asks each mode's older read, which may still answer. A refusal is final: the
+ * older reads sit under the same grant.
+ */
+async function searchAcrossModes(
+  transport: MobileRemoteTransport,
+  query: string,
+  signal: AbortSignal | undefined,
+): Promise<ModeSearch> {
+  try {
+    const response = await transport.authenticatedFetch({
+      method: "GET",
+      path: "/api/search",
+      query: `?q=${encodeURIComponent(query)}&scope=all`,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    if (!response.ok) return { status: response.status === 403 ? "refused" : "unavailable" };
+    const result = decodeHostAnswer(ThreadSearch)(await response.json());
+    return {
+      status: "ready",
+      truncated: result.truncated,
+      // A phone list shows live threads only; an archived match stays on the
+      // desktop's Archived group.
+      hits: result.hits
+        .filter((entry) => entry.lifecycle === "active")
+        .map((entry): MobileTranscriptHit => {
+          const turnId = entry.mode === "code" ? entry.operationId : entry.turnId;
+          return {
+            hostId: transport.hostId,
+            mode: entry.mode,
+            threadId: String(entry.threadId),
+            title: entry.title,
+            ...(turnId === undefined ? {} : { turnId: String(turnId) }),
+            field: entry.field,
+            snippet: entry.snippet,
+          };
+        }),
+    };
+  } catch {
+    return { status: "unavailable" };
+  }
 }
 
 async function searchMode(
