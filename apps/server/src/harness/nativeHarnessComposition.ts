@@ -15,7 +15,6 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
-import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
 import { decideHarnessProviderSearch, type ProviderOwnSearchOrigin } from "@octant/domain";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import {
@@ -245,15 +244,13 @@ export interface NativeHarnessCompositionOptions {
   readonly readThreadTaint: (threadId: string) => boolean;
   /**
    * What decides whether a turn may offer the provider's own web search: the
-   * endpoint's search origin and its ZDR statement, the host's data policy,
-   * and whether Octant's own search has an eligible backend. Absent offers
-   * none.
+   * endpoint's search origin and whether Octant's own search has an eligible
+   * backend. The web search data policy is not among them: it governs only
+   * Octant's own backends. Absent offers none.
    */
   readonly providerWebSearchFacts?: (providerInstanceId: ProviderInstanceId) =>
     | {
         readonly origin: ProviderOwnSearchOrigin | undefined;
-        readonly zdrStated: boolean;
-        readonly policy: WebSearchDataPolicy;
         readonly webSearchReady: boolean;
       }
     | undefined;
@@ -485,7 +482,7 @@ export function createNativeHarnessComposition(
   });
   /**
    * The turn's grant of the provider's own search, read when the turn's tools
-   * are composed: the taint and policy it was decided on are the turn's own.
+   * are composed: the taint it was decided on is the turn's own.
    */
   const withProviderSearch = (
     tools: AppManagedToolSet,

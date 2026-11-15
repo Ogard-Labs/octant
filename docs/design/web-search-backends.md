@@ -28,9 +28,7 @@ search's count and price in the turn's usage and cost (the count is journaled
 as research events; neither stream reports a price); replaying a built-in
 search's result blocks in the turn's later requests; a search status that
 tells a tainted thread with no eligible backend why it has no search (the tool
-is left out, with no status saying so); the web composer reading the data
-policy for the provider-native route (the host refuses the turn with the
-reason); and a per-entry processing region (no kind takes one through its API; Linkup's EU-pinned host is the
+is left out, with no status saying so); and a per-entry processing region (no kind takes one through its API; Linkup's EU-pinned host is the
 entry's address). Not yet run: the acceptance's live search on each of the two
 origins, which needs a maintainer's keys.
 

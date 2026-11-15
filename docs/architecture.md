@@ -5096,9 +5096,10 @@ unless the call asks for 1 to 10. It opens no page.
 - **A provider's own search in the native harness.** On Anthropic's own API
   (the basic `web_search_20250305` server tool, `max_uses: 1`) and OpenAI's own
   API over Responses (`web_search`, `max_tool_calls: 1`), a harness turn whose
-  research route picks the provider's search and whose policy allows it offers
-  that search in place of `web-search`, never beside it
-  (`decideHarnessProviderSearch`). The stream adapters accept one built-in
+  research route picks the provider's search offers that search in place of
+  `web-search`, never beside it (`decideHarnessProviderSearch`), under every
+  data policy: the policy governs only Octant's own backends (maintainer
+  decision, 2026-11-15: provider search behaves as it does on its own). The stream adapters accept one built-in
   search per response and refuse a second, and every other built-in tool, as
   `unsupported`. Below Full access a tainted thread is not offered it and
   searches through `web-search` when a backend is eligible, and the offer ends

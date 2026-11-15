@@ -3362,7 +3362,7 @@ describe("the provider's own web search in a harness turn", () => {
             prompt: "What shipped?",
             attachments: [],
             tools: offered,
-            providerWebSearch: { basicOnly: true, withdrawAfterFirstStep: true },
+            providerWebSearch: { withdrawAfterFirstStep: true },
           });
           yield* Effect.promise(() => vi.waitFor(() => expect(requests.length).toBe(1)));
           yield* Effect.yieldNow();
@@ -3377,7 +3377,7 @@ describe("the provider's own web search in a harness turn", () => {
       ),
     );
 
-    expect(requests[0]?.providerWebSearch).toEqual({ basicOnly: true });
+    expect(requests[0]?.providerWebSearch).toBe(true);
     expect(requests[0]?.tools.map((definition) => definition.name)).not.toContain("web-search");
     expect(requests[1]?.providerWebSearch).toBeUndefined();
     expect(requests[1]?.tools.map((definition) => definition.name)).toContain("web-search");
@@ -3434,7 +3434,7 @@ describe("the provider's own web search in a harness turn", () => {
             prompt: "What shipped?",
             attachments: [],
             tools,
-            providerWebSearch: { basicOnly: true, withdrawAfterFirstStep: true },
+            providerWebSearch: { withdrawAfterFirstStep: true },
           });
           return Array.from(yield* Fiber.join(all));
         }),
@@ -3475,7 +3475,7 @@ describe("the provider's own web search in a harness turn", () => {
             prompt: "Search",
             attachments: [],
             tools: offered,
-            providerWebSearch: { basicOnly: false, withdrawAfterFirstStep: false },
+            providerWebSearch: { withdrawAfterFirstStep: false },
           });
           yield* Effect.promise(() => vi.waitFor(() => expect(scripted.requests.length).toBe(1)));
           yield* Effect.yieldNow();
@@ -3489,9 +3489,6 @@ describe("the provider's own web search in a harness turn", () => {
         }),
       ),
     );
-    expect(scripted.requests.map((request) => request.providerWebSearch)).toEqual([
-      { basicOnly: false },
-      { basicOnly: false },
-    ]);
+    expect(scripted.requests.map((request) => request.providerWebSearch)).toEqual([true, true]);
   });
 });

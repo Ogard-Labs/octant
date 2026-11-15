@@ -1,13 +1,6 @@
 import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
-import {
-  PROVIDER_OWN_SEARCH_OFFERS,
-  decideHarnessProviderSearch,
-  decideProviderOwnSearch,
-  providerNativeResearchUnderPolicy,
-  providerOwnSearchOrigin,
-} from "./providerWebSearchPolicy";
-import { resolveResearchBackend } from "./researchPolicy";
+import { decideHarnessProviderSearch, providerOwnSearchOrigin } from "./providerWebSearchPolicy";
 
 const createdAt = "2026-11-14T12:00:00.000Z";
 
@@ -77,69 +70,19 @@ describe("which endpoints reach a provider's own search", () => {
   });
 });
 
-describe("what the data policy allows of a provider's own search", () => {
-  const origin = "anthropic-api" as const;
-
-  it("lets it run under Any", () => {
-    expect(decideProviderOwnSearch({ origin, policy: "any", zdrStated: false })).toEqual({
-      kind: "allowed",
-      origin,
-      basicOnly: false,
-    });
-  });
-
-  it("needs the person's ZDR statement under ZDR only, and then only the basic search", () => {
-    expect(decideProviderOwnSearch({ origin, policy: "zdr-only", zdrStated: false })).toEqual({
-      kind: "withheld",
-      reason: "zdr-not-stated",
-    });
-    expect(decideProviderOwnSearch({ origin, policy: "zdr-only", zdrStated: true })).toEqual({
-      kind: "allowed",
-      origin,
-      basicOnly: true,
-    });
-  });
-
-  it("withholds every provider's own search under both EU policies", () => {
-    for (const policy of ["eu-only", "eu-and-zdr"] as const) {
-      for (const each of Object.keys(PROVIDER_OWN_SEARCH_OFFERS) as Array<
-        keyof typeof PROVIDER_OWN_SEARCH_OFFERS
-      >) {
-        expect(decideProviderOwnSearch({ origin: each, policy, zdrStated: true })).toEqual({
-          kind: "withheld",
-          reason: "eu-processing-not-offered",
-        });
-      }
-    }
-  });
-
-  it("withholds it where the endpoint has no search Octant can name", () => {
-    expect(decideProviderOwnSearch({ origin: undefined, policy: "any", zdrStated: true })).toEqual({
-      kind: "withheld",
-      reason: "no-own-search",
-    });
-  });
-});
-
 describe("a native harness turn's provider search", () => {
   const base = {
     research: true,
     routing: "automatic" as const,
     origin: "anthropic-api" as const,
-    policy: "any" as const,
-    zdrStated: false,
     webSearchReady: false,
     tainted: false,
     fullAccess: false,
   };
 
   it("offers it when the route picks the provider's search, ending at the turn's first step below Full access", () => {
-    expect(decideHarnessProviderSearch(base)).toEqual({
-      basicOnly: false,
-      withdrawAfterFirstStep: true,
-    });
+    expect(decideHarnessProviderSearch(base)).toEqual({ withdrawAfterFirstStep: true });
     expect(decideHarnessProviderSearch({ ...base, fullAccess: true })).toEqual({
-      basicOnly: false,
       withdrawAfterFirstStep: false,
     });
   });
@@ -152,53 +95,12 @@ describe("a native harness turn's provider search", () => {
     ).toBeUndefined();
   });
 
-  it("follows the research route and the data policy", () => {
+  it("follows the research route, offering it first on Automatic even when a backend is eligible", () => {
     expect(decideHarnessProviderSearch({ ...base, research: false })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, routing: "searxng" })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, origin: undefined })).toBeUndefined();
-    expect(decideHarnessProviderSearch({ ...base, policy: "eu-only" })).toBeUndefined();
-    expect(decideHarnessProviderSearch({ ...base, policy: "zdr-only", zdrStated: true })).toEqual({
-      basicOnly: true,
+    expect(decideHarnessProviderSearch({ ...base, webSearchReady: true })).toEqual({
       withdrawAfterFirstStep: true,
     });
-  });
-});
-
-describe("a provider's own search on the research route", () => {
-  it("keeps the provider's report under Any and withholds a search the policy cannot hold under any other", () => {
-    const decide = (
-      policy: "any" | "zdr-only" | "eu-only",
-      origin: "anthropic-api" | undefined,
-      zdrStated = false,
-    ) =>
-      providerNativeResearchUnderPolicy({ nativeResearch: "supported", origin, policy, zdrStated });
-    expect(decide("any", undefined)).toEqual({ nativeResearch: "supported", withheld: false });
-    expect(decide("eu-only", "anthropic-api", true)).toEqual({
-      nativeResearch: "supported",
-      withheld: true,
-    });
-    expect(decide("zdr-only", undefined, true).withheld).toBe(true);
-    expect(decide("zdr-only", "anthropic-api", true).withheld).toBe(false);
-    expect(
-      providerNativeResearchUnderPolicy({
-        nativeResearch: "unsupported",
-        origin: undefined,
-        policy: "eu-only",
-        zdrStated: false,
-      }),
-    ).toEqual({ nativeResearch: "unsupported", withheld: false });
-  });
-
-  it("reads a withheld search as unavailable with the data policy as its reason", () => {
-    expect(
-      resolveResearchBackend({
-        researchEnabled: true,
-        routing: "provider-native",
-        webSearchReady: false,
-        appManagedTools: "supported",
-        nativeResearch: "supported",
-        nativeResearchWithheld: true,
-      }),
-    ).toEqual({ kind: "unavailable", reason: "native-research-withheld-by-data-policy" });
   });
 });

@@ -1346,9 +1346,7 @@ export function createNativeHarnessConnection(
           system: state.system,
           history,
           tools,
-          ...(providerSearch === undefined
-            ? {}
-            : { providerWebSearch: { basicOnly: providerSearch.basicOnly } }),
+          ...(providerSearch === undefined ? {} : { providerWebSearch: true as const }),
         },
         { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );

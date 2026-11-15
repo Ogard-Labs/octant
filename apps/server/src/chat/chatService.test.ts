@@ -310,7 +310,6 @@ function openFixture(options?: {
     /** The outcome of the n-th turn the provider is sent, counting from zero. */
     | ((turnIndex: number) => "completed" | "waiting" | "interrupted" | "limited" | "failed");
   readonly usageLimitResetsAt?: string;
-  readonly providerSearchPolicy?: ChatServiceOptions["providerSearchPolicy"];
   readonly providerNativeExecute?: (
     input: import("./research/researchRouter").ResearchExecuteInput,
   ) => Promise<import("./research/researchRouter").ProviderNativeResearchResultSet>;
@@ -765,9 +764,6 @@ function openFixture(options?: {
     contextHarness,
     capacityScheduler,
     researchRouter,
-    ...(options?.providerSearchPolicy === undefined
-      ? {}
-      : { providerSearchPolicy: options.providerSearchPolicy }),
     threadWork,
     turnTimeoutMs: 5_000,
     ...(options?.contextMaintenanceTimeoutMs === undefined
@@ -7402,45 +7398,6 @@ describe("ChatService", () => {
       }),
     ).resolves.toMatchObject({ kind: "turn-created" });
     expect(service.read(created.thread.id).turns[0]?.attempts[0]?.outcome).toBe("completed");
-  });
-
-  it("reads provider-native research as withheld by the data policy under EU only", async () => {
-    const { service } = openFixture({
-      providerSearchPolicy: () => ({
-        origin: "anthropic-api",
-        policy: "eu-only",
-        zdrStated: true,
-      }),
-    });
-    const created = await service.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: "Provider-native under EU only",
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
-    const configured = await service.execute({
-      kind: "change-chat-research",
-      threadId: created.thread.id,
-      expectedVersion: created.thread.version,
-      researchEnabled: true,
-      researchRouting: "provider-native",
-    });
-    if (configured.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
-
-    await expect(
-      service.execute({
-        kind: "send-chat-turn",
-        threadId: created.thread.id,
-        expectedVersion: configured.thread.version,
-        prompt: "research natively",
-      }),
-    ).rejects.toMatchObject({
-      failure: {
-        category: "unavailable",
-        message: "Provider-native research is withheld by the host's web search data policy.",
-      },
-    });
-    expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
   it("rejects explicit SearXNG routing when SearXNG is not configured", async () => {

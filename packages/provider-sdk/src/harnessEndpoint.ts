@@ -124,12 +124,11 @@ export interface HarnessEndpointRequest {
   readonly tools: ReadonlyArray<ProviderToolDefinition>;
   /**
    * Offer the provider's own built-in web search on this request, capped at
-   * one search. Set only where the host's data policy allows it; `basicOnly`
-   * asks for the provider's basic search, never a version that runs more of
-   * its own tools. An endpoint whose provider search Octant cannot name
-   * ignores it, and every other built-in tool stays refused.
+   * one search, in its basic form, never a version that runs more of its own
+   * tools. An endpoint whose provider search Octant cannot name ignores it,
+   * and every other built-in tool stays refused.
    */
-  readonly providerWebSearch?: { readonly basicOnly: boolean };
+  readonly providerWebSearch?: true;
 }
 
 export interface HarnessEndpointResponse {

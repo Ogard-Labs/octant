@@ -7,14 +7,8 @@ import type { OctantInstructionsBlock } from "../octantInstructions/octantInstru
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
-import {
-  describedImageText,
-  providerNativeResearchUnderPolicy,
-  validateQuestionnaireAnswer,
-} from "@octant/domain";
+import { describedImageText, validateQuestionnaireAnswer } from "@octant/domain";
 import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
-import type { ProviderOwnSearchOrigin } from "@octant/domain";
-import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
 import { SIDE_CHAT_RETURN_UNAVAILABLE, type SideChatReturnResolver } from "./sideChatReturn";
 import {
   THREAD_DIALOGUE_TOOL_NAME,
@@ -737,18 +731,6 @@ export interface ChatServiceOptions {
    * alone decides, as the list reads before its person saves one.
    */
   readonly webSearchReady?: (chatSearxngBaseUrl: string | undefined) => boolean;
-  /**
-   * What the host's web search data policy needs to decide a provider's own
-   * search: whose search the endpoint reaches, the policy, and whether the
-   * person stated ZDR for it. Absent, the provider's report alone decides.
-   */
-  readonly providerSearchPolicy?: (providerInstanceId: ProviderInstanceId) =>
-    | {
-        readonly origin: ProviderOwnSearchOrigin | undefined;
-        readonly policy: WebSearchDataPolicy;
-        readonly zdrStated: boolean;
-      }
-    | undefined;
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
   /**
@@ -1213,7 +1195,6 @@ export class ChatService {
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
   readonly #webSearchReady: (chatSearxngBaseUrl: string | undefined) => boolean;
-  readonly #providerSearchPolicy: ChatServiceOptions["providerSearchPolicy"];
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerChangeProbeSettleMs: number;
@@ -1290,7 +1271,6 @@ export class ChatService {
     this.#researchRouter = options.researchRouter;
     this.#webSearchReady =
       options.webSearchReady ?? ((address) => address !== undefined && address.trim().length > 0);
-    this.#providerSearchPolicy = options.providerSearchPolicy;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
     }
@@ -2635,7 +2615,7 @@ export class ChatService {
             selectedModelId !== undefined
               ? this.#effectiveAppManagedTools(selectedProbe, selectedModelId)
               : selectedProbe.capabilities.appManagedTools,
-          ...this.#nativeResearchFor(selectedProviderInstanceId, selectedProbe),
+          nativeResearch: selectedProbe.capabilities.nativeWebResearch,
         });
         if (route.kind === "unavailable") {
           throw new ChatServiceError(
@@ -2645,10 +2625,7 @@ export class ChatService {
                 route.reason === "native-research-unsupported"
                   ? "unsupported"
                   : "unavailable",
-              message:
-                route.reason === "native-research-withheld-by-data-policy"
-                  ? "Provider-native research is withheld by the host's web search data policy."
-                  : "Default Chat research is unavailable for the selected routing.",
+              message: "Default Chat research is unavailable for the selected routing.",
             }),
           );
         }
@@ -6037,37 +6014,8 @@ export class ChatService {
       routing: thread.researchRouting,
       webSearchReady: this.#webSearchReady(settings.searxngBaseUrl),
       appManagedTools: this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)),
-      ...this.#nativeResearchFor(thread.providerInstanceId, probe),
-    });
-  }
-
-  /**
-   * The provider's own search as the research route may use it: what the
-   * provider reports, withheld where the host's data policy does not allow
-   * it, by the same rule the native harness applies.
-   */
-  #nativeResearchFor(
-    providerInstanceId: ProviderInstanceId | undefined,
-    probe: ProviderProbeResult,
-  ): {
-    readonly nativeResearch: ProviderProbeResult["capabilities"]["nativeWebResearch"];
-    readonly nativeResearchWithheld: boolean;
-  } {
-    const facts =
-      providerInstanceId === undefined
-        ? undefined
-        : this.#providerSearchPolicy?.(providerInstanceId);
-    if (facts === undefined) {
-      return {
-        nativeResearch: probe.capabilities.nativeWebResearch,
-        nativeResearchWithheld: false,
-      };
-    }
-    const decided = providerNativeResearchUnderPolicy({
       nativeResearch: probe.capabilities.nativeWebResearch,
-      ...facts,
     });
-    return { nativeResearch: decided.nativeResearch, nativeResearchWithheld: decided.withheld };
   }
 
   #assertResearchAvailable(thread: ChatThread, researchRoute: ResearchRouteDecision): void {
@@ -6079,10 +6027,7 @@ export class ChatService {
           researchRoute.reason === "native-research-unsupported"
             ? "unsupported"
             : "unavailable",
-        message:
-          researchRoute.reason === "native-research-withheld-by-data-policy"
-            ? "Provider-native research is withheld by the host's web search data policy."
-            : "Chat research is unavailable for the selected routing.",
+        message: "Chat research is unavailable for the selected routing.",
       }),
     );
   }

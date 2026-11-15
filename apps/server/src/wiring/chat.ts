@@ -80,11 +80,7 @@ import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaf
 import { resolveAvailableTools } from "../scaffold/scaffoldFilesystem";
 import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentMessageProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
-import {
-  defaultShellSettings,
-  findWorkspacePresetTarget,
-  providerOwnSearchOrigin,
-} from "@octant/domain";
+import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
@@ -533,15 +529,6 @@ export function wireChat(deps: ChatDependencies) {
       capacityScheduler,
       researchRouter,
       webSearchReady: (searxngBaseUrl) => webSearchSettings.readyWithChatAddress(searxngBaseUrl),
-      providerSearchPolicy: (providerInstanceId) => {
-        const instance = persistence.readProviderInstance(providerInstanceId);
-        if (instance === undefined) return undefined;
-        return {
-          origin: providerOwnSearchOrigin(instance),
-          policy: webSearchSettings.read().settings.policy,
-          zdrStated: instance.providerSearchZdr === true,
-        };
-      },
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,

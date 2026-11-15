@@ -1188,8 +1188,6 @@ export function wireHarness(deps: HarnessDependencies) {
       if (instance === undefined) return undefined;
       return {
         origin: providerOwnSearchOrigin(instance),
-        zdrStated: instance.providerSearchZdr === true,
-        policy: webSearchSettings.read().settings.policy,
         webSearchReady: webSearchSettings.eligible().length > 0,
       };
     },
