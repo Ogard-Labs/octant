@@ -114,6 +114,7 @@ import {
   browserToolTransport,
   chatTurnAnsweredAttempt,
   modelCanTakeDelegatedWork,
+  isNativeHarnessDriverKind,
 } from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
@@ -1227,6 +1228,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         providerInstanceId: String(candidate.providerInstanceId),
         modelId: String(candidate.modelId),
       }),
+    canRunInHarness: (candidate) => {
+      const instance = persistence.readProviderInstance(candidate.providerInstanceId as never);
+      return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+    },
   });
   // Hub membership is wired after this scope, so a helper request that names a
   // target member reaches the delegating service through a holder wireRemote fills.

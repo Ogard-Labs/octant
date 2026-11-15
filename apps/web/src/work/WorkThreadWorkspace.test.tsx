@@ -1989,6 +1989,50 @@ describe("WorkThreadWorkspace", () => {
       );
     });
 
+    it("opens a search hit older than the loaded turns at that turn", async () => {
+      const client = pagedClient();
+      const onTurnRevealed = vi.fn();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          onTurnRevealed={onTurnRevealed}
+          revealTurnId={"turn-3" as never}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Long brief"
+          turnClient={client as never}
+        />,
+      );
+
+      await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+      expect(client.transcriptWindow).toHaveBeenLastCalledWith(
+        threadId,
+        { limit: 30, before: "request-20" },
+        expect.any(AbortSignal),
+      );
+      expect(screen.getByText("Prompt 3")).toBeInTheDocument();
+    });
+
+    it("spends a search hit the thread no longer holds once nothing earlier is left", async () => {
+      const client = pagedClient();
+      const onTurnRevealed = vi.fn();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          onTurnRevealed={onTurnRevealed}
+          revealTurnId={"turn-rewound" as never}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Long brief"
+          turnClient={client as never}
+        />,
+      );
+
+      await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+      expect(await screen.findByText("No earlier messages")).toBeVisible();
+      expect(client.transcriptWindow).toHaveBeenCalledTimes(2);
+    });
+
     it("says a page failed and loads it when asked again", async () => {
       let fail = true;
       const client = pagedClient({
@@ -2760,6 +2804,58 @@ describe("WorkThreadWorkspace", () => {
     render(renderTurn("waiting"));
     await screen.findByRole("button", { name: "Resume when the limit resets" });
     expect(screen.getByRole("button", { name: "Snooze until reset" })).toBeVisible();
+  });
+
+  it("stops treating a turn parked on a usage limit as running once a hand-off released it", async () => {
+    const parked = workTurn({
+      status: "waiting",
+      failure: {
+        category: "rate-limited",
+        message: "Rate limit reached.",
+        usageLimit: { kind: "exhausted" },
+      },
+      transcript: [
+        { role: "user", text: "Summarize the brief" },
+        { role: "assistant", text: "", status: "waiting" },
+      ],
+    });
+    const renderThread = (thread: ReturnType<typeof workThread>) => (
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        initialThread={thread}
+        threadClient={
+          {
+            bootstrap: vi.fn(async () => ({ threads: [thread] })),
+            execute: vi.fn(),
+          } as unknown as WorkThreadClient
+        }
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [parked] })) } as never}
+      />
+    );
+
+    const waiting = render(renderThread(workThread()));
+    expect(await screen.findByRole("button", { name: "Stop turn" })).toBeVisible();
+    waiting.unmount();
+
+    render(
+      renderThread(
+        workThread({
+          version: 3,
+          providerHandoff: {
+            previousProviderInstanceId: providerId,
+            previousModelId: modelId,
+            nextProviderInstanceId: providerId,
+            nextModelId: modelId,
+            changedAt: "2026-08-01T20:05:00.000Z",
+            releasedStopId: parked.turnId,
+          },
+        }),
+      ),
+    );
+    expect(await screen.findByText("Summarize the brief")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
   });
 
   it("does not duplicate a turn that settles before the start response arrives", async () => {

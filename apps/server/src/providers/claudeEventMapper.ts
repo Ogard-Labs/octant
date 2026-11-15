@@ -21,12 +21,14 @@ import type {
   ClaudeToolRequest,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { isClaudeTaskTool, type ClaudeTaskList } from "./claudeTaskList";
 import { outputStopReason } from "./outputStopReason";
 import {
   boundedChildFinalSummary,
   reportedChildUsage,
 } from "@octant/provider-sdk/child-observations";
 import { outsideContentTarget } from "./outsideContentRead";
+import { proposedPlanText } from "./proposedPlan";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -46,6 +48,12 @@ const SUMMARY_MAX_CHARACTERS = 1_024;
 export const CLAUDE_CHECKLIST_TOOL = "TodoWrite";
 /** Claude Code's own subagent tool, offered only when the person turned subagents on. */
 export const CLAUDE_SUBAGENT_TOOL = "Agent";
+/**
+ * Claude Code's own tool that hands a finished plan to the person. Offered in
+ * Plan only: the gate captures the plan and refuses the call, so the session
+ * never leaves Plan (see `claudeDriver.ts`).
+ */
+export const CLAUDE_PLAN_EXIT_TOOL = "ExitPlanMode";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -57,6 +65,11 @@ const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
   // Publishing runs on claude.ai, and its answer (the page's address, title,
   // and any warnings) reaches the model as content Octant did not write.
   ["Artifact", { source: "hosted-tool", targetKey: "url" }],
+  // The account's other claude.ai services answer the model the same way.
+  ["Projects", { source: "hosted-tool", targetKey: "path" }],
+  ["ClaudeDesign", { source: "hosted-tool", targetKey: "operation" }],
+  ["RemoteTrigger", { source: "hosted-tool", targetKey: "trigger_id" }],
+  ["PushNotification", { source: "hosted-tool", targetKey: "message" }],
 ]);
 // Claude's AskUserQuestion schema itself carries at most this many questions
 // in one tool call; more than that is not a shape the SDK can answer.
@@ -79,6 +92,7 @@ const DECODED_MESSAGE_KINDS = new Set([
   "status",
   "compaction",
   "review-denied",
+  "session-state",
   "ignored",
 ]);
 
@@ -96,6 +110,8 @@ export interface ClaudeToolState {
   readonly disabled?: true;
   lifecycle: "active" | "terminal";
   fileChange?: ClaudeFileChange;
+  /** A task tool call's input, applied with its result once that arrives. */
+  taskInput?: { readonly [key: string]: ClaudeJsonValue };
 }
 
 export interface ClaudeRequestCorrelation {
@@ -169,6 +185,11 @@ export interface ClaudeEventContext {
    * when an item is renamed, reordered, or inserted.
    */
   readonly todoTaskIds: Map<number, string>;
+  /**
+   * The session's task list from Claude's task tools. It outlives the turn,
+   * since each call changes one task and the panel shows the whole list.
+   */
+  readonly taskList: ClaudeTaskList;
   readonly toolStates: Map<string, ClaudeToolState>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -238,6 +259,13 @@ function event(
   return { kind: "event", event: mappedEvent(context, value) };
 }
 
+/**
+ * Claude's tools whose input is a shell command: `Bash`, and `Monitor`, which
+ * keeps a command running and reads each line it prints as an event. Both
+ * name the command in a prompt, and both mark a command that reaches a server.
+ */
+const CLAUDE_COMMAND_TOOLS: ReadonlySet<string> = new Set(["Bash", "Monitor"]);
+
 /** Octant's own tools reach Claude under this prefix; the host records those itself. */
 const OCTANT_TOOL_PREFIX = "mcp__octant__";
 
@@ -249,13 +277,17 @@ function reportsToolCallContent(state: ClaudeToolState): boolean {
 }
 
 /**
- * The input a record keeps. A file edit or write keeps the path alone: what
- * was written stays out of every event this adapter emits, as it does for the
- * change's diff, and the file itself holds it.
+ * The input a record keeps. A file or notebook edit, or a write, keeps the
+ * path alone: what was written stays out of every event this adapter emits,
+ * as it does for the change's diff, and the file itself holds it.
  */
 function recordedInput(
   content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
 ): string {
+  if (content.toolName === "NotebookEdit") {
+    const notebook = jsonString(content.input, "notebook_path");
+    return notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook });
+  }
   if (content.toolName !== "Edit" && content.toolName !== "Write") {
     return JSON.stringify(content.input);
   }
@@ -511,8 +543,13 @@ function toolState(
   const state: ClaudeToolState = {
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
-    // The checklist shows as the thread's task panel, not as a tool row.
-    emitsActivity: toolName !== "AskUserQuestion" && toolName !== CLAUDE_CHECKLIST_TOOL,
+    // The checklist and the task tools show as the thread's task panel and a
+    // handed-over plan as the reply's text, not as tool rows.
+    emitsActivity:
+      toolName !== "AskUserQuestion" &&
+      toolName !== CLAUDE_CHECKLIST_TOOL &&
+      toolName !== CLAUDE_PLAN_EXIT_TOOL &&
+      !isClaudeTaskTool(toolName),
     ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
@@ -570,6 +607,20 @@ function mapToolUse(
   ) {
     return checklistEvents(context, content.input);
   }
+  if (
+    authoritativeInput &&
+    content.disabled !== true &&
+    content.toolName === CLAUDE_PLAN_EXIT_TOOL
+  ) {
+    const plan = proposedPlanText(jsonString(content.input, "plan") ?? "");
+    if (plan === undefined) return [{ kind: "ignored" }];
+    const results = agentText(context, plan);
+    endAgentMessage(context);
+    return results;
+  }
+  if (authoritativeInput && isClaudeTaskTool(content.toolName)) {
+    resolved.state.taskInput = content.input;
+  }
   // A streamed call's start carried no input; its whole message does. Octant
   // records a tool it runs itself from the request, so only the runtime's own
   // tools are reported here.
@@ -583,8 +634,9 @@ function mapToolUse(
   // A shell command rides on the tool's start only when it reaches a server,
   // so the command can be journaled with its host as Octant Shield's record
   // of it; the start of any other command names the tool and nothing more.
-  const shellCommand =
-    content.toolName === "Bash" ? jsonString(content.input, "command") : undefined;
+  const shellCommand = CLAUDE_COMMAND_TOOLS.has(content.toolName)
+    ? jsonString(content.input, "command")
+    : undefined;
   const remoteArgument =
     shellCommand !== undefined && remoteHostsNamedBy(shellCommand).length > 0
       ? summarizeStepArgument(shellCommand)
@@ -727,6 +779,35 @@ function checklistEvents(
   return [...results, event(context, { kind: "task-list", taskIds })];
 }
 
+/**
+ * The session's whole task list, one `task-progress` per task in Claude's
+ * order and a closing `task-list`, as a `TodoWrite` restatement reads. Each
+ * task tool call changes one task, so the panel is restated whole after each.
+ */
+function taskListEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMappedMessage> {
+  const results: ClaudeMappedMessage[] = [];
+  const taskIds: string[] = [];
+  for (const task of context.taskList.ordered()) {
+    const summary = normalized(task.subject, SUMMARY_MAX_CHARACTERS);
+    const status = CHECKLIST_STATUSES[task.status];
+    if (summary === undefined || status === undefined) continue;
+    const taskId = context.taskList.panelTaskId(task.id, context.makeTaskId);
+    taskIds.push(taskId);
+    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+  }
+  return [...results, event(context, { kind: "task-list", taskIds })];
+}
+
+/**
+ * The list Claude stored for a resumed session, shown once at the start of
+ * its first turn so the panel holds the whole list before any call changes it.
+ */
+export function claudeStoredTaskListEvents(
+  context: ClaudeEventContext,
+): ReadonlyArray<ClaudeMappedMessage> {
+  return context.taskList.takeSeed() ? taskListEvents(context) : [];
+}
+
 function withoutIgnored(
   results: ReadonlyArray<ClaudeMappedMessage>,
 ): ReadonlyArray<ClaudeMappedMessage> {
@@ -867,6 +948,15 @@ function mapToolResults(
   for (const pair of states) {
     const state = pair.state!;
     state.lifecycle = "terminal";
+    if (isClaudeTaskTool(state.toolName)) {
+      if (
+        !pair.result.isError &&
+        context.taskList.apply(state.toolName, state.taskInput, pair.result.taskOutput)
+      ) {
+        results.push(...taskListEvents(context));
+      }
+      continue;
+    }
     if (!state.emitsActivity) continue;
     if (pair.result.text !== undefined && reportsToolCallContent(state)) {
       results.push(
@@ -1397,6 +1487,8 @@ export function mapClaudeMessage(
       ];
     }
     case "tool-summary":
+    // The driver reads the runtime's state itself; it carries nothing to show.
+    case "session-state":
       return [{ kind: "ignored" }];
     case "task":
       return mapTask(context, message);
@@ -1635,7 +1727,7 @@ function approvalTarget(
   request: ClaudeToolRequest,
 ): string | undefined {
   const input = request.input;
-  if (request.toolName === "Bash") {
+  if (CLAUDE_COMMAND_TOOLS.has(request.toolName)) {
     const command = input.command;
     if (typeof command !== "string") return undefined;
     let line = command.replace(/\s+/g, " ");

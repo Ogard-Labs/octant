@@ -70,6 +70,7 @@ describe("octantSettingsRegistry", () => {
       "harness",
       "voice",
       "skills",
+      "web-search",
       "computer-use",
       "device-tools",
       "github",
@@ -78,6 +79,7 @@ describe("octantSettingsRegistry", () => {
       "memory",
       "secret-stores",
       "data",
+      "todos",
       "sync",
       "remote-access",
       "host",
@@ -114,8 +116,10 @@ describe("octantSettingsRegistry", () => {
     ]);
     expect(section("host")?.keywords).toMatch(/lifecycle/);
     expect(section("host")?.keywords).toMatch(/diagnostics/);
-    expect(ids("general")?.slice(-4)).toEqual([
+    expect(ids("general")?.slice(-6)).toEqual([
       "user-profile",
+      "your-instructions",
+      "orchestration-instructions",
       "host-phone-notifications",
       "host-push-gateway",
       "host-automation-notifications",
@@ -261,6 +265,7 @@ describe("octantSettingsRegistry", () => {
       "provider-deployment-ids",
       "provider-claude-account",
       "provider-claude-artifacts",
+      "provider-web-tools",
       "provider-native-setup",
       "provider-own-memory",
     ]);
@@ -272,6 +277,7 @@ describe("octantSettingsRegistry", () => {
       "code-language-services",
       "code-android-snapshot-boot",
       "code-coordinator-starting",
+      "code-coordinator-show-workers",
       "code-coordinator-open-workers",
       "project-view-switcher",
       "code-default-access",
@@ -292,7 +298,6 @@ describe("octantSettingsRegistry", () => {
       "chat-personality",
       "chat-research-enabled",
       "chat-research-backend",
-      "chat-searxng-url",
       "chat-restart-continuation",
     ]);
   });
@@ -412,7 +417,8 @@ describe("octantSettingsRegistry", () => {
  * joins or restores, placeholders shown while nothing is installed) or that
  * repeat a listed row (OpenCode's Update button sits on the listed OpenCode
  * update row). They carry a setting id so a deep link can land on them, but
- * they are not things a person looks up.
+ * they are not things a person looks up. Project instructions live on a
+ * Project's overview, not in Settings, so Settings search does not list them.
  */
 const UNLISTED_SETTING_ROWS = new Set([
   "agent-access-code",
@@ -425,6 +431,7 @@ const UNLISTED_SETTING_ROWS = new Set([
   "opencode-managed-available",
   "opencode-managed-update-action",
   "paired-computers-claim",
+  "project-instructions",
   "sync-ask-again",
   "sync-join-read",
   "sync-leave-replica",
@@ -458,6 +465,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-deployment-ids": "provider-deployment-ids",
   "provider-*-claude-artifacts": "provider-claude-artifacts",
   "provider-*-native-setup": "provider-native-setup",
+  "provider-*-web-tools": "provider-web-tools",
   "provider-*-own-memory": "provider-own-memory",
   "provider-tooling-*": "provider-tooling-configured",
   "*-config-directory": "provider-claude-account",

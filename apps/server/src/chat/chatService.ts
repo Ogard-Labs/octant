@@ -3,6 +3,7 @@ import {
   type ConversationInputPolicy,
   type ConversationInputReceipt,
 } from "@octant/contracts/conversation-inputs";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
 import { conversationInputReceiptBlock } from "../attachments/conversationInputs";
@@ -194,6 +195,10 @@ import {
 import {
   decideConversationSession,
   decideProviderAccountMove,
+  decideUsageLimitHandoff,
+  decideUsageLimitHandoffSetting,
+  withUsageLimitHandoff,
+  withUsageLimitHandoffOutcome,
   defaultShellSettings,
   reapsStaleProviderSession,
   SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
@@ -704,6 +709,12 @@ export interface ChatServiceOptions {
     readonly settle: import("../spendCeilingService").SpendCeilingService["settle"];
   };
   readonly researchRouter: ResearchRouter;
+  /**
+   * Whether the host's data policy leaves a web search backend eligible, given
+   * the SearXNG address Chat settings hold or are saving. Absent, the address
+   * alone decides, as the list reads before its person saves one.
+   */
+  readonly webSearchReady?: (chatSearxngBaseUrl: string | undefined) => boolean;
   readonly threadWork: ThreadWorkService;
   readonly turnTimeoutMs?: number;
   /**
@@ -777,6 +788,13 @@ export interface ChatServiceOptions {
     readonly thread: ChatThread;
     readonly windowId: WindowId | undefined;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: ChatThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   /**
    * The native harness around a turn on a provider it drives: stable
    * instructions in front of the context, and the completed reply observed
@@ -1151,6 +1169,7 @@ export class ChatService {
   readonly #toolStepsPerTurn: () => number;
   readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
+  readonly #webSearchReady: (chatSearxngBaseUrl: string | undefined) => boolean;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
   readonly #providerChangeProbeSettleMs: number;
@@ -1162,6 +1181,7 @@ export class ChatService {
   readonly #verifyModelToolsOnFirstUse: ChatServiceOptions["verifyModelToolsOnFirstUse"];
   readonly #resolveComputerUseTools?: ChatServiceOptions["resolveComputerUseTools"];
   readonly #personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
+  readonly #octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
   readonly #hiddenThreadIds: () => ReadonlySet<string>;
   readonly #resolveSideChatReturns: SideChatReturnResolver | undefined;
   readonly #resolveSideChatSourceContext?: ChatServiceOptions["resolveSideChatSourceContext"];
@@ -1223,6 +1243,8 @@ export class ChatService {
       this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     }
     this.#researchRouter = options.researchRouter;
+    this.#webSearchReady =
+      options.webSearchReady ?? ((address) => address !== undefined && address.trim().length > 0);
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
     }
@@ -1244,6 +1266,8 @@ export class ChatService {
       this.#resolveComputerUseTools = options.resolveComputerUseTools;
     if (options.personMemoryBlock !== undefined)
       this.#personMemoryBlock = options.personMemoryBlock;
+    if (options.octantInstructionBlocks !== undefined)
+      this.#octantInstructionBlocks = options.octantInstructionBlocks;
     if (options.contextMaintenanceTimeoutMs !== undefined) {
       this.#contextMaintenanceTimeoutMs = options.contextMaintenanceTimeoutMs;
     }
@@ -1494,8 +1518,10 @@ export class ChatService {
     this.#assertReady();
     const projected = this.#persistence.readChatSettings();
     const hidden = this.#hiddenThreadIds();
+    const settings = projected?.settings ?? this.#defaultChatSettings();
     return {
-      settings: projected?.settings ?? this.#defaultChatSettings(),
+      settings,
+      webSearchReady: this.#webSearchReady(settings.searxngBaseUrl),
       threads: this.#persistence
         .readChatThreads()
         .filter((thread) => thread.lifecycle === "active" && !hidden.has(String(thread.id)))
@@ -1579,6 +1605,22 @@ export class ChatService {
       query: trimmed,
       ...this.#persistence.searchChatTranscript(trimmed, hidden),
     };
+  }
+
+  /**
+   * The threads search may look in: active and archived threads, never a
+   * deleted one or a hidden Side Chat sidecar, as transcript search lists.
+   */
+  listSearchableThreads(): ReadonlyArray<ChatThread> {
+    this.#assertReady();
+    const hidden = this.#hiddenThreadIds();
+    return this.#persistence
+      .readChatThreads()
+      .filter(
+        (thread) =>
+          (thread.lifecycle === "active" || thread.lifecycle === "archived") &&
+          !hidden.has(String(thread.id)),
+      );
   }
 
   read(threadId: ChatThreadId): ChatThreadView {
@@ -1750,6 +1792,10 @@ export class ChatService {
         case "move-chat-thread-account":
           return await this.#withThreadAdmission(command.threadId, () =>
             this.#moveThreadAccount(command, executionContext?.actor),
+          );
+        case "set-chat-thread-usage-limit-handoff":
+          return await this.#withThreadAdmission(command.threadId, () =>
+            this.#updateThread(command, executionContext?.actor),
           );
         case "update-chat-settings":
           return await this.#updateThread(command, executionContext?.actor);
@@ -2537,7 +2583,7 @@ export class ChatService {
         const route = this.#researchRouter.resolve({
           researchEnabled: true,
           routing: command.defaultResearchRouting,
-          searxngConfigured: searxngBaseUrl !== undefined && searxngBaseUrl.trim().length > 0,
+          webSearchReady: this.#webSearchReady(searxngBaseUrl),
           appManagedTools:
             selectedModelId !== undefined
               ? this.#effectiveAppManagedTools(selectedProbe, selectedModelId)
@@ -2764,9 +2810,26 @@ export class ChatService {
           : { modelOptionValues: command.modelOptionValues }),
       });
       const omissions = this.#historicalAttachmentOmissions(current, targetProbe, command.modelId);
-      const { handoffWarning: _previousWarning, ...withoutPreviousWarning } = changed;
+      const {
+        handoffWarning: _previousWarning,
+        releasedStopId: _previousRelease,
+        ...withoutPreviousWarning
+      } = changed;
+      // A change while the latest attempt is parked on its account's usage
+      // limit releases that attempt; see `parkedStopReleased`.
+      const parked = activeChatTurns(this.#persistence.readChatThreadView(threadId)?.turns ?? [])
+        .at(-1)
+        ?.attempts.at(-1);
+      const releasedStopId =
+        parked !== undefined &&
+        parked.outcome === "waiting" &&
+        parked.usageLimit !== undefined &&
+        String(changed.providerInstanceId) !== String(current.providerInstanceId)
+          ? String(parked.id)
+          : undefined;
       next = decodeChatThread({
         ...withoutPreviousWarning,
+        ...(releasedStopId === undefined ? {} : { releasedStopId }),
         ...(omissions.length === 0
           ? {}
           : {
@@ -2818,6 +2881,30 @@ export class ChatService {
         const { multiModelPool: _clearedPool, ...withoutPool } = next;
         next = decodeChatThread(withoutPool);
       }
+    } else if (command.kind === "set-chat-thread-usage-limit-handoff") {
+      const target =
+        command.providerInstanceId === undefined
+          ? undefined
+          : decodeProviderInstanceId(command.providerInstanceId);
+      const decision = decideUsageLimitHandoffSetting({
+        actor,
+        modelPoolOn: current.multiModelPool !== undefined,
+        from: this.#persistence.readProviderInstance(
+          decodeProviderInstanceId(current.providerInstanceId),
+        ),
+        to: target === undefined ? "off" : this.#persistence.readProviderInstance(target),
+      });
+      if (decision.kind === "refused") {
+        throw new ChatServiceError({
+          category: decision.reason === "unattended" ? "unauthorized" : "unavailable",
+          message: decision.message,
+        });
+      }
+      next = decodeChatThread({
+        ...withUsageLimitHandoff(current, target),
+        version: (command.expectedVersion + 1) as AggregateVersion,
+        updatedAt: timestamp,
+      });
     } else if (command.kind === "change-chat-research") {
       next = changeChatResearch(current, {
         researchEnabled: command.researchEnabled,
@@ -4927,6 +5014,7 @@ export class ChatService {
         thread,
         windowId: executionContext?.windowId,
       });
+      const instructionBlocks = this.#octantInstructionBlocks?.({ thread }) ?? [];
       const planWith = (sideChatContext: string | undefined) =>
         this.#planContext(
           thread,
@@ -4952,6 +5040,7 @@ export class ChatService {
           offersCanvasTool(tools?.definitions),
           appToolHostLines(tools?.definitions),
           personMemoryText,
+          instructionBlocks,
         );
       let context = planWith(sideChatSourceContext);
       // A plan that leaves earlier conversation out to fit cannot be met by the
@@ -5829,8 +5918,7 @@ export class ChatService {
     return this.#researchRouter.resolve({
       researchEnabled: thread.researchEnabled,
       routing: thread.researchRouting,
-      searxngConfigured:
-        settings.searxngBaseUrl !== undefined && settings.searxngBaseUrl.trim().length > 0,
+      webSearchReady: this.#webSearchReady(settings.searxngBaseUrl),
       appManagedTools: this.#effectiveAppManagedTools(probe, decodeProviderModelId(thread.modelId)),
       nativeResearch: probe.capabilities.nativeWebResearch,
     });
@@ -5851,7 +5939,8 @@ export class ChatService {
   }
 
   /**
-   * Octant's web search for a turn whose research searches through SearXNG,
+   * Octant's web search for a turn whose research searches through its own
+   * backends,
    * or nothing. A harness thread is already offered the same `web-search` by
    * its own tool set, under the harness's tool-call policy and its rules for
    * a tainted thread's queries, so it is not given a second copy.
@@ -5864,7 +5953,7 @@ export class ChatService {
     if (!thread.researchEnabled) return undefined;
     if (researchRoute.kind !== "ready" || researchRoute.backend !== "searxng") return undefined;
     if (hostAppTools?.definitions.includes(WEB_SEARCH_TOOL_DEFINITION) === true) return undefined;
-    const tools = createWebSearchTools(researchRoute.execute);
+    const tools = createWebSearchTools(researchRoute.execute, thread.id);
     const record = this.#recordExternalContentIngestion;
     // What a search returns was written by others, so a result marks the
     // thread as the harness's own search does.
@@ -6005,6 +6094,8 @@ export class ChatService {
     toolHostLines: ReadonlyArray<AppToolHostLine> = [],
     /** What Octant remembers about the person, placed before Project memory. */
     personMemoryText?: string,
+    /** The person's instructions for Octant, after Octant's own and before person memory. */
+    instructionBlocks: ReadonlyArray<OctantInstructionsBlock> = [],
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -6370,6 +6461,19 @@ export class ChatService {
             { kind: "instruction", referenceId: `octant-tool-host-line:${index}` },
           ),
           { kind: "instructions", text: line.text, tool: line.tool },
+        ),
+      ),
+      ...instructionBlocks.map((block) =>
+        contextEntry(
+          this.#contextEntry(
+            thread,
+            block.kind,
+            block.text,
+            Math.max(16, Math.ceil(block.text.length / 4)),
+            "required",
+            { kind: "instruction", referenceId: block.key },
+          ),
+          block,
         ),
       ),
       ...(personMemoryText === undefined
@@ -6935,6 +7039,95 @@ export class ChatService {
       this.#activeAttempts.delete(String(input.attempt.id));
       this.#activeThreadExecutions.delete(String(input.thread.id));
     }
+    await this.#withThreadAdmission(input.thread.id, () =>
+      this.#handOffAfterUsageLimit(input.thread.id, input.attempt.id),
+    ).catch(() => undefined);
+  }
+
+  /**
+   * Carries out the person's "on a usage limit, hand off to" opt-in once the
+   * attempt has stopped. The move is the ordinary provider change, made by
+   * the host under the person's standing choice, so the next turn carries the
+   * disclosed handoff; what happened (or why nothing could) is recorded on
+   * the thread naming both accounts. The stopped attempt is left as it is.
+   * The caller holds the thread's admission, so no command lands in between.
+   */
+  async #handOffAfterUsageLimit(threadId: ChatThreadId, attemptId: ChatAttempt["id"]) {
+    // The thread row's version lags its stream, which turns also append to.
+    const stored = this.#persistence.readChatThread(threadId);
+    const current =
+      stored === undefined ? undefined : withChatThreadHeadVersion(this.#persistence, stored);
+    const handoff = current?.usageLimitHandoff;
+    if (current === undefined || handoff === undefined || current.lifecycle !== "active") return;
+    const attempt = this.#persistence
+      .readChatThreadView(threadId)
+      ?.turns.flatMap((turn) => turn.attempts)
+      .find((candidate) => String(candidate.id) === String(attemptId));
+    const limitStopId =
+      attempt !== undefined &&
+      attempt.usageLimit !== undefined &&
+      (attempt.outcome === "waiting" || attempt.outcome === "failed")
+        ? String(attempt.id)
+        : undefined;
+    const fromId = decodeProviderInstanceId(current.providerInstanceId);
+    const toId = decodeProviderInstanceId(handoff.providerInstanceId);
+    const decision = decideUsageLimitHandoff({
+      targetProviderInstanceId: String(toId),
+      lastStopId: handoff.last?.stopId,
+      limitStopId,
+      modelPoolOn: current.multiModelPool !== undefined,
+      from: this.#persistence.readProviderInstance(fromId),
+      to: this.#persistence.readProviderInstance(toId),
+    });
+    if (decision.kind === "stays" || limitStopId === undefined) return;
+    const host: EventActor = { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
+    let detail = decision.kind === "stopped" ? decision.message : undefined;
+    if (decision.kind === "hands-off") {
+      try {
+        await this.#updateThread(
+          {
+            kind: "change-chat-provider",
+            threadId,
+            expectedVersion: current.version,
+            providerInstanceId: toId,
+            modelId: current.modelId,
+          },
+          host,
+        );
+      } catch (error) {
+        detail = error instanceof Error && error.message.trim() !== "" ? error.message : undefined;
+        detail ??= "The account to hand off to could not take the thread.";
+      }
+    }
+    const latestStored = this.#persistence.readChatThread(threadId);
+    if (latestStored === undefined) return;
+    const latest = withChatThreadHeadVersion(this.#persistence, latestStored);
+    const timestamp = decodeTimestamp(this.#clock());
+    const next = decodeChatThread({
+      ...withUsageLimitHandoffOutcome(latest, {
+        kind: detail === undefined ? "handed-off" : "stopped",
+        stopId: limitStopId,
+        fromProviderInstanceId: fromId,
+        toProviderInstanceId: toId,
+        at: timestamp,
+        ...(detail === undefined ? {} : { detail: detail.slice(0, 512) }),
+      }),
+      version: (latest.version + 1) as AggregateVersion,
+      updatedAt: timestamp,
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
+      expectedVersion: latest.version,
+      events: [
+        this.#pending(
+          "chat.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          {
+            actor: host,
+          },
+        ),
+      ],
+    });
   }
 
   #prepareContent(
@@ -7019,6 +7212,7 @@ export class ChatService {
     category:
       | "octant-policy"
       | "user-instructions"
+      | OctantInstructionsBlock["kind"]
       | "current-request"
       | "conversation"
       | "workspace-context"

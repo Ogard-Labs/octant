@@ -198,6 +198,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "profile name email avatar gravatar initials colour color picture",
         },
         {
+          id: settingId("your-instructions"),
+          label: "Your instructions",
+          scope: "host",
+          keywords:
+            "instructions rules system prompt custom instructions providers models canvas routines board",
+        },
+        {
+          id: settingId("orchestration-instructions"),
+          label: "Orchestration",
+          scope: "host",
+          keywords:
+            "orchestration coordinator planner workers instructions delegate providers models",
+        },
+        {
           id: settingId("host-phone-notifications"),
           label: "Phone notifications",
           scope: "host",
@@ -580,7 +594,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Chat",
       scope: "app",
       keywords:
-        "chat defaults provider model fallback backup web research backend routing searxng base url personality instructions new threads",
+        "chat defaults provider model fallback backup web research backend routing octant searxng base url personality instructions new threads",
       settings: [
         {
           id: settingId("stream-replies"),
@@ -616,13 +630,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("chat-research-backend"),
           label: "Default research backend",
           scope: "app",
-          keywords: "research backend web search searxng",
-        },
-        {
-          id: settingId("chat-searxng-url"),
-          label: "SearXNG base URL",
-          scope: "app",
-          keywords: "searxng url address search engine research",
+          keywords: "research backend web search octant searxng",
         },
         {
           id: settingId("chat-restart-continuation"),
@@ -713,6 +721,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "mode",
           keywords:
             "coordinator coordinators workers start without asking propose for approval planner proposals",
+        },
+        {
+          id: settingId("code-coordinator-show-workers"),
+          label: "Show workers",
+          scope: "mode",
+          keywords: "coordinator coordinators workers show list sidebar board hide visible inside",
         },
         {
           id: settingId("code-coordinator-open-workers"),
@@ -898,6 +912,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "claude artifacts artifact tool publish published page claude.ai link documents reports pages canvas delivery upload leaves this computer telemetry usage anthropic privacy",
         },
         {
+          id: settingId("provider-web-tools"),
+          label: "A runtime's own web search and fetch",
+          scope: "host",
+          keywords: "web tools search fetch locked web search data policy zdr eu",
+        },
+        {
           id: settingId("provider-native-setup"),
           label: "Run as itself",
           scope: "host",
@@ -939,7 +959,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Model roles",
           scope: "host",
           keywords:
-            "model roles main model planning careful review research lookups quick jobs reading images vision advisor backup fallback which job uses which role slots default plan slow task smol",
+            "model roles roles main model builder planner planning scout quick edit hard problems reviewer careful review research lookups quick jobs small jobs sees images reading images vision advisor backup fallback ask before using continue on the fallback coordinators workers helper agents which job uses which role slots default plan slow task smol deep",
         },
         {
           id: settingId("subagent-creation-posture"),
@@ -1105,6 +1125,33 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Added skill folders",
           scope: "host",
           keywords: "skill folders add folder path custom directory",
+        },
+      ],
+    },
+    {
+      id: "web-search",
+      label: "Web search",
+      scope: "host",
+      keywords:
+        "web search backends data policy zdr eu searxng staan mojeek linkup brave exa api key fallback provider search",
+      settings: [
+        {
+          id: settingId("web-search-policy"),
+          label: "Data policy",
+          scope: "host",
+          keywords: "policy zdr eu processing region any",
+        },
+        {
+          id: settingId("web-search-provider-search"),
+          label: "A provider's own search",
+          scope: "host",
+          keywords: "provider native search anthropic openai web tools locked",
+        },
+        {
+          id: settingId("web-search-add"),
+          label: "Add backend",
+          scope: "host",
+          keywords: "add backend searxng staan mojeek linkup brave exa key",
         },
       ],
     },
@@ -1591,6 +1638,20 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Thread retention",
           scope: "host",
           keywords: "thread retention window purge journal erase delete history",
+        },
+      ],
+    },
+    {
+      id: "todos",
+      label: "To-dos",
+      scope: "host",
+      keywords: "to-dos todo list keep host hub paired computer where sync",
+      settings: [
+        {
+          id: settingId("todo-list-host"),
+          label: "Keep the list on",
+          scope: "host",
+          keywords: "to-dos list host hub paired computer this computer where",
         },
       ],
     },

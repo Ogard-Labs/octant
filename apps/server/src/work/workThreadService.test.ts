@@ -3275,3 +3275,242 @@ describe("searching Work message text", () => {
     });
   });
 });
+
+describe("moving a Work thread to another account", () => {
+  const personal = "72000000-0000-4000-8000-0000000000e1";
+  const account = (id: string, displayName: string, enabled = true) =>
+    decodeProviderInstance({
+      id,
+      displayName,
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://example.invalid/v1/",
+        authentication: "bearer",
+        protocol: "responses",
+        manualModelIds: ["model-a"],
+      },
+      enabled,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  const withAccounts = (
+    fixture: ReturnType<typeof serviceFixture>,
+    options: { readonly personalEnabled?: boolean } = {},
+  ) => {
+    fixture.persistence.readProviderInstance.mockImplementation(((id: string) =>
+      String(id) === personal
+        ? account(personal, "Personal", options.personalEnabled ?? true)
+        : String(id) === String(ids.provider)
+          ? account(ids.provider, "Work")
+          : undefined) as never);
+    return fixture;
+  };
+  const limitedTurn = (turnId = "72000000-0000-4000-8000-0000000000e2") =>
+    decodeWorkTurnState({
+      requestId: "72000000-0000-4000-8000-0000000000e3",
+      threadId: ids.thread,
+      turnId,
+      projectId: ids.project,
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+      }),
+      providerSessionId: "72000000-0000-4000-8000-0000000000e4",
+      status: "waiting",
+      prompt: "Keep going.",
+      transcript: [],
+      failure: {
+        category: "rate-limited",
+        message: "The provider's usage window is spent.",
+        usageLimit: { kind: "exhausted" },
+      },
+      capabilities: {
+        workspace: "project-backed",
+        confinement: "project-root-confined",
+        shell: "denied",
+        git: "denied",
+        worktree: "denied",
+        pullRequest: "denied",
+        code: "denied",
+      },
+      version: 1,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+
+  it("moves on the person's request, keeping the model, and records the provider handoff", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "move-work-thread-account",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: personal,
+    });
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        providerInstanceId: personal,
+        modelId: "model-a",
+        providerHandoff: {
+          previousProviderInstanceId: ids.provider,
+          nextProviderInstanceId: personal,
+        },
+      },
+    });
+  });
+
+  it("releases a turn parked on the old account's usage limit when the person moves the thread", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()], turns: [limitedTurn()] }));
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "move-work-thread-account",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: personal,
+    });
+
+    expect(result).toMatchObject({
+      thread: { providerHandoff: { releasedStopId: "72000000-0000-4000-8000-0000000000e2" } },
+    });
+  });
+
+  it("refuses a move from an agent, from a routine, and while a turn runs", async () => {
+    const agent = {
+      kind: "agent" as const,
+      actorId: "72000000-0000-4000-8000-0000000000e5" as never,
+      providerInstanceId: ids.provider as never,
+      threadId: String(ids.thread),
+    };
+    const move = {
+      kind: "move-work-thread-account",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: personal,
+    } as const;
+    const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
+    await expect(
+      fixture.service.execute(ids.window, move, { actor: agent as never }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    await expect(fixture.service.execute(ROUTINE_HOST_SCOPE_ID, move)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    const running = withAccounts(
+      serviceFixture({
+        threads: [thread()],
+        observeRuntime: async () => ({ executing: true }) as never,
+      }),
+    );
+    await expect(running.service.execute(ids.window, move)).rejects.toMatchObject({
+      failure: { message: "Wait for the running answer to finish before moving this thread." },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(running.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("hands off once to the account the person named when the account hits its usage limit", async () => {
+    const fixture = withAccounts(
+      serviceFixture({
+        threads: [thread({ usageLimitHandoff: { providerInstanceId: personal as never } })],
+        turns: [limitedTurn()],
+      }),
+    );
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    const moved = fixture.projection.read(ids.thread);
+    expect(moved).toMatchObject({
+      providerInstanceId: personal,
+      modelId: "model-a",
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider,
+        nextProviderInstanceId: personal,
+        // The parked turn no longer holds the thread; its limit stays in history.
+        releasedStopId: "72000000-0000-4000-8000-0000000000e2",
+      },
+      usageLimitHandoff: {
+        providerInstanceId: personal,
+        last: {
+          kind: "handed-off",
+          stopId: "72000000-0000-4000-8000-0000000000e2",
+          fromProviderInstanceId: ids.provider,
+          toProviderInstanceId: personal,
+        },
+      },
+    });
+    // One provider change and one record of it; the second call found the stop already handled.
+    expect(fixture.persistence.journal.append).toHaveBeenCalledTimes(2);
+    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ actor: expect.objectContaining({ kind: "system" }) })],
+      }),
+    );
+  });
+
+  it("does not move a thread on a usage limit without the person's opt-in", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()], turns: [limitedTurn()] }));
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    expect(fixture.projection.read(ids.thread)?.providerInstanceId).toBe(ids.provider);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("stops and says why when the named account is turned off", async () => {
+    const fixture = withAccounts(
+      serviceFixture({
+        threads: [thread({ usageLimitHandoff: { providerInstanceId: personal as never } })],
+        turns: [limitedTurn()],
+      }),
+      { personalEnabled: false },
+    );
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    expect(fixture.projection.read(ids.thread)).toMatchObject({
+      providerInstanceId: ids.provider,
+      usageLimitHandoff: {
+        last: {
+          kind: "stopped",
+          toProviderInstanceId: personal,
+          detail: "Personal is turned off.",
+        },
+      },
+    });
+  });
+
+  it("lets the person set and clear the opt-in, and refuses it from a routine", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
+    const set = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-usage-limit-handoff",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: personal,
+    });
+    expect(set).toMatchObject({ thread: { usageLimitHandoff: { providerInstanceId: personal } } });
+    await expect(
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
+        kind: "set-work-thread-usage-limit-handoff",
+        threadId: ids.thread,
+        expectedVersion: 2,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    const cleared = await fixture.service.execute(ids.window, {
+      kind: "set-work-thread-usage-limit-handoff",
+      threadId: ids.thread,
+      expectedVersion: 2,
+    });
+    expect(cleared).toMatchObject({ kind: "thread-updated" });
+    expect(fixture.projection.read(ids.thread)?.usageLimitHandoff).toBeUndefined();
+  });
+});

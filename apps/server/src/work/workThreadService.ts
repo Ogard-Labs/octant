@@ -68,7 +68,12 @@ import {
 import type { PermissionMode } from "@octant/contracts/providers";
 import {
   assertProviderAllowedByProjectPolicy,
+  decideProviderAccountMove,
+  decideUsageLimitHandoff,
+  decideUsageLimitHandoffSetting,
   hasWorkToolAuthority,
+  withUsageLimitHandoff,
+  withUsageLimitHandoffOutcome,
   ProjectProviderPolicyRejected,
   workProjectKeepsStatusFile,
 } from "@octant/domain";
@@ -82,7 +87,7 @@ import {
   decideThreadMove,
   folderRelativeTo,
 } from "@octant/domain/thread-project-move-policy";
-import { isRoutineHostScope } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   INHERITED_MARK_REFUSAL,
   journalWithInheritedMark,
@@ -520,6 +525,32 @@ export class WorkThreadService {
    * projection, so the search reads them there rather than from a store; a
    * rewound turn has left the thread's order and is not matched.
    */
+  /**
+   * The threads search may look in, newest first: exactly what the sidebar and
+   * its Archived group list. A thread being deleted, or one in a Project that
+   * is gone or not a Work Project, is never searched.
+   */
+  listSearchableThreads(_authenticatedWindowId: WindowId): ReadonlyArray<WorkThread> {
+    this.#assertReady();
+    return this.#searchableThreads();
+  }
+
+  #searchableThreads(): WorkThread[] {
+    return this.#projection
+      .list()
+      .filter((thread) => {
+        if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") return false;
+        if (this.#serverProjects?.holdsThread(thread) === true) return true;
+        const project = this.#persistence.readProject(thread.projectId);
+        return project?.type === "work" && project.lifecycle === "active";
+      })
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          String(left.id).localeCompare(String(right.id)),
+      );
+  }
+
   async searchTranscript(
     _authenticatedWindowId: WindowId,
     query: string,
@@ -532,19 +563,7 @@ export class WorkThreadService {
     }
     const needle = normalizeSearchText(trimmed);
     try {
-      const threads = this.#projection
-        .list()
-        .filter((thread) => {
-          if (thread.lifecycle !== "active" && thread.lifecycle !== "archived") return false;
-          if (this.#serverProjects?.holdsThread(thread) === true) return true;
-          const project = this.#persistence.readProject(thread.projectId);
-          return project?.type === "work" && project.lifecycle === "active";
-        })
-        .sort(
-          (left, right) =>
-            right.updatedAt.localeCompare(left.updatedAt) ||
-            String(left.id).localeCompare(String(right.id)),
-        );
+      const threads = this.#searchableThreads();
       const hits: WorkTranscriptSearch["hits"][number][] = [];
       for (const thread of threads) {
         const lifecycle = thread.lifecycle === "archived" ? "archived" : "active";
@@ -955,6 +974,63 @@ export class WorkThreadService {
           throw this.#failure("unsupported", SERVER_THREAD_STAYS_IN_FOLDER);
         return await this.#moveThread(authenticatedWindowId, current, project, command, actor);
       }
+      if (command.kind === "move-work-thread-account") {
+        const decision = decideProviderAccountMove({
+          actor: isRoutineHostScope(authenticatedWindowId) ? undefined : actor,
+          turnRunning: (await this.#restSignals(current.id)).executing,
+          modelPoolOn: false,
+          from: this.#persistence.readProviderInstance(current.providerInstanceId),
+          to: this.#persistence.readProviderInstance(command.providerInstanceId),
+        });
+        if (decision.kind === "refused") {
+          throw this.#failure(
+            decision.reason === "unattended" ? "unauthorized" : "unavailable",
+            decision.message,
+          );
+        }
+        // The move is the ordinary provider change with the model kept, so
+        // the next turn carries the same disclosed handoff.
+        return await this.execute(
+          authenticatedWindowId,
+          {
+            kind: "change-work-thread-provider",
+            threadId: current.id,
+            expectedVersion: command.expectedVersion,
+            providerInstanceId: command.providerInstanceId,
+            modelId: current.modelId,
+          },
+          executionContext,
+        );
+      }
+      if (command.kind === "set-work-thread-usage-limit-handoff") {
+        const target = command.providerInstanceId;
+        const decision = decideUsageLimitHandoffSetting({
+          actor: isRoutineHostScope(authenticatedWindowId) ? undefined : actor,
+          modelPoolOn: false,
+          from: this.#persistence.readProviderInstance(current.providerInstanceId),
+          to: target === undefined ? "off" : this.#persistence.readProviderInstance(target),
+        });
+        if (decision.kind === "refused") {
+          throw this.#failure(
+            decision.reason === "unattended" ? "unauthorized" : "unavailable",
+            decision.message,
+          );
+        }
+        const updated = decodeWorkThread({
+          ...withUsageLimitHandoff(current, target),
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(
+          current.id,
+          command.expectedVersion,
+          "work.thread-updated@1",
+          { kind: "thread-updated", thread: updated },
+          actor,
+        );
+        this.#projection.apply({ kind: "thread-updated", thread: updated });
+        return { kind: "thread-updated", thread: updated };
+      }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-work-usage-resume") {
         if (current.lifecycle !== "active") {
@@ -1181,6 +1257,16 @@ export class WorkThreadService {
         this.#projection.apply({ kind: "thread-updated", thread: updated });
         return { kind: "thread-updated", thread: updated };
       }
+      // A provider change while the latest turn is parked on its account's
+      // usage limit releases that stop; see `parkedStopReleased`.
+      const limitParked =
+        command.kind === "change-work-thread-provider"
+          ? this.#turnProjection.listForThread(current.id).at(-1)
+          : undefined;
+      const releasedStopId =
+        limitParked?.status === "waiting" && limitParked.failure?.usageLimit !== undefined
+          ? String(limitParked.turnId)
+          : undefined;
       if (command.kind === "change-work-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,
@@ -1343,6 +1429,7 @@ export class WorkThreadService {
                                 nextProviderInstanceId: command.providerInstanceId,
                                 nextModelId: command.modelId,
                                 changedAt: updatedAt,
+                                ...(releasedStopId === undefined ? {} : { releasedStopId }),
                               },
                             }),
                         version: command.expectedVersion + 1,
@@ -1773,6 +1860,77 @@ export class WorkThreadService {
       kind: "thread-updated",
       thread: updated,
     });
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+  }
+
+  /**
+   * Carries out the person's "on a usage limit, hand off to" opt-in once the
+   * thread's latest turn has stopped. The move is the ordinary provider
+   * change, made by the host under the person's standing choice, so the next
+   * turn carries the disclosed handoff; what happened (or why nothing could)
+   * is recorded on the thread naming both accounts. A failure here never
+   * touches the stopped turn, which already says it hit the limit.
+   */
+  async handOffAfterUsageLimit(threadId: WorkThreadId): Promise<void> {
+    const current = this.#projection.read(threadId);
+    const handoff = current?.usageLimitHandoff;
+    if (current === undefined || handoff === undefined || current.lifecycle !== "active") return;
+    const turn = this.#turnProjection.listForThread(threadId).at(-1);
+    const limitStopId =
+      turn !== undefined && turn.status !== "running" && turn.failure?.usageLimit !== undefined
+        ? String(turn.turnId)
+        : undefined;
+    const from = this.#persistence.readProviderInstance(current.providerInstanceId);
+    const to = this.#persistence.readProviderInstance(handoff.providerInstanceId);
+    const decision = decideUsageLimitHandoff({
+      targetProviderInstanceId: String(handoff.providerInstanceId),
+      lastStopId: handoff.last?.stopId,
+      limitStopId,
+      modelPoolOn: false,
+      from,
+      to,
+    });
+    if (decision.kind === "stays" || limitStopId === undefined) return;
+    let detail = decision.kind === "stopped" ? decision.message : undefined;
+    if (decision.kind === "hands-off") {
+      try {
+        await this.execute(
+          ROUTINE_HOST_SCOPE_ID,
+          {
+            kind: "change-work-thread-provider",
+            threadId: current.id,
+            expectedVersion: current.version,
+            providerInstanceId: handoff.providerInstanceId,
+            modelId: current.modelId,
+          },
+          { actor: hostActor() },
+        );
+      } catch (error) {
+        detail = error instanceof Error && error.message.trim() !== "" ? error.message : undefined;
+        detail ??= "The account to hand off to could not take the thread.";
+      }
+    }
+    const latest = this.#projection.read(threadId);
+    if (latest === undefined) return;
+    const updated = decodeWorkThread({
+      ...withUsageLimitHandoffOutcome(latest, {
+        kind: detail === undefined ? "handed-off" : "stopped",
+        stopId: limitStopId,
+        fromProviderInstanceId: current.providerInstanceId,
+        toProviderInstanceId: handoff.providerInstanceId,
+        at: decodeTimestamp(this.#clock()),
+        ...(detail === undefined ? {} : { detail: detail.slice(0, 512) }),
+      }),
+      version: latest.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(
+      latest.id,
+      latest.version,
+      "work.thread-updated@1",
+      { kind: "thread-updated", thread: updated },
+      "system",
+    );
     this.#projection.apply({ kind: "thread-updated", thread: updated });
   }
 
@@ -2248,6 +2406,11 @@ function withoutDoneMark(current: WorkThread): WorkThread {
 /** The picker's word for a Work thread's stored level. */
 function workModeOfAccess(access: WorkAccess): PermissionMode {
   return permissionModeOf(workThreadAccessOf(access));
+}
+
+/** The host acting on a person's standing choice, never as the person. */
+function hostActor(): EventActor {
+  return { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
 }
 
 function localPerson(): EventActor {

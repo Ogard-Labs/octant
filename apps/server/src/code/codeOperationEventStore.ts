@@ -1761,6 +1761,10 @@ function foldTurnFrame(
   } else if (frame.event.kind === "operation-result") {
     if (frame.event.result.kind === "provider-turn-state") {
       builder.status = conversationStatus(frame.event.result.state);
+      // A turn the provider stopped at a usage limit waits with the limit on
+      // this result; no operation-state frame carries it, so a reader of the
+      // conversation alone (the phone) could not tell the turn may resume.
+      if (frame.event.result.failure !== undefined) builder.failure = frame.event.result.failure;
     } else if (frame.event.result.kind === "operation-failed") {
       builder.status = "failed";
       builder.failure = frame.event.result.failure;

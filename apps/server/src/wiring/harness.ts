@@ -34,7 +34,8 @@ import {
 import { Schema } from "effect";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ResearchRouter } from "../chat/research/researchRouter";
-import { SearxngClient } from "../chat/research/searxngClient";
+import { WebSearchSettingsService } from "../webSearch/webSearchSettingsService";
+import { makeWebSearchCredentialBrokerClient } from "../providers/credentialBrokerClient";
 import { ThreadWorkService } from "../chat/threadWorkService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
@@ -76,7 +77,7 @@ import { octantOrientation } from "../orientation/octantOrientation";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
-import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
+import { harnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
 import { isNativeHarnessDriverKind, workThreadAccessOf } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
@@ -149,6 +150,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
+    | "cloudMachineServers"
     | "serverConnection"
     | "serverProjectStore"
     | "serverRegistry"
@@ -173,6 +175,7 @@ export function wireHarness(deps: HarnessDependencies) {
   const {
     safeNetworkStore,
     agentRunInteractions,
+    cloudMachineServers,
     serverConnection,
     serverProjectStore,
     serverRegistry,
@@ -276,6 +279,8 @@ export function wireHarness(deps: HarnessDependencies) {
     ownerCurrent: (owner) =>
       windowAuthorityStore.listWindowIds().some((id) => String(id) === owner),
     agentSocket: sshAgentSocket,
+    pinnedKnownHosts: (server) => serverConnection.pinnedKnownHostsFile(server),
+    refuses: (server) => serverConnection.refusal(server),
     record: (record) => serverProjectStore.recordPreview(record),
   });
   const previewRoutes = createServerPreviewTunnelRoutes({
@@ -299,6 +304,8 @@ export function wireHarness(deps: HarnessDependencies) {
     projects: serverProjectStore,
   });
   cloudMachines.load();
+  cloudMachineServers.pinnedHostKeys = (server) => cloudMachines.pinnedHostKeys(server);
+  cloudMachineServers.suspendedRefusal = (server) => cloudMachines.suspendedRefusal(server);
   const cloudMachineRoutes = createCloudMachineRouteHandler({
     windowAuthorityStore,
     service: cloudMachines,
@@ -355,17 +362,24 @@ export function wireHarness(deps: HarnessDependencies) {
     return projectId === undefined ? undefined : String(projectId);
   };
 
-  const researchRouter = new ResearchRouter({
-    searxngClient: {
-      search: async (input) => {
-        const settings = persistence.readChatSettings()?.settings;
-        if (settings?.searxngBaseUrl === undefined) {
-          throw new Error("SearXNG is not configured.");
-        }
-        return new SearxngClient({ baseUrl: settings.searxngBaseUrl }).search(input);
-      },
-    },
+  const webSearchSettings = new WebSearchSettingsService({
+    connection: persistence.connection,
+    journal: persistence.journal,
+    clock: () => new Date().toISOString(),
+    uuid: randomUUID,
+    readChatSearxngBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+    // Search keys sit in the broker's own namespace; a host with no broker
+    // has none, and keyed vendors read as Needs key.
+    ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+      ? {}
+      : {
+          keys: makeWebSearchCredentialBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+        }),
   });
+  const researchRouter = new ResearchRouter({ webSearch: webSearchSettings });
   const threadWork = new ThreadWorkService({
     persistence,
     uuid: randomUUID,
@@ -1066,8 +1080,9 @@ export function wireHarness(deps: HarnessDependencies) {
       return stored || runningWorkTurnSandbox(threadId) === true;
     },
     resolveWebSearch: () =>
-      searxngHarnessWebSearch({
-        readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
+      harnessWebSearch({
+        readEligible: () => webSearchSettings.eligible(),
+        search: (input) => webSearchSettings.search(input),
       }),
     webFetch: async (input) => {
       try {
@@ -1155,6 +1170,7 @@ export function wireHarness(deps: HarnessDependencies) {
     onHarnessPausedByPerson,
     onHarnessRecoveryLifted,
     researchRouter,
+    webSearchSettings,
     sideTaskHost,
     sideTaskRoutes,
     hostShield,

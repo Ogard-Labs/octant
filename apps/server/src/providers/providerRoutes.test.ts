@@ -232,6 +232,66 @@ describe("ProviderRoutes", () => {
     expect(other?.status).toBe(400);
   });
 
+  it("answers whether a thread's Project holds untrusted Project code to a local window and a paired device, and changes no trust", async () => {
+    const threadId = "80000000-0000-4000-8000-000000000060";
+    const set = vi.fn(() => "recorded" as const);
+    const projectCode = vi.fn(async () => ({
+      status: "untrusted" as const,
+      provider: "claude" as const,
+      found: ["settings", "mcp-servers"] as const,
+    }));
+    const route = routeFixture({}, undefined, false, {
+      get: () => "inherit",
+      set,
+      projectCode,
+    });
+    const body = JSON.stringify({ kind: "project-code", threadId, mode: "code" });
+    const local = await route(
+      new Request("http://127.0.0.1/api/providers/thread-native-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body,
+      }),
+    );
+    expect(local?.status).toBe(200);
+    expect(await local?.json()).toEqual({
+      threadId,
+      projectCode: { status: "untrusted", provider: "claude", found: ["settings", "mcp-servers"] },
+    });
+    expect(projectCode).toHaveBeenCalledWith({ kind: "project-code", threadId, mode: "code" });
+
+    const remote = new Request("http://127.0.0.1/api/providers/thread-native-setup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    const pairedDeviceId = "80000000-0000-4000-8000-000000000061";
+    bindPrincipalRouteContext(remote, {
+      principal: {
+        kind: "remote-device",
+        hostId: "local",
+        deviceId: pairedDeviceId,
+        credentialGeneration: 1,
+        origin: "https://remote.example",
+        protocolVersion: 1,
+        capabilityDigest: "a".repeat(64),
+        sessionId: "80000000-0000-4000-8000-000000000062",
+      } as never,
+      scopeId: pairedDeviceId as never,
+    });
+    expect((await route(remote))?.status).toBe(200);
+    expect(set).not.toHaveBeenCalled();
+
+    const chat = await route(
+      new Request("http://127.0.0.1/api/providers/thread-native-setup", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": capability },
+        body: JSON.stringify({ kind: "project-code", threadId, mode: "chat" }),
+      }),
+    );
+    expect(chat?.status).toBe(400);
+  });
+
   it("refuses a paired device turning on Claude artifacts before the service runs", async () => {
     const execute = vi.fn(() => ({ kind: "provider-updated", instance: provider() }));
     const route = routeFixture({ execute });

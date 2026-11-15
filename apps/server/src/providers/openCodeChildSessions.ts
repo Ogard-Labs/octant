@@ -65,6 +65,9 @@ const FORWARDED_EVENTS: ReadonlySet<string> = new Set([
   "question.v2.asked",
   "question.replied",
   "question.rejected",
+  // OpenCode 2.x asks a subagent's questions through a form in the child's
+  // own session; held back, the child waits on an answer nobody can give.
+  "form.created",
   "session.next.tool.called",
 ]);
 

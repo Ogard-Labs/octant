@@ -1,8 +1,13 @@
 import { ServerProjectPreviewTunnel } from "./ServerProjectPreviewTunnel";
+import {
+  CLOUD_MACHINE_SUSPENDED_NOTICE,
+  CloudMachinesSettings,
+  type CloudMachinesClient,
+} from "./CloudMachinesSettings";
 import { ServerWorkProjectTerminal } from "./ServerWorkProjectTerminal";
 import type { ServerProjectsClient } from "@octant/client-runtime/server-projects-client";
 import type { ProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
-import { AggregateVersion, type ProjectId } from "@octant/contracts";
+import { AggregateVersion, type AggregateId, type ProjectId } from "@octant/contracts";
 import { Schema } from "effect";
 import { ProjectActionsSection } from "../projects/ProjectActionsSection";
 import {
@@ -29,7 +34,15 @@ import { ShieldServersSettings } from "./ShieldServersSettings";
 export interface ServerProjectsSettingsProps {
   /** Absent off this computer: the catalog is host authority. */
   readonly client:
-    | Pick<ServerProjectsClient, "read" | "command" | "previewRead" | "previewCommand">
+    | Pick<
+        ServerProjectsClient,
+        | "read"
+        | "command"
+        | "previewRead"
+        | "previewCommand"
+        | "cloudMachinesRead"
+        | "cloudMachinesCommand"
+      >
     | undefined;
   readonly servers: Pick<ShieldServersClient, "read"> | undefined;
   /** Bumped when the registry above changes, so the server choices are read again. */
@@ -67,6 +80,17 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
   const [mode, setMode] = useState<"code" | "work">("code");
   const [editingActions, setEditingActions] = useState<string>();
   const [actionTarget, setActionTarget] = useState<ProjectActionTarget>();
+  const [cloudRevision, setCloudRevision] = useState(0);
+  const [resumeProblem, setResumeProblem] = useState<
+    { readonly projectId: string; readonly message: string } | undefined
+  >(undefined);
+  const cloudClient = useMemo<CloudMachinesClient | undefined>(() => {
+    const read = client?.cloudMachinesRead;
+    const command = client?.cloudMachinesCommand;
+    return read === undefined || command === undefined
+      ? undefined
+      : { cloudMachinesRead: read, cloudMachinesCommand: command };
+  }, [client]);
 
   const registryRevision = props.registryRevision ?? 0;
   const load = useCallback(async () => {
@@ -141,6 +165,27 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
     }
   }
 
+  /** Resumes a suspended machine from the Project its refusal names. */
+  async function resumeMachine(projectId: string, machineId: AggregateId) {
+    if (cloudClient === undefined) return;
+    setResumeProblem(undefined);
+    setBusy(true);
+    try {
+      const result = await cloudClient.cloudMachinesCommand({
+        kind: "resume-cloud-machine",
+        machineId,
+      });
+      if (result.kind === "cloud-machines-refused")
+        setResumeProblem({ projectId, message: result.message });
+    } catch {
+      setResumeProblem({ projectId, message: "The machine could not be resumed from this host." });
+    } finally {
+      setBusy(false);
+      setCloudRevision((revision) => revision + 1);
+      void load();
+    }
+  }
+
   if (client === undefined) return null;
   if (view === undefined) {
     return (
@@ -198,6 +243,30 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
                   {project.mode === "work" ? "Work · " : "Code · "}
                   {aliasOf(String(project.serverId))}:{project.folder}
                 </span>
+                {project.cloudMachine?.state === "suspended" ? (
+                  <div className="basis-full min-w-0">
+                    <OctantAlert tone="warning">{CLOUD_MACHINE_SUSPENDED_NOTICE}</OctantAlert>
+                    {cloudClient === undefined ? null : (
+                      <OctantButton
+                        aria-label={`Resume the machine for ${project.name}`}
+                        disabled={busy}
+                        onClick={() => {
+                          const machine = project.cloudMachine;
+                          if (machine !== undefined)
+                            void resumeMachine(String(project.id), machine.machineId);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Resume machine
+                      </OctantButton>
+                    )}
+                    {resumeProblem?.projectId === String(project.id) ? (
+                      <OctantAlert tone="danger">{resumeProblem.message}</OctantAlert>
+                    ) : null}
+                  </div>
+                ) : null}
                 <span className="shield-servers__row-actions">
                   {project.mode === "work" && project.developerTools?.enabled !== true ? null : (
                     <OctantButton
@@ -362,6 +431,13 @@ export function ServerProjectsSettings(props: ServerProjectsSettingsProps) {
           />
         )}
       </OctantDialogPresence>
+      {cloudClient === undefined ? null : (
+        <CloudMachinesSettings
+          client={cloudClient}
+          onChanged={() => void load()}
+          revision={cloudRevision}
+        />
+      )}
       <SettingsPanel
         collapse={{ summary: "Bind a folder on a registered server" }}
         description="Octant checks the folder on the server before it binds it."
@@ -461,9 +537,7 @@ export function ServerAccessSettings(props: {
   readonly workProjectId?: ProjectId | undefined;
   readonly onOpenServerProject?: (project: ServerProject) => void;
   readonly servers: ShieldServersClient | undefined;
-  readonly projects:
-    | Pick<ServerProjectsClient, "read" | "command" | "previewRead" | "previewCommand">
-    | undefined;
+  readonly projects: ServerProjectsSettingsProps["client"];
   readonly focusedSetting?: string | undefined;
   /** Project names by id, for the registry's Project picker. */
   readonly projectNames: ReadonlyMap<string, string>;

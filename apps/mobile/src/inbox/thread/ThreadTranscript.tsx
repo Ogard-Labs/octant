@@ -264,7 +264,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   />
                 ))}
                 {turn.status === "waiting" ? (
-                  <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
+                  <Text style={styles.metaText}>
+                    {turn.usageLimit === undefined
+                      ? MOBILE_COPY.turnRunning
+                      : MOBILE_COPY.turnWaitingOnUsageLimit}
+                  </Text>
                 ) : turn.status === "failed" || turn.status === "interrupted" ? (
                   <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
                 ) : null}

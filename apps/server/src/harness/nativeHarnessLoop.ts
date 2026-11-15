@@ -1517,14 +1517,29 @@ function inSystemPrompt(block: ProviderContextBlock): boolean {
   return block.kind === "instructions" || block.kind === "skill-instructions";
 }
 
+/**
+ * The instructions the person wrote for Octant. They join the system prompt
+ * after Octant's own instructions, so the harness, whose endpoint models bring
+ * no prompt of their own, reads them as standing rules rather than a message.
+ */
+function personWrittenInstructions(block: ProviderContextBlock): boolean {
+  return (
+    block.kind === "person-instructions" ||
+    block.kind === "project-instructions" ||
+    block.kind === "orchestration-instructions"
+  );
+}
+
 function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
   readonly system: ReadonlyArray<string>;
   readonly rest: ReadonlyArray<ProviderContextBlock>;
 } {
   const blocks = context ?? [];
   return {
-    system: blocks.filter(inSystemPrompt).map((block) => block.text),
-    rest: blocks.filter((block) => !inSystemPrompt(block)),
+    system: [...blocks.filter(inSystemPrompt), ...blocks.filter(personWrittenInstructions)].map(
+      (block) => block.text,
+    ),
+    rest: blocks.filter((block) => !inSystemPrompt(block) && !personWrittenInstructions(block)),
   };
 }
 

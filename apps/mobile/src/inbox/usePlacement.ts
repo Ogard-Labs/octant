@@ -73,7 +73,7 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
 
   /** Callers check `placementTransport` and `staleGate` first; this only sends. */
   const createChat = useCallback(
-    async (prompt: string): Promise<MobileInboxRow> => {
+    async (prompt: string, onCreated?: (row: MobileInboxRow) => void): Promise<MobileInboxRow> => {
       if (placementTransport === undefined) {
         throw new Error("createChat requires a placement host.");
       }
@@ -82,6 +82,7 @@ export function usePlacement(options: { readonly fallbackToFirstHost: boolean })
       return createMobileChatWithFirstTurn({
         transport: placementTransport,
         prompt,
+        ...(onCreated === undefined ? {} : { onCreated }),
         ...(decoded === undefined
           ? {}
           : { providerInstanceId: decoded.providerInstanceId, modelId: decoded.modelId }),

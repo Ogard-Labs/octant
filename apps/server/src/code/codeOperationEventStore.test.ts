@@ -123,6 +123,36 @@ describe("CodeOperationEventStore", () => {
     reopened.connection.close();
   });
 
+  it("replays a turn the runtime started inside the person's turn after a restart", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const firstStore = createStore(first.journal);
+    firstStore.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { kind: "runtime-turn-started", trigger: "background-task" },
+    });
+    firstStore.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const store = createStore(reopened.journal);
+    expect(store.replay({ threadId, operationId, afterCursor: 0, limit: 10 })).toMatchObject({
+      status: "ok",
+      frames: [
+        { cursor: 1, event: { kind: "operation-state", state: "running" } },
+        { cursor: 2, event: { kind: "runtime-turn-started", trigger: "background-task" } },
+        { cursor: 3, event: { kind: "operation-state", state: "completed" } },
+      ],
+    });
+    expect(() =>
+      decodeCodeOperationEvent({ kind: "runtime-turn-started", trigger: "person" }),
+    ).toThrow();
+    reopened.connection.close();
+  });
+
   it("retains the normalized child identity in Code journal replay without granting a run", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);
@@ -793,6 +823,47 @@ describe("CodeOperationEventStore", () => {
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns).toMatchObject([
       { operationId: failedOperation, status: "failed" },
       { operationId: incompleteOperation, status: "incomplete" },
+    ]);
+    fixture.connection.close();
+  });
+
+  it("carries the usage limit a waiting provider turn stopped at", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt: {
+          contentId: "89000000-0000-4000-8000-000000000031",
+          digest: "e".repeat(64),
+          byteLength: 4,
+        },
+      }),
+    });
+    const usageLimit = { kind: "temporary", resetsAt: "2026-11-15T18:00:00.000Z" };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId,
+          state: "waiting",
+          failure: { category: "unavailable", message: "Usage limit reached.", usageLimit },
+        },
+      }),
+    });
+
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns).toMatchObject([
+      { operationId, status: "waiting", failure: { usageLimit } },
     ]);
     fixture.connection.close();
   });

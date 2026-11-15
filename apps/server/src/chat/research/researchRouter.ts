@@ -3,16 +3,9 @@ import {
   type ResearchBackendDecision,
   type ResearchBackendInput,
 } from "@octant/domain/research-policy";
-import type {
-  ResearchResultSet as SearxngResearchResultSet,
-  SearxngSearchInput,
-} from "./searxngClient";
+import type { WebSearchAnswer, WebSearchInput } from "../../webSearch/webSearchBackends";
 
-export interface ResearchExecuteInput {
-  readonly query: string;
-  readonly limit: number;
-  readonly signal?: AbortSignal;
-}
+export type ResearchExecuteInput = WebSearchInput;
 
 export interface ProviderNativeResearchResultSet {
   readonly query: string;
@@ -24,7 +17,7 @@ export interface ProviderNativeResearchResultSet {
   }>;
 }
 
-export type ResearchExecutionResult = SearxngResearchResultSet | ProviderNativeResearchResultSet;
+export type ResearchExecutionResult = WebSearchAnswer | ProviderNativeResearchResultSet;
 
 export type ResearchRouteDecision =
   | ResearchBackendDecision
@@ -40,12 +33,13 @@ export type ResearchRouteDecision =
       readonly attribution: string;
     };
 
-export interface SearxngClientLike {
-  search(input: SearxngSearchInput): Promise<SearxngResearchResultSet>;
+/** Octant's own `web-search` over the host's eligible backends. */
+export interface WebSearchLike {
+  search(input: WebSearchInput): Promise<WebSearchAnswer>;
 }
 
 export interface ResearchRouterDependencies {
-  readonly searxngClient: SearxngClientLike;
+  readonly webSearch: WebSearchLike;
   /** @deprecated Provider-native research executes inside the selected provider adapter. */
   readonly providerNativeExecute?: (
     input: ResearchExecuteInput,
@@ -65,8 +59,8 @@ export class ResearchRouter {
       return {
         kind: "ready",
         backend: "searxng",
-        attribution: "SearXNG",
-        execute: (executeInput) => this.dependencies.searxngClient.search(executeInput),
+        attribution: "Octant web search",
+        execute: (executeInput) => this.dependencies.webSearch.search(executeInput),
       };
     }
 

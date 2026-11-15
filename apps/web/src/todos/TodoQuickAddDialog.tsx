@@ -1,3 +1,4 @@
+import type { StableHostId } from "@octant/contracts/remote-access";
 import { matchKeybinding } from "@octant/domain";
 import { useEffect, useMemo, useRef } from "react";
 import { useKeybindings } from "../keybindings/useKeybindings";
@@ -16,8 +17,12 @@ export function TodoQuickAddDialog(props: {
   readonly list: TodoList;
   readonly projects: ReadonlyArray<TodoProjectSource>;
   readonly onClose: () => void;
+  /** This host's own id, which names its Projects. */
+  readonly thisHostId?: StableHostId;
 }) {
-  const hostId = props.list.read.status === "loading" ? undefined : props.list.read.view?.hostId;
+  const hostId =
+    props.thisHostId ??
+    (props.list.read.status === "loading" ? undefined : props.list.read.view?.hostId);
   const choices = useMemo(
     () => todoProjectChoices(hostId, props.projects),
     [hostId, props.projects],

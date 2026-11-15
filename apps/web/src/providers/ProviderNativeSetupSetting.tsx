@@ -14,7 +14,7 @@ export interface ProviderNativeSetupSettingProps {
     readonly id: string;
     readonly displayName: string;
     readonly driverKind: KeyProviderDriverKind;
-    readonly nativeSetup?: true;
+    readonly nativeSetup?: boolean;
   };
   readonly observed?: Pick<ProviderObservedState, "capabilities">;
   readonly disabled: boolean;
@@ -38,9 +38,9 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
 };
 
 /**
- * The person's switch that lets one key provider account run as it does in
- * its own app at Guarded and Reviewed: its own subagents, web tools, skills,
- * and home configuration. Full access turns the same on by itself. Only a
+ * The person's switch for one key provider account running as it does in its
+ * own app: its own subagents, web tools, skills, and home configuration. On by
+ * default; turning it off keeps them unloaded below Full access. Only a
  * window on this host may change it (the server refuses others). The line
  * under the switch says which of those this provider's driver can load at
  * all, so a feature Octant cannot see is never implied.
@@ -55,11 +55,17 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
         <>
           Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
           subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
-          in its home folder. Octant still shows each subagent and marks each web read. Full access
-          turns this on by itself. Plan stays read-only, and Chat never gets a folder or a shell. A
-          Project’s own hooks, MCP servers, and plugins load only in a Project you trust for {name}.
+          in its home folder. On by default; each call still follows the thread’s level. Octant
+          still shows each subagent and marks each web read. Turned off, Full access still turns it
+          on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
+          MCP servers, and plugins load only in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
-            <> Mistral Vibe’s own subagents run only at Full access.</>
+            <>
+              {" "}
+              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
+              name, and a subagent running as one of your own Vibe agents may approve its own tools,
+              as in Vibe.
+            </>
           ) : null}
           {unsupported.length === 0 ? null : (
             <>
@@ -74,7 +80,7 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
       settingId={`provider-${props.instance.id}-native-setup`}
     >
       <OctantSwitch
-        checked={props.instance.nativeSetup === true}
+        checked={props.instance.nativeSetup !== false}
         describedBy={`${settingId}-description`}
         disabled={props.disabled}
         label={`Run ${props.instance.displayName} as itself`}

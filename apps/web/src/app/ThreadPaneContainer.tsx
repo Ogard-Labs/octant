@@ -1,4 +1,3 @@
-import type { ChatThreadId, ChatTurnId } from "@octant/contracts/chat";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -9,13 +8,15 @@ import type {
   ProviderModelId,
 } from "@octant/contracts/providers";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
-import { decodeCodeThreadId } from "@octant/contracts/code";
+import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import { decodeWorkThreadId } from "@octant/contracts";
 import type {
   buildModelPickerGroups,
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
+import { CoordinatorWorkersToggle, WorkerOfStrip } from "../code/CoordinatorWorkersPanel";
+import { threadRowActivity } from "../shell/navigationModel";
 import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
@@ -46,7 +47,11 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { useShellController } from "../shell/useShellController";
 import type { useWorkspaceSurfaceDrag } from "../shell/useWorkspaceTabDrag";
-import { WorkspaceView, type WorkspaceViewProps } from "../shell/WorkspaceView";
+import {
+  WorkspaceView,
+  type RevealedThreadTurn,
+  type WorkspaceViewProps,
+} from "../shell/WorkspaceView";
 import { ThreadStatsDetailDialog } from "../threadStats/ThreadStatsDetail";
 import { ThreadStatsProvider } from "../threadStats/threadStatsScope";
 import type { useThreadTurnMetrics } from "../threadStats/useThreadTurnMetrics";
@@ -158,7 +163,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
     | "setWorkComposerSelection"
-    | "spendRevealChatTurn"
+    | "spendRevealTurn"
     | "splitPane"
     | "touchMemoryRevision"
     | "viewAllChatProjectThreads"
@@ -239,7 +244,7 @@ export interface ThreadPaneContainerProps {
   readonly projectClient: ProjectController["client"];
   readonly providerController: ProviderController;
   readonly providerReady: boolean;
-  readonly revealChatTurn?: { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId };
+  readonly revealTurn?: RevealedThreadTurn;
   readonly serverUrl: string;
   readonly settings: NonNullable<ShellController["settings"]>;
   readonly tabActivation: ShellController["tabActivation"];
@@ -335,7 +340,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     projectClient,
     providerController,
     providerReady,
-    revealChatTurn,
+    revealTurn,
     serverUrl,
     settings,
     tabActivation,
@@ -436,7 +441,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectWorkDeveloperTools,
     setUsageOpen,
     setWorkComposerSelection,
-    spendRevealChatTurn,
+    spendRevealTurn,
     splitPane,
     touchMemoryRevision,
     viewAllChatProjectThreads,
@@ -452,6 +457,44 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     return row === undefined ||
       !threadCoordinatorMenuOffers(row, coordinatorActions) ? undefined : (
       <ThreadCoordinatorMenuItems actions={coordinatorActions} thread={row} />
+    );
+  };
+  // A coordinator's pane header offers its Workers panel; a worker's names its
+  // coordinator and the way back. Both read the window's Code thread list.
+  const threadHeader = (surface: WorkspaceTab): ReactNode => {
+    if (surface.kind !== "code-overview") return undefined;
+    const rows = navigation.codeProjectThreads;
+    const row = rows.find((thread) => String(thread.threadId) === String(surface.threadId));
+    if (row === undefined) return undefined;
+    if (row.coordinator === true) {
+      const workers = rows.filter((thread) => thread.coordinatorThreadId === row.threadId);
+      return (
+        <CoordinatorWorkersToggle
+          coordinatorThreadId={row.threadId}
+          needsYouCount={
+            workers.filter((thread) => threadRowActivity(thread) === "attention").length
+          }
+          workerCount={workers.length}
+        />
+      );
+    }
+    const coordinator =
+      row.coordinatorThreadId === undefined
+        ? undefined
+        : rows.find((thread) => thread.threadId === row.coordinatorThreadId);
+    if (coordinator === undefined) return undefined;
+    return (
+      <WorkerOfStrip
+        coordinatorTitle={coordinator.title}
+        onBack={() =>
+          void openCodeThread(
+            coordinator.threadId as CodeThreadId,
+            coordinator.title,
+            undefined,
+            coordinator.projectId as ProjectId | undefined,
+          )
+        }
+      />
     );
   };
   const {
@@ -567,6 +610,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 <ComposerContextMeterShortcut />
                 <ThreadStatsDetailDialog />
                 <WorkspaceView
+                  threadHeader={threadHeader}
+                  octantInstructionsClient={props.clients.octantInstructionsClient}
                   threadMenuItems={threadMenuItems}
                   {...(contextClient === undefined ? {} : { contextClient })}
                   {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
@@ -623,8 +668,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   chatClient={chatClient}
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
-                  {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
-                  onChatTurnRevealed={spendRevealChatTurn}
+                  {...(revealTurn === undefined ? {} : { revealTurn })}
+                  onTurnRevealed={spendRevealTurn}
                   {...(zen.enabled
                     ? {
                         onPinTerminal: (request: Parameters<typeof zen.pinTerminal>[0]) =>

@@ -1359,7 +1359,7 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
-  test("denies background Bash requests before either authority callback executes", async () => {
+  test("lets background commands reach the gate and refuses a watch Octant cannot hold", async () => {
     const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
     const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
     const tools = ["Read", "Grep", "Glob", "Bash"] as const;
@@ -1371,6 +1371,7 @@ describe("Claude Agent SDK port", () => {
           const query = yield* harness.port.openQuery({
             ...openInput,
             tools,
+            withheldTools: [],
             canUseTool,
             preToolUse,
           });
@@ -1381,21 +1382,40 @@ describe("Claude Agent SDK port", () => {
             throw new Error("Expected injected callbacks.");
           }
           const signal = new AbortController().signal;
+          expect(harness.invocation?.options.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS).toBe("1");
 
-          for (const [index, runInBackground] of ([true, "invalid"] as const).entries()) {
-            const toolUseId = `tool-background-${index}`;
+          yield* Effect.promise(() =>
+            permission(
+              "Bash",
+              { command: "npm test", run_in_background: true },
+              { signal, toolUseID: "tool-background", requestId: "request-background" },
+            ),
+          );
+          expect(canUseTool).toHaveBeenCalledOnce();
+
+          for (const [index, [watch, reason]] of (
+            [
+              [
+                { ws: { url: "wss://example.test" } },
+                "Claude's Monitor may watch a command, not a WebSocket.",
+              ],
+              [
+                { persistent: true },
+                "Claude's Monitor may not keep a watch for the whole session.",
+              ],
+            ] as const
+          ).entries()) {
+            const toolUseId = `tool-watch-${index}`;
+            const toolInput = { description: "watch", timeout_ms: 60_000, ...watch };
             expect(
               yield* Effect.promise(() =>
-                permission(
-                  "Bash",
-                  { command: "pwd", run_in_background: runInBackground },
-                  { signal, toolUseID: toolUseId, requestId: `request-background-${index}` },
-                ),
+                permission("Monitor", toolInput, {
+                  signal,
+                  toolUseID: toolUseId,
+                  requestId: `request-watch-${index}`,
+                }),
               ),
-            ).toEqual({
-              behavior: "deny",
-              message: "Claude background tool use is unavailable.",
-            });
+            ).toEqual({ behavior: "deny", message: reason });
             expect(
               yield* Effect.promise(() =>
                 preTool(
@@ -1403,8 +1423,8 @@ describe("Claude Agent SDK port", () => {
                     hook_event_name: "PreToolUse",
                     session_id: "session-1",
                     cwd: "/repo",
-                    tool_name: "Bash",
-                    tool_input: { command: "pwd", run_in_background: runInBackground },
+                    tool_name: "Monitor",
+                    tool_input: toolInput,
                     tool_use_id: toolUseId,
                   },
                   toolUseId,
@@ -1415,12 +1435,47 @@ describe("Claude Agent SDK port", () => {
               hookSpecificOutput: {
                 hookEventName: "PreToolUse",
                 permissionDecision: "deny",
-                permissionDecisionReason: "Claude background tool use is unavailable.",
+                permissionDecisionReason: reason,
               },
             });
           }
-          expect(canUseTool).not.toHaveBeenCalled();
+          expect(canUseTool).toHaveBeenCalledOnce();
           expect(preToolUse).not.toHaveBeenCalled();
+        }),
+      ),
+    );
+
+    // Plan keeps its read-only commands in the foreground.
+    const plan = makeHarness([{ ...safeRuntimeInitialization, permissionMode: "plan" }]);
+    const { sandbox: _sandbox, ...planInput } = openInput;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* plan.port.openQuery({
+            ...planInput,
+            executionPolicy: "plan",
+            canUseTool,
+            preToolUse,
+          });
+          yield* Stream.runHead(query.messages);
+          const permission = plan.invocation?.options.canUseTool;
+          if (permission === undefined) throw new Error("Expected injected callbacks.");
+          expect(
+            yield* Effect.promise(() =>
+              permission(
+                "Bash",
+                { command: "ls", run_in_background: true },
+                {
+                  signal: new AbortController().signal,
+                  toolUseID: "tool-plan",
+                  requestId: "request-plan",
+                },
+              ),
+            ),
+          ).toEqual({
+            behavior: "deny",
+            message: "Claude background commands are unavailable in Plan.",
+          });
         }),
       ),
     );
@@ -1951,29 +2006,36 @@ describe("Claude Agent SDK port", () => {
     { name: "missing baseline", before: undefined, after: 0.09, expected: undefined },
     { name: "reset total", before: 0.08, after: 0.01, expected: undefined },
     { name: "unchanged total", before: 0.08, after: 0.08, expected: 0 },
-  ])("attributes only the measured increment for a $name", async ({ before, after, expected }) => {
-    const harness = makeHarness([
-      safeRuntimeInitialization,
-      { ...validResult, total_cost_usd: after },
-      { ...validResult, total_cost_usd: after },
-    ]);
-    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
-      session: { total_cost_usd: before },
-    });
-    const messages = await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* harness.port.openQuery(openInput);
-          yield* query.send({ text: "Hello" });
-          return yield* Stream.runCollect(query.messages);
-        }),
-      ),
-    );
-    const results = Chunk.toReadonlyArray(messages).filter((message) => message.kind === "result");
-    if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
-    else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
-    expect(results[1]).not.toHaveProperty("costUsd");
-  });
+  ])(
+    "attributes only the measured increment for a $name and a runtime turn after it",
+    async ({ before, after, expected }) => {
+      const harness = makeHarness([
+        safeRuntimeInitialization,
+        { ...validResult, total_cost_usd: after },
+        // A turn the runtime starts by itself, with no prompt of its own.
+        { ...validResult, total_cost_usd: after + 0.005 },
+      ]);
+      harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
+        session: { total_cost_usd: before },
+      });
+      const messages = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* query.send({ text: "Hello" });
+            return yield* Stream.runCollect(query.messages);
+          }),
+        ),
+      );
+      const results = Chunk.toReadonlyArray(messages).filter(
+        (message) => message.kind === "result",
+      );
+      if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
+      else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
+      // Its cost is measured from the result before it.
+      expect(results[1]).toHaveProperty("costUsd", expect.closeTo(0.005, 10));
+    },
+  );
 
   test("stops waiting for cost snapshots after the control fails to answer", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -2236,16 +2298,14 @@ describe("Claude Agent SDK port", () => {
       },
     ],
     [
-      "a hidden task notification",
+      "a workflow task start",
       {
         type: "system",
-        subtype: "task_notification",
+        subtype: "task_started",
         task_id: "task-background",
-        status: "completed",
-        output_file: "/private/background",
-        summary: "secret-background",
-        skip_transcript: true,
-        uuid: "task-notification-background",
+        description: "secret-background",
+        task_type: "local_workflow",
+        uuid: "task-start-workflow",
         session_id: "session-1",
       },
     ],
@@ -3039,6 +3099,93 @@ describe("Claude Agent SDK port", () => {
   });
 });
 
+describe("Claude's full built-in tool set", () => {
+  const withheldTools = ["EnterWorktree", "Workflow"];
+
+  test("launches with Claude Code's own tool preset less the withheld tools and holds a built-in tool Octant never named", async () => {
+    const harness = makeHarness([
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "FutureTool"] },
+    ]);
+    const opened = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, withheldTools });
+          return yield* Stream.runHead(query.messages);
+        }),
+      ),
+    );
+    expect(opened._tag === "Some" ? opened.value.kind : undefined).toBe("initialized");
+    expect(harness.invocation?.options).toMatchObject({
+      tools: { type: "preset", preset: "claude_code" },
+      disallowedTools: withheldTools,
+      allowedTools: ["Grep", "Glob"],
+    });
+  });
+
+  test("refuses a runtime that holds a withheld tool", async () => {
+    const harness = makeHarness([
+      { ...safeRuntimeInitialization, tools: [...safeRuntimeInitialization.tools, "Workflow"] },
+    ]);
+    const failed = await failureOf(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({ ...openInput, withheldTools });
+          return yield* Stream.runDrain(query.messages);
+        }),
+      ),
+    );
+    expect(failed).toEqual({
+      category: "protocol",
+      message: "Claude initialized an unexpected runtime surface.",
+    });
+  });
+
+  test("passes a built-in tool Octant never named to its gate and refuses a withheld one first", async () => {
+    const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
+    const preToolUse = vi.fn(async () => ({ behavior: "ask" as const }));
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery({
+            ...openInput,
+            withheldTools,
+            canUseTool,
+            preToolUse,
+          });
+          yield* Stream.runHead(query.messages);
+          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+          if (preTool === undefined) throw new Error("Expected the injected hook.");
+          const signal = new AbortController().signal;
+          const call = (toolName: string, toolUseId: string) =>
+            Effect.promise(() =>
+              preTool(
+                {
+                  hook_event_name: "PreToolUse",
+                  session_id: "session-1",
+                  cwd: "/repo",
+                  tool_name: toolName,
+                  tool_input: {},
+                  tool_use_id: toolUseId,
+                },
+                toolUseId,
+                { signal },
+              ),
+            );
+          expect(yield* call("FutureTool", "future")).toEqual({
+            hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask" },
+          });
+          expect(yield* call("Workflow", "workflow")).toMatchObject({
+            hookSpecificOutput: { permissionDecision: "deny" },
+          });
+          expect(preToolUse).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+});
+
 describe("Claude running as itself", () => {
   const ownSetup = {
     subagents: true,
@@ -3071,6 +3218,13 @@ describe("Claude running as itself", () => {
     expect(claudeNativeQueryOptions({ ...ownSetup, projectCode: true })).toMatchObject({
       settingSources: ["user", "project", "local"],
       strictMcpConfig: false,
+    });
+  });
+
+  test("keeps Claude's own memory working for an account that turned it on while its home settings load", () => {
+    expect(claudeNativeQueryOptions(ownSetup, true).settings).toEqual({});
+    expect(claudeNativeQueryOptions({ ...ownSetup, hooks: false }, true).settings).toEqual({
+      disableAllHooks: true,
     });
   });
 
@@ -3177,6 +3331,56 @@ describe("Claude running as itself", () => {
       ),
     );
     expect(failed).toMatchObject({ category: "protocol" });
+  });
+
+  test("reads a background command's task lifecycle and the runtime's idle state in any session", async () => {
+    const messages = await collectMessages([
+      {
+        type: "system",
+        subtype: "session_state_changed",
+        state: "idle",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "session_state_changed",
+        state: "running",
+        session_id: "session-1",
+      },
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "bash-1",
+        tool_use_id: "toolu-bash",
+        description: "npm test",
+        task_type: "local_bash",
+        uuid: "00000000-0000-4000-8000-0000000000b1",
+        session_id: "session-1",
+      },
+      { type: "system", subtype: "session_state_changed", state: "idle", session_id: "session-1" },
+      {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "bash-1",
+        tool_use_id: "toolu-bash",
+        status: "completed",
+        output_file: "/tmp/bash-output",
+        summary: "npm test finished",
+        skip_transcript: true,
+        uuid: "00000000-0000-4000-8000-0000000000b2",
+        session_id: "session-1",
+      },
+    ]);
+    // A state reported before initializing still says the runtime reports
+    // its state; only the latest of them is kept, after the initialized one.
+    expect(messages.slice(1)).toEqual([
+      { kind: "session-state", sessionId: "session-1", state: "running" },
+      expect.objectContaining({ kind: "task", subtype: "task_started", background: true }),
+      { kind: "session-state", sessionId: "session-1", state: "idle" },
+      expect.objectContaining({ kind: "task", subtype: "task_notification", taskId: "bash-1" }),
+    ]);
+    expect(JSON.stringify(messages)).not.toContain("/tmp/bash-output");
   });
 
   test("reads a subagent's task lifecycle, as the runtime reports it, only when subagents are on", async () => {

@@ -36,15 +36,27 @@ describe("A provider's own memory", () => {
 });
 
 describe("Run a key provider as itself", () => {
-  it("starts off, says what it loads, and turns on with one switch", async () => {
+  it("starts on, says what it loads, and turns off with one switch", async () => {
     const onChange = vi.fn(async () => true);
     render(<ProviderNativeSetupSetting disabled={false} instance={codex} onChange={onChange} />);
     const toggle = screen.getByRole("switch", { name: "Run Codex work as itself" });
-    expect(toggle).not.toBeChecked();
+    expect(toggle).toBeChecked();
     expect(toggle).toHaveAccessibleDescription(/its own\s+subagents, web search and fetch, skills/);
+    expect(toggle).toHaveAccessibleDescription(/On by default/);
     expect(toggle).toHaveAccessibleDescription(/Plan stays read-only/);
     await userEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith(true);
+    expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  it("stays off for an account the person turned off", () => {
+    render(
+      <ProviderNativeSetupSetting
+        disabled={false}
+        instance={{ ...codex, nativeSetup: false }}
+        onChange={vi.fn(async () => true)}
+      />,
+    );
+    expect(screen.getByRole("switch", { name: "Run Codex work as itself" })).not.toBeChecked();
   });
 
   it("names the features this provider's driver reports it cannot load", () => {
@@ -70,7 +82,7 @@ describe("Run a key provider as itself", () => {
     );
   });
 
-  it("says Mistral Vibe's own subagents wait for Full access, and says it only for Vibe", () => {
+  it("says Mistral Vibe's subagent approvals name no tool, and says it only for Vibe", () => {
     const vibe = { ...codex, displayName: "Vibe", driverKind: "mistral-vibe" } as const;
     const { unmount } = render(
       <ProviderNativeSetupSetting
@@ -80,8 +92,11 @@ describe("Run a key provider as itself", () => {
       />,
     );
     expect(screen.getByRole("switch", { name: "Run Vibe as itself" })).toHaveAccessibleDescription(
-      /Mistral Vibe’s own subagents run only at Full access\./,
+      /Vibe doesn’t say which tool its subagents ask to run/,
     );
+    expect(
+      screen.getByRole("switch", { name: "Run Vibe as itself" }),
+    ).not.toHaveAccessibleDescription(/only at Full access/);
     unmount();
     render(
       <ProviderNativeSetupSetting
@@ -92,7 +107,7 @@ describe("Run a key provider as itself", () => {
     );
     expect(
       screen.getByRole("switch", { name: "Run Codex work as itself" }),
-    ).not.toHaveAccessibleDescription(/only at Full access/);
+    ).not.toHaveAccessibleDescription(/its subagents ask/);
   });
 
   it("claims nothing for a checked driver that reports no native setup at all", () => {

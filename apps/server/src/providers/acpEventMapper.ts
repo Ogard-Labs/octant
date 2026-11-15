@@ -29,6 +29,8 @@ interface AcpToolState {
   outsideContentSource?: "web-search" | "web-fetch";
   /** The subagent this call started, once the agent named its session. */
   childAgentId?: string;
+  /** The agent that subagent runs as, when the agent named it. */
+  childAgentName?: string;
 }
 
 /** Where the agent's own text stands in this turn, once it has written any. */
@@ -53,6 +55,10 @@ export interface AcpEventContext {
   readonly makeRequestId: () => string;
   /** The profile's `childRunMetaKey`: where a call names the subagent it started. */
   readonly childRunMetaKey?: string;
+  /** The profile's `unnamedPermissionDescription`. */
+  readonly unnamedPermissionDescription?: string;
+  /** The profile's `unseenChildCalls`. */
+  readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
   /** Unset until the agent writes its first text of the turn. */
   agentText?: AcpAgentTextState;
 }
@@ -286,6 +292,9 @@ function childRun(
 ): ReadonlyArray<AcpMappedNotification> {
   if (context.childRunMetaKey === undefined) return [];
   const meta = record(update._meta);
+  // The agent is named on the call's start, before the child exists.
+  const agent = normalized(string(meta?.agent), 64);
+  if (agent !== undefined) state.childAgentName = agent;
   const reported = string(meta?.[context.childRunMetaKey])?.trim();
   const named =
     reported !== undefined && reported.length > 0 && reported.length <= 255 ? reported : undefined;
@@ -297,7 +306,31 @@ function childRun(
   const status = ended ?? "running";
   const finalSummary =
     status === "completed" ? boundedChildFinalSummary(string(meta?.response)) : undefined;
-  return [
+  const unseen = context.unseenChildCalls;
+  if (unseen === undefined) {
+    return [
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId,
+        ...(task === undefined ? {} : { task }),
+        ...(finalSummary === undefined ? {} : { finalSummary }),
+        status,
+        summary:
+          status === "running"
+            ? `${context.displayName} is running a subagent.`
+            : status === "completed"
+              ? "The subagent finished."
+              : "The subagent stopped before it finished.",
+      }),
+    ];
+  }
+  // The agent's child calls never reach Octant, so the record names the
+  // agent the subagent ran as and says plainly what Octant could not see.
+  const runsAs =
+    state.childAgentName === undefined ? "a subagent" : `its "${state.childAgentName}" subagent`;
+  const readsOnly =
+    state.childAgentName !== undefined && unseen.readOnlyAgents.includes(state.childAgentName);
+  const results: AcpMappedNotification[] = [
     event(context, {
       kind: "child-agent-activity",
       childAgentId,
@@ -306,12 +339,29 @@ function childRun(
       status,
       summary:
         status === "running"
-          ? `${context.displayName} is running a subagent.`
+          ? `${context.displayName} is running ${runsAs}. Octant cannot see its tool calls${
+              readsOnly ? "" : ", and that agent may approve them itself"
+            }.`
           : status === "completed"
             ? "The subagent finished."
             : "The subagent stopped before it finished.",
     }),
   ];
+  // An agent that may read outside content does so where Octant cannot see
+  // it, so its run marks the thread as one would; Vibe's read-only built-in
+  // reads only the Project.
+  if (firstSeen && !readsOnly && state.outsideContentReported !== true) {
+    state.outsideContentReported = true;
+    results.push(
+      event(context, {
+        kind: "outside-content-read",
+        toolCallId: state.toolCallId,
+        toolName: outsideContentToolName(`subagent ${state.childAgentName ?? "unnamed"}`),
+        source: "hosted-tool",
+      }),
+    );
+  }
+  return results;
 }
 
 /**
@@ -499,7 +549,8 @@ export function mapAcpPermissionRequest(
   const tool = context.tools.get(request.params.toolCall.toolCallId);
   if (
     tool === undefined &&
-    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
+    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined &&
+    context.unnamedPermissionDescription === undefined
   ) {
     return {
       kind: "protocol-failure",
@@ -512,6 +563,7 @@ export function mapAcpPermissionRequest(
   const title =
     normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) ??
     tool?.title ??
+    context.unnamedPermissionDescription ??
     "Tool requires permission";
   const toolKind = request.params.toolCall.kind ?? tool?.kind ?? "tool";
   const requestId = context.makeRequestId();

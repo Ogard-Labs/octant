@@ -581,6 +581,26 @@ Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.
 
+### Project trust prompt
+
+When a Work or Code thread opens and its Project holds untrusted Project code
+for the thread's key provider, the composer shows one quiet notice card above
+the box (maintainer decision, 2026-11-14: one trust prompt per Project). It is
+the neutral card, announced as a status rather than an alert, and names the
+provider and what would load: "This Project has its own Claude Code settings
+and MCP servers. They load once you trust this Project for Claude Code." Its
+actions are **Trust for <provider>** (secondary) and **Not now** (ghost) at the
+trailing edge. Trust sends the Project's trust command, the same one Project
+settings' Trusted providers sends, and the card goes once the Project lists
+the provider. Not now hides it for that Project and provider in this viewer's
+browser only; Trusted providers in Project settings still offers the trust. A
+window with no Project controller shows the words and Not now without Trust,
+and the host refuses the command from anyone but its own person. The card never
+shows for a trusted Project, a Project folder without that provider's Project
+code, or a provider whose trust loads none (any provider that is not a key
+provider, and Codex). The host's answer and the entries it reads are
+in [Architecture: Key providers run as themselves](../architecture.md#providers).
+
 ## Turn menu panels
 
 A panel a turn's menu opens inline (a checkpoint's name, the question before

@@ -24,6 +24,7 @@ const MCP_SERVER_CREDENTIAL_SERVICE = "mcp-server-credentials.v1";
 const DESKTOP_PROVIDER_CREDENTIAL_SERVICE = "desktop-provider-credentials.v1";
 const PUSH_PLATFORM_CREDENTIAL_SERVICE = "push-platform-credentials.v1";
 const SSH_KEY_CREDENTIAL_SERVICE = "ssh-keys.v1";
+const WEB_SEARCH_CREDENTIAL_SERVICE = "web-search-credentials.v1";
 
 const ARTIFACT_DIRECTORIES: ReadonlyArray<{ readonly name: string; readonly relative: string }> = [
   { name: "Apple toolchain artifacts", relative: "artifacts" },
@@ -171,6 +172,7 @@ export function desktopCredentialStore(
       DESKTOP_PROVIDER_CREDENTIAL_SERVICE,
       PUSH_PLATFORM_CREDENTIAL_SERVICE,
       SSH_KEY_CREDENTIAL_SERVICE,
+      WEB_SEARCH_CREDENTIAL_SERVICE,
     ].map((service) => ({ service: `${prefix}${service}` })),
   };
 }

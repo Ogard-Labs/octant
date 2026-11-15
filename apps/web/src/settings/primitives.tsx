@@ -98,7 +98,7 @@ export function revealSettingsWithin(root: HTMLElement): boolean {
  * control (or the row), so keyboard and screen-reader users land on the exact
  * destination.
  */
-function useRevealedFocus(rowRef: RefObject<HTMLElement | null>, focused: boolean) {
+export function useRevealedFocus(rowRef: RefObject<HTMLElement | null>, focused: boolean) {
   useEffect(() => {
     const row = rowRef.current;
     if (!focused || row === null) return;

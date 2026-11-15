@@ -305,7 +305,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     selectWorkThread,
     updateSettings,
   } = actions;
-  const { codeProjectThreads, markedThreadGroups, withProviderMark, workProjectThreads } =
+  const { codeSidebarThreads, markedThreadGroups, withProviderMark, workProjectThreads } =
     navigation;
 
   // The thread whose Move to Project choice is open. Work and Code rows ask for
@@ -923,7 +923,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                             ? codeStatus === "ready"
                               ? {
                                   threads:
-                                    outsideServerProjects(codeProjectThreads).map(withProviderMark),
+                                    outsideServerProjects(codeSidebarThreads).map(withProviderMark),
                                 }
                               : {}
                             : {
@@ -993,7 +993,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
                     onOpenProject={(projectId) => void openDraftInProject(projectId)}
                     onSelectThread={selectCodeThread}
                     projects={serverCodeProjects}
-                    threads={codeProjectThreads.map(withProviderMark)}
+                    threads={codeSidebarThreads.map(withProviderMark)}
                   />
                 ) : null}
                 {activeMode === "work" && workStatus === "ready" ? (

@@ -1615,6 +1615,14 @@ function hydrateThreadUsageResume(connection: SqliteConnection, thread: ChatThre
  * activity cannot be read from its own row; it takes the fold over the thread.
  * A rewound turn is marked on its own row but takes part in the same fold.
  */
+/** The turns a Chat thread shows: not superseded by an edit, not rewound. */
+export function readActiveChatTurnIds(
+  connection: SqliteConnection,
+  threadId: string,
+): ReadonlyArray<string> {
+  return readTurnIds(connection, threadId).active;
+}
+
 function readTurnIds(
   connection: SqliteConnection,
   threadId: string,

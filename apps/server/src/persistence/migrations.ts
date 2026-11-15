@@ -2697,6 +2697,76 @@ CREATE INDEX validation_evidence_authority_idx
         ON code_transcript_search_projection(thread_id, start_sequence);
     `,
   },
+  {
+    version: 107,
+    name: "create_web_search_settings_projection",
+    sql: `
+      CREATE TABLE web_search_settings_projection (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        settings_json TEXT NOT NULL CHECK(json_valid(settings_json)),
+        changed_at TEXT NOT NULL,
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+    `,
+  },
+  {
+    version: 108,
+    name: "create_thread_search_index",
+    // Search across Chat, Work and Code. A projection under a new name, so the
+    // first start after this migration replays the journal into it. A document
+    // is a thread's title, a turn's prompt or tool steps (joined from replaced
+    // parts), or one streamed piece of a reply or terminal (a stream: rows
+    // sharing `stream_key`, each written once). The trigram full-text index
+    // matches any run of three or more characters, as the earlier LIKE search
+    // did, without reading every row on each query. `thread_id` on both tables
+    // puts them in a thread purge's sweep, and the triggers keep the index in
+    // step with every delete, the sweep's included.
+    sql: `
+      CREATE TABLE thread_search_document (
+        doc_id INTEGER PRIMARY KEY,
+        doc_key TEXT NOT NULL UNIQUE CHECK(length(trim(doc_key)) > 0),
+        mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        turn_key TEXT NOT NULL,
+        anchor_id TEXT NOT NULL,
+        field TEXT NOT NULL CHECK(field IN ('title', 'prompt', 'reply', 'tool', 'canvas')),
+        stream_key TEXT NOT NULL,
+        start_sequence INTEGER NOT NULL CHECK(start_sequence > 0),
+        body TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX thread_search_document_thread_idx
+        ON thread_search_document(mode, thread_id, turn_key, start_sequence);
+      CREATE INDEX thread_search_document_stream_idx
+        ON thread_search_document(stream_key, start_sequence);
+      CREATE TABLE thread_search_part (
+        part_key TEXT PRIMARY KEY CHECK(length(trim(part_key)) > 0),
+        doc_key TEXT NOT NULL,
+        thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+        position INTEGER NOT NULL,
+        body TEXT NOT NULL
+      ) STRICT;
+      CREATE INDEX thread_search_part_doc_idx ON thread_search_part(doc_key, position);
+      CREATE VIRTUAL TABLE thread_search_fts USING fts5(
+        body,
+        content = 'thread_search_document',
+        content_rowid = 'doc_id',
+        tokenize = 'trigram'
+      );
+      CREATE TRIGGER thread_search_document_ai AFTER INSERT ON thread_search_document BEGIN
+        INSERT INTO thread_search_fts(rowid, body) VALUES (new.doc_id, new.body);
+      END;
+      CREATE TRIGGER thread_search_document_ad AFTER DELETE ON thread_search_document BEGIN
+        INSERT INTO thread_search_fts(thread_search_fts, rowid, body)
+          VALUES ('delete', old.doc_id, old.body);
+      END;
+      CREATE TRIGGER thread_search_document_au AFTER UPDATE OF body ON thread_search_document BEGIN
+        INSERT INTO thread_search_fts(thread_search_fts, rowid, body)
+          VALUES ('delete', old.doc_id, old.body);
+        INSERT INTO thread_search_fts(rowid, body) VALUES (new.doc_id, new.body);
+      END;
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

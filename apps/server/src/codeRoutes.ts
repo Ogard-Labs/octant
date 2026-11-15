@@ -163,6 +163,7 @@ import {
   type CodeThreadView,
   type WindowId,
   decodeCodeTranscriptSearch,
+  type CodeThread,
   type CodeTranscriptSearch,
 } from "@octant/contracts";
 import {
@@ -306,6 +307,10 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     query: string,
   ) => Promise<CodeTranscriptSearch> | CodeTranscriptSearch;
+  /** The threads search across modes may look in: what bootstrap lists. */
+  readonly listSearchableThreads?: (
+    authenticatedWindowId: WindowId,
+  ) => Promise<ReadonlyArray<CodeThread>>;
   readonly navigation: (
     authenticatedWindowId: WindowId,
   ) => Promise<CodeNavigation> | CodeNavigation;
@@ -821,6 +826,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               (command.kind === "update-code-settings" &&
                 (command.coordinatorStarting !== undefined ||
                   command.coordinatorStartingByProject !== undefined ||
+                  command.coordinatorWorkerListing !== undefined ||
+                  command.coordinatorWorkerListingByProject !== undefined ||
                   command.coordinatorOpenWorkerLimit !== undefined)))
           ) {
             return failureResponse(
@@ -847,6 +854,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 category: "unauthorized",
                 message: "Continue after restart is set at a window on this computer.",
               },
+              403,
+              origin,
+            );
+          }
+          // Which account a thread runs on, now or when its account hits its
+          // usage limit, is the person's own choice; a device that acts on
+          // this host without the person's powers may not make it.
+          if (
+            callerAuthority !== "local-window" &&
+            (command?.kind === "move-code-thread-account" ||
+              command?.kind === "set-code-thread-usage-limit-handoff")
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: ACCOUNT_MOVE_PERSON_ONLY },
               403,
               origin,
             );
@@ -3346,3 +3367,6 @@ function raisesToFullAccess(command: CodeCommand): boolean {
       return false;
   }
 }
+
+const ACCOUNT_MOVE_PERSON_ONLY =
+  "Move a thread to another account at a window or on a device you paired.";

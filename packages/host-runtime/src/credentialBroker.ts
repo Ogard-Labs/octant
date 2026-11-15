@@ -86,6 +86,10 @@ const ROUTES = new Set([
   "/v1/push-platform-credentials/resolve",
   "/v1/push-platform-credentials/set",
   "/v1/push-platform-credentials/delete",
+  "/v1/web-search-credentials/has",
+  "/v1/web-search-credentials/resolve",
+  "/v1/web-search-credentials/set",
+  "/v1/web-search-credentials/delete",
   "/v1/ssh-keys/ensure",
   "/v1/ssh-keys/public",
   "/v1/ssh-keys/sign",
@@ -131,6 +135,7 @@ const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 const DESKTOP_PROVIDER_CREDENTIAL_PREFIX = "/v1/desktop-provider-credentials/";
 const PUSH_PLATFORM_CREDENTIAL_PREFIX = "/v1/push-platform-credentials/";
+const WEB_SEARCH_CREDENTIAL_PREFIX = "/v1/web-search-credentials/";
 const SSH_KEY_PREFIX = "/v1/ssh-keys/";
 /** A login request an SSH client asks to sign, base64: a few hundred bytes. */
 const MAX_SSH_SIGN_DATA_BYTES = 8 * 1_024;
@@ -230,6 +235,14 @@ export async function startCredentialBroker(
    */
   sshKeys?: CredentialStore,
   browserFill?: BrowserCredentialFillHostPort,
+  /**
+   * The API keys a person gives a web search backend, in a credential
+   * namespace of their own. They are served only on
+   * `/v1/web-search-credentials/*`, keyed by the backend entry's credential
+   * reference, so no model provider or other secret with the same UUID can
+   * reach one, and a search backend can reach no other.
+   */
+  webSearchCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -299,6 +312,7 @@ export async function startCredentialBroker(
       pushPlatformCredentials,
       linked,
       sshKeys,
+      webSearchCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -384,6 +398,7 @@ export async function startCredentialBroker(
         pushPlatformCredentials,
         linked,
         sshKeys,
+        webSearchCredentials,
       ),
   });
 }
@@ -404,6 +419,7 @@ async function handleIncoming(
   pushPlatformCredentials: CredentialStore | undefined,
   linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
+  webSearchCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -442,6 +458,7 @@ async function handleIncoming(
         pushPlatformCredentials,
         linked,
         sshKeys,
+        webSearchCredentials,
       ),
     ),
   };
@@ -463,6 +480,7 @@ async function handleBrokerRequest(
   pushPlatformCredentials: CredentialStore | undefined,
   linked: LinkedBrokerStores | undefined,
   sshKeys: CredentialStore | undefined,
+  webSearchCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -646,6 +664,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       pushPlatformCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(WEB_SEARCH_CREDENTIAL_PREFIX)) {
+    if (webSearchCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(WEB_SEARCH_CREDENTIAL_PREFIX.length),
+      "credentialRef",
+      request,
+      webSearchCredentials,
     );
   }
 

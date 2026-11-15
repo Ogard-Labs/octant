@@ -101,13 +101,35 @@ describe("mobile mock scenarios", () => {
       codeResponse.json().then(decodeCodeBootstrap),
     ]);
 
-    expect(chat.threads).toHaveLength(2);
-    expect(work.threads).toHaveLength(1);
-    expect(code.threads).toHaveLength(1);
+    expect(chat.threads).toHaveLength(3);
+    expect(work.threads).toHaveLength(2);
+    expect(code.threads).toHaveLength(2);
 
     const inbox = await listAllHostsMobileInbox(scenario.transports);
     expect(inbox.failures).toEqual([]);
-    expect(inbox.rows).toHaveLength(4);
+    expect(inbox.rows).toHaveLength(7);
+  });
+
+  it("opens an old Code search hit on an earlier page and offers a waiting turn's resume", async () => {
+    const transport = createMobileMockScenario("full").transports[0]!;
+
+    const search = await searchMobileTranscripts(transport, "keychain");
+    const hit = search.status === "ready" ? search.hits.find((h) => h.mode === "code") : undefined;
+    expect(hit).toBeDefined();
+    const page = await loadMobileCodeConversation(transport, String(hit?.threadId), {
+      through: String(hit?.turnId),
+    });
+    expect(page).toMatchObject({ hasEarlier: false, hasLater: true });
+    expect(page.turns.at(-1)?.prompt).toContain("keychain");
+
+    const waiting = await loadMobileCodeConversation(
+      transport,
+      "60000000-0000-4000-8000-000000000002",
+    );
+    expect(waiting.turns.at(-1)).toMatchObject({
+      status: "waiting",
+      usageLimit: { kind: "temporary" },
+    });
   });
 
   it("keeps mock Chat creations distinct and persists submitted turns", async () => {
@@ -253,6 +275,7 @@ describe("mobile mock scenarios", () => {
         }),
       ],
       hasEarlier: false,
+      hasLater: false,
     });
   });
 });

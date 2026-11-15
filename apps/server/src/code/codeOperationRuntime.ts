@@ -1,4 +1,5 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
@@ -460,6 +461,12 @@ export interface CodeOperationRuntimeOptions {
    * not bring back.
    */
   readonly onProviderTurnRequested?: (threadId: CodeThreadId) => void;
+  /**
+   * The thread's provider turn just stopped on its account's usage limit, as
+   * the provider itself reported it. Fires once the turn has closed. A
+   * rejection is ignored: the stop is journaled and stays.
+   */
+  readonly onUsageLimitStop?: (threadId: CodeThreadId) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -740,6 +747,15 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: CodeThread;
+    /** Whether the thread reads as a coordinator now, so it gets orchestration. */
+    readonly orchestrates: boolean;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   /**
    * The active Project memory entries this thread's turn carries, as a Chat
    * or Work turn in the Project does. Absent gives none.
@@ -5532,6 +5548,15 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         tool: line.tool,
       })),
     ];
+    // After Octant's own instructions and before person memory, and counted
+    // with Octant's instructions as person memory is.
+    // The role is decided again on every turn, so Stop coordinating takes the
+    // orchestration text away at the next turn.
+    const instructionBlocks =
+      this.#options.octantInstructionBlocks?.({
+        thread: active.thread,
+        orchestrates: this.#options.isCoordinatorThread?.(String(active.thread.id)) === true,
+      }) ?? [];
     const personMemoryText = this.#options.personMemoryBlock?.({
       thread: active.thread,
       windowId: active.windowId,
@@ -5562,6 +5587,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     const fullContext = [
       ...harnessContext,
       ...hostGuidance,
+      ...instructionBlocks,
       ...personMemory,
       ...projectMemory,
       ...(context ?? []),
@@ -5592,6 +5618,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               : []),
             ...sentNow([
               ...hostGuidance,
+              ...instructionBlocks,
               ...personMemory,
               ...projectMemory,
               ...(active.sentContext?.instructions ?? []),
@@ -5602,6 +5629,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         attachments,
       }),
     };
+    let stoppedOnUsageLimit = false;
     const folderWatch =
       active.folderCurrent === undefined
         ? undefined
@@ -5859,6 +5887,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                       : boundProviderFailureMessage(
                           sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
+                  if (failure?.usageLimit !== undefined) stoppedOnUsageLimit = true;
                   this.#persistOutcome(
                     active,
                     outcome,
@@ -5926,6 +5955,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
+        if (stoppedOnUsageLimit) {
+          void this.#options.onUsageLimitStop?.(active.thread.id).catch(() => undefined);
+        }
       });
   }
 
@@ -6811,6 +6843,9 @@ function normalizedOperationEvent(
         announcedAt: event.occurredAt,
       };
     }
+  }
+  if (event.category === "runtime-turn" && event.status === "background-task") {
+    return { kind: "runtime-turn-started", trigger: "background-task" };
   }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };

@@ -30,6 +30,8 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
+  readonly revealOperationId?: CodeWorkspaceProps["revealOperationId"];
+  readonly onTurnRevealed?: () => void;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
@@ -63,6 +65,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onNewThreadInProject?: CodeWorkspaceProps["onNewThreadInProject"];
   readonly coordinatorProposals?: CodeWorkspaceProps["coordinatorProposals"];
   readonly coordinatorWorkerAsks?: CodeWorkspaceProps["coordinatorWorkerAsks"];
+  readonly coordinatorWorkers?: CodeWorkspaceProps["coordinatorWorkers"];
   /**
    * Opens a Code thread this workspace started, such as a fork of the one in
    * view. Absent on a surface with no tab of its own.
@@ -147,6 +150,10 @@ export default function CodeWorkspaceTab(props: {
           })}
     >
       <CodeWorkspace
+        {...(props.revealOperationId === undefined
+          ? {}
+          : { revealOperationId: props.revealOperationId })}
+        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -164,6 +171,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.coordinatorWorkerAsks === undefined
           ? {}
           : { coordinatorWorkerAsks: props.coordinatorWorkerAsks })}
+        {...(props.coordinatorWorkers === undefined
+          ? {}
+          : { coordinatorWorkers: props.coordinatorWorkers })}
         client={props.controller.client}
         controller={props.controller}
         {...(props.holdAccessNotice === undefined

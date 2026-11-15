@@ -1848,6 +1848,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     linkedStores,
     backend.sshKeys,
     createDesktopBrowserCredentialFill({ stores: linkedStores, surface: () => browserSurfaceHost }),
+    backend.webSearchCredentials,
   );
 }
 

@@ -11,6 +11,7 @@
  * `@octant/contracts/acp-agent-profiles`; the record below must hold a runtime
  * profile for every row there.
  */
+import { providerRunsAsItself } from "@octant/domain";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -187,6 +188,19 @@ export interface AcpProviderProfile {
    * subagent it started, so that call is shown as a child run.
    */
   readonly childRunMetaKey?: string;
+  /**
+   * What an approval says when the agent's permission request names no tool
+   * Octant has seen and carries no title. Absent, such a request fails the
+   * turn; present, it is shown with this text and Allow and Deny.
+   */
+  readonly unnamedPermissionDescription?: string;
+  /**
+   * Set where a subagent's own tool calls never reach Octant: each child run
+   * then names the agent it ran as and says Octant could not see its calls,
+   * and one run as any agent but `readOnlyAgents` marks the thread as having
+   * read outside content, since that agent may have done so unseen.
+   */
+  readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
   /**
    * The agent answers a mode it does not offer with success and keeps its
    * previous mode, so a renamed or dropped mode would leave a turn running
@@ -574,10 +588,12 @@ const vibeProfile: AcpProviderProfile = {
   reasoningOptionId: "thinking",
   // Vibe's ACP mode ids are its agent profile names, and those names moved:
   // `chat` was removed in 2.23.3 and `default` became `ask` in 2.24.1, so the
-  // names below and the version floor have to agree. `accept-edits` is never
-  // selected: it auto-approves edits inside the agent, which would bypass
-  // Octant's approval bridge. `auto-approve` is Vibe's own answer to its
-  // prompts, so a Code thread at Reviewed that chose it runs in that mode
+  // names below and the version floor have to agree. `accept-edits` approves
+  // Vibe's own file writes and edits and asks for everything else, which is
+  // Octant's Accept edits level, so a Work or Code thread at that level runs
+  // in it inside the Accept edits wall, which holds writes to the Project
+  // (maintainer decision, 2026-11-14). `auto-approve` is Vibe's own answer to
+  // its prompts, so a Code thread at Reviewed that chose it runs in that mode
   // inside the same confined launch as Guarded; the host withdraws it on a
   // thread marked by outside content.
   sessionMode: (mode, policy, autoReview) => {
@@ -585,16 +601,25 @@ const vibeProfile: AcpProviderProfile = {
     if (policy === "plan") return "plan";
     if (policy === "full-access") return "auto-approve";
     if (autoReview === true && mode === "code") return "auto-approve";
+    if (policy === "auto-accept-edits") return "accept-edits";
     return "ask";
   },
   ownReviewer: true,
   // Read from the 3.0.3 source: a subagent call carries its child's session
   // id here once the child exists.
   childRunMetaKey: "child_session_id",
+  // A subagent's request names only an entry Octant never saw; see
+  // `VIBE_ENABLE_SUBAGENTS`.
+  unnamedPermissionDescription:
+    "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which.",
+  // A subagent's own calls stay in its own history; `explore` is Vibe's
+  // built-in that reads the Project only (grep, read_file, skill in 3.0.3).
+  unseenChildCalls: { readOnlyAgents: ["explore"] },
   nativeSetupSupport: {
-    // Only at Full access in Work and Code; see `VIBE_ENABLE_SUBAGENTS`.
+    // In Work and Code outside Plan; see `VIBE_ENABLE_SUBAGENTS`.
     subagents: "supported",
-    // Its own web fetch was never switched off; each fetch marks the thread.
+    // Its own web search and fetch are off unless the setup has them on;
+    // each fetch marks the thread.
     webTools: "supported",
     skills: "supported",
     toolServers: "supported",
@@ -603,6 +628,11 @@ const vibeProfile: AcpProviderProfile = {
   },
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
+  // Vibe 3.0.3 asks its questions as an ACP form elicitation, which the
+  // shared questionnaire carries (maintainer decision, 2026-11-14). The
+  // `session/request_permission` question shape above stays unsupported:
+  // this release never sends it.
+  elicitationVersions: ["3.0.3"],
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
@@ -635,9 +665,16 @@ const vibeProfile: AcpProviderProfile = {
       // A subagent's permission request reaches `session/request_permission`
       // on the parent's session naming only the subagent's own history entry,
       // which the parent's updates never announced, so Octant cannot show
-      // what it asks or hold it to a tool kind's rule. They run only where
-      // nothing asks: at Full access in Work and Code, once the person allows
-      // them. A release without the setting ignores the variable.
+      // what it asks or hold it to a tool kind's rule. Read again from the
+      // 3.0.3 source on 2026-11-14: `_answer_callback` sends only
+      // `ToolCallUpdate(tool_call_id=related_entry_id)`, with no title, kind,
+      // or input, and the child's entries never reach the parent's updates,
+      // so there is nothing to name or route through the parent's approval
+      // path. The maintainer accepted that (2026-11-14): subagents follow the
+      // person's setup in Work and Code outside Plan, and such a request is
+      // shown with `unnamedPermissionDescription`, saying plainly that Vibe
+      // names no tool, with Allow and Deny under the thread's level. A
+      // release without the setting ignores the variable.
       VIBE_ENABLE_SUBAGENTS: "false",
       // Vibe's Keychain lookup spawns /usr/bin/security, but the confined
       // launch forbids exec; disable it so Vibe reports a missing key instead
@@ -650,11 +687,19 @@ const vibeProfile: AcpProviderProfile = {
       // agent makes `session/new` fail outright (-31002). `enabled_agents` takes
       // precedence over `disabled_agents` and still excludes every discovered
       // third-party agent, and pinning the default to the approval-gated agent
-      // keeps a session from opening on an edit-approving one.
-      VIBE_ENABLED_AGENTS: '["ask","plan","auto-approve"]',
+      // keeps a session from opening on an edit-approving one; `accept-edits`
+      // is listed only so an Accept edits thread can select it.
+      VIBE_ENABLED_AGENTS: '["ask","plan","accept-edits","auto-approve"]',
       VIBE_DEFAULT_AGENT: "ask",
       // Skills have no `default_skill` to resolve, so the deny-all form is safe here.
       VIBE_DISABLED_SKILLS: '["*"]',
+      // Vibe's own web search and fetch stay off unless the setup has web
+      // tools on, so turning "Run as itself" off really removes them rather
+      // than leaving Vibe's defaults in place. Read from the 3.0.3 source: the
+      // tools are named `web_search` and `web_fetch`, `disabled_tools` is
+      // applied after `enabled_tools`, and the environment layer's list is
+      // added to the person's own rather than replacing it.
+      VIBE_DISABLED_TOOLS: '["web_search","web_fetch"]',
     },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
@@ -689,21 +734,43 @@ const vibeProfile: AcpProviderProfile = {
     // so it comes with any of it. A trusted Project's `.vibe` entries become
     // readable again, and Vibe's own folder-trust list still decides whether
     // it loads them. Telemetry, update checks, notifications, the voice and
-    // narrator features, the keyring, and the agent allowlist stay as above.
+    // narrator features, and the keyring stay as above. Skills include the
+    // registry skills the person's own configuration opts into. Its own
+    // subagents follow the person's setup in Work and Code outside Plan, and
+    // with them the person's custom and installed agents and their own agent
+    // lists, since a subagent runs as one of those agents. A person whose own
+    // lists leave out a mode Octant selects gets a refused start, not another
+    // mode. In Plan and Chat the agent allowlist above holds, so a session
+    // opens and switches only on the modes Octant selects (maintainer
+    // decisions, 2026-11-14).
     nativeSetup: (setup, launch) => {
-      const on =
-        setup.skills || setup.toolServers || setup.hooks || setup.projectCode || setup.webTools;
+      const on = providerRunsAsItself(setup);
+      const workOrCode = launch.mode === "work" || launch.mode === "code";
+      // The person's own agents come with the subagents: a custom agent may
+      // approve its own tools, as it does in Vibe itself (maintainer decision,
+      // 2026-11-14), and each child run says so. Plan and Chat get none.
+      const subagents = setup.subagents && launch.executionPolicy !== "plan" && workOrCode;
       return {
         releasedGuards: [
           ...(on ? ["VIBE_INCLUDE_PROJECT_CONTEXT"] : []),
-          ...(setup.skills ? ["VIBE_SKILL_PATHS", "VIBE_DISABLED_SKILLS"] : []),
+          ...(setup.skills
+            ? [
+                "VIBE_SKILL_PATHS",
+                "VIBE_DISABLED_SKILLS",
+                "VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS",
+              ]
+            : []),
           ...(setup.toolServers ? ["VIBE_MCP_SERVERS", "VIBE_ENABLE_CONNECTORS"] : []),
           ...(setup.hooks ? ["VIBE_ENABLE_EXPERIMENTAL_HOOKS"] : []),
           ...(setup.projectCode ? ["VIBE_TOOL_PATHS"] : []),
-          ...(setup.subagents &&
-          launch.executionPolicy === "full-access" &&
-          (launch.mode === "work" || launch.mode === "code")
-            ? ["VIBE_ENABLE_SUBAGENTS"]
+          ...(setup.webTools ? ["VIBE_DISABLED_TOOLS"] : []),
+          ...(subagents
+            ? [
+                "VIBE_ENABLE_SUBAGENTS",
+                "VIBE_AGENT_PATHS",
+                "VIBE_INSTALLED_AGENTS",
+                "VIBE_ENABLED_AGENTS",
+              ]
             : []),
         ],
         releasedRootEntries: setup.projectCode

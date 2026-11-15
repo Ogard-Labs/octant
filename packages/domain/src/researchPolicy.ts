@@ -8,7 +8,7 @@ export type ResearchBackendDecision =
   | {
       readonly kind: "unavailable";
       readonly reason:
-        | "searxng-not-configured"
+        | "no-eligible-web-search-backend"
         | "app-managed-tools-unsupported"
         | "native-research-unsupported";
     };
@@ -16,7 +16,8 @@ export type ResearchBackendDecision =
 export interface ResearchBackendInput {
   readonly researchEnabled: boolean;
   readonly routing: ChatResearchRouting;
-  readonly searxngConfigured: boolean;
+  /** The host's data policy leaves at least one of its web search backends eligible. */
+  readonly webSearchReady: boolean;
   readonly appManagedTools: "supported" | "unsupported" | "unavailable";
   readonly nativeResearch: "supported" | "unsupported" | "unavailable";
 }
@@ -25,9 +26,9 @@ function isSupported(value: "supported" | "unsupported" | "unavailable"): value 
   return value === "supported";
 }
 
-function selectSearxng(input: ResearchBackendInput): ResearchBackendDecision {
-  if (!input.searxngConfigured) {
-    return { kind: "unavailable", reason: "searxng-not-configured" };
+function selectOctant(input: ResearchBackendInput): ResearchBackendDecision {
+  if (!input.webSearchReady) {
+    return { kind: "unavailable", reason: "no-eligible-web-search-backend" };
   }
   if (!isSupported(input.appManagedTools)) {
     return { kind: "unavailable", reason: "app-managed-tools-unsupported" };
@@ -48,17 +49,20 @@ export function resolveResearchBackend(input: ResearchBackendInput): ResearchBac
   }
 
   if (input.routing === "searxng") {
-    return selectSearxng(input);
+    return selectOctant(input);
   }
 
   if (input.routing === "provider-native") {
     return selectNative(input);
   }
 
-  const searxng = selectSearxng(input);
-  if (searxng.kind === "selected") {
-    return searxng;
+  // Automatic prefers the provider's own search: it needs no endpoint, so a
+  // fresh install searches without setup. Octant's own web search is the
+  // fallback for a provider that has none.
+  const native = selectNative(input);
+  if (native.kind === "selected") {
+    return native;
   }
 
-  return selectNative(input);
+  return selectOctant(input);
 }

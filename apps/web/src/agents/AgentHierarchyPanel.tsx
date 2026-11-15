@@ -62,6 +62,10 @@ export interface SubagentWorker {
   readonly threadId: string;
   readonly title: string;
   readonly provider?: SubagentProviderIdentity;
+  /** The model the worker runs on, by name. */
+  readonly model?: string;
+  /** Why the host did not start the role's main model, or the coordinator's why. */
+  readonly choiceNote?: string;
   readonly state: "working" | "attention" | "done" | "idle";
   readonly runs: ReadonlyArray<AgentRunGraphRow>;
   /** The worker has more runs than the host listed. */
@@ -313,6 +317,8 @@ function workerFacts(worker: SubagentWorker): string {
   ).length;
   return [
     WORKER_STATE_WORDS[worker.state],
+    worker.model,
+    worker.choiceNote,
     worker.runs.length === 0
       ? undefined
       : `${worker.runs.length} ${worker.runs.length === 1 ? "subagent" : "subagents"}`,

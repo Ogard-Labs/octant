@@ -522,6 +522,11 @@ export async function createMobileChatWithFirstTurn(input: {
   readonly prompt: string;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
+  /**
+   * Told as soon as the host has made the thread, before its first turn: a
+   * turn that then fails to start still leaves a thread the caller can name.
+   */
+  readonly onCreated?: (row: MobileInboxRow) => void;
 }): Promise<MobileInboxRow> {
   const trimmed = input.prompt.trim();
   if (trimmed.length === 0) {
@@ -531,6 +536,7 @@ export async function createMobileChatWithFirstTurn(input: {
     transport: input.transport,
     title: titleFromPrompt(trimmed),
   });
+  input.onCreated?.(chatRow(input.transport.hostId, thread));
   if (
     input.providerInstanceId !== undefined &&
     input.modelId !== undefined &&

@@ -30,7 +30,10 @@ import { createNativeHarnessShell } from "./nativeHarnessShell";
 import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
-import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
+import { harnessWebSearch } from "./nativeHarnessWebSearch";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
+import { webSearchSettingsFromChatAddress } from "@octant/domain";
+import { MIGRATED_SEARXNG_ENTRY_ID } from "../webSearch/webSearchSettingsService";
 
 const authority = {
   hostId: "00000000-0000-4000-8000-0000000000aa",
@@ -149,6 +152,7 @@ describe("native harness composition", () => {
 
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {
     let searxngBaseUrl: string | undefined;
+    const asked: Array<{ readonly threadId?: string; readonly toolCallId?: string }> = [];
     const fetch = vi.fn(
       async (_input: RequestInfo | URL) =>
         new Response(
@@ -174,7 +178,20 @@ describe("native harness composition", () => {
         }),
       },
       isHarnessProvider: () => true,
-      resolveWebSearch: () => searxngHarnessWebSearch({ readBaseUrl: () => searxngBaseUrl, fetch }),
+      resolveWebSearch: () =>
+        harnessWebSearch({
+          readEligible: () =>
+            webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID).backends,
+          search: (input) => {
+            asked.push(input);
+            return searchWebSearchBackends({
+              backends: webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID)
+                .backends,
+              search: input,
+              fetch,
+            });
+          },
+        }),
       hostId: authority.hostId,
       readThreadTaint: () => false,
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
@@ -187,6 +204,7 @@ describe("native harness composition", () => {
       nextTurn()?.execute({
         name: "web-search",
         inputJson: JSON.stringify({ query: "octant" }),
+        toolCallId: "toolu_search_1",
       });
 
     const unset = nextTurn()?.definitions.map((definition) => definition.name);
@@ -198,6 +216,8 @@ describe("native harness composition", () => {
       result: { query: "octant", results: [{ url: "https://example.com/octant" }] },
     });
     expect(String(fetch.mock.calls.at(-1)?.[0])).toMatch(/^https:\/\/search\.example\.test\//);
+    // Where the query went is journaled with the thread's own tool call.
+    expect(asked.at(-1)).toMatchObject({ threadId: thread.id, toolCallId: "toolu_search_1" });
 
     searxngBaseUrl = "https://other.example.test";
     await search();

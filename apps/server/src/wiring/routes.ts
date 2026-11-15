@@ -154,12 +154,17 @@ export type RoutesDependencies = {
     | "workOverviewRoutes"
     | "workPromotionRoutes"
     | "workRequestRoutes"
+    | "threadSearchRoutes"
     | "workThreadRoutes"
   > &
   Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
   Pick<
     AuthorityWiring,
-    "personMemoryRoutes" | "protectedFilesRoutes" | "todoRoutes" | "windowAuthorityStore"
+    | "personMemoryRoutes"
+    | "octantInstructionsRoutes"
+    | "protectedFilesRoutes"
+    | "todoRoutes"
+    | "windowAuthorityStore"
   >;
 
 export function wireRoutes(deps: RoutesDependencies) {
@@ -231,6 +236,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     projectBindingRoutes,
     projectRoutes,
     personMemoryRoutes,
+    octantInstructionsRoutes,
     protectedFilesRoutes,
     todoRoutes,
     providerOAuthRoutes,
@@ -264,6 +270,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     workRequestRoutes,
     workResearchRoutes,
     workspacePresetRoutes,
+    threadSearchRoutes,
     workThreadRoutes,
     workTurnRoutes,
     zenBackgroundRoutes,
@@ -331,6 +338,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await scaffoldRoutes(request)) ??
     (await workspacePresetRoutes(request)) ??
     (await productFeedbackRoutes(request)) ??
+    (await threadSearchRoutes(request)) ??
     (await workThreadRoutes(request)) ??
     (await workTurnRoutes(request)) ??
     (await workOverviewRoutes(request)) ??
@@ -369,6 +377,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??
     (await todoRoutes(request)) ??
+    (await octantInstructionsRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??
     (await terminalSessionRoutes(request)) ??

@@ -5,7 +5,7 @@ function input(overrides: Partial<ResearchBackendInput> = {}): ResearchBackendIn
   return {
     researchEnabled: true,
     routing: "automatic" as const,
-    searxngConfigured: true,
+    webSearchReady: true,
     appManagedTools: "supported" as const,
     nativeResearch: "supported" as const,
     ...overrides,
@@ -19,20 +19,27 @@ describe("research backend routing", () => {
     });
   });
 
-  it("automatic prefers configured SearXNG when app-managed tools are supported", () => {
+  it("automatic prefers the provider's own search even when a web search backend is eligible", () => {
     expect(resolveResearchBackend(input())).toEqual({
+      kind: "selected",
+      backend: "provider-native",
+    });
+  });
+
+  it("automatic falls back to an eligible web search backend when the provider has no search of its own", () => {
+    expect(resolveResearchBackend(input({ nativeResearch: "unsupported" }))).toEqual({
       kind: "selected",
       backend: "searxng",
     });
   });
 
-  it("automatic falls back to provider-native when SearXNG is not configured", () => {
+  it("automatic falls back to provider-native when no web search backend is eligible", () => {
     expect(
-      resolveResearchBackend(input({ searxngConfigured: false, nativeResearch: "supported" })),
+      resolveResearchBackend(input({ webSearchReady: false, nativeResearch: "supported" })),
     ).toEqual({ kind: "selected", backend: "provider-native" });
   });
 
-  it("automatic falls back to provider-native when app-managed tools are unsupported even if SearXNG is configured", () => {
+  it("automatic falls back to provider-native when app-managed tools are unsupported even with an eligible web search backend", () => {
     expect(
       resolveResearchBackend(
         input({ appManagedTools: "unsupported", nativeResearch: "supported" }),
@@ -44,38 +51,38 @@ describe("research backend routing", () => {
     expect(
       resolveResearchBackend(
         input({
-          searxngConfigured: false,
+          webSearchReady: false,
           appManagedTools: "unsupported",
           nativeResearch: "unavailable",
         }),
       ),
     ).toEqual({
       kind: "unavailable",
-      reason: "native-research-unsupported",
+      reason: "no-eligible-web-search-backend",
     });
   });
 
-  it("explicit SearXNG fails when SearXNG is not configured", () => {
+  it("explicit Octant search fails when no web search backend is eligible", () => {
     expect(
       resolveResearchBackend(
         input({
           routing: "searxng",
-          searxngConfigured: false,
+          webSearchReady: false,
           appManagedTools: "supported",
         }),
       ),
     ).toEqual({
       kind: "unavailable",
-      reason: "searxng-not-configured",
+      reason: "no-eligible-web-search-backend",
     });
   });
 
-  it("explicit SearXNG fails when app-managed tools are unsupported", () => {
+  it("explicit Octant search fails when app-managed tools are unsupported", () => {
     expect(
       resolveResearchBackend(
         input({
           routing: "searxng",
-          searxngConfigured: true,
+          webSearchReady: true,
           appManagedTools: "unsupported",
         }),
       ),
@@ -100,15 +107,15 @@ describe("research backend routing", () => {
   });
 
   it("explicit unavailable backends never silently fall through to the other backend", () => {
-    const searxng = resolveResearchBackend(
+    const octant = resolveResearchBackend(
       input({
         routing: "searxng",
-        searxngConfigured: true,
+        webSearchReady: true,
         appManagedTools: "unsupported",
         nativeResearch: "supported",
       }),
     );
-    expect(searxng).toEqual({
+    expect(octant).toEqual({
       kind: "unavailable",
       reason: "app-managed-tools-unsupported",
     });
@@ -116,7 +123,7 @@ describe("research backend routing", () => {
     const native = resolveResearchBackend(
       input({
         routing: "provider-native",
-        searxngConfigured: true,
+        webSearchReady: true,
         appManagedTools: "supported",
         nativeResearch: "unavailable",
       }),

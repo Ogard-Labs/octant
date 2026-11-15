@@ -244,10 +244,14 @@ export type RemoteDependencies = {
     readonly bind: (routes: ReadonlyArray<PairedDeviceRoutes>) => void;
   };
 } & Pick<ServerStart, "options" | "persistence" | "serve" | "startedAt" | "version"> &
-  Pick<HarnessWiring, "beginGoogleCliChange"> &
+  Pick<HarnessWiring, "beginGoogleCliChange" | "webSearchSettings"> &
   Pick<
     AuthorityWiring,
-    "browserCaptureStore" | "browserCaptures" | "personMemory" | "windowAuthorityStore"
+    | "browserCaptureStore"
+    | "browserCaptures"
+    | "personMemory"
+    | "octantInstructions"
+    | "windowAuthorityStore"
   > &
   Pick<
     AgentRunsWiring,
@@ -360,6 +364,7 @@ export function wireRemote(deps: RemoteDependencies) {
     automationScheduler,
     browserCaptureStore,
     personMemory,
+    octantInstructions,
     hubPushHandoffSlot,
     pairedMergeUnlockSlot,
     nativeHarnessSessions,
@@ -2338,6 +2343,9 @@ export function wireRemote(deps: RemoteDependencies) {
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => {
+      // The erase took the Project's instructions from the journal; turns
+      // stop receiving them now.
+      octantInstructions.forgetProject(projectId);
       browserUploadPermissions.forgetProject(projectId);
       browserDownloadPermissions.forgetProject(projectId);
       // The Project's Browser profile goes with its other data: its extensions
@@ -2469,6 +2477,7 @@ export function wireRemote(deps: RemoteDependencies) {
     memory: () => hostMemoryGuard.report(),
     restartRecovery: deps.restartRecovery,
     memoryLimits: hostMemoryLimits,
+    webSearch: deps.webSearchSettings,
     threadRetention,
     ...(options.hostControl?.servicePolicy === undefined
       ? {}
@@ -2529,6 +2538,15 @@ export function wireRemote(deps: RemoteDependencies) {
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       personMemoryEntries: () => personMemory.view().entries,
+      instructions: () => ({
+        yours: octantInstructions.view(true).instructions,
+        orchestration: octantInstructions.view(true).orchestration,
+      }),
+      projectInstructions: () =>
+        octantInstructions.projectInstructions().map((entry) => ({
+          projectId: decodeProjectId(entry.projectId),
+          instructions: entry.instructions,
+        })),
       listCanvases: () =>
         [...persistence.canvasProjection.snapshot().values()].map((entry) => ({
           canvasId: entry.canvasId,

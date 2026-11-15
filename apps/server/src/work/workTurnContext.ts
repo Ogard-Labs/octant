@@ -12,6 +12,7 @@ import {
   type ProviderModelId,
   type WorkThreadId,
 } from "@octant/contracts";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import { reduceContextToBudget } from "@octant/domain/context-policy";
 import { CANVAS_TOOL_NAME } from "../canvas/canvasAgentTools";
 import {
@@ -54,6 +55,7 @@ export interface WorkTurnContextContribution {
     | "current-request"
     | "workspace-context"
     | "octant-policy"
+    | OctantInstructionsBlock["kind"]
     | "person-memory"
     | "project-memory";
   readonly posture: "required" | "compressible";
@@ -113,6 +115,9 @@ export function planWorkTurnContext(input: {
         "current-request": "Current request",
         "workspace-context": "Workspace context",
         "octant-policy": "Work instructions",
+        "person-instructions": "Your instructions",
+        "project-instructions": "Project instructions",
+        "orchestration-instructions": "Orchestration",
         "person-memory": "Person memory",
         "project-memory": "Project memory",
       }[contribution.category],

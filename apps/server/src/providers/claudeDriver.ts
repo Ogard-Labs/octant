@@ -64,7 +64,9 @@ import {
 } from "./claudeAgentSdkPort";
 import {
   CLAUDE_CHECKLIST_TOOL,
+  CLAUDE_PLAN_EXIT_TOOL,
   CLAUDE_SUBAGENT_TOOL,
+  claudeStoredTaskListEvents,
   mapClaudeMessage,
   mapClaudeToolRequest,
   claudeToolUseStepId,
@@ -72,6 +74,7 @@ import {
   type ClaudePendingApproval,
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
+import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
 import { providerOwnMemoryLaunches } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
@@ -188,6 +191,13 @@ function claudeTurnMessage(
   };
 }
 
+/**
+ * The tools Octant's gate has its own rule for in a Work or Code session
+ * outside Plan. The session holds Claude Code's whole built-in set beside
+ * them (see {@link claudeWithheldTools}); any other built-in tool asks below
+ * Full access, so a tool a new Claude Code release adds works from that
+ * release on and is never run unasked by a posture that asks.
+ */
 const CLAUDE_TOOLS = [
   "Read",
   "Grep",
@@ -206,13 +216,42 @@ const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
  * service admits (read from the bundled binary, 2026-10-27).
  */
 export const CLAUDE_ARTIFACT_TOOL = "Artifact";
+/** Claude's claude.ai Projects tool, whose upload names a local file in `local_path`. */
+const CLAUDE_PROJECTS_TOOL = "Projects";
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 /**
  * Tools that change only Claude's own session state: no file, shell, network,
- * or person is involved, so every posture, Plan included, runs them unasked.
- * The checklist is the thread's task panel.
+ * or person is involved, so every posture runs them unasked, as Claude Code
+ * does. Plan holds the checklist and the task tools of these, its task panel.
+ *
+ * - `TodoWrite`: the checklist, the thread's task panel, where the runtime
+ *   still offers it.
+ * - `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`: the task tools that
+ *   replace the checklist by default. Each reads or writes only the session's
+ *   task list in the account's configuration directory (read from the bundled
+ *   2.1.211 binary, 2026-11-14), never the Project, and Plan already refuses
+ *   an account directory that overlaps the checkout.
+ * - `ToolSearch`: loads the definitions of tools the session already holds
+ *   but deferred; it calls no tool itself. Claude Code 2.1.211's own tool
+ *   marks it read-only (`isReadOnly` true, read from the bundled binary,
+ *   2026-11-14), and the SDK describes tool search as deferring tool
+ *   definitions behind it.
+ *
+ * A name joins only on such evidence; every other tool keeps asking.
  */
-const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL]);
+const CLAUDE_SESSION_TOOLS = new Set<string>([
+  CLAUDE_CHECKLIST_TOOL,
+  ...CLAUDE_TASK_TOOLS,
+  "ToolSearch",
+]);
+/**
+ * The refusal a Plan session's plan tool gets once its plan is captured.
+ * Claude Code's own answer to that tool leaves plan mode for one that edits;
+ * Octant's thread stays in Plan until the person moves it, so the call is
+ * refused and the model is told the plan reached the person.
+ */
+export const CLAUDE_PLAN_CAPTURED_MESSAGE =
+  "The plan was captured and shown to the person; wait for the person. Plan stays read-only until they move the thread out of Plan.";
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
 const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude probe did not initialize its runtime.",
@@ -225,14 +264,68 @@ const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude returned an invalid SDK response.",
 ]);
 /** The tools that write files inside the Project, and nothing else. */
-const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write"]);
+const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write", "NotebookEdit"]);
+/**
+ * Claude Code's tools that run or manage its shell commands: each takes the
+ * shell's approval rules, so it asks below Full access and runs in the
+ * Project root, where the command sandbox holds it. `Monitor` keeps a command
+ * running and reads each line it prints, so it is a shell command too.
+ */
+const CLAUDE_SHELL_TOOLS = new Set<string>(["Bash", "Monitor", "TaskOutput", "TaskStop"]);
+/**
+ * Claude Code's built-in tools a Work or Code session outside Plan does not
+ * hold. Octant adds to Claude Code and does not take its core features away
+ * (maintainer decision, 2026-11-14), so the session holds the runtime's whole
+ * built-in set except this list, and each entry is here only because it
+ * would break a rule the server enforces.
+ */
+const CLAUDE_WITHHELD_TOOLS = [
+  // The thread's mode is the server's. Claude switching its own permission
+  // mode would leave the posture Octant granted mid-session; Plan is a
+  // thread mode with its own read-only tool set, not a runtime switch. A Plan
+  // session holds the plan tool to hand its plan over; outside Plan there is
+  // no plan to hand over and nothing to leave.
+  "EnterPlanMode",
+  CLAUDE_PLAN_EXIT_TOOL,
+  // A thread is bound to one checkout; a worktree switch moves the session's
+  // working directory out of it.
+  "EnterWorktree",
+  "ExitWorktree",
+  // A workflow's agents report under the `Workflow` call, not an `Agent`
+  // call, so the child-run display cannot show them and the decoder refuses
+  // their task frames; offering it waits on that display.
+  "Workflow",
+  // Each of these wakes the model at a later time. A session lasts one turn,
+  // so a wake-up kept in memory never fires and the call's success would be
+  // untrue, and a durable one is written to the Project's own Claude files
+  // and fires in whatever later session opens there, unseen by this thread.
+  // Background commands and `Monitor` watches are held instead: the turn that
+  // started them stays open until they end (see `ClaudeHeldTurn`).
+  "CronCreate",
+  "ScheduleWakeup",
+  // Runs JavaScript inside the runtime process, outside the command sandbox
+  // that holds every shell command below Full access and outside the secret
+  // guard's file checks.
+  "REPL",
+] as const;
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
 const MAX_PENDING_APPROVALS = 4;
+/**
+ * How many turns the runtime may start by itself inside one person's turn.
+ * A watch that keeps printing wakes the model on every line; past this the
+ * person's turn completes and its session, with the watch, is stopped.
+ */
+const MAX_RUNTIME_TURNS = 16;
 const MAX_PRE_TOOL_GRANTS = 16;
-const MAX_TOOL_USES_PER_SESSION = 256;
-const MAX_TOOL_USES_PER_TURN = 64;
+/**
+ * How many tool-use ids a session remembers. Settled ids are forgotten oldest
+ * first past this, so a long turn never runs out: a turn used to fail at its
+ * 64th tool call. Only ids still pending or holding a grant are never
+ * forgotten, and the caps above keep those few.
+ */
+const MAX_TRACKED_TOOL_USES = 256;
 const PRE_TOOL_GRANT_TTL_MS = 30_000;
 const USER_ANSWER_MAX_CHARACTERS = 4_096;
 const USER_QUESTION_MAX_CHARACTERS = 1_024;
@@ -244,6 +337,11 @@ export interface ClaudeExecutionOptions {
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions: boolean;
   readonly tools: readonly string[];
+  /**
+   * Whether the session holds Claude Code's whole built-in tool set beside
+   * `tools`, less {@link claudeWithheldTools}. Plan holds exactly `tools`.
+   */
+  readonly fullToolSet: boolean;
 }
 
 export function claudeExecutionOptions(
@@ -254,7 +352,14 @@ export function claudeExecutionOptions(
 ): ClaudeExecutionOptions {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Bash exactly as a Code session at that level does.
-  const options = claudePolicyOptions(policy, autoApprove);
+  const policyOptions = claudePolicyOptions(policy, autoApprove);
+  // Only Work and Code hold Claude Code's whole built-in set. Chat withholds
+  // the filesystem and shell at every level, so it keeps the earlier list of
+  // tools Octant names one by one rather than every tool a new runtime adds.
+  const options: ClaudeExecutionOptions = {
+    ...policyOptions,
+    fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
+  };
   // A Code Plan turn may run read-only commands where its sandbox can hold the
   // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
   // the sandbox, not a person, is what keeps those commands read-only.
@@ -284,6 +389,24 @@ export function claudeNativeSetup(
 ): ProviderNativeSetup | undefined {
   if (setup === undefined) return undefined;
   return { ...setup, toolServers: false };
+}
+
+/**
+ * The built-in tools a session with the full tool set does not hold: the
+ * fixed list above, the person's own setup features they turned off, and
+ * Claude's Artifact tool unless the session offers it.
+ */
+export function claudeWithheldTools(
+  setup: ProviderNativeSetup | undefined,
+  offersArtifacts: boolean,
+): readonly string[] {
+  return [
+    ...CLAUDE_WITHHELD_TOOLS,
+    ...(setup?.subagents === true ? [] : [CLAUDE_SUBAGENT_TOOL]),
+    ...(setup?.webTools === true ? [] : [...CLAUDE_WEB_TOOLS]),
+    ...(setup?.skills === true ? [] : ["Skill"]),
+    ...(offersArtifacts ? [] : [CLAUDE_ARTIFACT_TOOL]),
+  ];
 }
 
 /** The tools a session adds for the person's own Claude setup. */
@@ -405,6 +528,34 @@ export function claudeArtifactCallRefusal(input: {
   return confined ? undefined : "Claude tool request is outside the Project.";
 }
 
+/**
+ * The path a call is confined by. A tool that names no file (a question, the
+ * checklist, or a built-in tool the gate has no rule of its own for) is judged
+ * at the Project root and asks below Full access, so a new tool is neither
+ * refused for lacking a path nor run unasked.
+ */
+function claudeConfinedTarget(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  projectRoot: string,
+): unknown {
+  if (CLAUDE_SHELL_TOOLS.has(toolName)) return input.cwd ?? projectRoot;
+  if (toolName === "Glob" || toolName === "Grep") return input.path ?? projectRoot;
+  if (toolName === "NotebookEdit") return input.notebook_path;
+  // A Projects upload sends the local file it names to claude.ai, so it is
+  // held to the Project's folders as an Artifact publish is; a call that
+  // uploads nothing is judged at the Project root.
+  if (toolName === CLAUDE_PROJECTS_TOOL) return input.local_path ?? projectRoot;
+  if (
+    CLAUDE_READ_TOOLS.has(toolName) ||
+    CLAUDE_EDIT_TOOLS.has(toolName) ||
+    toolName === CLAUDE_ARTIFACT_TOOL
+  ) {
+    return input.file_path;
+  }
+  return projectRoot;
+}
+
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
 function isPlanShellCommand(
   policy: ProviderExecutionPolicy,
@@ -424,6 +575,7 @@ function claudePolicyOptions(
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         tools: [...CLAUDE_TOOLS],
+        fullToolSet: true,
       };
     case "auto-accept-edits":
     case "approval-gated":
@@ -437,12 +589,19 @@ function claudePolicyOptions(
         permissionMode: autoApprove === true ? "auto" : "default",
         allowDangerouslySkipPermissions: false,
         tools: [...CLAUDE_TOOLS],
+        fullToolSet: true,
       };
     case "plan":
       return {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false,
-        tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL],
+        tools: [
+          ...CLAUDE_PLAN_TOOLS,
+          CLAUDE_CHECKLIST_TOOL,
+          CLAUDE_PLAN_EXIT_TOOL,
+          ...CLAUDE_TASK_TOOLS,
+        ],
+        fullToolSet: false,
       };
   }
 }
@@ -485,12 +644,18 @@ export function claudeSandboxSettings(
   };
 }
 
+/** The configuration directory the runtime launched with this environment uses. */
+function claudeConfigurationDirectory(
+  environment: Readonly<Record<string, string | undefined>>,
+): string {
+  return environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
+    ? environment.CLAUDE_CONFIG_DIR
+    : join(environment.HOME ?? homedir(), ".claude");
+}
+
 /** The account's own state, which the secret guard leaves to this runtime. */
 function claudeOwnAccountPaths(environment: Readonly<Record<string, string | undefined>>) {
-  const configuration =
-    environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
-      ? environment.CLAUDE_CONFIG_DIR
-      : join(environment.HOME ?? homedir(), ".claude");
+  const configuration = claudeConfigurationDirectory(environment);
   return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
     (path): path is string => path !== undefined && isAbsolute(path),
   );
@@ -546,8 +711,12 @@ export function claudeFileToolSecretRefusal(
     }
     return undefined;
   }
-  if (!CLAUDE_READ_TOOLS.has(toolName) && !CLAUDE_EDIT_TOOLS.has(toolName)) return undefined;
-  for (const key of ["file_path", "notebook_path", "path"] as const) {
+  // Every built-in tool that names a file is checked, a tool the gate has no
+  // rule of its own for included; an MCP server's tool runs in its own
+  // process and its arguments are its own.
+  if (toolName.startsWith("mcp__")) return undefined;
+  // `local_path` is the local file Claude's Projects tool uploads.
+  for (const key of ["file_path", "notebook_path", "path", "local_path"] as const) {
     const value = input[key];
     if (typeof value !== "string") continue;
     const refusal = secretGuardRefusal(rootedClaudeFilePath(value, projectRoot), options);
@@ -731,6 +900,11 @@ export interface ClaudeDriverOptions {
    * always passes it; a standalone driver falls back to wall time.
    */
   readonly authorityNow?: () => number;
+  /**
+   * How many tool-use ids a session remembers; {@link MAX_TRACKED_TOOL_USES}
+   * unless a test needs to reach the bound with a few calls.
+   */
+  readonly maxTrackedToolUses?: number;
   readonly correlationId?: () => string;
   readonly requestId?: () => string;
   readonly taskId?: () => string;
@@ -838,9 +1012,11 @@ interface SessionState {
   readonly approvalReuse: Set<string>;
   /** What each approved publish sent, by tool use, until its result arrives. */
   readonly publishedSnapshots: Map<string, ThreadPublishedSnapshot>;
+  /** The tool uses the gate has seen, oldest first; settled ones are forgotten past a bound. */
   readonly observedToolUseIds: Set<string>;
   readonly settledToolUseIds: Set<string>;
-  readonly turnToolUseIds: Set<string>;
+  /** The task list from Claude's task tools, kept across the session's turns. */
+  readonly taskList: ClaudeTaskList;
   claudeSessionId?: string;
   context?: ClaudeEventContext;
   collector?: Fiber.RuntimeFiber<void, never>;
@@ -867,7 +1043,95 @@ interface SessionState {
   releasePromise?: Promise<void>;
   /** The compaction `compact` asked for, until the runtime reports how it ended. */
   compaction?: ClaudePendingCompaction | undefined;
+  /** The runtime's background tasks still running, by its own task id. */
+  readonly backgroundTasks: Set<string>;
+  /** Whether the person's current turn started any background task. */
+  startedBackgroundWork: boolean;
+  /** Whether this runtime reports when it goes idle (`session_state_changed`). */
+  reportsSessionState: boolean;
+  heldTurn?: ClaudeHeldTurn | undefined;
+  /** The person's turn's latest usage report as published, for a held turn to build on. */
+  turnUsage?: ClaudeUsageEvent | undefined;
 }
+
+/**
+ * A person's turn the runtime finished while background work it started
+ * still runs (maintainer decision, 2026-11-14). A background command or a
+ * `Monitor` watch wakes the model when it ends or reports, and the runtime
+ * then starts a turn by itself. A session lasts one turn, so that turn would
+ * otherwise start with nothing to journal it, after the runner had stopped the
+ * session. Instead the completion is held: the runtime's turns are folded into
+ * the person's turn, each opened by a `runtime-turn-started` event, and pass
+ * the same gate at the same level. The completion goes out once no background
+ * task runs and the runtime has gone idle; the stalled-turn limit, the
+ * person's stop, and {@link MAX_RUNTIME_TURNS} end it sooner.
+ */
+interface ClaudeHeldTurn {
+  /** The completion the runtime's last result made, without its envelope. */
+  completion: Omit<
+    Extract<ProviderRuntimeEvent, { readonly kind: "completed" }>,
+    "sequence" | "occurredAt"
+  >;
+  /**
+   * Nothing queued can wake the model: the runtime said it went idle after
+   * that result, and no background task ended since.
+   */
+  idle: boolean;
+  /** The runtime is running a turn it started itself. */
+  runtimeTurnOpen: boolean;
+  runtimeTurns: number;
+  /**
+   * What the person's turn used up to the last result, the runtime's earlier
+   * turns included. Each runtime turn counts only its own requests and cost,
+   * so its reports are added to this: a usage report covers the whole turn.
+   */
+  usageBase?: ClaudeUsageEvent | undefined;
+}
+
+type ClaudeUsageEvent = Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>;
+
+/** A runtime turn's own usage report, carried on from what the person's turn used before it. */
+function foldedUsage(base: ClaudeUsageEvent, own: ClaudeUsageEvent): ClaudeUsageEvent {
+  const sum = (first: number | undefined, second: number | undefined) =>
+    first === undefined && second === undefined ? undefined : (first ?? 0) + (second ?? 0);
+  const reasoningTokens = sum(base.reasoningTokens, own.reasoningTokens);
+  const cacheReadInputTokens = sum(base.cacheReadInputTokens, own.cacheReadInputTokens);
+  const cacheWriteInputTokens = sum(base.cacheWriteInputTokens, own.cacheWriteInputTokens);
+  const providerExecutionDurationMs = sum(
+    base.providerExecutionDurationMs,
+    own.providerExecutionDurationMs,
+  );
+  const costUsd = sum(base.costUsd, own.costUsd);
+  const {
+    reasoningTokens: _reasoning,
+    cacheReadInputTokens: _cacheRead,
+    cacheWriteInputTokens: _cacheWrite,
+    providerExecutionDurationMs: _duration,
+    costUsd: _cost,
+    ...rest
+  } = own;
+  return {
+    ...rest,
+    inputTokens: base.inputTokens + own.inputTokens,
+    outputTokens: base.outputTokens + own.outputTokens,
+    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+    ...(cacheReadInputTokens === undefined ? {} : { cacheReadInputTokens }),
+    ...(cacheWriteInputTokens === undefined ? {} : { cacheWriteInputTokens }),
+    ...(providerExecutionDurationMs === undefined ? {} : { providerExecutionDurationMs }),
+    ...(costUsd === undefined ? {} : { costUsd }),
+  };
+}
+
+/** What the runtime sends while running a turn, which opens one when a turn is held. */
+const CLAUDE_TURN_MESSAGE_KINDS: ReadonlySet<ClaudeDecodedMessage["kind"]> = new Set([
+  "assistant",
+  "stream-event",
+  "tool-results",
+  "tool-progress",
+  "tool-summary",
+  "child-assistant",
+  "result",
+]);
 
 interface ClaudePendingCompaction {
   /** The runtime marked the cut, so the session holds the summary now. */
@@ -891,6 +1155,7 @@ const CLAUDE_COMPACTION_UNCERTAIN = {
 interface ConnectionFactories {
   readonly clock: () => string;
   readonly authorityNow: () => number;
+  readonly maxTrackedToolUses: number;
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -1007,6 +1272,23 @@ function expireClaudePreToolGrants(state: SessionState, now: number): void {
     if (grant.expiresAt > now) continue;
     state.preToolRequests.delete(toolUseId);
     state.settledToolUseIds.add(toolUseId);
+  }
+}
+
+/**
+ * Forgets the oldest settled tool-use ids once the session remembers as many
+ * as it may. A settled id's decision is already made, so forgetting it gives
+ * nothing new: a repeat of it passes the whole gate again, and `canUseTool`
+ * still needs the grant `PreToolUse` records. An id still pending or holding
+ * a grant is never settled, so it is never forgotten.
+ */
+function forgetSettledToolUses(state: SessionState, limit: number): void {
+  if (state.observedToolUseIds.size < limit) return;
+  for (const toolUseId of state.observedToolUseIds) {
+    if (state.observedToolUseIds.size < limit) return;
+    if (!state.settledToolUseIds.has(toolUseId)) continue;
+    state.observedToolUseIds.delete(toolUseId);
+    state.settledToolUseIds.delete(toolUseId);
   }
 }
 
@@ -1503,6 +1785,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
   const factories: ConnectionFactories = {
     clock: options.clock ?? (() => new Date().toISOString()),
     authorityNow: options.authorityNow ?? Date.now,
+    maxTrackedToolUses: options.maxTrackedToolUses ?? MAX_TRACKED_TOOL_USES,
     makeCorrelation: options.correlationId ?? randomUUID,
     makeRequestId: options.requestId ?? randomUUID,
     makeTaskId: options.taskId ?? randomUUID,
@@ -1758,6 +2041,7 @@ function makeConnection(
       taskIds: new Map(),
       todoTaskIds: new Map(),
       subagentTaskIds: new Map(),
+      taskList: state.taskList,
       toolStates: new Map(),
       makeRequestId: factories.makeRequestId,
       makeTaskId: factories.makeTaskId,
@@ -1765,10 +2049,8 @@ function makeConnection(
     });
     const admitToolUse = (state: SessionState, toolUseId: string): boolean => {
       if (state.observedToolUseIds.has(toolUseId)) return true;
-      if (
-        state.observedToolUseIds.size >= MAX_TOOL_USES_PER_SESSION ||
-        state.turnToolUseIds.size >= MAX_TOOL_USES_PER_TURN
-      ) {
+      forgetSettledToolUses(state, factories.maxTrackedToolUses);
+      if (state.observedToolUseIds.size >= factories.maxTrackedToolUses) {
         terminal(state, {
           kind: "failed",
           failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
@@ -1776,7 +2058,6 @@ function makeConnection(
         return false;
       }
       state.observedToolUseIds.add(toolUseId);
-      state.turnToolUseIds.add(toolUseId);
       return true;
     };
     const closeAfterPublishedTerminal = (state: SessionState) => {
@@ -1787,6 +2068,87 @@ function makeConnection(
       state.terminalResult.resolve(undefined);
       deactivate(state);
       scheduleRelease(state);
+    };
+    /**
+     * Holds the person's turn the runtime just finished while its background
+     * work runs. The next events are numbered from the completion's own
+     * number, which never went out, and the runtime's task ids carry over so
+     * a background task's end still names the row its start opened.
+     */
+    const holdTurn = (
+      state: SessionState,
+      completed: Extract<ProviderRuntimeEvent, { readonly kind: "completed" }>,
+    ) => {
+      const previous = state.context;
+      if (previous === undefined) return;
+      const { sequence, occurredAt: _unsent, ...completion } = completed;
+      state.heldTurn = {
+        completion,
+        // A runtime that never reports its state is taken as idle after each
+        // result; only a background task's end then makes it wait again.
+        idle: !state.reportsSessionState,
+        runtimeTurnOpen: false,
+        runtimeTurns: state.heldTurn?.runtimeTurns ?? 0,
+        usageBase: state.turnUsage,
+      };
+      state.context = makeEventContext(state, previous.claudeSessionId, sequence);
+      for (const [taskId, task] of previous.taskIds) state.context.taskIds.set(taskId, task);
+      settleHeldTurn(state);
+    };
+    const releaseHeldTurn = (state: SessionState, held: ClaudeHeldTurn) => {
+      state.heldTurn = undefined;
+      state.turnUsage = undefined;
+      state.startedBackgroundWork = false;
+      const context = state.context;
+      if (context === undefined) return;
+      context.terminal = true;
+      publish({
+        ...held.completion,
+        sequence: context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
+      state.terminalResult.resolve(undefined);
+      clearAuthorityState(state);
+      state.pendingTurns = Math.max(0, state.pendingTurns - 1);
+      state.hookDeliveries.shift();
+      state.outputAccepted = false;
+    };
+    /** Sends the held completion once nothing the runtime runs can wake it again. */
+    const settleHeldTurn = (state: SessionState) => {
+      const held = state.heldTurn;
+      if (
+        held === undefined ||
+        held.runtimeTurnOpen ||
+        state.backgroundTasks.size > 0 ||
+        !held.idle
+      ) {
+        return;
+      }
+      releaseHeldTurn(state, held);
+    };
+    const openRuntimeTurn = (state: SessionState, held: ClaudeHeldTurn) => {
+      const context = state.context;
+      if (context === undefined) return;
+      // A runtime that keeps waking itself ends with the person's turn: the
+      // completion goes out, and the session, with its background work, is
+      // stopped rather than left running turns nobody reads.
+      if (held.runtimeTurns >= MAX_RUNTIME_TURNS) {
+        releaseHeldTurn(state, held);
+        closeAfterPublishedTerminal(state);
+        return;
+      }
+      held.runtimeTurns += 1;
+      held.runtimeTurnOpen = true;
+      held.idle = false;
+      publish({
+        kind: "runtime-turn-started",
+        trigger: "background-task",
+        instanceId: options.instanceId,
+        sessionId: state.sessionId,
+        correlationId: state.correlationId,
+        sequence: context.sequence++,
+        occurredAt: factories.clock() as UtcTimestamp,
+      });
     };
     const handleMessage = (state: SessionState, message: ClaudeDecodedMessage) => {
       if (state.terminal) return;
@@ -1835,14 +2197,39 @@ function makeConnection(
           };
         }
       }
+      if (message.kind === "session-state") {
+        state.reportsSessionState = true;
+        const held = state.heldTurn;
+        if (held === undefined) return;
+        if (message.state === "idle") {
+          held.idle = true;
+          settleHeldTurn(state);
+        } else if (!held.runtimeTurnOpen) {
+          openRuntimeTurn(state, held);
+        }
+        return;
+      }
+      if (state.heldTurn !== undefined && CLAUDE_TURN_MESSAGE_KINDS.has(message.kind)) {
+        if (!state.heldTurn.runtimeTurnOpen) openRuntimeTurn(state, state.heldTurn);
+        if (state.terminal) return;
+      }
       if (message.kind === "result" && state.pendingTurns === 0) {
         closeAfterPublishedTerminal(state);
         return;
       }
-      for (const mapped of mapClaudeMessage(
-        state.context,
-        withPublishedSnapshots(state, message),
-      )) {
+      if (message.kind === "task" && message.background === true && state.pendingTurns > 0) {
+        state.backgroundTasks.add(message.taskId);
+        state.startedBackgroundWork = true;
+      }
+      // A resumed session's stored task list opens its first turn.
+      const storedTaskList =
+        state.pendingTurns > 0 && state.compaction === undefined
+          ? claudeStoredTaskListEvents(state.context)
+          : [];
+      for (const mapped of [
+        ...storedTaskList,
+        ...mapClaudeMessage(state.context, withPublishedSnapshots(state, message)),
+      ]) {
         if (mapped.kind === "ignored") continue;
         if (mapped.kind === "failure") {
           terminal(state, { kind: "failed", failure: mapped.failure });
@@ -1855,8 +2242,27 @@ function makeConnection(
           });
           return;
         }
-        publish(withHookDelivery(state, mapped.event));
+        if (
+          mapped.event.kind === "completed" &&
+          state.pendingTurns > 0 &&
+          (state.heldTurn !== undefined ||
+            (state.startedBackgroundWork &&
+              (state.backgroundTasks.size > 0 || state.reportsSessionState)))
+        ) {
+          holdTurn(state, mapped.event);
+          continue;
+        }
+        let next = mapped.event;
+        if (next.kind === "usage") {
+          const base = state.heldTurn?.usageBase;
+          if (base !== undefined) next = foldedUsage(base, next);
+          state.turnUsage = next;
+        }
+        publish(withHookDelivery(state, next));
         if (isTerminalEvent(mapped.event)) {
+          state.heldTurn = undefined;
+          state.turnUsage = undefined;
+          state.startedBackgroundWork = false;
           state.terminalResult.resolve(undefined);
           clearAuthorityState(state);
           state.pendingTurns = Math.max(0, state.pendingTurns - 1);
@@ -1880,6 +2286,21 @@ function makeConnection(
           return;
         }
         state.outputAccepted = true;
+      }
+      if (
+        message.kind === "task" &&
+        (message.subtype === "task_notification" ||
+          (message.subtype === "task_updated" &&
+            (message.status === "completed" ||
+              message.status === "failed" ||
+              message.status === "killed")))
+      ) {
+        // A task that ended hands the model a notice, so the runtime starts
+        // a turn for it unless the turn running now takes it in.
+        if (state.backgroundTasks.delete(message.taskId) && state.heldTurn !== undefined) {
+          state.heldTurn.idle = false;
+        }
+        settleHeldTurn(state);
       }
       // The boundary's event is out now; a status that already said the
       // compaction succeeded was only waiting for it.
@@ -2124,6 +2545,11 @@ function makeConnection(
               tools: [...baseExecutionOptions.tools, CLAUDE_ARTIFACT_TOOL],
             }
           : baseExecutionOptions;
+        // Outside Plan the session holds Claude Code's whole built-in set
+        // less what Octant withholds, so the gate below sees every tool.
+        const withheldTools = executionOptions.fullToolSet
+          ? claudeWithheldTools(nativeSetup, offersArtifacts)
+          : undefined;
         // The switch is read again at every call: a session opened while it
         // was on keeps the tool in its list after the person turns it off.
         const artifactCallRefusal = (toolInput: Readonly<Record<string, unknown>>) =>
@@ -2373,6 +2799,7 @@ function makeConnection(
             !claudeOffersTool(
               {
                 tools: executionOptions.tools,
+                ...(withheldTools === undefined ? {} : { withheldTools }),
                 ...(nativeSetup === undefined ? {} : { nativeSetup }),
               },
               request.toolName,
@@ -2389,6 +2816,12 @@ function makeConnection(
               : undefined;
           if (requestInput === undefined) {
             return deny("Claude tool request has invalid input.");
+          }
+          // The plan already reached the thread as the reply's text from the
+          // call's transcript block. Granting the call would let Claude Code
+          // leave plan mode for one that edits, so it is always refused.
+          if (request.toolName === CLAUDE_PLAN_EXIT_TOOL) {
+            return deny(CLAUDE_PLAN_CAPTURED_MESSAGE);
           }
           // Checked here, before any posture: Full access answers "allow" in
           // this hook and Claude Code then never calls `canUseTool`.
@@ -2491,14 +2924,7 @@ function makeConnection(
           // sandbox confines it there. Requiring a cwd field denied every
           // shell call before it could be asked about (observed 2026-09-06:
           // "git status" refused four times, then the turn failed).
-          const candidate =
-            request.toolName === "AskUserQuestion" || CLAUDE_SESSION_TOOLS.has(request.toolName)
-              ? projectRoot
-              : request.toolName === "Bash"
-                ? (requestInput?.cwd ?? projectRoot)
-                : request.toolName === "Glob" || request.toolName === "Grep"
-                  ? (requestInput?.path ?? projectRoot)
-                  : requestInput?.file_path;
+          const candidate = claudeConfinedTarget(request.toolName, requestInput, projectRoot);
           if (typeof candidate !== "string") {
             return deny("Claude tool request has no authoritative confined path.");
           }
@@ -2538,6 +2964,21 @@ function makeConnection(
         // The runtime initializes with the first turn, so a new session's id
         // is assigned here and the initialized message is later held to it.
         const assignedSessionId = resumeSessionId === undefined ? randomUUID() : undefined;
+        // The task tools keep their list outside the session's transcript, so
+        // a resumed session's panel starts from the list Claude stored.
+        const taskList = new ClaudeTaskList();
+        const storedTaskList = await readClaudeStoredTaskList(
+          claudeConfigurationDirectory(environment.environment),
+          resumeSessionId ?? assignedSessionId ?? "",
+        );
+        throwIfSetupCancelled(signal);
+        if (storedTaskList.status === "read") {
+          taskList.seed(storedTaskList.tasks);
+        } else {
+          console.warn(
+            `[provider] Claude's stored task list was refused: ${storedTaskList.reason}`,
+          );
+        }
         const query = await runSetupEffect(
           options.sdk
             .openQuery({
@@ -2554,6 +2995,7 @@ function makeConnection(
                 servers,
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
+              ...(keepsOwnMemory ? { ownMemory: true as const } : {}),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
@@ -2566,6 +3008,7 @@ function makeConnection(
               // the account's configuration directory.
               ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
+              ...(withheldTools === undefined ? {} : { withheldTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
@@ -2611,7 +3054,7 @@ function makeConnection(
           publishedSnapshots: new Map(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
-          turnToolUseIds: new Set(),
+          taskList,
           outputAccepted: false,
           pendingTurns: 0,
           promptHookRuns: claudePromptHookRuns(nativeSetup, runtimeVersion),
@@ -2621,6 +3064,9 @@ function makeConnection(
           active: true,
           releasing: false,
           released: false,
+          backgroundTasks: new Set(),
+          startedBackgroundWork: false,
+          reportsSessionState: false,
         };
         callbackState = state;
         sessions.set(input.sessionId, state);
@@ -2848,6 +3294,12 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
+        // The runtime may still start turns of its own inside the held one.
+        if (state.heldTurn !== undefined) {
+          return Effect.fail(
+            failure("unavailable", "Claude is still finishing background work from the last turn."),
+          );
+        }
         if ((input.tools.length > 0 || state.appToolsEnabled) && state.pendingTurns > 0) {
           return Effect.fail(
             failure("unavailable", "The previous tool-enabled turn is still active."),
@@ -2866,7 +3318,6 @@ function makeConnection(
           if (state.pendingTurns === 0) {
             state.terminalResult = deferred<void>();
             state.outputAccepted = false;
-            state.turnToolUseIds.clear();
           }
           state.appToolsEnabled = input.tools.length > 0;
           state.pendingTurns += 1;
@@ -3038,6 +3489,20 @@ function makeConnection(
         const state = sessions.get(sessionId);
         if (state === undefined || state.terminal || state.released || state.pendingTurns === 0) {
           return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        // An idle runtime has no turn to abort. Stopping the held turn ends
+        // the session, and with it every background task it still runs.
+        if (state.heldTurn !== undefined && !state.heldTurn.runtimeTurnOpen) {
+          return Effect.tryPromise({
+            try: async () => {
+              terminal(state, {
+                kind: "interrupted",
+                message: "Claude's background work was stopped.",
+              });
+              await release(state);
+            },
+            catch: () => failure("interrupted", "Claude interruption cleanup did not complete."),
+          });
         }
         return state.query.interrupt().pipe(
           Effect.flatMap(() =>

@@ -7,10 +7,20 @@ import {
   decodeSetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
-import { decideHostMemoryLimits, type PrincipalKind } from "@octant/domain";
+import {
+  decodeSetWebSearchSettingsOutcome,
+  decodeWebSearchSettingsView,
+  type SetWebSearchSettingsRequest,
+} from "@octant/contracts/web-search";
+import {
+  decideHostMemoryLimits,
+  decideWebSearchSettings,
+  type PrincipalKind,
+} from "@octant/domain";
 import { decodeHostDataMap } from "@octant/contracts/host-data-map";
 import { desktopCredentialStore } from "./hostDataMap";
-import type { HostRuntimeDiagnostics } from "@octant/host-runtime";
+import { createWindowsLogonEntryPolicy, type HostRuntimeDiagnostics } from "@octant/host-runtime";
+import { createWindowsUserServiceManager } from "@octant/cli/service-manager";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { decodeWindowId } from "@octant/contracts";
 import {
@@ -216,6 +226,80 @@ describe("host control routes", () => {
     expect(status.policy.kind).toBe("unavailable");
     expect(status.lifecycle.enable.kind).toBe("unavailable");
     expect(status.lifecycle.disable.kind).toBe("unavailable");
+  });
+
+  it("keeps Settings and `octant server` on one Windows logon entry, and refuses a restart nothing would undo", async () => {
+    // One fake Run key serves both the host's reader and the CLI's reg.exe calls.
+    let entry = true;
+    const valueLine = `\r\n    Octant    REG_SZ    "C:\\bun.exe" "server" "start"\r\n`;
+    const cli = createWindowsUserServiceManager({
+      systemRoot: "C:\\Windows",
+      logonCommand: ["C:\\bun.exe", "C:\\octant\\bin.ts", "server", "start"],
+      host: () => ({ command: "C:\\bun.exe", args: [], env: {} }),
+      owner: { observe: async () => ({ status: "absent" }), requestStop: async () => false },
+      logs: async () => ({ entries: [], follow: false }),
+      sleep: async () => undefined,
+      runner: {
+        run: async (_command, args) => {
+          const missing = Object.assign(new Error("value not found"), { code: 1 });
+          if (args[0] === "add") entry = true;
+          if (args[0] === "delete") {
+            const existed = entry;
+            entry = false;
+            if (!existed) throw missing;
+          }
+          if (args[0] === "query" && !entry) throw missing;
+          return { stdout: args[0] === "query" ? valueLine : "", stderr: "" };
+        },
+      },
+    });
+    const { handler, requestOwnerStop } = setup({
+      diagnostics: () => makeDiagnostics("service"),
+      servicePolicy: createWindowsLogonEntryPolicy({
+        systemRoot: "C:\\Windows",
+        query: async () => ({ status: entry ? "present" : "absent" }),
+      }),
+    });
+    const settings = async () =>
+      decodeHostControlStatus(
+        await (await handler(
+          makeRequest("/api/host-control/status", { method: "GET", capability }),
+        ))!.json(),
+      );
+    const toggle = async (action: "enable" | "disable" | "restart") =>
+      decodeHostLifecycleOutcome(
+        await (await handler(
+          makeRequest("/api/host-control/lifecycle", { capability, body: { action } }),
+        ))!.json(),
+      );
+    const agree = async () => {
+      const policy = (await settings()).policy;
+      const installed = (await cli.status()).installed;
+      expect(policy).toMatchObject({ kind: "known", enabled: installed });
+      return installed;
+    };
+
+    expect(await agree()).toBe(true);
+    // A Settings toggle changes nothing, so the two can never drift apart.
+    await expect(toggle("disable")).resolves.toMatchObject({
+      kind: "refused",
+      code: "policy-unavailable",
+      guidance: expect.stringContaining("octant server disable"),
+    });
+    expect(await agree()).toBe(true);
+    await cli.disable();
+    expect(await agree()).toBe(false);
+    await expect(toggle("enable")).resolves.toMatchObject({ kind: "refused" });
+    expect(await agree()).toBe(false);
+    await cli.enable();
+    expect(await agree()).toBe(true);
+
+    await expect(toggle("restart")).resolves.toMatchObject({
+      kind: "refused",
+      code: "restart-unavailable",
+      guidance: expect.stringContaining("octant server restart"),
+    });
+    expect(requestOwnerStop).not.toHaveBeenCalled();
   });
 
   it("fails closed without a window capability, off loopback, or with a query string", async () => {
@@ -771,5 +855,197 @@ describe("host control from a paired device", () => {
     );
     expect(purge).toHaveBeenCalledWith(expect.anything(), "remote-device", actor);
     expect(setWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("web search settings route", () => {
+  const path = "/api/host-control/web-search";
+  const settings = {
+    policy: "zdr-only",
+    backends: [
+      {
+        id: "00000000-0000-4000-8000-0000000000b1",
+        kind: "searxng",
+        address: "https://search.example/",
+        enabled: true,
+        statesZdr: true,
+        statesEuProcessing: false,
+      },
+    ],
+  } as const;
+
+  function webSearchSetup() {
+    const view = vi.fn(() => ({
+      settings,
+      source: "saved" as const,
+      states: [{ id: settings.backends[0].id, state: { kind: "ready" as const } }],
+    }));
+    const set = vi.fn((request: SetWebSearchSettingsRequest, principalKind: PrincipalKind) => {
+      const decision = decideWebSearchSettings({ principalKind, settings: request.settings });
+      return decision.kind === "allow"
+        ? ({ kind: "saved", view: view() } as const)
+        : ({ kind: "refused", code: decision.code, message: decision.message } as const);
+    });
+    const setKey = vi.fn(async () => ({ kind: "saved" as const, view: view() }));
+    return { view, set, setKey, ...setup({ webSearch: { view, set, setKey } as never }) };
+  }
+
+  async function asDevice(request: Request, admittedBy: "host-person" | "hub-roster") {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { createRemoteDevicePrincipal } = await import("./clientPrincipal");
+    const deviceId = "00000000-0000-4000-8000-00000000c201";
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "00000000-0000-4000-8000-00000000c202" as never,
+        deviceId: deviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-00000000c203" as never,
+        admittedBy,
+      }),
+      scopeId: decodeWindowId(deviceId),
+    });
+    return request;
+  }
+
+  it("reads and saves the backend list for a local window", async () => {
+    const { handler, set } = webSearchSetup();
+    const read = await handler(makeRequest(path, { method: "GET", capability }));
+    expect(read?.status).toBe(200);
+    expect(decodeWebSearchSettingsView(await read?.json()).settings).toEqual(settings);
+
+    const saved = await handler(makeRequest(path, { capability, body: { settings } }));
+    expect(saved?.status).toBe(200);
+    expect(decodeSetWebSearchSettingsOutcome(await saved?.json())).toMatchObject({
+      kind: "saved",
+    });
+    expect(set).toHaveBeenCalledWith({ settings }, "local-window");
+  });
+
+  it("refuses a missing capability and a malformed body without saving anything", async () => {
+    const { handler, set, view } = webSearchSetup();
+    expect((await handler(makeRequest(path, { method: "GET" })))?.status).toBe(401);
+    expect((await handler(makeRequest(path, { body: { settings } })))?.status).toBe(401);
+    const malformed = await handler(
+      makeRequest(path, { capability, body: { settings: { ...settings, policy: "anything" } } }),
+    );
+    expect(malformed?.status).toBe(400);
+    const keyInSettings = await handler(
+      makeRequest(path, {
+        capability,
+        body: { settings: { ...settings, backends: [{ ...settings.backends[0], key: "k" }] } },
+      }),
+    );
+    expect(keyInSettings?.status).toBe(400);
+    expect(set).not.toHaveBeenCalled();
+    expect(view).not.toHaveBeenCalled();
+  });
+
+  it("lets a device the host's own person paired read and change where queries go", async () => {
+    const { handler, set } = webSearchSetup();
+    const read = await handler(
+      await asDevice(
+        makeRequest(path, { method: "GET", origin: "http://127.0.0.1" }),
+        "host-person",
+      ),
+    );
+    expect(read?.status).toBe(200);
+    const saved = await handler(
+      await asDevice(
+        makeRequest(path, { body: { settings }, origin: "http://127.0.0.1" }),
+        "host-person",
+      ),
+    );
+    expect(saved?.status).toBe(200);
+    expect(set).toHaveBeenCalledWith({ settings }, "person-paired-device", expect.anything());
+  });
+
+  it("refuses a device another person introduced both the list and any change to it", async () => {
+    const { handler, view } = webSearchSetup();
+    const read = await handler(
+      await asDevice(
+        makeRequest(path, { method: "GET", origin: "http://127.0.0.1" }),
+        "hub-roster",
+      ),
+    );
+    expect(read?.status).toBe(403);
+    expect(view).not.toHaveBeenCalled();
+    const change = await handler(
+      await asDevice(
+        makeRequest(path, { body: { settings }, origin: "http://127.0.0.1" }),
+        "hub-roster",
+      ),
+    );
+    expect(change?.status).toBe(403);
+    expect(decodeSetWebSearchSettingsOutcome(await change?.json())).toMatchObject({
+      kind: "refused",
+      code: "unauthorized",
+    });
+  });
+});
+
+describe("web search key route", () => {
+  const path = "/api/host-control/web-search/key";
+  const entryId = "00000000-0000-4000-8000-0000000000b1";
+
+  function keySetup() {
+    const view = {
+      settings: { policy: "any" as const, backends: [] },
+      source: "saved" as const,
+      states: [],
+    };
+    const setKey = vi.fn(async (_request: unknown, principalKind: PrincipalKind) =>
+      principalKind === "remote-device"
+        ? ({ kind: "refused", code: "unauthorized", message: "No." } as const)
+        : ({ kind: "saved", view } as const),
+    );
+    return {
+      setKey,
+      ...setup({ webSearch: { view: async () => view, set: vi.fn(), setKey } as never }),
+    };
+  }
+
+  it("hands a key to the store for a local window and never answers with it", async () => {
+    const { handler, setKey } = keySetup();
+    const response = await handler(
+      makeRequest(path, { capability, body: { entryId, key: "search-secret" } }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.text()).not.toContain("search-secret");
+    expect(setKey).toHaveBeenCalledWith({ entryId, key: "search-secret" }, "local-window");
+  });
+
+  it("refuses a missing capability, a malformed body, and a GET without touching the store", async () => {
+    const { handler, setKey } = keySetup();
+    expect((await handler(makeRequest(path, { body: { entryId, key: "k" } })))?.status).toBe(401);
+    expect(
+      (await handler(makeRequest(path, { capability, body: { entryId: "nope", key: "k" } })))
+        ?.status,
+    ).toBe(400);
+    expect((await handler(makeRequest(path, { method: "GET", capability })))?.status).toBe(405);
+    expect(setKey).not.toHaveBeenCalled();
+  });
+
+  it("answers a refusal for a device another person introduced with 403", async () => {
+    const { bindPrincipalRouteContext } = await import("./principalRouteContext");
+    const { createRemoteDevicePrincipal } = await import("./clientPrincipal");
+    const { handler } = keySetup();
+    const request = makeRequest(path, { body: { entryId, key: "k" }, origin: "http://127.0.0.1" });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "00000000-0000-4000-8000-00000000c302" as never,
+        deviceId: "00000000-0000-4000-8000-00000000c301" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-00000000c303" as never,
+        admittedBy: "hub-roster",
+      }),
+      scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c301"),
+    });
+    expect((await handler(request))?.status).toBe(403);
   });
 });

@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -427,6 +428,12 @@ export interface WorkTurnServiceDependencies {
    * ignored: the stop has happened and must not report as failed.
    */
   readonly onTurnCancelled?: (threadId: WorkThreadId) => void;
+  /**
+   * The thread's turn just stopped on its account's usage limit, as the
+   * provider itself reported it. Fires after the stop is journaled. A
+   * rejection is ignored: the stop has happened and stays recorded.
+   */
+  readonly onUsageLimitStop?: (threadId: WorkThreadId) => Promise<void>;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -440,6 +447,13 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: WorkThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
@@ -611,12 +625,14 @@ export class WorkTurnService {
   readonly #serverProjects: ServerWorkTurns | undefined;
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
+  readonly #octantInstructionBlocks: WorkTurnServiceDependencies["octantInstructionBlocks"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
   readonly #spendReservations = new Map<
     string,
     ReturnType<typeof decodeSpendCeilingReservationId>
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
+  readonly #onUsageLimitStop: WorkTurnServiceDependencies["onUsageLimitStop"];
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
@@ -675,8 +691,10 @@ export class WorkTurnService {
     this.#serverProjects = dependencies.serverProjects;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#personMemoryBlock = dependencies.personMemoryBlock;
+    this.#octantInstructionBlocks = dependencies.octantInstructionBlocks;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
+    this.#onUsageLimitStop = dependencies.onUsageLimitStop;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
@@ -1525,6 +1543,9 @@ export class WorkTurnService {
               posture: "required",
               block,
             }),
+          ),
+          ...octantInstructionsContributions(
+            thread === undefined ? [] : (this.#octantInstructionBlocks?.({ thread }) ?? []),
           ),
           ...personMemoryContributions(
             thread === undefined
@@ -2675,6 +2696,9 @@ export class WorkTurnService {
       }
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+      if (settled?.failure?.usageLimit !== undefined) {
+        await this.#onUsageLimitStop?.(input.command.threadId).catch(() => undefined);
+      }
     } finally {
       // Every turn that reached the provider leaves a ledger row, whatever its
       // outcome: one that reported nothing is recorded as unreported, so a
@@ -3554,6 +3578,20 @@ function projectMemoryContributions(
     category: "project-memory",
     posture: "compressible",
     block: { kind: "project-memory", text: entry.content },
+  }));
+}
+
+/** The person's instructions for Octant, placed after Octant's own and before person memory. */
+function octantInstructionsContributions(
+  blocks: ReadonlyArray<OctantInstructionsBlock>,
+): ReadonlyArray<WorkTurnContextContribution> {
+  return blocks.map((block) => ({
+    text: block.text,
+    sourceKind: "instruction",
+    referenceId: block.key,
+    category: block.kind,
+    posture: "required",
+    block,
   }));
 }
 

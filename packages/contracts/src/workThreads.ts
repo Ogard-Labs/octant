@@ -17,6 +17,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 
@@ -99,6 +100,11 @@ export const WorkThread = Schema.Struct({
    * this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * The person's opt-in to hand this thread to one named account when its
+   * account hits its usage limit; see {@link ThreadUsageLimitHandoff}.
+   */
+  usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
   /**
    * How this thread delivers documents: absent until the person chooses (it
    * delivers Canvases meanwhile). `native-artifacts` is the person's choice to
@@ -277,6 +283,31 @@ export const ChangeWorkThreadProviderCommand = Schema.Struct({
 }).annotations(strict);
 export type ChangeWorkThreadProviderCommand = typeof ChangeWorkThreadProviderCommand.Type;
 
+/**
+ * The person moves the thread to another account (provider instance) of the
+ * same provider, keeping its model. The host accepts it only from the person
+ * and only while no turn runs; the next turn starts on the new account with
+ * the disclosed conversation handoff.
+ */
+export const MoveWorkThreadAccountCommand = Schema.Struct({
+  kind: Schema.Literal("move-work-thread-account"),
+  ...WorkThreadCommandFields,
+  providerInstanceId: ProviderInstanceId,
+}).annotations(strict);
+export type MoveWorkThreadAccountCommand = typeof MoveWorkThreadAccountCommand.Type;
+
+/**
+ * The person's "when this account hits its usage limit, hand off to" choice
+ * for the thread. Absent `providerInstanceId` turns it off.
+ */
+export const SetWorkThreadUsageLimitHandoffCommand = Schema.Struct({
+  kind: Schema.Literal("set-work-thread-usage-limit-handoff"),
+  ...WorkThreadCommandFields,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+}).annotations(strict);
+export type SetWorkThreadUsageLimitHandoffCommand =
+  typeof SetWorkThreadUsageLimitHandoffCommand.Type;
+
 export const ChangeWorkThreadBrowserProfileCommand = Schema.Struct({
   kind: Schema.Literal("change-work-thread-browser-profile"),
   ...WorkThreadCommandFields,
@@ -424,6 +455,8 @@ export const WorkThreadCommand = Schema.Union(
   ChangeWorkThreadWorkingDirectoryCommand,
   MoveWorkThreadCommand,
   ChangeWorkThreadProviderCommand,
+  MoveWorkThreadAccountCommand,
+  SetWorkThreadUsageLimitHandoffCommand,
   ChangeWorkThreadDocumentDeliveryCommand,
   ChangeWorkThreadBrowserProfileCommand,
   ChangeWorkThreadAccessCommand,

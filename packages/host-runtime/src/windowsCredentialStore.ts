@@ -14,6 +14,8 @@ const NAMESPACES = [
   "desktop-provider-credential",
   "push-platform-credential",
   "ssh-key",
+  // Appended: the helper names a purpose by its index, so the order is wire.
+  "web-search-credential",
 ] as const;
 export type WindowsCredentialNamespace = (typeof NAMESPACES)[number];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

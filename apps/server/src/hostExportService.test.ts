@@ -1,5 +1,6 @@
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { decodeHostId } from "@octant/contracts/host";
+import { HOST_EXPORT_MAX_PAGE_ITEMS } from "@octant/contracts/host-export";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodePersonMemoryEntry } from "@octant/contracts/person-memory";
 import { decodeProjectId } from "@octant/contracts/projects";
@@ -135,6 +136,7 @@ function service(
     readonly observeResident?: (section: string, count: number) => void;
     readonly exportThread?: HostExportServiceOptions["threads"]["exportThread"];
     readonly listIds?: HostExportServiceOptions["threads"]["listIds"];
+    readonly projectInstructions?: HostExportServiceOptions["projectInstructions"];
   } = {},
 ) {
   const limits: number[] = [];
@@ -186,6 +188,9 @@ function service(
       }),
     },
     personMemory: { entries: () => [MEMORY_ENTRY] },
+    ...(overrides.projectInstructions === undefined
+      ? {}
+      : { projectInstructions: overrides.projectInstructions }),
     canvases: {
       list: ({ cursor, limit }) =>
         pageHostExportSlice(
@@ -281,6 +286,33 @@ describe("host export", () => {
     expect(resident.length).toBe(4);
   });
 
+  it("carries the instructions of more Projects than one page holds, in bounded pages", async () => {
+    const written = Array.from({ length: HOST_EXPORT_MAX_PAGE_ITEMS + 6 }, (_, index) => ({
+      projectId: decodeProjectId(
+        `20000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+      ),
+      instructions: `Rules for Project ${index + 1}.`,
+    }));
+    const resident: number[] = [];
+    const fixture = service({
+      projectInstructions: () => written,
+      observeResident: (section, count) => {
+        if (section === "project-instructions") resident.push(count);
+      },
+    });
+    const collected = [];
+    for await (const page of fixture.service.exportPages({ principal: "local-window", windowId })) {
+      collected.push(page);
+    }
+
+    const assembled = assembleHostExportBundle(collected);
+    expect(assembled.kind).toBe("exported");
+    if (assembled.kind !== "exported") return;
+    expect(assembled.bundle.projectInstructions).toEqual(written);
+    expect(resident.length).toBeGreaterThan(1);
+    expect(Math.max(...resident)).toBeLessThanOrEqual(HOST_EXPORT_MAX_PAGE_ITEMS);
+  });
+
   it("carries each thread's tool-call records in Export my data, as the thread export wrote them", async () => {
     const fixture = service({
       exportThread: async (_windowId, mode, threadId) => ({
@@ -324,6 +356,8 @@ describe("host export", () => {
         listProjects: () => [],
         readProjectMemory: (id) => ({ projectId: decodeProjectId(id), active: [], history: [] }),
         personMemoryEntries: () => [],
+        instructions: () => ({ yours: "" }),
+        projectInstructions: () => [],
         listCanvases: () => [],
         readSettings: () => ({ chatEnabled: true, workEnabled: true, themeMode: "dark" }),
         listProjectIds: () => [],

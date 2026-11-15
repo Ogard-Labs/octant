@@ -1,6 +1,8 @@
 import {
   decodeTodoCommand,
+  decodeTodoListHostCommand,
   decodeTodoResult,
+  type TodoListHostCommand,
   type TodoCommand,
   type TodoResult,
 } from "@octant/contracts/todos";
@@ -18,6 +20,11 @@ const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 32_768;
 export const TODOS_PATH = "/api/todos";
 export const TODO_COMMAND_PATH = "/api/todos/commands";
+/**
+ * Which host keeps the list. Served to this host's own windows: the private
+ * listener does not forward it, so a paired device cannot move the list.
+ */
+export const TODO_LIST_HOST_PATH = "/api/todos/list-host";
 
 function corsHeaders(origin: string | null): Record<string, string> {
   return {
@@ -45,7 +52,7 @@ function statusFor(result: TodoResult): number {
 }
 
 export interface TodoRouteDependencies {
-  readonly store: Pick<TodoStore, "view" | "change">;
+  readonly store: Pick<TodoStore, "view" | "change" | "listHost" | "chooseListHost">;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
 }
@@ -61,7 +68,13 @@ export function createTodoRouteHandler(dependencies: TodoRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== TODOS_PATH && url.pathname !== TODO_COMMAND_PATH) return undefined;
+    if (
+      url.pathname !== TODOS_PATH &&
+      url.pathname !== TODO_COMMAND_PATH &&
+      url.pathname !== TODO_LIST_HOST_PATH
+    ) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return json({ error: "To-do requests must use loopback." }, 400, null);
@@ -91,6 +104,36 @@ export function createTodoRouteHandler(dependencies: TodoRouteDependencies) {
         403,
         origin,
       );
+    }
+    if (url.pathname === TODO_LIST_HOST_PATH) {
+      if (request.method === "GET") return json(dependencies.store.listHost(), 200, origin);
+      if (request.method !== "POST") {
+        return json({ error: "To-do route is not found." }, 404, origin);
+      }
+      let command: TodoListHostCommand;
+      try {
+        const text = await request.text();
+        if (text.length > BODY_LIMIT) return json({ error: "Request is too large." }, 413, origin);
+        command = decodeTodoListHostCommand(JSON.parse(text) as unknown);
+      } catch {
+        return json(refusal("malformed", "That list host choice is not valid."), 400, origin);
+      }
+      try {
+        const result = dependencies.store.chooseListHost(
+          command,
+          eventActorForPrincipal(principal),
+        );
+        return json(result, result.kind === "todo-list-host" ? 200 : 409, origin);
+      } catch (error) {
+        if (error instanceof ConcurrencyConflict) {
+          return json(
+            refusal("changed-elsewhere", "The choice changed while saving. Reload and try again."),
+            409,
+            origin,
+          );
+        }
+        throw error;
+      }
     }
     if (url.pathname === TODOS_PATH && request.method === "GET") {
       return json(dependencies.store.view(), 200, origin);

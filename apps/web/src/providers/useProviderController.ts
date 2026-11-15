@@ -2204,6 +2204,13 @@ export function useProviderController(options: ProviderControllerOptions) {
                   choice,
                 })
               )?.choice ?? "inherit",
+            ...(client.threadProjectCode === undefined
+              ? {}
+              : {
+                  readProjectCode: async (threadId: string, mode: "work" | "code") =>
+                    (await client.threadProjectCode?.({ kind: "project-code", threadId, mode }))
+                      ?.projectCode ?? { status: "none" as const },
+                }),
           },
     [client],
   );

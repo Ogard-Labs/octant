@@ -5649,6 +5649,39 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("journals a turn the runtime started inside the person's turn as the runtime's", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(1382);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({ kind: "runtime-turn-started", trigger: "background-task" }),
+        ),
+      );
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(frames.map((frame) => frame.event)).toContainEqual({
+          kind: "runtime-turn-started",
+          trigger: "background-task",
+        });
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
     const fixture = runtimeFixture({ projectAccess: false });
     try {
@@ -10448,6 +10481,11 @@ function runtimeFixture(options: {
   canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   projectMemoryEntries?: Parameters<typeof createCodeOperationRuntime>[0]["projectMemoryEntries"];
+  octantInstructionBlocks?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["octantInstructionBlocks"];
+  personMemoryBlock?: Parameters<typeof createCodeOperationRuntime>[0]["personMemoryBlock"];
+  isCoordinatorThread?: Parameters<typeof createCodeOperationRuntime>[0]["isCoordinatorThread"];
   designSystemContext?: Parameters<typeof createCodeOperationRuntime>[0]["designSystemContext"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
@@ -10872,6 +10910,15 @@ function runtimeFixture(options: {
     ...(options.projectMemoryEntries === undefined
       ? {}
       : { projectMemoryEntries: options.projectMemoryEntries }),
+    ...(options.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
+    ...(options.isCoordinatorThread === undefined
+      ? {}
+      : { isCoordinatorThread: options.isCoordinatorThread }),
     ...(options.confirmAgentMessagesDelivered === undefined
       ? {}
       : { confirmAgentMessagesDelivered: options.confirmAgentMessagesDelivered }),
@@ -12583,6 +12630,117 @@ it("carries the Project's active memory in a Code turn's context, as a Chat turn
   } finally {
     await fixture.runtime.close();
     fixture.close();
+  }
+});
+
+it("gives a Code session your and its Project's instructions after Octant's own, once, and an edit once as a revision", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  let instructions = "Plan in Work before coding.";
+  const fixture = runtimeFixture({
+    provider: { ...providerDriver(connection), conversationOwnership: "provider" },
+    octantInstructionBlocks: () => [
+      { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+      { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+    ],
+    personMemoryBlock: () => "Remembered: prefers short replies.",
+    projectMemoryEntries: () => ["Releases ship from main only."],
+  });
+  const kept = providerEvent({
+    kind: "usage",
+    inputTokens: 10,
+    outputTokens: 2,
+    contextTokens: 9_000,
+    promptRetention: "kept",
+  });
+  const turn = async (operation: number, prompt: string) => {
+    const reference = storedEvidence(operation + 100, prompt);
+    fixture.evidenceValues.set(reference.contentId, prompt);
+    const sends = vi.mocked(connection.send).mock.calls.length;
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(operation),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: reference,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(sends + 1));
+    await Effect.runPromise(Queue.offer(queue, kept));
+    await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledTimes(sends + 1));
+    return vi.mocked(connection.send).mock.calls[sends]?.[0].context ?? [];
+  };
+  try {
+    const first = (await turn(140, "first")).map((block) => block.kind);
+    const own = first.lastIndexOf("instructions");
+    const yours = first.indexOf("person-instructions");
+    expect(yours).toBeGreaterThan(own);
+    expect(first.indexOf("project-instructions")).toBe(yours + 1);
+    expect(first.indexOf("person-memory")).toBe(yours + 2);
+    expect(first.indexOf("project-memory")).toBeGreaterThan(yours + 2);
+
+    const second = (await turn(141, "second")).map((block) => block.kind);
+    expect(second).not.toContain("person-instructions");
+    expect(second).not.toContain("project-instructions");
+
+    instructions = "Plan in Code instead.";
+    const edited = await turn(142, "third");
+    expect(edited.filter((block) => block.kind === "person-instructions")).toEqual([
+      { kind: "person-instructions", key: "octant-person-instructions", text: instructions },
+    ]);
+    expect(edited.map((block) => block.kind)).not.toContain("person-memory");
+    expect((await turn(143, "fourth")).map((block) => block.kind)).not.toContain(
+      "person-instructions",
+    );
+  } finally {
+    await fixture.runtime.close();
+    fixture.close();
+  }
+});
+
+it("gives a coordinator the orchestration text after your and its Project's instructions, and an ordinary thread none", async () => {
+  for (const coordinator of [true, false]) {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      isCoordinatorThread: (id) => coordinator && id === String(threadId),
+      octantInstructionBlocks: ({ orchestrates }) => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Yours." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+        ...(orchestrates
+          ? [
+              {
+                kind: "orchestration-instructions" as const,
+                key: "octant-orchestration-instructions",
+                text: "Start a worker per failing test.",
+              },
+            ]
+          : []),
+      ],
+    });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(coordinator ? 150 : 151),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      const kinds = (vi.mocked(connection.send).mock.calls[0]?.[0].context ?? []).map(
+        (block) => block.kind,
+      );
+      const yours = kinds.indexOf("person-instructions");
+      expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+      if (coordinator) expect(kinds.indexOf("orchestration-instructions")).toBe(yours + 2);
+      else expect(kinds).not.toContain("orchestration-instructions");
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
   }
 });
 

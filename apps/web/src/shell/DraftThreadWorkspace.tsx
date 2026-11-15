@@ -10,6 +10,7 @@ import {
   COORDINATOR_BOUND_FIELDS,
   COORDINATOR_WORKER_LEVELS,
 } from "../projects/coordinatorChoices";
+import { CoordinatorBoundsDialog } from "../projects/CoordinatorBoundsDialog";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -110,9 +111,7 @@ import {
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantSelectField } from "../ui/base/OctantSelect";
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -915,11 +914,21 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }}
       />
     );
+    const coordinatorSettings =
+      props.coordinator === undefined ||
+      props.coordinator.onChoicesChange === undefined ||
+      String(props.coordinator.projectId) !== String(selectedProjectId) ? undefined : (
+        <CoordinatorDraftSettings
+          choices={props.coordinator.choices ?? {}}
+          onChoicesChange={props.coordinator.onChoicesChange}
+        />
+      );
     const composer = (
       <CodeComposerAdapter
         {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
         {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
         {...(beneath === undefined ? {} : { beneath })}
+        {...(coordinatorSettings === undefined ? {} : { afterComposer: coordinatorSettings })}
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
         {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
@@ -1637,59 +1646,69 @@ function CreateFromIssueControl(props: {
  * The start screen's question for a draft opened with New coordinator. The
  * thread it starts becomes a coordinator before its first message
  * (docs/design/coordinator-threads.md), and the way back to an ordinary
- * thread stays one click away.
+ * thread stays one click away. Its settings sit under the composer
+ * ({@link CoordinatorDraftSettings}): above it, a select and three number
+ * fields came before the box the person types the work into.
  */
 function CoordinatorDraftHeading(props: { readonly coordinator: CoordinatorDraft }) {
-  const { onCancel, onChoicesChange } = props.coordinator;
-  const choices = props.coordinator.choices ?? {};
   return (
     <>
       <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
-        Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
-        <OctantButton onClick={onCancel} type="button" variant="link">
+        One thread that plans the work and hands it to worker threads.
+      </p>
+      <p className="oct-row-detail welcome__status">
+        <OctantButton onClick={props.coordinator.onCancel} type="button" variant="link">
           Start an ordinary thread instead
         </OctantButton>
       </p>
-      {onChoicesChange === undefined ? null : (
-        <div className="draft-thread__context-strip">
-          <OctantSelectField
-            aria-label="Workers start at"
-            onValueChange={(value) => {
-              const { workerLevel: _previous, ...rest } = choices;
-              const level = COORDINATOR_WORKER_LEVELS.find((entry) => entry.id === value)?.level;
-              onChoicesChange(level === undefined ? rest : { ...rest, workerLevel: level });
-            }}
-            options={COORDINATOR_WORKER_LEVELS}
-            value={choices.workerLevel ?? ""}
-          />
-          {COORDINATOR_BOUND_FIELDS.map((field) => (
-            <OctantInput
-              aria-label={field.label}
-              key={field.bound}
-              max={field.max}
-              min={1}
-              onChange={(event) => {
-                const { [field.bound]: _previous, ...rest } = choices.bounds ?? {};
-                const value = Number(event.currentTarget.value);
-                // A cleared or out-of-range field returns that bound to its default.
-                const bounds =
-                  Number.isInteger(value) && value >= 1 && value <= field.max
-                    ? { ...rest, [field.bound]: value }
-                    : rest;
-                const { bounds: _bounds, ...others } = choices;
-                onChoicesChange(Object.keys(bounds).length === 0 ? others : { ...others, bounds });
-              }}
-              placeholder={`${field.label}: ${String(field.default)}`}
-              title={field.label}
-              type="number"
-              value={choices.bounds?.[field.bound] ?? ""}
-            />
-          ))}
-        </div>
-      )}
     </>
+  );
+}
+
+/**
+ * The New coordinator draft's settings as one line under the composer, with
+ * the defaults filled in, and Change… to edit them in the same dialog a
+ * running coordinator's limits use, plus the workers' level.
+ */
+function CoordinatorDraftSettings(props: {
+  readonly choices: CoordinatorDraftChoices;
+  readonly onChoicesChange: (choices: CoordinatorDraftChoices) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { choices } = props;
+  const level =
+    COORDINATOR_WORKER_LEVELS.find((entry) => entry.level === choices.workerLevel) ??
+    COORDINATOR_WORKER_LEVELS[0];
+  const parts = [
+    ...(level === undefined ? [] : [level.summary]),
+    ...COORDINATOR_BOUND_FIELDS.map((field) =>
+      field.summary(choices.bounds?.[field.bound] ?? field.default),
+    ),
+  ];
+  return (
+    <div aria-label="Coordinator settings" className="coordinator-draft-settings" role="group">
+      <span className="oct-row-detail">{parts.join(" · ")}</span>
+      <OctantButton onClick={() => setOpen(true)} size="sm" type="button" variant="link">
+        Change…
+      </OctantButton>
+      {open ? (
+        <CoordinatorBoundsDialog
+          bounds={choices.bounds}
+          onClose={() => setOpen(false)}
+          onSave={(bounds, workerLevel) => {
+            props.onChoicesChange({
+              ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
+              ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
+            });
+            setOpen(false);
+          }}
+          title="New coordinator"
+          workerLevel={{ level: choices.workerLevel }}
+        />
+      ) : null}
+    </div>
   );
 }
 

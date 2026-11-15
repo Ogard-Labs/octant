@@ -241,6 +241,16 @@ function withProbe(
   };
 }
 
+/**
+ * A provider with no search of its own, so automatic routing takes SearXNG
+ * and the turn carries Octant's web-search tool.
+ */
+function searxngResearchProbe(): ProviderProbeResult {
+  return probeFixture({
+    capabilities: { ...probeFixture().capabilities, nativeWebResearch: "unsupported" },
+  });
+}
+
 function openFixture(options?: {
   readonly responseFragments?: ReadonlyArray<string>;
   readonly verifyModelToolsOnFirstUse?: ChatServiceOptions["verifyModelToolsOnFirstUse"];
@@ -275,6 +285,8 @@ function openFixture(options?: {
   /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
   readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
+  readonly octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
+  readonly personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
@@ -699,7 +711,7 @@ function openFixture(options?: {
     return submitCapacity(request);
   };
   const researchRouter = new ResearchRouter({
-    searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+    webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
     ...(options?.providerNativeExecute === undefined
       ? {}
       : { providerNativeExecute: options.providerNativeExecute }),
@@ -759,6 +771,12 @@ function openFixture(options?: {
       ? {}
       : { contextMaintenanceShutdownTimeoutMs: options.contextMaintenanceShutdownTimeoutMs }),
     ...(options?.hiddenThreadIds === undefined ? {} : { hiddenThreadIds: options.hiddenThreadIds }),
+    ...(options?.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options?.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
     ...(options?.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options?.resolveSideChatReturns === undefined
       ? {}
@@ -1905,6 +1923,41 @@ describe("ChatService", () => {
     ).not.toContain("Referenced thread");
   });
 
+  it("gives a Chat session your and its Project's instructions after Octant's own and before person memory", async () => {
+    const { service, fakeDriver, contextHarness } = openFixture({
+      nativeConversation: true,
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+      ],
+      personMemoryBlock: () => "Remembered: prefers tables.",
+    });
+    const planSpy = vi.spyOn(contextHarness, "planTurn");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Instructions",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Hello",
+    });
+
+    const kinds = (fakeDriver.sentTurns[0]?.context ?? []).map((block) => block.kind);
+    const yours = kinds.indexOf("person-instructions");
+    expect(kinds).toContain("instructions");
+    expect(yours).toBeGreaterThan(kinds.lastIndexOf("instructions"));
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toEqual(
+      expect.arrayContaining(["person-instructions", "project-instructions"]),
+    );
+  });
+
   it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
     const { service, fakeDriver } = openFixture({
@@ -2871,7 +2924,9 @@ describe("ChatService", () => {
   });
 
   it("creates a thread, uploads an attachment, sends a turn, and confines provider access to scratch", async () => {
-    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture();
+    const { service, fakeDriver, dataDirectory, contextHarness } = openFixture({
+      probe: searxngResearchProbe(),
+    });
     const planSpy = vi.spyOn(contextHarness, "planTurn");
     const userProjectRoot = join(dataDirectory, "user-project-root");
     mkdtempSync(userProjectRoot);
@@ -3256,7 +3311,10 @@ describe("ChatService", () => {
         execute: vi.fn(async () => ({ result: { status: "built" } })),
       },
     }));
-    const { service, fakeDriver } = openFixture({ resolveExtensionSelectionContext });
+    const { service, fakeDriver } = openFixture({
+      resolveExtensionSelectionContext,
+      probe: searxngResearchProbe(),
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -3838,6 +3896,7 @@ describe("ChatService", () => {
             })
           : undefined;
       const { service, fakeDriver } = openFixture({
+        probe: searxngResearchProbe(),
         resolveExtensionSelectionContext,
         ...(resolveAppManagedTools === undefined ? {} : { resolveAppManagedTools }),
       });
@@ -7499,7 +7558,7 @@ describe("ChatService", () => {
   });
 
   it("leaves out the summary the compacted plan priced out of the request", async () => {
-    const probe = probeFixture();
+    const probe = searxngResearchProbe();
     const sent: Array<SentTurn> = [];
     const fixture = openFixture({
       probe,
@@ -11817,6 +11876,104 @@ describe("handing a Chat conversation to a new provider session", () => {
         "Turn off the model pool",
       );
       expect(fixture.service.read(threadId).thread).toEqual(before);
+    });
+
+    const setHandoff = (
+      fixture: ReturnType<typeof openFixture>,
+      threadId: ChatThreadId,
+      providerInstanceId: string | undefined,
+    ) =>
+      fixture.service.execute(
+        {
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+        },
+        { actor: person },
+      );
+    const limitedAfterFirst = (turnIndex: number) =>
+      turnIndex === 1 ? ("limited" as const) : ("completed" as const);
+
+    it("hands off once to the named account when the account hits its usage limit, and the next turn discloses it", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+      await setHandoff(fixture, threadId, otherNative);
+
+      await sendFollowUp(fixture, threadId);
+      const limitedAttempt = lastAttempt(fixture, threadId);
+      expect(limitedAttempt?.usageLimit).toEqual({ kind: "exhausted" });
+      expect(fixture.service.read(threadId).thread).toMatchObject({
+        providerInstanceId: otherNative,
+        modelId: "model-a",
+        // The parked attempt no longer holds the thread; its limit stays in history.
+        releasedStopId: String(limitedAttempt?.id),
+        usageLimitHandoff: {
+          providerInstanceId: otherNative,
+          last: {
+            kind: "handed-off",
+            stopId: String(limitedAttempt?.id),
+            fromProviderInstanceId: native,
+            toProviderInstanceId: otherNative,
+          },
+        },
+      });
+
+      await sendFollowUp(fixture, threadId, "Carry on");
+      expect(lastAttempt(fixture, threadId)).toMatchObject({
+        providerInstanceId: otherNative,
+        handoff: { reason: "provider-switch", previousProviderInstanceId: native },
+      });
+    });
+
+    it("waits on the usage limit without moving when the person has not opted in", async () => {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: limitedAfterFirst,
+      });
+      const threadId = await answeredThread(fixture);
+
+      await sendFollowUp(fixture, threadId);
+
+      expect(lastAttempt(fixture, threadId)?.usageLimit).toEqual({ kind: "exhausted" });
+      const after = fixture.service.read(threadId).thread;
+      expect(String(after.providerInstanceId)).toBe(native);
+      expect(after.usageLimitHandoff).toBeUndefined();
+    });
+
+    it("refuses the opt-in on a pooled thread and from anyone but the person", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      await expect(
+        fixture.service.execute({
+          kind: "set-chat-thread-usage-limit-handoff",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          providerInstanceId: otherNative,
+        }),
+      ).rejects.toThrow("only when you ask for it");
+      await fixture.service.execute({
+        kind: "select-chat-multi-model-pool",
+        threadId,
+        expectedVersion: fixture.service.read(threadId).thread.version,
+        pool: {
+          candidates: [
+            { hostId: "local", providerInstanceId: native, modelId: "model-a" },
+            { hostId: "local", providerInstanceId: native, modelId: "model-b" },
+          ],
+          mixedVendorEnabled: false,
+          fallbackAllowed: false,
+          higherCostFallbackAllowed: false,
+        },
+      } as never);
+
+      await expect(setHandoff(fixture, threadId, otherNative)).rejects.toThrow(
+        "Turn off the model pool",
+      );
+      expect(fixture.service.read(threadId).thread.usageLimitHandoff).toBeUndefined();
     });
   });
 

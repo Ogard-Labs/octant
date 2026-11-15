@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import type { ProviderToolDefinition } from "@octant/contracts";
+import type { ProviderExecutionPolicy, ProviderToolDefinition } from "@octant/contracts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -355,13 +355,21 @@ describe("Pi process boundary", () => {
     );
   });
 
-  it("writes isolated configuration, links provider-owned auth, and loads only the Octant bridge", async () => {
+  it("writes isolated configuration, links provider-owned auth and the person's own Pi setup, and loads the Octant bridge", async () => {
     const f = fixture();
+    const own = join(f.base, "own-agent");
+    mkdirSync(join(own, "skills"), { recursive: true });
+    mkdirSync(join(own, "extensions", "status"), { recursive: true });
+    writeFileSync(join(own, "extensions", "guard.ts"), "export default () => {};");
+    writeFileSync(join(own, "extensions", "notes.md"), "not an extension");
+    writeFileSync(join(own, "AGENTS.md"), "Prefer small diffs.");
+    mkdirSync(join(own, "sessions"));
     const confinement = makePiConfinementLive({
       platform: "darwin",
       sandboxPath: f.sandbox,
       credentialPath: f.auth,
       modelsPath: f.models,
+      ownSetupPath: own,
       temporaryDirectory: f.base,
     });
     const launch = await Effect.runPromise(
@@ -391,9 +399,31 @@ describe("Pi process boundary", () => {
     expect(launch.args[1]).toContain("(allow process-fork)");
     expect(launch.args).toContain("--extension");
     expect(launch.args).toContain("bash,edit,write,read,grep,find,ls");
+    // Pi's own discovery stays off; the person's resources are named by path.
     expect(launch.args).toContain("--no-extensions");
     expect(launch.args).toContain("--no-skills");
-    expect(launch.args).toContain("--no-context-files");
+    expect(launch.args).not.toContain("--no-context-files");
+    const piArgs = launch.args.slice(launch.args.indexOf("--no-approve"));
+    expect(piArgs).toEqual(expect.arrayContaining(["--skill", join(own, "skills")]));
+    const extensions = piArgs.flatMap((arg, index) =>
+      piArgs[index - 1] === "--extension" ? [arg] : [],
+    );
+    expect(extensions).toEqual([
+      join(f.home, "octant-approval-bridge.ts"),
+      join(own, "extensions", "guard.ts"),
+      join(own, "extensions", "status"),
+    ]);
+    expect(piArgs).not.toContain("--prompt-template");
+    expect(lstatSync(join(f.home, "AGENTS.md")).isSymbolicLink()).toBe(true);
+    for (const path of [
+      join(own, "skills"),
+      join(own, "extensions", "guard.ts"),
+      join(own, "AGENTS.md"),
+    ]) {
+      expect(launch.args[1], path).toContain(path);
+    }
+    // The person's own sessions stay private to the wall.
+    expect(launch.args[1]).not.toContain(join(own, "sessions"));
     expect(launch.args).toContain("--session-id");
     expect(launch.args).toContain("session-1");
     expect(launch.environment.ANTHROPIC_API_KEY).toBe("provider-owned");
@@ -529,6 +559,89 @@ describe("Pi process boundary", () => {
     expect(launch.args[1]).toContain("com.apple.system.opendirectoryd.libinfo");
     expect(launch.environment.SSH_AUTH_SOCK).toBe(join(folder, "agent"));
     expect(launch.environment.PATH).toBe(`${join(folder, "bin")}:/usr/bin`);
+  });
+
+  it("loads the person's own Pi skills, templates and context in Work and Code, and their extensions only outside Plan", () => {
+    const own = {
+      skills: "/own/skills",
+      prompts: "/own/prompts",
+      extensions: ["/own/extensions/guard.ts"],
+    };
+    const launch = (mode: "chat" | "work" | "code", policy: ProviderExecutionPolicy) =>
+      piArguments("/bridge.ts", "/sessions", "s-1", mode, policy, [], undefined, own);
+    const extensionsOf = (args: ReadonlyArray<string>) =>
+      args.flatMap((arg, index) => (args[index - 1] === "--extension" ? [arg] : []));
+    // Discovery stays off everywhere, which keeps Pi's built-in extensions
+    // and a Project's own resources out.
+    for (const args of [launch("chat", "approval-gated"), launch("code", "plan")]) {
+      expect(args).toEqual(
+        expect.arrayContaining(["--no-extensions", "--no-skills", "--no-prompt-templates"]),
+      );
+    }
+    const chat = launch("chat", "approval-gated");
+    expect(chat).toEqual(expect.arrayContaining(["--no-context-files", "--no-tools"]));
+    expect(chat).not.toContain("--skill");
+    expect(extensionsOf(chat)).toEqual(["/bridge.ts"]);
+    const plan = launch("code", "plan");
+    expect(plan).toEqual(
+      expect.arrayContaining(["--skill", "/own/skills", "--prompt-template", "/own/prompts"]),
+    );
+    expect(plan).not.toContain("--no-context-files");
+    expect(extensionsOf(plan)).toEqual(["/bridge.ts"]);
+    expect(plan).toEqual(expect.arrayContaining(["--tools", "read,grep,find,ls"]));
+    for (const policy of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      const work = launch("work", policy);
+      expect(work).toEqual(expect.arrayContaining(["--skill", "/own/skills"]));
+      expect(extensionsOf(work)).toEqual(["/bridge.ts", "/own/extensions/guard.ts"]);
+      // The tool list still names only Pi's built-ins, so the bridge decides
+      // every side effect below Full access.
+      expect(work).toEqual(
+        expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls"]),
+      );
+    }
+  });
+
+  it("offers the person's extension tools on a release that takes tool additions, asking for each, and never in Plan", async () => {
+    const own = { extensions: ["/own/extensions/deploy.ts"] };
+    const launch = (policy: ProviderExecutionPolicy, version: string | undefined) =>
+      piArguments(
+        "/bridge.ts",
+        "/s",
+        "s-1",
+        "code",
+        policy,
+        ["octant_browser"],
+        undefined,
+        own,
+        version,
+      );
+    const toolsOf = (args: ReadonlyArray<string>) => args[args.indexOf("--tools") + 1];
+    // Additions to Pi's defaults leave no allowlist, so an extension's tool
+    // is registered and offered as in Pi itself.
+    expect(toolsOf(launch("approval-gated", "1.1.0"))).toBe("+grep,+find,+ls,+octant_browser");
+    expect(toolsOf(launch("full-access", "1.5.2"))).toBe("+grep,+find,+ls,+octant_browser");
+    // An older or unknown release keeps the allowlist, which leaves them out.
+    expect(toolsOf(launch("approval-gated", "1.0.3"))).toBe(
+      "bash,edit,write,read,grep,find,ls,octant_browser",
+    );
+    expect(toolsOf(launch("approval-gated", undefined))).toBe(
+      "bash,edit,write,read,grep,find,ls,octant_browser",
+    );
+    // Plan loads no extension and keeps its read-only allowlist.
+    const plan = launch("plan", "1.1.0");
+    expect(plan).not.toContain("/own/extensions/deploy.ts");
+    expect(toolsOf(plan)).toBe("read,grep,find,ls,octant_browser");
+    // The bridge asks for every tool but the known reads and Octant's own.
+    const bridge = piExtensionSource([
+      { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
+    ]);
+    expect(bridge).toContain(
+      "if (knownReads.has(event.toolName) || octantTools.has(event.toolName)) return undefined;",
+    );
+    expect(bridge).toContain('const knownReads = new Set(["read","grep","find","ls"]);');
+    expect(piExtensionSource([])).toContain(
+      "if (knownReads.has(event.toolName)) return undefined;",
+    );
   });
 
   it("maps modes to the minimum Pi tools and keeps full access genuine", async () => {

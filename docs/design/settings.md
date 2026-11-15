@@ -37,15 +37,19 @@ person brings to Settings, and a group lists its pages in this order: General
 (General alone: who you are, app-wide defaults, and what Octant tells you), Look &
 feel (Appearance, Sidebar, Keybindings), AI (Providers & Models, Octant Harness,
 Voice & images, then Chat, Work and Code: which provider or model answers each
-job, and how each mode starts), Tools (Skills & Extensions, Computer use, Device
-tools, GitHub, Linear: what a running agent may reach), Safety (Permissions,
+job, and how each mode starts), Tools (Skills & Extensions, Web search, Computer use,
+Device tools, GitHub, Linear: what a running agent may reach; Web search's
+rules are in [Web search backends](web-search-backends.md#settings)), Safety (Permissions,
 Secret stores, Memory: what an agent may touch, reach and remember), and
 Data & devices (Data & storage, Sync, Remote access, Host, Usage: what this
 computer stores and the other machines it talks to). An earlier Privacy & data
 group had grown to seven pages answering three different questions, Modes stood
 apart from the models its pages choose, and Advanced held two pages. General
-opens on Your identity (the profile) and ends on Notifications (what Octant
-sends while a person is away); Permissions holds the files no agent may touch,
+opens on Your identity (the profile), followed by Your instructions (a
+multi-line field with its count, limit, a likely-secret warning, and Save,
+read-only where the window cannot change it) and Orchestration, the same field
+for coordinator threads ([Octant instructions](octant-instructions.md#settings)),
+and ends on Notifications (what Octant sends while a person is away); Permissions holds the files no agent may touch,
 then the network places and servers agents may reach (Network limits, Safe
 networks, Servers), then what a person has already allowed (remembered
 websites, remembered tool approvals, public links). Profile and Notifications
@@ -61,7 +65,7 @@ person's providers and their Defaults, then Find providers and Octant's own
 OpenCode copy, with the Provider catalog under them; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
-by model roles, helper agents, and Navigator's models; with no endpoint yet it offers three ways
+by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
 images holds speech, transcription, the image profiles, and custom image
@@ -472,3 +476,21 @@ The following canonical map applies to the Usage flow and its Settings entry:
 | Scrollbar       | Usage workspace viewport and table scroll regions                           | usageWorkspace.css and providerUsageHistory.css | One page scroller; horizontal table overflow and disclosed chart-data scrolling | Narrow viewport and keyboard QA              |
 | Toast           | Inline usage status and error regions                                       | Query and provider-limit state                  | Retained stale readings and inline recovery; no critical toast-only feedback    | Failure, refresh, and client-switch tests    |
 | CRUD            | UsageDashboard in Settings                                                  | Usage client and retention/export contracts     | Main Usage is read-only; retention and export stay in Settings                  | Existing usage action tests                  |
+
+## Web search
+
+Settings › Web search, in Tools after Skills & Extensions, follows
+[Web search backends and data policy](web-search-backends.md#settings). The
+data policy is a select of the four policies; each backend is a compact row
+whose name opens its address, the two statements (a statement the vendor's
+terms do not offer is shown disabled with the terms), where the terms were
+read from, its key field for a kind that takes one, and Move up, Move down,
+and Remove; the row's meta is its state as the host reports it (Ready, Needs
+key, Not eligible under this policy with the reason, or Not saved). The page
+keeps a draft and saves the policy and the list in one change with Save, and
+shows the host's refusal as it arrived. A key is asked for only once the list
+holding its entry is saved; it goes to the host's credential store and the
+field empties. Settings › Chat no longer shows the SearXNG address: a link to
+its old row opens this page, and a Chat save carries the stored address
+unchanged. The page says the policy covers only its backends: a provider's
+own search and a key provider's own web search and fetch are not locked by it.

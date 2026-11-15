@@ -24,7 +24,7 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { ServerProjectStore } from "../serverProjects/serverProjectStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { ShieldServerStore } from "../shield/shieldServerStore";
-import { CloudMachineService } from "./cloudMachineService";
+import { CLOUD_MACHINE_SUSPENDED_MESSAGE, CloudMachineService } from "./cloudMachineService";
 import { fakeCloudMachineTarget } from "./fakeCloudMachineTarget.test-support";
 
 const directories: string[] = [];
@@ -67,6 +67,8 @@ function host(
   });
   servers.load();
   const folderChecks: Array<string> = [];
+  // The host keys pinned for the server at the moment its folder is checked.
+  const pinsAtFolderCheck: Array<ReadonlyArray<string> | undefined> = [];
   const projects = new ServerProjectStore({
     journal,
     personActor: person,
@@ -77,6 +79,7 @@ function host(
     connection: {
       run: async (server, input) => {
         folderChecks.push(server.alias);
+        pinsAtFolderCheck.push(machines.pinnedHostKeys(server));
         return {
           status: "ran",
           exitCode: 0,
@@ -109,7 +112,7 @@ function host(
     projects,
   });
   machines.load();
-  return { machines, projects, servers, handles, folderChecks };
+  return { machines, projects, servers, handles, folderChecks, pinsAtFolderCheck };
 }
 
 const createInput = {
@@ -296,10 +299,102 @@ describe("machines in the person's cloud account", () => {
     expect(journaledEventNames(journal)).toEqual([]);
   });
 
-  it("shows a suspended machine on its server Project until the person resumes it", async () => {
+  it("pins the host key the provider reported before the folder check, and keeps it when a later answer reports another", async () => {
+    const journal = openJournal();
+    const reported = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeHostKeyReportedByTheProvider0001";
+    const fake = fakeCloudMachineTarget({
+      hostKeys: [reported],
+      hostKeysAfterCreate: [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAnotherKeyAfterCreation000000002",
+      ],
+    });
+    const { machines, pinsAtFolderCheck } = host(journal, fake.target);
+    const address = { alias: "m-1.machines.test", user: "octant" };
+
+    const created = await machines.create({ ...createInput, principal: "local-window" });
+    if (created.kind !== "changed" || created.machine === undefined)
+      throw Error("Expected fixture");
+    expect(pinsAtFolderCheck).toEqual([[reported]]);
+    expect(machines.pinnedHostKeys(address)).toEqual([reported]);
+
+    await machines.refresh({ machineId: String(created.machine.id), principal: "local-window" });
+    expect(machines.pinnedHostKeys(address)).toEqual([reported]);
+    expect(host(journal, fake.target).machines.pinnedHostKeys(address)).toEqual([reported]);
+    expect(machines.pinnedHostKeys({ alias: "m-1.machines.test", user: "root" })).toBeUndefined();
+  });
+
+  it("refuses a provider's host key that carries anything but a key, and records the creation as uncertain", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget({
+      hostKeys: ["ssh-ed25519 AAAAC3Nza\n* ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAttacker"],
+    });
+    const { machines, projects } = host(journal, fake.target);
+
+    expect(await machines.create({ ...createInput, principal: "local-window" })).toMatchObject({
+      kind: "refused",
+      reason: "provider-failed",
+    });
+    expect(machines.view().machines).toEqual([
+      expect.objectContaining({ lifecycle: "creation-uncertain" }),
+    ]);
+    expect(projects.projects()).toEqual([]);
+  });
+
+  it("pins nothing for a destroyed machine, so a reused address is not held to its key", async () => {
+    const journal = openJournal();
+    const fake = fakeCloudMachineTarget({
+      hostKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeHostKeyReportedByTheProvider0001"],
+    });
+    const { machines } = host(journal, fake.target);
+    const created = await machines.create({ ...createInput, principal: "local-window" });
+    if (created.kind !== "changed" || created.machine === undefined)
+      throw Error("Expected fixture");
+    const machineId = String(created.machine.id);
+    const confirm = machines.requestDestroy({ machineId, principal: "local-window" });
+    if (confirm.kind !== "confirm") throw Error("Expected a confirmation");
+    await machines.destroy({
+      machineId,
+      confirmation: confirm.confirmation,
+      principal: "local-window",
+    });
+
+    expect(machines.pinnedHostKeys({ alias: "m-1.machines.test", user: "octant" })).toBeUndefined();
+  });
+
+  it("keeps the provider's own hourly cost with its source and when it was read, and invents none", async () => {
+    const journal = openJournal();
+    const priced = fakeCloudMachineTarget({
+      costPerHour: { amount: "0.0179", currency: "USD", source: "Provider price list for small" },
+    });
+    const created = await host(journal, priced.target).machines.create({
+      ...createInput,
+      principal: "local-window",
+    });
+    expect(created).toMatchObject({
+      machine: {
+        costPerHour: {
+          amount: "0.0179",
+          currency: "USD",
+          source: "Provider price list for small",
+          observedAt: "2026-11-14T12:00:00.000Z",
+        },
+      },
+    });
+
+    const unpriced = await host(openJournal(), fakeCloudMachineTarget().target).machines.create({
+      ...createInput,
+      principal: "local-window",
+    });
+    if (unpriced.kind !== "changed" || unpriced.machine === undefined)
+      throw Error("Expected fixture");
+    expect(unpriced.machine.costPerHour).toBeUndefined();
+  });
+
+  it("refuses every call to a suspended machine's server by name until the person resumes it", async () => {
     const journal = openJournal();
     const fake = fakeCloudMachineTarget();
     const { machines } = host(journal, fake.target);
+    const address = { alias: "m-1.machines.test", user: "octant" };
     const created = await machines.create({ ...createInput, principal: "local-window" });
     if (created.kind !== "changed" || created.machine === undefined)
       throw Error("Expected fixture");
@@ -309,13 +404,17 @@ describe("machines in the person's cloud account", () => {
     expect(await machines.resume({ machineId, principal: "local-window" })).toMatchObject({
       reason: "machine-not-suspended",
     });
+    expect(machines.suspendedRefusal(address)).toBeUndefined();
     await machines.suspend({ machineId, principal: "local-window" });
     expect(machines.machineForProject(projectId)).toMatchObject({ state: "suspended" });
-    expect(host(journal, fake.target).machines.machineForProject(projectId)).toMatchObject({
-      state: "suspended",
-    });
+    expect(machines.suspendedRefusal(address)).toBe(CLOUD_MACHINE_SUSPENDED_MESSAGE);
+    expect(CLOUD_MACHINE_SUSPENDED_MESSAGE).toContain("This machine is suspended; resume it first");
+    const restarted = host(journal, fake.target).machines;
+    expect(restarted.machineForProject(projectId)).toMatchObject({ state: "suspended" });
+    expect(restarted.suspendedRefusal(address)).toBe(CLOUD_MACHINE_SUSPENDED_MESSAGE);
     await machines.resume({ machineId, principal: "local-window" });
     expect(machines.machineForProject(projectId)).toMatchObject({ state: "running" });
+    expect(machines.suspendedRefusal(address)).toBeUndefined();
   });
 
   it("keeps a creation whose answer never arrived on record as uncertain, binding nothing", async () => {

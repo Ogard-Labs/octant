@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import type { ProviderInstance, ProviderToolingProvider } from "@octant/contracts";
-import { effectiveClaudeAccountConfigDirectory } from "@octant/domain";
+import { accountRunsAsItself, effectiveClaudeAccountConfigDirectory } from "@octant/domain";
 import { isolatedClaudeAccountEnvironment } from "./claudeAccountIsolation";
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import { effectiveCodexAccountHome } from "./providerDriverFactory";
@@ -50,7 +50,7 @@ export function resolveProviderToolingAccount(
       shownEnvironment:
         directory === undefined ? [] : [{ name: "CLAUDE_CONFIG_DIR", value: directory }],
       directory,
-      runsAsItself: instance.nativeSetup === true,
+      runsAsItself: accountRunsAsItself(instance),
     };
   }
   if (instance.driverKind === "codex") {
@@ -65,7 +65,7 @@ export function resolveProviderToolingAccount(
       }),
       shownEnvironment: [{ name: "CODEX_HOME", value: directory }],
       directory,
-      runsAsItself: instance.nativeSetup === true,
+      runsAsItself: accountRunsAsItself(instance),
     };
   }
   return undefined;

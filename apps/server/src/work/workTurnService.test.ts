@@ -2712,6 +2712,79 @@ describe("WorkTurnService", () => {
     expect(readProjectMemory).toHaveBeenCalledWith(ids.project);
   });
 
+  it("gives a Work session your and its Project's instructions after Octant's own and before person and Project memory", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const fixture = serviceFixture({
+      nativeConversation: true,
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+      ],
+      personMemoryBlock: () => "Remembered: prefers tables.",
+      readProjectMemory: () =>
+        decodeProjectMemoryView({
+          projectId: ids.project,
+          active: [
+            {
+              id: "00000000-0000-4000-8000-000000000a03",
+              kind: "fact",
+              projectId: ids.project,
+              content: "Invoices go out on the 1st.",
+              provenance: { kind: "user-authored" },
+              author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              version: 1,
+              createdAt: "2026-07-14T10:00:00.000Z",
+              updatedAt: "2026-07-14T10:00:00.000Z",
+              status: "active",
+            },
+          ],
+          history: [],
+        }),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    await fixture.waitForIdle();
+
+    const kinds = (contexts[0] ?? []).map((block) => block.kind);
+    const yours = kinds.indexOf("person-instructions");
+    expect(yours).toBeGreaterThan(kinds.indexOf("instructions"));
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(kinds.indexOf("project-memory")).toBe(yours + 3);
+  });
+
+  it("gives a routine's Work turn your instructions though it gets no person memory", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const fixture = serviceFixture({
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+      ],
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    await fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand());
+    await fixture.waitForIdle();
+
+    expect(contexts[0]).toContainEqual({
+      kind: "person-instructions",
+      key: "octant-person-instructions",
+      text: "Use Canvas.",
+    });
+  });
+
   it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
     const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
     const disk = new Map<string, string>([
@@ -5784,6 +5857,8 @@ function serviceFixture(
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
+    readonly octantInstructionBlocks?: WorkTurnServiceDependencies["octantInstructionBlocks"];
+    readonly personMemoryBlock?: WorkTurnServiceDependencies["personMemoryBlock"];
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly designSystemFiles?: WorkTurnServiceDependencies["designSystemFiles"];
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
@@ -6006,6 +6081,12 @@ function serviceFixture(
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
+    ...(options.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.designSystemFiles === undefined
       ? {}

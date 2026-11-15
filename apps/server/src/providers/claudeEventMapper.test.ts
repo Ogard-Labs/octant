@@ -14,12 +14,19 @@ import type { ClaudeOpenQueryInput } from "./claudeAgentSdkPort";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  claudeStoredTaskListEvents,
   mapClaudeMessage,
   mapClaudeToolRequest,
   type ClaudeEventContext,
   type ClaudeMappedMessage,
 } from "./claudeEventMapper";
-import type { ClaudeDecodedMessage, ClaudeToolRequest, ClaudeUsage } from "./claudeAgentSdkPort";
+import { ClaudeTaskList } from "./claudeTaskList";
+import type {
+  ClaudeDecodedMessage,
+  ClaudeJsonValue,
+  ClaudeToolRequest,
+  ClaudeUsage,
+} from "./claudeAgentSdkPort";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000091");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000092");
@@ -56,6 +63,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     taskIds: new Map(),
     todoTaskIds: new Map(),
     subagentTaskIds: new Map(),
+    taskList: new ClaudeTaskList(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
     makeTaskId: () => `task-${++task}`,
@@ -710,6 +718,33 @@ describe("mapClaudeMessage", () => {
     expect(whole.some((next) => next.kind === "tool-start")).toBe(false);
   });
 
+  it("records only the notebook's path for a NotebookEdit, never the cell it writes", () => {
+    const ctx = context();
+    const recorded = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-notebook",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-notebook-1",
+            toolName: "NotebookEdit",
+            input: {
+              notebook_path: "/repo/analysis.ipynb",
+              cell_id: "cell-1",
+              new_source: "notebook-cell-must-not-cross",
+            },
+          },
+        ],
+        usage,
+      }),
+    ).filter((next) => next.kind === "tool-call-content");
+    expect(recorded).toMatchObject([
+      { part: "input", text: '{"notebook_path":"/repo/analysis.ipynb"}' },
+    ]);
+  });
+
   it("leaves a tool Octant runs itself to the host's own record", () => {
     const ctx = context();
     const started = eventValues(
@@ -936,6 +971,30 @@ describe("mapClaudeMessage", () => {
     ).toMatchObject([{ kind: "failure" }]);
   });
 
+  it("marks the answer of each claude.ai service tool as outside content", () => {
+    for (const [toolName, input] of [
+      ["Projects", { method: "project_read", path: "notes.md" }],
+      ["ClaudeDesign", { operation: "list", arguments: {} }],
+      ["RemoteTrigger", { action: "get", trigger_id: "trig_1" }],
+      ["PushNotification", { message: "Done", status: "proactive" }],
+    ] as const) {
+      const started = mapped(context(), {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input },
+        },
+      });
+      expect(eventValues(started)[1]).toMatchObject({
+        kind: "outside-content-read",
+        source: "hosted-tool",
+        toolName,
+      });
+    }
+  });
+
   it("treats claude.ai's answer to an artifact publish as outside content and carries the page it names", () => {
     const ctx = context();
     const started = mapped(ctx, {
@@ -1081,6 +1140,41 @@ describe("mapClaudeMessage", () => {
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
+  it("shows a plan Claude hands over in Plan as marked reply text, not as a tool row", () => {
+    const ctx = context();
+    const handedOver = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-plan",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-plan-1",
+            toolName: "ExitPlanMode",
+            input: { plan: "1. Add the route.\n2. Test it." },
+          },
+        ],
+        usage,
+      }),
+    );
+    const refused = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-plan-1", isError: true }],
+      }),
+    );
+
+    const text = handedOver.flatMap((event) => (event.kind === "text-delta" ? [event.text] : []));
+    expect(text.join("")).toBe("**Proposed plan**\n\n1. Add the route.\n2. Test it.\n");
+    expect(
+      [...handedOver, ...refused].some(
+        (event) => event.kind === "tool-start" || event.kind === "tool-failure",
+      ),
+    ).toBe(false);
+  });
+
   it("keeps the task panel in Claude's latest order when an item is renamed or inserted", () => {
     const ctx = context();
     const write = (toolUseId: string, items: ReadonlyArray<string>) =>
@@ -1161,6 +1255,265 @@ describe("mapClaudeMessage", () => {
     expect(write("sdk-todo-c", ["Test it", "Read the spec"])).toEqual(["Test it", "Read the spec"]);
     // An empty list clears the panel.
     expect(write("sdk-todo-d", [])).toEqual([]);
+  });
+
+  describe("Claude's task tools", () => {
+    const decodingInput: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "approval-gated",
+      tools: ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+      canUseTool: async () => ({ behavior: "allow" }),
+      preToolUse: async () => ({ behavior: "allow" }),
+    };
+    // One call as the runtime sends it: the tool use, then the user message
+    // that settles it with the model's text and the structured result.
+    const call = (
+      ctx: ClaudeEventContext,
+      toolUseId: string,
+      toolName: string,
+      input: { readonly [key: string]: ClaudeJsonValue },
+      toolUseResult: unknown,
+      isError = false,
+    ) => {
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: `message-${toolUseId}`,
+        content: [{ kind: "tool-use", toolUseId, toolName, input }],
+        usage,
+      });
+      const decoded = decodeMessage(
+        {
+          type: "user",
+          session_id: claudeSessionId,
+          parent_tool_use_id: null,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: toolUseId,
+                content: "Task text the model reads",
+                ...(isError ? { is_error: true } : {}),
+              },
+            ],
+          },
+          ...(toolUseResult === undefined ? {} : { tool_use_result: toolUseResult }),
+        },
+        decodingInput,
+        { kind: "active", sessionId: claudeSessionId },
+      );
+      const results = mapped(ctx, decoded);
+      expect(results.some((result) => result.kind === "failure")).toBe(false);
+      return eventValues(results);
+    };
+    const panel = (events: ReturnType<typeof eventValues>) =>
+      events.map((event) =>
+        event.kind === "task-progress"
+          ? `${event.taskId} ${event.status} ${event.summary}`
+          : event.kind === "task-list"
+            ? `list ${event.taskIds.join(",")}`
+            : event.kind,
+      );
+
+    it("restates the whole task list after each create, update, and list", () => {
+      const ctx = context();
+
+      expect(
+        panel(
+          call(
+            ctx,
+            "create-1",
+            "TaskCreate",
+            { subject: "Read the spec", description: "d" },
+            {
+              task: { id: "1", subject: "Read the spec" },
+            },
+          ),
+        ),
+      ).toEqual(["task-1 pending Read the spec", "list task-1"]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "create-2",
+            "TaskCreate",
+            { subject: "Write the test", description: "d" },
+            {
+              task: { id: "2", subject: "Write the test" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 pending Read the spec",
+        "task-2 pending Write the test",
+        "list task-1,task-2",
+      ]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-1",
+            "TaskUpdate",
+            { taskId: "1", status: "in_progress", subject: "Read it" },
+            {
+              success: true,
+              taskId: "1",
+              updatedFields: ["subject", "status"],
+              statusChange: { from: "pending", to: "in_progress" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 in-progress Read it",
+        "task-2 pending Write the test",
+        "list task-1,task-2",
+      ]);
+      // The runtime's own list is the whole truth: a task it no longer holds
+      // leaves the panel and one Octant never saw joins it.
+      expect(
+        panel(
+          call(
+            ctx,
+            "list-1",
+            "TaskList",
+            {},
+            {
+              tasks: [
+                { id: "1", subject: "Read it", status: "completed", blockedBy: [] },
+                { id: "3", subject: "Ship it", status: "pending", blockedBy: ["1"] },
+              ],
+            },
+          ),
+        ),
+      ).toEqual(["task-1 completed Read it", "task-3 pending Ship it", "list task-1,task-3"]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-3",
+            "TaskUpdate",
+            { taskId: "3", status: "deleted" },
+            {
+              success: true,
+              taskId: "3",
+              updatedFields: ["deleted"],
+              statusChange: { from: "pending", to: "deleted" },
+            },
+          ),
+        ),
+      ).toEqual(["task-1 completed Read it", "list task-1"]);
+    });
+
+    it("never adds a task whose id did not come back in the call's result", () => {
+      const ctx = context();
+
+      // A refused create, and one whose structured result is missing, name no id.
+      expect(
+        call(
+          ctx,
+          "create-refused",
+          "TaskCreate",
+          { subject: "Read", description: "d" },
+          undefined,
+          true,
+        ),
+      ).toEqual([]);
+      expect(
+        call(ctx, "create-bare", "TaskCreate", { subject: "Read", description: "d" }, undefined),
+      ).toEqual([]);
+      // An update Claude refused, or to a task this session never saw, changes nothing.
+      expect(
+        call(
+          ctx,
+          "update-missing",
+          "TaskUpdate",
+          { taskId: "9", status: "completed" },
+          {
+            success: false,
+            taskId: "9",
+            updatedFields: [],
+            error: "Task not found",
+          },
+        ),
+      ).toEqual([]);
+      expect(
+        call(
+          ctx,
+          "update-unseen",
+          "TaskUpdate",
+          { taskId: "9", status: "completed" },
+          {
+            success: true,
+            taskId: "9",
+            updatedFields: ["status"],
+            statusChange: { from: "pending", to: "completed" },
+          },
+        ),
+      ).toEqual([]);
+    });
+
+    it("opens a resumed session's first turn with the whole stored list, once", () => {
+      const ctx = context();
+      ctx.taskList.seed([
+        { id: "1", subject: "Read the spec", status: "completed" },
+        { id: "2", subject: "Write the test", status: "in_progress" },
+      ]);
+
+      expect(panel(eventValues(claudeStoredTaskListEvents(ctx)))).toEqual([
+        "task-1 completed Read the spec",
+        "task-2 in-progress Write the test",
+        "list task-1,task-2",
+      ]);
+      expect(claudeStoredTaskListEvents(ctx)).toEqual([]);
+      // The next call builds on the stored list rather than starting over.
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-2",
+            "TaskUpdate",
+            { taskId: "2", status: "completed" },
+            {
+              success: true,
+              taskId: "2",
+              updatedFields: ["status"],
+              statusChange: { from: "in_progress", to: "completed" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 completed Read the spec",
+        "task-2 completed Write the test",
+        "list task-1,task-2",
+      ]);
+    });
+
+    it("still shows a checklist Claude writes with TodoWrite in a session that holds the task tools", () => {
+      const ctx = context();
+      ctx.taskList.seed([{ id: "1", subject: "Stored task", status: "pending" }]);
+      const events = eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: "message-todo",
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId: "todo-1",
+              toolName: "TodoWrite",
+              input: { todos: [{ content: "Read", status: "pending", activeForm: "Reading" }] },
+            },
+          ],
+          usage,
+        }),
+      ).filter((event) => event.kind !== "usage");
+
+      expect(panel(events)).toEqual(["task-1 pending Read", "list task-1"]);
+    });
   });
 
   it("ignores raw provider tool summaries regardless of Unicode length", () => {

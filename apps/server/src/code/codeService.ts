@@ -7,9 +7,14 @@ import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputPolicy } from "@octant/contracts/conversation-inputs";
 import {
   decideCoordinatorRole,
+  decideProviderAccountMove,
+  decideUsageLimitHandoff,
+  decideUsageLimitHandoffSetting,
   projectExtraFolderRoots,
   readsAsCoordinator,
   unsupportedModelOptionValues,
+  withUsageLimitHandoff,
+  withUsageLimitHandoffOutcome,
 } from "@octant/domain";
 import {
   defaultFullAccessSandboxFor,
@@ -95,6 +100,7 @@ import {
   type CodeThreadActivity,
   type CodeThreadForkOrigin,
   type CodeThreadId,
+  type CoordinatorWorkerChoice,
   type CodeThreadView,
   type CodeOperationEventFrame,
   decodeCodeOperationEventFrame,
@@ -105,6 +111,7 @@ import {
   type ProjectId,
   type TerminalSessionImportRequest,
   type ProviderExecutionPolicy,
+  type ProviderInstance,
   type ProviderModelId,
   type ProviderModelOptionValues,
   type ProviderProbeResult,
@@ -207,7 +214,7 @@ import { directoryInResolvedRoot, pathInResolvedRoot } from "./codeProjectFolder
 import type { FileIdentity } from "./fileOperationPort";
 import {} from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
-import { isRoutineHostScope } from "../routineHostScope";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   INHERITED_MARK_REFUSAL,
   journalWithInheritedMark,
@@ -444,6 +451,10 @@ export interface CodePersistencePort {
   }>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
   readonly readProject?: (projectId: ProjectId) => Project | undefined;
+  /** The account a thread runs on or would move to; absent refuses every account move. */
+  readonly readProviderInstance?: (
+    instanceId: CodeThread["providerInstanceId"],
+  ) => ProviderInstance | undefined;
   readonly readAgentProfileBinding?: (
     profileId: AgentProfileId,
   ) => { readonly profile: AgentProfile; readonly scope: AgentProfileScope } | undefined;
@@ -684,6 +695,13 @@ export interface CodeServiceExecutionContext {
    * command carries it, and a created thread's own record never may.
    */
   readonly coordinatorThreadId?: CodeThreadId;
+  /**
+   * How the host chose a coordinator worker's model, set only by the host's
+   * coordinator start (on creation, and when a first request that failed
+   * before any work moves the worker to its next model) and a confirmed
+   * proposal. No wire command carries it.
+   */
+  readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /**
    * Who asked, as the route resolved it from the authenticated principal: a
    * paired device's change is journaled as that device. Absent means the
@@ -1299,6 +1317,14 @@ export class CodeService {
     };
   }
 
+  /**
+   * The threads search may look in for this window: exactly what bootstrap
+   * lists, by the same browse rule.
+   */
+  async listSearchableThreads(authenticatedWindowId: WindowId): Promise<ReadonlyArray<CodeThread>> {
+    return this.#visibleThreads(authenticatedWindowId);
+  }
+
   async #visibleThreads(authenticatedWindowId: WindowId): Promise<CodeThread[]> {
     const threads: CodeThread[] = [];
     for (const thread of this.#persistence.readCodeThreads()) {
@@ -1743,6 +1769,10 @@ export class CodeService {
               ...(executionContext?.coordinatorThreadId === undefined
                 ? {}
                 : { coordinatorThreadId: executionContext.coordinatorThreadId }),
+              ...(executionContext?.coordinatorThreadId === undefined ||
+              executionContext.coordinatorChoice === undefined
+                ? {}
+                : { coordinatorChoice: executionContext.coordinatorChoice }),
               version: 1,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -2033,6 +2063,20 @@ export class CodeService {
                 coordinatorStartingByProject:
                   command.coordinatorStartingByProject ?? current.coordinatorStartingByProject,
               }),
+          ...((command.coordinatorWorkerListing ?? current.coordinatorWorkerListing) === undefined
+            ? {}
+            : {
+                coordinatorWorkerListing:
+                  command.coordinatorWorkerListing ?? current.coordinatorWorkerListing,
+              }),
+          ...((command.coordinatorWorkerListingByProject ??
+            current.coordinatorWorkerListingByProject) === undefined
+            ? {}
+            : {
+                coordinatorWorkerListingByProject:
+                  command.coordinatorWorkerListingByProject ??
+                  current.coordinatorWorkerListingByProject,
+              }),
           ...((command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit) ===
           undefined
             ? {}
@@ -2099,6 +2143,7 @@ export class CodeService {
         if (
           command.thread.coordinator !== undefined ||
           command.thread.coordinatorThreadId !== undefined ||
+          command.thread.coordinatorChoice !== undefined ||
           command.thread.coordinatorBounds !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
@@ -2239,6 +2284,69 @@ export class CodeService {
       }
       if (command.kind === "move-code-thread") {
         return await this.#moveThread(authenticatedWindowId, current, command, actor);
+      }
+      if (command.kind === "move-code-thread-account") {
+        const decision = decideProviderAccountMove({
+          actor: this.#personActor(authenticatedWindowId, actor),
+          turnRunning: boardRuntimeActivityFromWorks(
+            this.#persistence.readCodeRuntimeWorks(current.id),
+          ).executing,
+          modelPoolOn: false,
+          from: this.#persistence.readProviderInstance?.(current.providerInstanceId),
+          to: this.#persistence.readProviderInstance?.(command.providerInstanceId),
+        });
+        if (decision.kind === "refused") {
+          throw this.#failure(
+            decision.reason === "unattended" ? "unauthorized" : "unavailable",
+            decision.message,
+          );
+        }
+        // The move is the ordinary provider change with the model kept, so
+        // the next turn carries the same disclosed handoff.
+        return await this.execute(
+          authenticatedWindowId,
+          {
+            kind: "change-code-thread-provider",
+            threadId: current.id,
+            expectedVersion: command.expectedVersion,
+            providerInstanceId: command.providerInstanceId,
+            modelId: current.modelId,
+          },
+          signal,
+          executionContext,
+        );
+      }
+      if (command.kind === "set-code-thread-usage-limit-handoff") {
+        const target = command.providerInstanceId;
+        const decision = decideUsageLimitHandoffSetting({
+          actor: this.#personActor(authenticatedWindowId, actor),
+          modelPoolOn: false,
+          from: this.#persistence.readProviderInstance?.(current.providerInstanceId),
+          to: target === undefined ? "off" : this.#persistence.readProviderInstance?.(target),
+        });
+        if (decision.kind === "refused") {
+          throw this.#failure(
+            decision.reason === "unattended" ? "unauthorized" : "unavailable",
+            decision.message,
+          );
+        }
+        const next = decodeCodeThread({
+          ...withUsageLimitHandoff(current, target),
+          version: command.expectedVersion + 1,
+          updatedAt: decodeTimestamp(this.#clock()),
+        });
+        this.#append(
+          "code-thread",
+          current.id,
+          command.expectedVersion,
+          "code.thread-updated@1",
+          { kind: "thread-updated", thread: next },
+          actor,
+        );
+        return {
+          kind: "thread-updated",
+          thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
+        };
       }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "set-code-thread-restart-continuation") {
@@ -2503,6 +2611,12 @@ export class CodeService {
           throw this.#failure("invalid", "Code working directory is unavailable.");
         }
       }
+      // A provider change while the latest provider turn is parked on its
+      // account's usage limit releases that stop; see `parkedStopReleased`.
+      const releasedStopId =
+        command.kind === "change-code-thread-provider"
+          ? this.#limitParkedStopId(current.id)
+          : undefined;
       if (command.kind === "change-code-thread-provider") {
         await this.#requireProviderModel(
           command.providerInstanceId,
@@ -2688,6 +2802,20 @@ export class CodeService {
                             providerInstanceId: command.providerInstanceId,
                             modelId: command.modelId,
                             ...nextModelOptionValues(current, command),
+                            // A worker's choice follows its model: the host's
+                            // restart on the next model records its own, and
+                            // anyone else's change reads as a person's pick.
+                            ...(current.coordinatorChoice === undefined ||
+                            (String(current.providerInstanceId) ===
+                              String(command.providerInstanceId) &&
+                              String(current.modelId) === String(command.modelId))
+                              ? {}
+                              : {
+                                  coordinatorChoice: executionContext?.coordinatorChoice ?? {
+                                    role: current.coordinatorChoice.role,
+                                    rank: "person",
+                                  },
+                                }),
                             ...(String(current.providerInstanceId) ===
                               String(command.providerInstanceId) &&
                             String(current.modelId) === String(command.modelId)
@@ -2699,6 +2827,7 @@ export class CodeService {
                                     nextProviderInstanceId: command.providerInstanceId,
                                     nextModelId: command.modelId,
                                     changedAt: updatedAt,
+                                    ...(releasedStopId === undefined ? {} : { releasedStopId }),
                                   },
                                 }),
                             version: command.expectedVersion + 1,
@@ -4264,6 +4393,105 @@ export class CodeService {
         payload,
       })),
     });
+  }
+
+  /** The thread's latest provider turn, when it is parked on a usage limit. */
+  #limitParkedStopId(threadId: CodeThreadId): string | undefined {
+    const providerTurn = this.#persistence
+      .readCodeRuntimeWorks(threadId)
+      .filter(({ work }) => work.kind === "provider-turn")
+      .at(-1);
+    if (providerTurn === undefined || providerTurn.work.state !== "waiting") return undefined;
+    const stopped = this.#latestProviderTurnState(providerTurn.work.id);
+    return stopped?.state === "waiting" && stopped.failure?.usageLimit !== undefined
+      ? String(providerTurn.work.id)
+      : undefined;
+  }
+
+  /**
+   * Who asked, when it is the person: a routine or other host scope never
+   * is, and an absent actor is the person at this host.
+   */
+  #personActor(authenticatedWindowId: WindowId, actor: EventActor | undefined) {
+    if (isRoutineHostScope(authenticatedWindowId)) return undefined;
+    return actor ?? { kind: "local-user" as const, actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) };
+  }
+
+  /**
+   * Carries out the person's "on a usage limit, hand off to" opt-in once the
+   * thread's latest provider turn has stopped. The move is the ordinary
+   * provider change, made by the host under the person's standing choice, so
+   * the next turn carries the disclosed handoff; what happened (or why
+   * nothing could) is recorded on the thread naming both accounts.
+   */
+  async handOffAfterUsageLimit(threadId: CodeThreadId): Promise<void> {
+    const current = this.#persistence.readCodeThread(threadId);
+    const handoff = current?.usageLimitHandoff;
+    if (current === undefined || handoff === undefined || current.lifecycle === "archived") return;
+    const providerTurn = this.#persistence
+      .readCodeRuntimeWorks(threadId)
+      .filter(({ work }) => work.kind === "provider-turn")
+      .at(-1);
+    const stopped =
+      providerTurn === undefined ? undefined : this.#latestProviderTurnState(providerTurn.work.id);
+    const limitStopId =
+      providerTurn !== undefined &&
+      stopped !== undefined &&
+      stopped.state !== "running" &&
+      stopped.failure?.usageLimit !== undefined
+        ? String(providerTurn.work.id)
+        : undefined;
+    const decision = decideUsageLimitHandoff({
+      targetProviderInstanceId: String(handoff.providerInstanceId),
+      lastStopId: handoff.last?.stopId,
+      limitStopId,
+      modelPoolOn: false,
+      from: this.#persistence.readProviderInstance?.(current.providerInstanceId),
+      to: this.#persistence.readProviderInstance?.(handoff.providerInstanceId),
+    });
+    if (decision.kind === "stays" || limitStopId === undefined) return;
+    let detail = decision.kind === "stopped" ? decision.message : undefined;
+    if (decision.kind === "hands-off") {
+      try {
+        await this.execute(
+          ROUTINE_HOST_SCOPE_ID,
+          {
+            kind: "change-code-thread-provider",
+            threadId: current.id,
+            expectedVersion: current.version,
+            providerInstanceId: handoff.providerInstanceId,
+            modelId: current.modelId,
+          },
+          undefined,
+          { actor: { kind: "system", actorId: decodeActorId(OCTANT_LOCAL_ACTOR_ID) } },
+        );
+      } catch (error) {
+        detail = error instanceof Error && error.message.trim() !== "" ? error.message : undefined;
+        detail ??= "The account to hand off to could not take the thread.";
+      }
+    }
+    const latest = this.#persistence.readCodeThread(threadId);
+    if (latest === undefined) return;
+    const next = decodeCodeThread({
+      ...withUsageLimitHandoffOutcome(latest, {
+        kind: detail === undefined ? "handed-off" : "stopped",
+        stopId: limitStopId,
+        fromProviderInstanceId: current.providerInstanceId,
+        toProviderInstanceId: handoff.providerInstanceId,
+        at: decodeTimestamp(this.#clock()),
+        ...(detail === undefined ? {} : { detail: detail.slice(0, 512) }),
+      }),
+      version: latest.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#append(
+      "code-thread",
+      latest.id,
+      latest.version,
+      "code.thread-updated@1",
+      { kind: "thread-updated", thread: next },
+      "system",
+    );
   }
 
   /**

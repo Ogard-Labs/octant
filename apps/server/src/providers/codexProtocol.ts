@@ -115,6 +115,12 @@ const ThreadResult = Schema.Struct({
   modelProvider: Schema.String,
   serviceTier: NullableString,
   cwd: Schema.String,
+  reasoningEffort: Schema.optional(NullableString),
+  /**
+   * The collaboration mode a resumed thread recorded; Codex keeps it for the
+   * thread's later turns. Absent from a fresh thread and an older server.
+   */
+  collaborationMode: Schema.optional(Schema.NullOr(Schema.Struct({ mode: Schema.String }))),
 });
 export type CodexThreadResult = typeof ThreadResult.Type;
 export const decodeThreadStartResult = decode(ThreadResult);
@@ -660,11 +666,39 @@ const DynamicToolCallParams = Schema.Struct({
 export type CodexDynamicToolCallParams = typeof DynamicToolCallParams.Type;
 export const decodeDynamicToolCallParams = decode(DynamicToolCallParams);
 
+/**
+ * Codex's own question form (`request_user_input`), which its Plan
+ * collaboration mode offers the model. Codex answers with
+ * `{ answers: { [questionId]: { answers: string[] } } }`; `isSecret` marks a
+ * question whose answer Codex would mask (`ToolRequestUserInputParams` in the
+ * app-server schema at `rust-v0.169.0`).
+ */
+const UserInputQuestion = Schema.Struct({
+  id: Schema.String,
+  header: Schema.String,
+  question: Schema.String,
+  isOther: Schema.optional(Schema.Boolean),
+  isSecret: Schema.optional(Schema.Boolean),
+  options: Schema.optional(
+    Schema.NullOr(
+      Schema.Array(Schema.Struct({ label: Schema.String, description: Schema.String })),
+    ),
+  ),
+});
+const UserInputRequestParams = Schema.Struct({
+  threadId: Schema.String,
+  turnId: Schema.String,
+  itemId: Schema.String,
+  questions: Schema.Array(UserInputQuestion),
+});
+export type CodexUserInputRequestParams = typeof UserInputRequestParams.Type;
+
 const stableRequestSchemas = {
   "item/commandExecution/requestApproval": CommandApprovalParams,
   "item/fileChange/requestApproval": FileChangeApprovalParams,
   "item/permissions/requestApproval": PermissionsApprovalParams,
   "item/tool/call": DynamicToolCallParams,
+  "item/tool/requestUserInput": UserInputRequestParams,
 } as const;
 
 export type CodexStableRequestMethod = keyof typeof stableRequestSchemas;
@@ -685,6 +719,7 @@ const stableRequestDecoders: Record<CodexStableRequestMethod, (value: unknown) =
   "item/fileChange/requestApproval": decode(FileChangeApprovalParams),
   "item/permissions/requestApproval": decode(PermissionsApprovalParams),
   "item/tool/call": decode(DynamicToolCallParams),
+  "item/tool/requestUserInput": decode(UserInputRequestParams),
 };
 
 export type CodexServerMessage =

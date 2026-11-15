@@ -12,7 +12,10 @@ import {
   CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
+  CoordinatorWorkerListing,
+  CoordinatorWorkerListingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerChoice,
   CoordinatorWorkerLevel,
 } from "./coordinator";
 import { AutoReviewer, ShieldModelChoice } from "./shield";
@@ -27,6 +30,7 @@ import {
   ThreadProviderHandoff,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
 import { ThreadDocumentDelivery } from "./threadToolSteps";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
@@ -329,6 +333,11 @@ export const CodeThread = Schema.Struct({
    */
   usageResume: Schema.optional(UsageResumeThreadState),
   /**
+   * The person's opt-in to hand this thread to one named account when its
+   * account hits its usage limit; see {@link ThreadUsageLimitHandoff}.
+   */
+  usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
+  /**
    * How this thread delivers documents: absent until the person chooses (it
    * delivers Canvases meanwhile). `native-artifacts` is the person's choice to
    * publish with the provider's own artifact tool instead; see
@@ -360,6 +369,12 @@ export const CodeThread = Schema.Struct({
    * creation and never changed. No wire command can set it.
    */
   coordinatorThreadId: Schema.optional(CodeThreadId),
+  /**
+   * How the host chose this worker's model from the model roles, recorded at
+   * creation (and again only when its first request failed before any work
+   * and the host started it on the next model). No wire command can set it.
+   */
+  coordinatorChoice: Schema.optional(CoordinatorWorkerChoice),
   /**
    * The person's **Wake when a message arrives** switch: an idle thread with
    * it on starts one host turn to carry an admitted agent message. Absent is
@@ -569,6 +584,13 @@ export const CodeSettings = Schema.Struct({
    * a Project not listed uses Settings.
    */
   coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+  /**
+   * Settings › Code › Coordinators › Show workers. Absent is off for both the
+   * sidebar and the board.
+   */
+  coordinatorWorkerListing: Schema.optional(CoordinatorWorkerListing),
+  /** Per-Project overrides of {@link coordinatorWorkerListing}; a Project not listed uses Settings. */
+  coordinatorWorkerListingByProject: Schema.optional(CoordinatorWorkerListingByProject),
   /** How many open workers one coordinator may have; absent is the default. */
   coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
   /**
@@ -808,6 +830,10 @@ export const CodeCommand = Schema.Union(
     coordinatorStarting: Schema.optional(CoordinatorStartingChoice),
     /** Absent keeps the stored overrides; a present map replaces them. */
     coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+    /** Absent keeps the stored choice. */
+    coordinatorWorkerListing: Schema.optional(CoordinatorWorkerListing),
+    /** Absent keeps the stored overrides; a present map replaces them. */
+    coordinatorWorkerListingByProject: Schema.optional(CoordinatorWorkerListingByProject),
     /** Absent keeps the stored limit. */
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
     /** Absent keeps the stored choice. */
@@ -938,6 +964,26 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+  }).annotations(strict),
+  /**
+   * The person moves the thread to another account (provider instance) of the
+   * same provider, keeping its model. The host accepts it only from the
+   * person and only while no turn runs; the next turn starts on the new
+   * account with the disclosed conversation handoff.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("move-code-thread-account"),
+    ...CodeThreadCommandFields,
+    providerInstanceId: ProviderInstanceId,
+  }).annotations(strict),
+  /**
+   * The person's "when this account hits its usage limit, hand off to"
+   * choice for the thread. Absent `providerInstanceId` turns it off.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("set-code-thread-usage-limit-handoff"),
+    ...CodeThreadCommandFields,
+    providerInstanceId: Schema.optional(ProviderInstanceId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-provider"),

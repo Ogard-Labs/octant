@@ -4,7 +4,7 @@ import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
 export const MOBILE_PRODUCT_NAME = "Octant";
 export const MOBILE_PRODUCT_TAGLINE = "Your computers, from your phone";
 
-export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts"] as const;
+export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts", "todos"] as const;
 export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
 
 export const MOBILE_TAB_LABELS = {
@@ -12,6 +12,7 @@ export const MOBILE_TAB_LABELS = {
   agents: "Agents",
   thread: "Thread",
   hosts: "Settings",
+  todos: "To-dos",
 } as const satisfies Record<MobileRouteId, string>;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
@@ -50,7 +51,9 @@ export const MOBILE_COPY = {
   toolStatusFailed: "Failed",
   threadViewReturn: "Conversation",
   workNoFolder: "No folder",
-  searchMessages: "Messages",
+  searchMessages: "In threads",
+  searchToolOutput: "Tool output",
+  searchCanvas: "Canvas",
   noProject: "No Project",
   threadViews: "Views",
   threadViewsAndPanes: "Views and panes",
@@ -100,6 +103,26 @@ export const MOBILE_COPY = {
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
   allAgents: "Agents",
+  todosTitle: "To-dos",
+  todosNew: "Add a to-do",
+  todosOpen: "Open",
+  todosDone: "Done",
+  todosLoading: "Reading your to-dos…",
+  todosEmpty:
+    "Nothing here yet. Add what you mean to do, and start it from a computer when you are ready.",
+  todosNoComputer: "Connect to a computer to see your to-dos.",
+  todosUnreachable:
+    "The computer that keeps your to-dos can't be reached. The list below is the last one read.",
+  todosUnsaved: "That change could not be saved. Try again when the computer is reachable.",
+  todosSignedOut: "This computer no longer accepts this phone. Pair it again in Settings.",
+  todosTooLong: "A to-do is at most 280 characters.",
+  todosActions: "To-do actions",
+  todosStart: "Start",
+  todosLink: "Link",
+  todosNotLinked: "Thread started, not linked",
+  todoSource: "From to-do",
+  todoStartProjectsUnread:
+    "This computer's Projects could not be read, so this draft is a Chat. Go back to To-dos and press Start again to try once more.",
   homeRecent: "Recent",
   statusAllShort: "All",
   homeSeeAll: "See all",
@@ -132,6 +155,8 @@ export const MOBILE_COPY = {
   attachFailed: "Could not attach that file.",
   attachLimit: (limit: number) => `A message can carry at most ${limit} attachments.`,
   attachPending: "Attached",
+  threadEarlierPage: "Showing an earlier part of this thread",
+  threadJumpToLatest: "Jump to latest",
   attachSheetTitle: "Attach",
   forkFromHere: "Fork from here",
   forking: "Forking…",
@@ -186,6 +211,7 @@ export const MOBILE_COPY = {
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
+  turnWaitingOnUsageLimit: "Waiting for the usage limit to reset",
   routineReceiptLabel: "Created automation",
   routineReceiptPaused: "created paused",
   threadRoutineLabel: "Scheduled",

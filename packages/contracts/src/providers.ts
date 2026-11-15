@@ -42,6 +42,13 @@ export const ThreadProviderHandoff = Schema.Struct({
   nextProviderInstanceId: ProviderInstanceId,
   nextModelId: ProviderModelId,
   changedAt: UtcTimestamp,
+  /**
+   * The turn this change released: the thread's latest turn had stopped on
+   * its account's usage limit, and moving off that account means the stop no
+   * longer holds the thread. The turn keeps its limit in history; the queue,
+   * the host's admission and the composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 
@@ -971,15 +978,18 @@ const ProviderInstanceFields = {
 } as const;
 
 /**
- * A key provider account the person let run as itself: its own subagents,
- * web tools, skills, and home configuration load in its threads at Guarded
- * and Reviewed, as they do at Full access. Absent is off. Only
- * `set-provider-native-setup`, sent from a window on this host, changes it; a
- * configuration change or a new account never carries it.
+ * Whether a key provider account runs as itself: its own subagents, web
+ * tools, skills, and home configuration load in its threads at every level,
+ * as they do in the provider's own app. Absent is on, the default; `false`
+ * means the person turned it off for this account. An earlier default kept it
+ * off until the person turned it on, so a record may still carry `true`,
+ * which reads as on. Only `set-provider-native-setup`, sent from a window on
+ * this host, changes it; a configuration change or a new account never
+ * carries it.
  */
 const KeyProviderInstanceFields = {
   ...ProviderInstanceFields,
-  nativeSetup: Schema.optional(Schema.Literal(true)),
+  nativeSetup: Schema.optional(Schema.Boolean),
 } as const;
 
 /**
@@ -1677,6 +1687,18 @@ export const ProviderContextBlock = Schema.Struct({
     "skill-instructions",
     "user-message",
     "assistant-message",
+    // The instructions the person wrote for Octant itself (Settings › General).
+    // Standing and keyed, so an edit reaches a session that holds the earlier
+    // copy once, as a revision. Kept apart from Octant's own instructions so a
+    // runtime with a higher-authority channel never lifts the person's text
+    // into it: the text grants nothing.
+    "person-instructions",
+    // The instructions the person wrote for one Project, after their own.
+    // Standing and keyed by the Project, like the person's own.
+    "project-instructions",
+    // The person's orchestration text, for coordinator threads and a Project's
+    // designated planner only, after the two texts above. Standing and keyed.
+    "orchestration-instructions",
     // What Octant remembers about the person from earlier threads, framed as
     // data. Standing, so a session keeps it after the first turn.
     "person-memory",
@@ -3047,6 +3069,19 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("liveness"),
+  }).annotations(strict),
+  /**
+   * The runtime started a turn by itself inside the person's turn: a
+   * background command or watch it ran in this turn finished or reported, and
+   * the runtime woke the model to act on it. The person's turn is held open
+   * while such work runs, so what follows is folded into it and passes the
+   * same gate at the same level. Its origin is the runtime, not the person;
+   * `background-task` is the only trigger a driver reports today.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("runtime-turn-started"),
+    trigger: Schema.Literal("background-task"),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

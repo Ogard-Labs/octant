@@ -22,6 +22,7 @@ import type {
   ClaudeTaskUsage,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { claudeTaskToolOutput } from "./claudeTaskList";
 
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const API_PROVIDERS = new Set([
@@ -417,11 +418,21 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   const only = results.length === 1 ? results[0] : undefined;
   const publishedPage =
     only === undefined || only.isError ? undefined : claudePublishedPage(message.tool_use_result);
+  const taskOutput =
+    only === undefined || only.isError ? undefined : claudeTaskToolOutput(message.tool_use_result);
   return {
     kind: "tool-results",
     sessionId: message.session_id,
     results:
-      only === undefined || publishedPage === undefined ? results : [{ ...only, publishedPage }],
+      only === undefined || (publishedPage === undefined && taskOutput === undefined)
+        ? results
+        : [
+            {
+              ...only,
+              ...(publishedPage === undefined ? {} : { publishedPage }),
+              ...(taskOutput === undefined ? {} : { taskOutput }),
+            },
+          ],
   };
 }
 
@@ -922,17 +933,18 @@ export function permissionMode(
 // the initialized tool set even when it was requested. A session that loads
 // a trusted Project's code also holds the tools of the MCP servers the person
 // and the Project set up, which Octant cannot name in advance; each call to
-// one still passes Octant's gate.
+// one still passes Octant's gate. A session with the full built-in set holds
+// every built-in tool but the withheld ones, also not named in advance, and
+// each call to one passes the gate too.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools">,
   toolName: string,
 ): boolean {
   if (input.tools.includes(toolName)) return true;
-  return (
-    input.nativeSetup?.projectCode === true &&
-    toolName.startsWith("mcp__") &&
-    !toolName.startsWith("mcp__octant__")
-  );
+  if (toolName.startsWith("mcp__")) {
+    return input.nativeSetup?.projectCode === true && !toolName.startsWith("mcp__octant__");
+  }
+  return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
 }
 
 /** Whether a server the session reports is one this session may hold. */
@@ -1212,6 +1224,22 @@ function decodeStatus(
   };
 }
 
+/**
+ * The runtime's own word on whether it is running a turn. It sends these only
+ * when `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS` is set; `idle` follows the
+ * last result of a run of turns, so a turn the runtime starts by itself from
+ * a queued notice comes before it.
+ */
+function decodeSessionState(message: Record<string, unknown>): ClaudeDecodedMessage {
+  if (
+    typeof message.session_id !== "string" ||
+    (message.state !== "idle" && message.state !== "running" && message.state !== "requires_action")
+  ) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return { kind: "session-state", sessionId: message.session_id, state: message.state };
+}
+
 export type ClaudeDecodePhase =
   | {
       readonly kind: "initializing";
@@ -1288,6 +1316,12 @@ export function decodeMessage(
       return decodeStatus(message, input);
     }
     if (message.type === "rate_limit_event") return decodeRateLimit(message);
+    // The session's state before it initializes says nothing about a turn,
+    // but it does say the runtime reports its state: dropped, a background
+    // task that ended before the first result could end the turn early.
+    if (message.type === "system" && message.subtype === "session_state_changed") {
+      return decodeSessionState(message);
+    }
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (
@@ -1459,6 +1493,9 @@ export function decodeMessage(
       ...(postTokens === undefined ? {} : { postTokens }),
     };
   }
+  if (message.type === "system" && message.subtype === "session_state_changed") {
+    return decodeSessionState(message);
+  }
   if (
     message.type === "system" &&
     (message.subtype === "task_started" ||
@@ -1485,16 +1522,27 @@ export function decodeMessage(
     const subagentTask = (value: Record<string, unknown>) =>
       input.nativeSetup?.subagents === true &&
       (value.subagent_type === undefined || typeof value.subagent_type === "string");
+    let background = false;
     if (message.subtype === "task_started") {
       const ownSubagent =
         subagentTask(message) &&
         (message.task_type === undefined || message.task_type === "local_agent") &&
         (message.prompt === undefined || typeof message.prompt === "string") &&
         (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      // A command Claude runs in the background, and a watch its Monitor
+      // tool keeps, are `local_bash` tasks (Claude Code 2.1.211). Each wakes
+      // the model when it finishes or reports, which the driver holds inside
+      // the turn that started it (maintainer decision, 2026-11-14).
+      background =
+        message.task_type === "local_bash" &&
+        message.subagent_type === undefined &&
+        message.prompt === undefined &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
       if (
         typeof message.description !== "string" ||
         message.workflow_name !== undefined ||
         (!ownSubagent &&
+          !background &&
           (message.subagent_type !== undefined ||
             message.task_type !== undefined ||
             message.prompt !== undefined ||
@@ -1521,9 +1569,9 @@ export function decodeMessage(
         !TASK_NOTIFICATION_STATUSES.has(message.status) ||
         typeof message.output_file !== "string" ||
         typeof message.summary !== "string" ||
-        (message.skip_transcript !== undefined &&
-          message.skip_transcript !== false &&
-          !(subagentTask(message) && typeof message.skip_transcript === "boolean"))
+        // Only a display hint; a background command's housekeeping notice
+        // carries it as a subagent's does.
+        (message.skip_transcript !== undefined && typeof message.skip_transcript !== "boolean")
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1555,6 +1603,7 @@ export function decodeMessage(
       subtype: message.subtype,
       taskId: message.task_id,
       ...(typeof message.tool_use_id === "string" ? { toolUseId: message.tool_use_id } : {}),
+      ...(background ? { background: true } : {}),
       ...(status === undefined ? {} : { status }),
       ...(description === undefined ? {} : { description }),
       ...(summary === undefined ? {} : { summary }),

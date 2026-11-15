@@ -1,8 +1,10 @@
 import type { SettingsSectionId } from "@octant/contracts";
 import {
+  Search,
   Bell,
   Blocks,
   Brain,
+  CircleCheckBig,
   ChartNoAxesColumnIncreasing,
   Code2,
   Database,
@@ -84,6 +86,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   work: { group: "AI", icon: FolderOpen },
   code: { group: "AI", icon: Code2 },
   skills: { group: "Tools", icon: Blocks },
+  "web-search": { group: "Tools", icon: Search },
   "computer-use": { group: "Tools", icon: Monitor },
   "device-tools": { group: "Tools", icon: TabletSmartphone },
   github: { group: "Tools", icon: FolderGit2 },
@@ -92,6 +95,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   access: { group: "Safety", icon: Network },
   "secret-stores": { group: "Safety", icon: KeyRound },
   memory: { group: "Safety", icon: Brain },
+  todos: { group: "Data & devices", icon: CircleCheckBig },
   data: { group: "Data & devices", icon: Database },
   sync: { group: "Data & devices", icon: FolderSync },
   "remote-access": { group: "Data & devices", icon: Radio },

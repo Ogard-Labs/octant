@@ -39,6 +39,7 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
 export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
@@ -141,12 +142,20 @@ export interface ClaudeOpenQueryInput {
   readonly persistSession?: false;
   readonly tools: readonly string[];
   /**
+   * Present: the session holds Claude Code's whole built-in tool set except
+   * these, and `tools` names the ones Octant's gate has its own rule for.
+   * Absent: the session holds exactly `tools`.
+   */
+  readonly withheldTools?: readonly string[];
+  /**
    * What this session loads of the person's own Claude setup, already held to
    * what the driver supports for the session's mode and posture. Absent opens
    * the query with no setting sources, skills, agents, plugins, or MCP
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
+  readonly ownMemory?: true;
   /**
    * The auto-compact window for this query alone, from the person's
    * compaction point; absent leaves the runtime its own.
@@ -329,6 +338,11 @@ export type ClaudeDecodedMessage =
           /** Attached by the driver from the file the person approved publishing. */
           readonly snapshot?: ThreadPublishedSnapshot;
         };
+        /**
+         * A task tool's structured result, read only from a message that
+         * settles one call. The mapper keeps it only for a task tool call.
+         */
+        readonly taskOutput?: ClaudeTaskToolOutput;
       }[];
     }
   | {
@@ -376,10 +390,18 @@ export type ClaudeDecodedMessage =
       readonly subtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
       readonly taskId: string;
       readonly toolUseId?: string;
+      /** A command or watch the runtime runs in the background (`local_bash`). */
+      readonly background?: true;
       readonly status?: string;
       readonly description?: string;
       readonly summary?: string;
       readonly usage?: ClaudeTaskUsage;
+    }
+  | {
+      /** Whether the runtime is running a turn, as it reports it. */
+      readonly kind: "session-state";
+      readonly sessionId: string;
+      readonly state: "idle" | "running" | "requires_action";
     }
   | {
       readonly kind: "rate-limit";
@@ -643,10 +665,11 @@ export interface ClaudeNativeQueryOptions {
  * starts the account's MCP servers without also reading a Project's
  * `.mcp.json` (`strictMcpConfig` governs both), so MCP servers start only
  * with the Project's code. Claude's own memory stays off by flag as well as
- * by its environment switch.
+ * by its environment switch, unless the account keeps its own memory.
  */
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
+  ownMemory = false,
 ): ClaudeNativeQueryOptions {
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
@@ -661,7 +684,9 @@ export function claudeNativeQueryOptions(
     strictMcpConfig: !setup.projectCode,
     settings: {
       ...(readsHome && !setup.hooks ? { disableAllHooks: true as const } : {}),
-      ...(readsHome ? { autoMemoryEnabled: false as const } : {}),
+      // Home settings could turn auto-memory on behind the account's switch,
+      // so they are held to it; an account that keeps its own memory is not.
+      ...(readsHome && !ownMemory ? { autoMemoryEnabled: false as const } : {}),
     },
   };
 }
@@ -683,7 +708,9 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly mcpServers: Readonly<Record<string, never>>;
   readonly strictMcpConfig: boolean;
   readonly additionalDirectories: readonly string[];
-  readonly tools: readonly string[];
+  readonly tools: readonly string[] | ClaudeToolPreset;
+  readonly disallowedTools?: readonly string[];
+  readonly allowedTools?: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
@@ -934,23 +961,70 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   }
 }
 
-function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): boolean {
+/** Claude Code's whole built-in tool set, as the SDK names it. */
+interface ClaudeToolPreset {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+}
+
+/**
+ * The tool options for a launch. With the full set the runtime gets its own
+ * preset less the withheld tools. The SDK notes that a native build may drop
+ * Grep and Glob from the preset in favour of searching through its shell
+ * unless they are listed in `allowedTools`; they are listed so a search stays
+ * a read the gate answers, not a command that asks. The `PreToolUse` hook
+ * still answers every call to them first.
+ */
+function claudeToolSetOptions(
+  input: Pick<ClaudeOpenQueryInput, "tools" | "withheldTools">,
+): Pick<ClaudeAgentSdkInvocationOptions, "tools" | "disallowedTools" | "allowedTools"> {
+  if (input.withheldTools === undefined) return { tools: [...input.tools] };
+  return {
+    tools: { type: "preset", preset: "claude_code" },
+    disallowedTools: [...input.withheldTools],
+    allowedTools: ["Grep", "Glob"],
+  };
+}
+
+/**
+ * Why a call asks for background work Octant cannot hold, or undefined. A
+ * background command (`Bash` with `run_in_background`) and a command watch
+ * (`Monitor`) run as background tasks the driver holds inside the turn that
+ * started them (maintainer decision, 2026-11-14), so neither is refused in
+ * general. Plan keeps the tool set and behaviour it had, so its read-only
+ * commands still run in the foreground. A watch that lasts the whole session
+ * would hold its turn open with nothing to end it but a stop, and a WebSocket
+ * watch is opened by the runtime process itself, outside the command sandbox
+ * and its network rules.
+ */
+function unavailableBackgroundWork(
+  toolName: unknown,
+  input: unknown,
+  executionPolicy: ClaudeOpenQueryInput["executionPolicy"],
+): string | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const fields = input as Readonly<Record<string, unknown>>;
   if (
-    toolName !== "Bash" ||
-    typeof input !== "object" ||
-    input === null ||
-    Array.isArray(input) ||
-    !Object.hasOwn(input, "run_in_background")
+    toolName === "Bash" &&
+    executionPolicy === "plan" &&
+    fields.run_in_background !== undefined &&
+    fields.run_in_background !== false
   ) {
-    return false;
+    return "Claude background commands are unavailable in Plan.";
   }
-  return (input as Readonly<Record<string, unknown>>).run_in_background !== false;
+  if (toolName !== "Monitor") return undefined;
+  if (fields.ws !== undefined) return "Claude's Monitor may watch a command, not a WebSocket.";
+  if (fields.persistent !== undefined && fields.persistent !== false) {
+    return "Claude's Monitor may not keep a watch for the whole session.";
+  }
+  return undefined;
 }
 
 function liveBridge(): ClaudeAgentSdkBridge {
   return {
     query: (invocation) => {
-      const { sandbox, settings, ...baseOptions } = invocation.options;
+      const { sandbox, settings, allowedTools, disallowedTools, ...baseOptions } =
+        invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
         ...(settings === undefined
@@ -971,7 +1045,12 @@ function liveBridge(): ClaudeAgentSdkBridge {
         skills: invocation.options.skills === "all" ? "all" : [],
         mcpServers: { ...invocation.options.mcpServers },
         additionalDirectories: [...invocation.options.additionalDirectories],
-        tools: [...invocation.options.tools],
+        tools:
+          "preset" in invocation.options.tools
+            ? { type: "preset", preset: "claude_code" }
+            : [...invocation.options.tools],
+        ...(disallowedTools === undefined ? {} : { disallowedTools: [...disallowedTools] }),
+        ...(allowedTools === undefined ? {} : { allowedTools: [...allowedTools] }),
         agents: { ...invocation.options.agents },
         plugins: [...invocation.options.plugins],
         ...(sandbox === undefined
@@ -1154,12 +1233,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               if (callback.agentID !== undefined && input.nativeSetup?.subagents !== true) {
                 return { behavior: "deny", message: "Claude subagent tool use is unavailable." };
               }
-              if (requestsUnavailableBackgroundTool(toolName, toolInput)) {
-                return {
-                  behavior: "deny",
-                  message: "Claude background tool use is unavailable.",
-                };
-              }
+              const backgroundRefusal = unavailableBackgroundWork(
+                toolName,
+                toolInput,
+                input.executionPolicy,
+              );
+              if (backgroundRefusal !== undefined)
+                return { behavior: "deny", message: backgroundRefusal };
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
@@ -1226,12 +1306,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
-                if (requestsUnavailableBackgroundTool(hookInput.tool_name, hookInput.tool_input)) {
+                const backgroundRefusal = unavailableBackgroundWork(
+                  hookInput.tool_name,
+                  hookInput.tool_input,
+                  input.executionPolicy,
+                );
+                if (backgroundRefusal !== undefined) {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "deny",
-                      permissionDecisionReason: "Claude background tool use is unavailable.",
+                      permissionDecisionReason: backgroundRefusal,
                     },
                   };
                 }
@@ -1301,7 +1386,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
-            const native = claudeNativeQueryOptions(input.nativeSetup);
+            const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
@@ -1318,13 +1403,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               cwd: input.projectRoot,
               env: {
                 ...input.authEnvironment,
+                // The runtime says when it goes idle, so the driver can tell a
+                // turn it starts by itself from a queued notice from the end
+                // of the person's turn.
+                CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
                 MCP_TOOL_TIMEOUT: "660000",
-                // Claude Code 2.1.211 replaces its `TodoWrite` checklist with
-                // `TaskCreate`/`TaskUpdate` unless this is off (observed
-                // 2026-10-20 in the init tool list). The checklist keeps
-                // `TodoWrite`, which restates the whole list in every call,
-                // so the task panel never has to piece it together.
-                CLAUDE_CODE_ENABLE_TASKS: "false",
+                // `CLAUDE_CODE_ENABLE_TASKS` is left to Claude Code: its
+                // default replaces the `TodoWrite` checklist with the task
+                // tools, and Octant adds to a provider rather than taking its
+                // features away (maintainer decision, 2026-11-14). The task
+                // panel follows those tools from their results and rebuilds a
+                // resumed session's list from the one Claude stored.
               },
               model: input.model,
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
@@ -1346,7 +1435,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // The Project's extra folders, which Claude Code then counts as
               // its workspace beside `cwd`; its sandbox lists them too.
               additionalDirectories: [...(input.additionalDirectories ?? [])],
-              tools: [...input.tools],
+              ...claudeToolSetOptions(input),
               agents: {},
               plugins: [],
               includePartialMessages: true,
@@ -1416,10 +1505,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             const streamEnded = (failed: ProviderFailure) => {
               sessionAnnounced.reject(failed);
             };
-            // Status notes and rate-limit frames the runtime sends before it
-            // initializes (a resumed `/compact` does) are held and delivered
-            // right after the initialized message, so a consumer still sees
-            // the session initialize first and the notes in their own order.
+            // Status notes, rate-limit frames and session states the runtime
+            // sends before it initializes (a resumed `/compact` does) are held
+            // and delivered right after the initialized message, so a consumer
+            // still sees the session initialize first and the notes in their
+            // own order.
             const heldBeforeInitialization: ClaudeDecodedMessage[] = [];
             const decodeNext = (message: unknown): readonly ClaudeDecodedMessage[] => {
               if (phase.kind !== "initializing")
@@ -1439,6 +1529,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               const sessionId = rawSessionId(message);
               if (sessionId !== undefined) announce(sessionId);
               if (decoded.kind === "ignored") return [];
+              // Only the latest state matters, so a run of them holds one.
+              if (decoded.kind === "session-state") {
+                const earlier = heldBeforeInitialization.findIndex(
+                  (held) => held.kind === "session-state",
+                );
+                if (earlier !== -1) heldBeforeInitialization.splice(earlier, 1);
+              }
               if (
                 heldBeforeInitialization.length >= MAX_NOTES_BEFORE_INITIALIZATION ||
                 (announcedSessionId !== undefined && decoded.sessionId !== announcedSessionId)
@@ -1514,9 +1611,15 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               Stream.map((message) => {
                 if (message.kind !== "result") return message;
                 const baseline = costBaseline;
-                costBaseline = undefined;
                 pendingCostInputs = Math.max(0, pendingCostInputs - 1);
                 const total = message.totalCostUsd;
+                // A turn the runtime starts by itself after this result sends
+                // no prompt to take a new baseline at, so this result's total
+                // is its baseline; a prompt still reads a fresh one.
+                costBaseline =
+                  pendingCostInputs === 0 && total !== undefined && Number.isFinite(total)
+                    ? total
+                    : undefined;
                 return baseline !== undefined && total !== undefined && total >= baseline
                   ? { ...message, costUsd: total - baseline }
                   : message;

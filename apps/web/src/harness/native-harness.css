@@ -14,22 +14,10 @@
   color: var(--color-destructive);
 }
 
-/* Model roles: each role is a setting row, optionally followed by its notes
-   and its open list of backups. The Settings kit draws the inset hairline
-   between the group's children, so a role's editor reads as part of its row. */
-.native-harness-role .setrow-control {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--oct-space-1);
-  min-width: 0;
-}
-
-.native-harness-role__control,
+/* Model roles: one block per role, with its models as a list of chips under a
+   name. The Settings kit draws the inset hairline between the group's
+   children, so each role reads as its own row. */
 .native-harness-roles__notice,
-.native-harness-backups__row,
-.native-harness-backups__actions,
-.native-harness-backups__add,
 .native-harness-job,
 .native-harness-card__head,
 .native-harness-panel__actions,
@@ -40,26 +28,9 @@
   gap: var(--oct-space-2);
 }
 
-.native-harness-role__control {
-  justify-content: flex-end;
-}
-
-.native-harness-role__chosen,
-.native-harness-role__source,
-.native-harness-backups__rank {
-  font-size: var(--text-sm);
-  color: var(--color-muted-foreground);
-}
-
-.native-harness-role__source {
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.native-harness-role__notes,
-.native-harness-backups,
 .native-harness-roles__notice {
-  padding: 0 var(--oct-space-4) var(--oct-space-3);
+  justify-content: space-between;
+  padding: var(--oct-space-3) var(--oct-space-4) 0;
 }
 
 .native-harness-roles > .native-harness-panel__message {
@@ -67,41 +38,142 @@
   padding: var(--oct-space-3) var(--oct-space-4);
 }
 
-.native-harness-roles__notice {
-  justify-content: space-between;
-  padding-top: var(--oct-space-3);
+.native-harness-role {
+  padding: var(--oct-space-3) var(--oct-space-4);
 }
 
-.native-harness-role__notes p {
+.native-harness-roles__flags {
   margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-4) 0;
 }
 
-/* The open list of a role's models, under its row: first choice, then backups. */
-.native-harness-backups {
+.model-role {
   display: grid;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.model-role__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--oct-space-1) var(--oct-space-3);
+}
+
+.model-role__head-action {
+  margin-inline-start: auto;
+}
+
+.project-model-roles {
+  display: grid;
+  gap: var(--oct-space-3);
+}
+
+.project-model-roles__role {
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.project-model-roles__choice {
+  width: 16rem;
+}
+
+.model-role__name {
+  font-weight: 600;
+}
+
+.model-role__chosen {
+  color: var(--color-muted-foreground);
+}
+
+.model-role__empty,
+.model-role__add,
+.model-role__notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--oct-space-2);
 }
 
-.native-harness-backups__row {
+.model-role__chips {
   display: grid;
-  grid-template-columns: 6.5rem minmax(0, auto) 1fr;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
+  gap: var(--oct-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.native-harness-backups__actions {
-  justify-content: flex-end;
+/* A model in the role: its place in the order, the model, and what Octant
+   knows about it. Hairline-bordered, never tinted. */
+.model-role__chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2) var(--oct-space-3);
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-sm);
+}
+
+.model-role__rank {
+  flex: 0 0 5.5rem;
+  font-size: var(--oct-text-detail);
+  color: var(--color-muted-foreground);
+}
+
+.model-role__tags {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-2);
+  min-width: 0;
+}
+
+.model-role__tag {
+  font-size: var(--oct-text-detail);
+  color: var(--color-muted-foreground);
+}
+
+.model-role__reasoning {
+  flex: 0 0 auto;
+  width: 14rem;
+  max-width: 100%;
+}
+
+.model-role__actions {
+  display: flex;
+  align-items: center;
+  margin-inline-start: auto;
+}
+
+.model-role__checks {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.model-role__check {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: 28px;
 }
 
 /* Settings pushes a chooser to the control column's right edge with an auto
-   margin. Here the role's own control and the backup rows place it, so a
-   wrapped row on a phone does not strand the chooser at the far edge. */
-.native-harness-panel .native-harness-roles .composer-model-picker {
+   margin. Here the chip places it, so a wrapped chip on a phone does not
+   strand the chooser at the far edge. */
+.native-harness-panel .model-role .composer-model-picker {
   margin-inline-start: 0;
 }
 
-/* One endpoint and no main model: the offer sits where the person looks first. */
+@media (max-width: 640px) {
+  .model-role__rank {
+    flex-basis: 100%;
+  }
+}
+
+/* One endpoint and no Builder: the offer sits where the person looks first. */
 .native-harness-suggestion {
   display: flex;
   flex-wrap: wrap;
@@ -134,32 +206,6 @@
 
 .native-harness-job + .native-harness-job {
   border-top: 1px solid var(--oct-hairline);
-}
-
-@media (max-width: 640px) {
-  .native-harness-role .setrow-control {
-    align-items: flex-start;
-  }
-
-  .native-harness-role__control {
-    justify-content: flex-start;
-  }
-
-  .native-harness-role__source {
-    text-align: left;
-  }
-
-  .native-harness-backups__row {
-    display: flex;
-  }
-
-  .native-harness-backups__rank {
-    flex-basis: 100%;
-  }
-
-  .native-harness-backups__actions {
-    margin-inline-start: auto;
-  }
 }
 
 .native-harness-card {
@@ -400,4 +446,33 @@
 
 .native-harness-egress__empty {
   margin: 0;
+}
+
+.role-suggestion {
+  display: grid;
+  gap: var(--oct-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.role-suggestion__role {
+  display: grid;
+  gap: 2px;
+}
+
+.role-suggestion__line {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.native-harness-roles__suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4) 0;
 }

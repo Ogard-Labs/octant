@@ -11,7 +11,7 @@ import {
 } from "@octant/contracts/todos";
 import type { OctantMode } from "@octant/contracts";
 import { Check, Ellipsis, Folder, Hash } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { WorkListMenuTrigger } from "../surface/WorkList";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -77,6 +77,15 @@ export interface TodosPageProps {
   readonly projects: ReadonlyArray<TodoProjectSource>;
   readonly onClose: () => void;
   readonly start?: TodoStartProps;
+  /** This host's own id, which names its Projects and threads; defaults to the list's host. */
+  readonly thisHostId?: StableHostId;
+  /**
+   * The list host cannot be reached: the last list read shows, nothing is
+   * sent, and quick add keeps drafts on this device until the person sends.
+   */
+  readonly readOnly?: boolean;
+  /** Names the list host; unsent drafts are kept per list host, never shared. */
+  readonly listKey?: string;
 }
 
 const STATE_FILTERS: ReadonlyArray<{ readonly id: TodoStateFilter; readonly label: string }> = [
@@ -96,9 +105,46 @@ export function TodosView(props: TodosPageProps) {
   const { read, change } = props.list;
   const view = read.status === "loading" ? undefined : read.view;
   const todos = useMemo(() => view?.todos ?? [], [view]);
+  const localHostId = props.thisHostId ?? view?.hostId;
+  const readOnly = props.readOnly === true;
+  const draftsKey = props.listKey ?? "this-host";
+  const [unsent, setUnsent] = useState<ReadonlyArray<UnsentTodo>>(() => readUnsentTodos(draftsKey));
+  const [unsentKey, setUnsentKey] = useState(draftsKey);
+  if (unsentKey !== draftsKey) {
+    // A draft belongs to the list host it was written for: after the list
+    // moves, another host's drafts are neither shown nor sendable here.
+    setUnsentKey(draftsKey);
+    setUnsent(readUnsentTodos(draftsKey));
+  }
+  // Every write starts from what storage holds now, not from this window's
+  // copy: two windows holding drafts for one list must not erase each other's.
+  const holdUnsent = (draft: UnsentTodo) => {
+    const stored = readUnsentTodos(draftsKey);
+    const next = stored.some((held) => String(held.command.todoId) === String(draft.command.todoId))
+      ? stored
+      : [...stored, draft];
+    writeUnsentTodos(draftsKey, next);
+    setUnsent(next);
+  };
+  const dropUnsent = (todoId: string) => {
+    const next = readUnsentTodos(draftsKey).filter(
+      (held) => String(held.command.todoId) !== todoId,
+    );
+    writeUnsentTodos(draftsKey, next);
+    setUnsent(next);
+  };
+  useEffect(() => {
+    const follow = (event: StorageEvent) => {
+      if (event.key === null || event.key === unsentStorageKey(draftsKey)) {
+        setUnsent(readUnsentTodos(draftsKey));
+      }
+    };
+    globalThis.addEventListener("storage", follow);
+    return () => globalThis.removeEventListener("storage", follow);
+  }, [draftsKey]);
   const choices = useMemo(
-    () => todoProjectChoices(view?.hostId, props.projects),
-    [view?.hostId, props.projects],
+    () => todoProjectChoices(localHostId, props.projects),
+    [localHostId, props.projects],
   );
   const [filter, setFilter] = useState<TodoFilter>(DEFAULT_TODO_FILTER);
   const [selected, setSelected] = useState<string>();
@@ -146,7 +192,53 @@ export function TodosView(props: TodosPageProps) {
         title="To-dos"
       />
       <OctantCard className="todos-card">
-        <TodoQuickAdd onChange={change} projects={choices} />
+        <TodoQuickAdd
+          onChange={async (command) => {
+            if (!readOnly) return change(command);
+            // Never sent on its own: a mutation names one destination and is
+            // not queued as offline work. The person sends it when the list
+            // host is back.
+            if (command.kind === "add-todo") {
+              holdUnsent({ command, title: command.title });
+            }
+            return { status: "saved" };
+          }}
+          projects={choices}
+        />
+        {unsent.length === 0 ? null : (
+          <section aria-label="Not sent" className="todo-unsent">
+            <h3 className="oct-section-label">Not sent</h3>
+            <ul className="todo-unsent__list">
+              {unsent.map((draft) => (
+                <li className="todo-unsent__row" key={String(draft.command.todoId)}>
+                  <span className="oct-row-label">{draft.title}</span>
+                  <OctantButton
+                    aria-label={`Send ${draft.title}`}
+                    disabled={readOnly}
+                    onClick={async () => {
+                      const outcome = await send(draft.command);
+                      if (outcome.status === "saved") dropUnsent(String(draft.command.todoId));
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Send
+                  </OctantButton>
+                  <OctantButton
+                    aria-label={`Discard ${draft.title}`}
+                    onClick={() => dropUnsent(String(draft.command.todoId))}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Discard
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         <div className="todos-card__filters">
           <OctantToggleGroup<TodoStateFilter>
             aria-label="Show to-dos"
@@ -206,7 +298,7 @@ export function TodosView(props: TodosPageProps) {
               <TodoRow
                 choices={choices}
                 dragging={dragging}
-                hostId={view.hostId}
+                hostId={localHostId ?? view.hostId}
                 key={String(todo.id)}
                 onDelete={() => setDeleting(todo)}
                 onDragEnd={() => setDragging(undefined)}
@@ -235,6 +327,7 @@ export function TodosView(props: TodosPageProps) {
                   setSelected(selected === String(todo.id) ? undefined : String(todo.id))
                 }
                 onSend={send}
+                readOnly={readOnly}
                 {...(props.start === undefined ? {} : { start: props.start })}
                 projects={props.projects}
                 selected={selected === String(todo.id)}
@@ -376,6 +469,7 @@ interface TodoRowProps {
   readonly onDragEnd: () => void;
   readonly onDrop: () => void;
   readonly start?: TodoStartProps;
+  readonly readOnly: boolean;
 }
 
 /** A link to a Project on this host that is no longer active reads as removed. */
@@ -412,7 +506,7 @@ function TodoRow(props: TodoRowProps) {
       }
       data-selected={props.selected ? "true" : undefined}
       data-state={todo.state}
-      draggable={!props.selected}
+      draggable={!props.selected && !props.readOnly}
       onDragEnd={() => {
         setOver(false);
         props.onDragEnd();
@@ -439,6 +533,7 @@ function TodoRow(props: TodoRowProps) {
           aria-checked={done}
           aria-label={todo.title}
           className="todo-row__check"
+          disabled={props.readOnly}
           onClick={() =>
             void props.onSend(
               decodeTodoCommand({
@@ -457,6 +552,7 @@ function TodoRow(props: TodoRowProps) {
         <OctantButton
           aria-expanded={props.selected}
           className="todo-row__open"
+          disabled={props.readOnly}
           onClick={props.onSelect}
           type="button"
           variant="bare"
@@ -485,41 +581,43 @@ function TodoRow(props: TodoRowProps) {
             </span>
           )}
         </OctantButton>
-        <span className="todo-row__actions">
-          {props.start === undefined || todo.state !== "open" ? null : (
-            <TodoStartControl
-              hostId={props.hostId}
-              onStart={(target) => props.start?.onStart(todo, target)}
-              projects={props.projects}
-              todo={todo}
+        {props.readOnly ? null : (
+          <span className="todo-row__actions">
+            {props.start === undefined || todo.state !== "open" ? null : (
+              <TodoStartControl
+                hostId={props.hostId}
+                onStart={(target) => props.start?.onStart(todo, target)}
+                projects={props.projects}
+                todo={todo}
+              />
+            )}
+            <OctantMenu
+              items={menuItems}
+              onValueChange={(value) => {
+                if (value === "edit") {
+                  if (!props.selected) props.onSelect();
+                } else if (value === "up") props.onMoveUp?.();
+                else if (value === "down") props.onMoveDown?.();
+                else if (value === "delete") props.onDelete();
+                else
+                  void props.onSend(
+                    decodeTodoCommand({
+                      kind: "set-todo-state",
+                      todoId: todo.id,
+                      state: value === "drop" ? "dropped" : "open",
+                    }),
+                  );
+              }}
+              selectionMode="action"
+              trigger={<Ellipsis aria-hidden="true" size={16} />}
+              triggerClassName="shell-icon-button"
+              triggerLabel={`Actions for ${todo.title}`}
+              value=""
             />
-          )}
-          <OctantMenu
-            items={menuItems}
-            onValueChange={(value) => {
-              if (value === "edit") {
-                if (!props.selected) props.onSelect();
-              } else if (value === "up") props.onMoveUp?.();
-              else if (value === "down") props.onMoveDown?.();
-              else if (value === "delete") props.onDelete();
-              else
-                void props.onSend(
-                  decodeTodoCommand({
-                    kind: "set-todo-state",
-                    todoId: todo.id,
-                    state: value === "drop" ? "dropped" : "open",
-                  }),
-                );
-            }}
-            selectionMode="action"
-            trigger={<Ellipsis aria-hidden="true" size={16} />}
-            triggerClassName="shell-icon-button"
-            triggerLabel={`Actions for ${todo.title}`}
-            value=""
-          />
-        </span>
+          </span>
+        )}
       </div>
-      {props.start === undefined ? null : (
+      {props.start === undefined || props.readOnly ? null : (
         <TodoThreadLine onSend={props.onSend} start={props.start} todo={todo} />
       )}
       {props.selected ? (
@@ -866,4 +964,47 @@ function TodoThreadLine(props: {
       )}
     </div>
   );
+}
+
+/** A quick add held on this device while the list host could not be reached. */
+interface UnsentTodo {
+  readonly command: Extract<TodoCommand, { kind: "add-todo" }>;
+  readonly title: string;
+}
+
+function unsentStorageKey(listKey: string): string {
+  return `octant.todos.unsent.v1:${listKey}`;
+}
+
+/** Unsent drafts live in this browser's storage only; it may be absent or refuse. */
+function readUnsentTodos(listKey: string): ReadonlyArray<UnsentTodo> {
+  try {
+    const stored = globalThis.localStorage.getItem(unsentStorageKey(listKey));
+    if (stored === null) return [];
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry: unknown) => {
+      try {
+        const command = decodeTodoCommand(
+          typeof entry === "object" && entry !== null && "command" in entry
+            ? entry.command
+            : undefined,
+        );
+        return command.kind === "add-todo" ? [{ command, title: command.title }] : [];
+      } catch {
+        return [];
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeUnsentTodos(listKey: string, unsent: ReadonlyArray<UnsentTodo>): void {
+  try {
+    if (unsent.length === 0) globalThis.localStorage.removeItem(unsentStorageKey(listKey));
+    else globalThis.localStorage.setItem(unsentStorageKey(listKey), JSON.stringify(unsent));
+  } catch {
+    // Storage refused: the drafts stay for this page's life.
+  }
 }

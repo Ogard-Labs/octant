@@ -52,9 +52,8 @@ describe("ChatSettingsView", () => {
     await chooseSelectFieldOption(
       user,
       screen.getByRole("combobox", { name: "Default research backend" }),
-      "SearXNG",
+      "Octant web search",
     );
-    await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Instructions for new Chat threads"));
     await user.type(
       screen.getByLabelText("Instructions for new Chat threads"),
@@ -69,7 +68,6 @@ describe("ChatSettingsView", () => {
       defaultModelId: "model-b-plus" as never,
       defaultResearchEnabled: true,
       defaultResearchRouting: "searxng",
-      searxngBaseUrl: "https://search.example/",
       defaultPersonalityInstructions: "Be calm and precise.",
       providerFallback: {
         providerInstanceId: providerA as never,
@@ -102,46 +100,22 @@ describe("ChatSettingsView", () => {
     );
   });
 
-  it("rejects non-HTTPS endpoints unless HTTP is loopback", async () => {
+  it("carries the stored SearXNG address unchanged, since Settings › Web search now edits it", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn<(command: UpdateChatSettingsCommand) => boolean>(() => true);
     render(
       <ChatSettingsView
         onUpdate={onUpdate}
         providerSnapshot={providerSnapshot()}
-        settings={settings()}
+        settings={{ ...settings(), searxngBaseUrl: "https://search.example/" }}
       />,
     );
 
-    await user.type(screen.getByLabelText("SearXNG base URL"), "http://search.example/");
-    expect(await screen.findByText("Use HTTPS or a loopback HTTP address.")).toBeVisible();
-    await user.tab();
-    expect(onUpdate).not.toHaveBeenCalled();
-
-    await user.clear(screen.getByLabelText("SearXNG base URL"));
-    await user.type(screen.getByLabelText("SearXNG base URL"), "http://127.0.0.1:8080/");
-    expect(screen.queryByText("Use HTTPS or a loopback HTTP address.")).not.toBeInTheDocument();
-    await user.tab();
-    expect(onUpdate).toHaveBeenCalledOnce();
-  });
-
-  it("rejects endpoint query and fragment delimiters before saving", async () => {
-    const user = userEvent.setup();
-    const onUpdate = vi.fn<(command: UpdateChatSettingsCommand) => boolean>(() => true);
-    render(
-      <ChatSettingsView
-        onUpdate={onUpdate}
-        providerSnapshot={providerSnapshot()}
-        settings={settings()}
-      />,
+    expect(screen.queryByLabelText("SearXNG base URL")).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("Enable research by default"));
+    expect(onUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ searxngBaseUrl: "https://search.example/" }),
     );
-
-    await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/?q=unsafe");
-    expect(
-      await screen.findByText("Use a base URL without credentials, query, or fragment."),
-    ).toBeVisible();
-    await user.tab();
-    expect(onUpdate).not.toHaveBeenCalled();
   });
 });
 
