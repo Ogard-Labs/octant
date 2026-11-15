@@ -235,7 +235,7 @@ try {
     return new Set(listing.match(/S-1-15-2(?:-\d+){7}/gu) ?? []);
   };
   const waiting = [0, 1].map(() => {
-    const launch = prepare(cmd, shell("set /p OCTANT_WAIT= & echo released %OCTANT_WAIT%"));
+    const launch = prepare(cmd, shell("set /p OCTANT_WAIT= & echo released"));
     return spawn(launch.command, [...launch.args], { stdio: ["pipe", "pipe", "pipe"] });
   });
   const outputs = waiting.map((child) => {
@@ -253,6 +253,8 @@ try {
     concurrent = containerSids().size;
   }
   // `set /p` exits 1 on an empty line, so each launch is released with a word.
+  // (cmd expands `%VAR%` when it parses the line, before `set /p` runs, so
+  // the echo names no variable.)
   for (const child of waiting) child.stdin.end("go\r\n");
   const codes = await Promise.all(exits);
   const leftAfter = containerSids().size;
@@ -260,7 +262,7 @@ try {
     "keeps both grants while two launches share a checkout and removes both after",
     concurrent === 2 &&
       codes.every((code) => code === 0) &&
-      outputs.every((output) => output.stdout.includes("released go")) &&
+      outputs.every((output) => output.stdout.includes("released")) &&
       leftAfter === 0,
     { concurrent, codes, outputs, leftAfter },
   );
