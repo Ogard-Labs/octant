@@ -50,6 +50,13 @@ function todoClient() {
  * becomes a thread: the To-dos page opens the ordinary draft, and the create
  * path that the host answers is the one that knows the new thread's id.
  */
+/** The band and the thread list both offer New chat, with the same action. */
+async function newChatButton(): Promise<HTMLElement> {
+  const [button] = await screen.findAllByRole("button", { name: "New chat" });
+  if (button === undefined) throw new Error("No New chat button");
+  return button;
+}
+
 describe("starting a thread from a to-do", () => {
   it("opens a Chat draft from the to-do and links the thread the host creates", async () => {
     const user = userEvent.setup();
@@ -119,7 +126,7 @@ describe("starting a thread from a to-do", () => {
 
     draft = await startIntoChat();
     expect(within(draft).getByText("From to-do")).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "New chat" }));
+    await user.click(await newChatButton());
     draft = await screen.findByRole("region", { name: "New Octant Chat thread" });
     expect(within(draft).queryByText("From to-do")).toBeNull();
     await user.type(within(draft).getByRole("textbox", { name: "First message" }), "Unrelated");
@@ -147,7 +154,7 @@ describe("starting a thread from a to-do", () => {
         todoClient={todos}
       />,
     );
-    await user.click(await screen.findByRole("button", { name: "New chat" }));
+    await user.click(await newChatButton());
     await screen.findByRole("region", { name: "New Octant Chat thread" });
 
     await user.click(await screen.findByRole("button", { name: /^To-dos/ }));
