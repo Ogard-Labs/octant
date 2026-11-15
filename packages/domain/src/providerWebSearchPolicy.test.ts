@@ -154,7 +154,7 @@ describe("a native harness turn's provider search", () => {
 
   it("follows the research route and the data policy", () => {
     expect(decideHarnessProviderSearch({ ...base, research: false })).toBeUndefined();
-    expect(decideHarnessProviderSearch({ ...base, routing: "octant" })).toBeUndefined();
+    expect(decideHarnessProviderSearch({ ...base, routing: "searxng" })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, origin: undefined })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, policy: "eu-only" })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, policy: "zdr-only", zdrStated: true })).toEqual({
