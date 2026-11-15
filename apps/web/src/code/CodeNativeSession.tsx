@@ -2,6 +2,7 @@ import { History } from "lucide-react";
 import type { CodeNativeSessions, CodeThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
 import "./code-native-session.css";
 
@@ -127,26 +128,42 @@ export function CodeNativeSession(props: {
         </OctantButton>
       </div>
       {open ? (
-        <fieldset className="code-native-session__choices">
-          <legend className="code-native-session__legend">Continue a session in this thread</legend>
-          {listed.sessions.map((session) => (
-            <label key={session.nativeSessionId} className="code-native-session__choice">
-              <input
-                type="radio"
-                name={`native-session-${String(threadId)}`}
-                value={session.nativeSessionId}
-                checked={chosen === session.nativeSessionId}
-                onChange={() => setChosen(session.nativeSessionId)}
-              />
-              <span className="code-native-session__title">
-                {session.title ?? session.nativeSessionId}
-              </span>
-              <span className="code-native-session__meta">
-                {session.gitBranch === undefined ? "" : `${session.gitBranch} · `}
-                {lastWritten(session.lastModified)}
-              </span>
-            </label>
-          ))}
+        <div className="code-native-session__choices">
+          <p className="code-native-session__legend" id={`native-session-${String(threadId)}`}>
+            Continue a session in this thread
+          </p>
+          <div
+            aria-labelledby={`native-session-${String(threadId)}`}
+            className="code-native-session__options"
+            role="radiogroup"
+            onKeyDown={moveWithinRadioGroup}
+          >
+            {listed.sessions.map((session) => (
+              <div
+                key={session.nativeSessionId}
+                className="code-native-session__choice"
+                data-checked={chosen === session.nativeSessionId ? "" : undefined}
+              >
+                <OctantButton
+                  aria-checked={chosen === session.nativeSessionId}
+                  className="code-native-session__option"
+                  role="radio"
+                  size={null}
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setChosen(session.nativeSessionId)}
+                >
+                  <span className="code-native-session__title">
+                    {session.title ?? session.nativeSessionId}
+                  </span>
+                  <span className="code-native-session__meta">
+                    {session.gitBranch === undefined ? "" : `${session.gitBranch} · `}
+                    {lastWritten(session.lastModified)}
+                  </span>
+                </OctantButton>
+              </div>
+            ))}
+          </div>
           <div className="code-native-session__actions">
             <OctantButton
               type="button"
@@ -157,7 +174,7 @@ export function CodeNativeSession(props: {
               Continue in this thread
             </OctantButton>
           </div>
-        </fieldset>
+        </div>
       ) : null}
       {message === undefined ? null : (
         <p className="code-native-session__message" role="status">
