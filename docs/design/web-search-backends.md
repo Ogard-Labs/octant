@@ -18,7 +18,9 @@ route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
 its 20-second budget, the journaled record of where each query went, Settings ›
 Web search, the endpoint ZDR statement (`set-provider-search-zdr`, journaled
 with the endpoint's data labels), the provider-search offer table, and the
-policy's lock on vendor runtimes' `webTools`. Not built: a provider's own
+policy's lock on vendor runtimes' `webTools`, with Claude Code, Codex,
+OpenCode, and Mistral Vibe each launched with its own search off. Not built: a
+generic ACP agent's own web tools, which Octant cannot switch off; a provider's own
 search in the native harness (slice 4), which still refuses any built-in tool
 a provider starts in its stream as `unsupported`, so a harness endpoint
 reports `nativeWebResearch` as `unsupported`. A per-entry processing region is
@@ -286,6 +288,28 @@ which search mode a vendor runtime uses, so the policy limits that switch:
 - Under any other policy, `webTools` is off, and Settings › Providers shows the
   switch locked with the policy as its reason. Its journaled value does not
   change, so returning to Any restores the person's choice.
+
+Off means the runtime cannot search, at every level, Full access included,
+because each runtime is launched with its own search switched off unless the
+session's setup has `webTools` on, as the provider SDK's `nativeSetup` contract
+already requires of a feature reported supported:
+
+- Claude Code leaves `WebSearch` and `WebFetch` out of its tools and refuses
+  them.
+- Codex starts and resumes every thread with `web_search = "disabled"` in the
+  thread's config, which removes its hosted and standalone search tools
+  (read from the codex-cli 0.169.0 source).
+- OpenCode denies `websearch` and `webfetch` after the person's own rules, on
+  1.x and 2.x.
+- Mistral Vibe launches with `VIBE_DISABLED_TOOLS` naming `web_search` and
+  `web_fetch` (read from the 3.0.3 source).
+
+Rationale: before this, Codex and OpenCode searched whatever the setup said, so
+Settings showed the switch locked off while their queries still reached their
+own search services. A Codex or OpenCode thread whose account does not run as
+itself therefore no longer searches at Guarded and Reviewed either. A generic
+ACP agent reports `webTools` unsupported: Octant has no switch for its own
+web tools, so the policy cannot turn them off, and that is not built.
 
 These tools already mark the thread as having read outside content.
 

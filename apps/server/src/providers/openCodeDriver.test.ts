@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
+  betaSessionPermissionRules,
   betaPermissionEffect,
   betaSessionPermissionRules,
   makeOpenCodeDriver,
@@ -3063,6 +3064,63 @@ describe("OpenCode driver", () => {
         { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
       ]);
     }
+  });
+
+  it("denies OpenCode's own web search and fetch at every level unless the setup has web tools on", () => {
+    const allowedOwn = {
+      rules: [
+        { action: "websearch", resource: "*", effect: "allow" },
+        { action: "webfetch", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+    } as const;
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits", "full-access"] as const) {
+      for (const action of ["websearch", "webfetch"]) {
+        // Off: denied on both runtimes, the person's own allow included.
+        expect(
+          evaluatePermission(
+            permissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluatePermission(permissionRules(policy, "code"), action)).toBe("deny");
+        expect(
+          evaluateV2Permission(
+            betaSessionPermissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluateV2Permission(betaSessionPermissionRules(policy, "code"), action)).toBe(
+          "deny",
+        );
+      }
+    }
+    // On, Full access lets them run as the level allows, and Plan still denies them.
+    const on = { rules: [], toolServers: false, webTools: true } as const;
+    expect(
+      evaluatePermission(
+        permissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("plan", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("deny");
   });
 
   it("gives 2.x Work mode the shell and child-agent rules Code mode gets at each level", () => {
