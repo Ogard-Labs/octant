@@ -70,6 +70,8 @@ export interface DockTileControls {
 
 /** What a card does with the dock around it, so the keyboard never falls to the page. */
 export interface DockCardControls {
+  /** Closes the page or shell the card stands for, as its tab's close does. */
+  readonly onClose: () => void;
   readonly onHide: () => void;
   readonly onShow: () => void;
 }
@@ -520,6 +522,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                 onShow: () => {
                   setRefocus({ surface: entry.surface });
                   props.shelf?.onShow(entry.tabId);
+                },
+                // A closed tool leaves no button open, so the keyboard goes to
+                // the same place a hidden card sends it.
+                onClose: () => {
+                  setRefocus({ surface: entry.surface });
+                  props.onCloseTab(entry.tabId);
                 },
                 // A card that goes away hands the keyboard to the tool's button.
                 onHide: () => {

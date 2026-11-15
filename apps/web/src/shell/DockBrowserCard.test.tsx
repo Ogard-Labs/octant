@@ -48,18 +48,18 @@ function renderCard(
   extra: { readonly pollIntervalMs?: number; readonly contextId?: string } = {},
 ) {
   const onExpand = vi.fn();
-  const onHide = vi.fn();
+  const onClose = vi.fn();
   const view = render(
     <DockBrowserCard
       client={client}
       {...(extra.contextId === undefined ? {} : { contextId: extra.contextId })}
-      onHide={onHide}
+      onClose={onClose}
       onExpand={onExpand}
       pollIntervalMs={extra.pollIntervalMs ?? 60_000}
       threadId={threadId as never}
     />,
   );
-  return { ...view, onHide, onExpand };
+  return { ...view, onClose, onExpand };
 }
 
 describe("DockBrowserCard", () => {
@@ -71,18 +71,19 @@ describe("DockBrowserCard", () => {
     );
     expect(within(card).getByText("Your account")).toBeVisible();
     expect(within(card).getByRole("button", { name: "Show Browser" })).toBeVisible();
-    expect(within(card).getByRole("button", { name: "Hide Browser card" })).toBeVisible();
+    expect(within(card).getByRole("button", { name: "Close Browser" })).toBeVisible();
   });
 
-  it("expands and hides from its controls, and expands from the preview itself", async () => {
+  it("expands from its controls and its preview, and closes the page from its X", async () => {
     const user = userEvent.setup();
-    const { onHide, onExpand } = renderCard(clientOf(() => snapshot()));
+    const { onClose, onExpand } = renderCard(clientOf(() => snapshot()));
     await screen.findByText("Your account");
     await user.click(screen.getByRole("button", { name: "Show Browser" }));
     await user.click(screen.getByRole("button", { name: /^Show Browser, live preview/ }));
     expect(onExpand).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole("button", { name: "Hide Browser card" }));
-    expect(onHide).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: "Close Browser" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Hide Browser card" })).toBeNull();
   });
 
   it("asks for a picture only while the card is shown", async () => {

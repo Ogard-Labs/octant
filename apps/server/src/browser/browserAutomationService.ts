@@ -2880,9 +2880,9 @@ export class BrowserAutomationService {
       owned !== undefined &&
       owned.windowId === windowId &&
       String(owned.threadId) === String(threadId) &&
-      // A native page is on the person's screen already; only a headless one
-      // is seen as a picture.
-      owned.record.presentation !== "native-live" &&
+      // A native page is not always on screen: minimised, its surface is
+      // detached and the card in the dock is the only place it is seen, so
+      // it is peeked like a headless one. The interval bounds the cost.
       this.#authorityIsActive(owned)
     ) {
       await this.#refreshPicture(owned, signal);

@@ -1118,6 +1118,28 @@ describe("BrowserAutomationService", () => {
     expect(runtime.peek).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a fresh picture of a native page read by its own context, as a minimised card does", async () => {
+    const { advance, contexts, runtime, service } = harness();
+    vi.mocked(runtime.createContext).mockImplementationOnce(async (contextId) => {
+      contexts.add(contextId);
+      return "native-live";
+    });
+    const created = await service.create({
+      windowId,
+      threadId: threadOne,
+      action: action(),
+      policy,
+    });
+    const contextId = created.context!.contextId;
+    advance(2_000);
+
+    const peeked = await service.peekContext(windowId, threadOne, contextId);
+
+    expect(runtime.peek).toHaveBeenCalledTimes(1);
+    expect(peeked.observation?.screenshotDataUrl).toBe("data:image/jpeg;base64,AAAA");
+    expect(peeked.observation?.stale).toBe(false);
+  });
+
   it("reattaches one current context per window and thread and releases only that scope", async () => {
     const { contexts, runtime, service } = harness();
     const first = await service.create({ windowId, threadId: threadOne, action: action(), policy });
