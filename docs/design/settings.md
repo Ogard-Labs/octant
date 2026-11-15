@@ -65,7 +65,7 @@ person's providers and their Defaults, then Find providers and Octant's own
 OpenCode copy, with the Provider catalog under them; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
-by model roles, helper agents, and Navigator's models; with no endpoint yet it offers three ways
+by model roles ([Model endpoints: Model roles](model-endpoints.md#model-roles)), helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
 sign-in one click with its terms as a consent line under the button. Voice &
 images holds speech, transcription, the image profiles, and custom image

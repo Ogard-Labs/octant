@@ -36,6 +36,13 @@ export type { CodeBoardStatus, CodeBoardStatusReason };
  */
 export interface CodeBoardCoordinators {
   readonly titleByCoordinator: ReadonlyMap<string, string>;
+  /**
+   * Whether the Show workers setting lists workers on the board for this
+   * Project (docs/design/workspace.md#coordinators). Absent shows every worker.
+   */
+  readonly workersOnBoard?: (projectId: string) => boolean;
+  /** Each coordinator's Project, so the Coordinator filter offers only those shown. */
+  readonly projectByCoordinator?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -64,14 +71,27 @@ export function codeBoardCoordinators(
   threads: ReadonlyArray<{
     readonly threadId: string;
     readonly title: string;
-    readonly coordinator?: true;
+    readonly projectId?: string;
+    readonly coordinator?: true | boolean;
   }>,
+  workersOnBoard?: (projectId: string) => boolean,
 ): CodeBoardCoordinators {
+  const coordinators = threads.filter((thread) => thread.coordinator === true);
   return {
     titleByCoordinator: new Map(
-      threads
-        .filter((thread) => thread.coordinator === true)
-        .map((thread) => [String(thread.threadId), thread.title]),
+      coordinators.map((thread) => [String(thread.threadId), thread.title]),
     ),
+    ...(workersOnBoard === undefined
+      ? {}
+      : {
+          workersOnBoard,
+          projectByCoordinator: new Map(
+            coordinators.flatMap((thread) =>
+              thread.projectId === undefined
+                ? []
+                : [[String(thread.threadId), String(thread.projectId)] as const],
+            ),
+          ),
+        }),
   };
 }

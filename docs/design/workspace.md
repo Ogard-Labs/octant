@@ -371,37 +371,60 @@ list-side counterpart, so no second priority group is added to the Projects tree
 [Coordinator threads](coordinator-threads.md) own the role; this section owns
 where a coordinator and its workers appear. Built; rendered against mocked threads, not yet on the desktop app.
 
+- **Where workers live.** A coordinator is the one thread a person talks to;
+  its workers belong to it and are not part of the thread list (maintainer
+  decision, 2026-11-15). By default a worker is not listed in the sidebar or on
+  the board. It is reached from the coordinator: the Workers panel, the worker
+  cards in its transcript, and Needs you. **Show workers** (below) lists them
+  outside the coordinator again. Hiding changes only where a worker is listed,
+  never what it may do or who sees its requests.
 - **Sidebar.** A Code Project with coordinators shows a **Coordinators**
   section at the top of its Project tree, above its other threads. Each
-  coordinator row has the coordinator mark in place of the thread icon and a
-  fold button (`aria-expanded`) that shows or hides its workers beneath it.
-  Folded, the row reports how many of its workers are working and how many need
-  input, through the [sidebar status policy](#sidebar-thread-status), so a
-  folded coordinator never hides a request. Its open workers are listed only
-  under it, never again among the Project's other threads; finished workers
-  follow the ordinary completion and put-away rules. The window remembers each
-  coordinator's fold state as session storage. The Project's designated planner
-  is listed among its coordinators.
+  coordinator row has the coordinator mark in place of the thread icon. With
+  Show workers off for the sidebar (the default) the row is alone: its workers
+  are listed neither under it nor among the Project's other threads, and the
+  row always reports how many of them are working and how many need input,
+  through the [sidebar status policy](#sidebar-thread-status), so a hidden
+  worker never hides a request. With it on, the row has a fold button
+  (`aria-expanded`) that shows or hides its workers beneath it; folded, the row
+  reports the same counts. Its workers are listed only under it, never again
+  among the Project's other threads; finished workers follow the ordinary
+  completion and put-away rules. The window remembers each coordinator's fold
+  state as session storage. A worker whose coordinator is not listed (stopped
+  coordinating, archived, put away) stays an ordinary row. The Project's
+  designated planner is listed among its coordinators.
 - **Status arrangement.** Coordinators are listed under **Pinned**. Workers
-  keep their ordinary headings, with their coordinator's name as secondary text
-  on the row.
+  are left out unless Show workers lists them in the sidebar, and then keep
+  their ordinary headings, with their coordinator's name as secondary text on
+  the row.
 - **Board.** A coordinator is never a board card: the host's board read
-  leaves it out, the designated planner included. Each card carries its
-  worker's coordinator id from the host and names that coordinator. The board's
-  Filters popover has a **Coordinator** choice, shown when the window has
-  coordinators, that asks the host for one coordinator's workers.
+  leaves it out, the designated planner included. With Show workers off for the
+  board (the default) a Project's workers are not cards either, and the
+  Filters popover has no Coordinator choice for it. With it on, each worker's
+  card carries the worker mark and names its coordinator (the id comes from the
+  host), and the **Coordinator** choice asks the host for one coordinator's
+  workers. A person's pick of a coordinator that stops being offered stops
+  filtering.
 - **Menus.** A Code Project's sidebar menu has **New coordinator**, which
   opens the ordinary Code draft under a "New coordinator" heading and makes the
   thread a coordinator once its creation is confirmed, before the first
-  message is sent. Under the heading the draft has **Workers start at** (this
-  thread's level or lower, or always at one named level, Full access included)
-  and three number fields for the coordinator's bounds (wakes an hour, rounds,
-  worker starts an hour), each empty for its default
-  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). A Code thread's row menu has **Make coordinator**, a submenu
+  message is sent. The heading says in one line what a coordinator does, with
+  **Start an ordinary thread instead** on its own line, and the composer comes
+  next. Directly under the composer, before the start screen's suggestions
+  and cards, one line states the coordinator's settings with
+  their defaults filled in (the workers' level, check-ins an hour,
+  back-and-forths, new workers an hour) and **Change…** opens **Coordinator
+  settings**: **Workers start at** (this thread's level or lower, or always at
+  one named level, Full access included) and a stepper per bound, each named
+  with what it limits and its default
+  ([Coordinator threads: Bounds](coordinator-threads.md#bounds)). The settings
+  sat above the composer as a select and three number fields until 2026-11-15;
+  most people keep the defaults, and the box for the work came after them. A Code thread's row menu has **Make coordinator**, a submenu
   with the same worker-level choice, or **Stop
   coordinating** on a coordinator (never on a worker); on a coordinator
-  **Coordinator limits…**, which opens a dialog with the three bounds and
-  Save; the **Wake when a message
+  **Coordinator limits…**, which opens the same dialog with the three bounds
+  and Save, without the workers' level, since the host refuses a later change
+  to it; the **Wake when a message
   arrives** checkbox, on a worker the **Wake for coordinator** checkbox, and
   the **Continue after restart** checkbox, on until a person turns it off for
   that thread ([Architecture: Persistence](../architecture.md#persistence)).
@@ -410,10 +433,50 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
-  Settings › Code › Coordinators holds **Starting workers** and **Open workers
-  per coordinator**, and a Code Project's overview holds its own **Starting
-  workers** choice (Use Settings, Start without asking, Propose for approval)
-  after the Project planner section.
+  Settings › Code › Coordinators holds **Starting workers**, **Show workers**
+  and **Open workers per coordinator**, and a Code Project's overview holds its
+  own **Starting workers** choice (Use Settings, Start without asking, Propose
+  for approval) and its own **Show workers** choice after the Project planner
+  section.
+- **Show workers.** Settings › Code › Coordinators › **Show workers** has two
+  checkboxes, both off by default: **In the sidebar** (workers listed folded
+  under their coordinator) and **On the board** (worker cards and the
+  Coordinator filter). A Code Project's overview has **Use Settings**, on by
+  default, and the same two checkboxes; once Use Settings is turned off the
+  Project's choice wins over Settings, and turning it on again removes the
+  Project's entry. It is a view preference stored with the other Code settings
+  (`coordinatorWorkerListing`, with per-Project overrides in
+  `coordinatorWorkerListingByProject`). It carries no authority: it never
+  changes what a worker may do or who sees its requests, and only a person,
+  at a local window, changes it.
+- **Workers panel.** A coordinator's pane header has a **Workers** button
+  (with the worker count, and a screen-reader note of how many need you) that
+  opens a panel beside the transcript, and a sheet over it on a narrow window.
+  Sections, in order: **Needs you**, **Working**, **In review** (delivered
+  with a pull request still open), **Done** (marked Done, or its pull request
+  merged or closed; folded as "Done · N" with **Show more**), and **Put away**
+  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model, the
+  pull request link when there is one, and when it last changed; a row opens
+  the worker. A worker waiting on a person is always under Needs you, whatever
+  else is true of it. The panel reads the same window thread list the Agents
+  dock's Workers section reads, so a worker this window cannot see is never
+  listed, and it is offered only for a thread on this window's host.
+- **Worker cards.** In the coordinator's transcript, each worker it started
+  has a small card (title, model, live state: Working, Needs you, In review,
+  Done) at the end of the turn that was running when the host created the
+  worker, from host facts, never agent text. Clicking a card opens the worker.
+  A worker the transcript cannot place (created before the first turn, or turns
+  not loaded yet) is listed at the end of the transcript. A worker started from
+  an approved proposal is placed by when the host created it, which is the
+  approval.
+- **Opening a worker.** A worker opened from the panel, a card, or Needs you
+  has a header line "Worker of <coordinator>" with the worker mark and a **Back
+  to coordinator** control. Being open does not list it in the sidebar.
+- **Marks.** The coordinator mark (the network glyph, "Coordinator") and the
+  worker mark (the same glyph one step smaller and quieter, "Worker of
+  <coordinator>") are a pair. Wherever a worker shows outside its coordinator
+  (a sidebar row, a board card, a search result, a Needs you or Inbox row) it
+  wears the worker mark in place of the thread icon.
 - **Agents dock.** A coordinator's Agents dock has a **Workers** section under
   its own subagents: one row per worker in the window's thread list, with the
   provider's mark, the title, the thread's state in words (Working, Needs
@@ -450,8 +513,11 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   owner section) shows a chosen Code thread's **Wake when a message arrives**
   and, on a worker, **Wake for coordinator**, each change under its own fresh
   unlock; the coordinator role is never there.
-- **Needs you.** A worker's row in Needs you and the Inbox shows "via" its
-  coordinator beside the worker's title, from the window's thread list.
+- **Needs you.** A worker's row in Needs you and the Inbox shows the worker
+  mark and "via" its coordinator beside the worker's title, from the window's
+  thread list. Requests are never hidden by Show workers.
+- **Search.** Search lists workers, marked as workers, whatever Show workers
+  says.
 
 ### Sidebar thread status
 

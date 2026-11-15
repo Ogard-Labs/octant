@@ -8,6 +8,7 @@ import {
   SquarePen,
   TriangleAlert,
 } from "lucide-react";
+import { WorkerMark } from "../projects/coordinatorMarks";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -299,6 +300,8 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
                 >
                   {hit.archived ? (
                     <Archive aria-hidden="true" size={14} />
+                  ) : hit.workerOf !== undefined ? (
+                    <WorkerMark coordinatorName={hit.workerOf} size={14} />
                   ) : (
                     <MessageSquare aria-hidden="true" size={14} />
                   )}

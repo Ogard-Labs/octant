@@ -15,6 +15,8 @@ export interface ThreadSearchThread {
   readonly projectId?: string;
   readonly lifecycle: ThreadSearchLifecycle;
   readonly updatedAt?: string;
+  /** Code only: the title of the coordinator this thread is a worker of. */
+  readonly workerOf?: string;
 }
 
 export interface ThreadSearchProject {
@@ -47,6 +49,8 @@ export interface ThreadSearchHit {
   readonly projectId?: string;
   readonly folderLabel: string;
   readonly archived: boolean;
+  /** The result is a worker of the coordinator with this title; it wears the worker mark. */
+  readonly workerOf?: string;
   readonly turnId?: string;
   /** Where the host found the text; absent on a title match made from the listed threads. */
   readonly field?: ThreadSearchField;
@@ -232,6 +236,7 @@ function toTitleHit(
     ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
     folderLabel,
     archived: thread.lifecycle === "archived",
+    ...(thread.workerOf === undefined ? {} : { workerOf: thread.workerOf }),
   };
 }
 

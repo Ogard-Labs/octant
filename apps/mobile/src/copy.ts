@@ -116,6 +116,13 @@ export const MOBILE_COPY = {
   todosUnsaved: "That change could not be saved. Try again when the computer is reachable.",
   todosSignedOut: "This computer no longer accepts this phone. Pair it again in Settings.",
   todosTooLong: "A to-do is at most 280 characters.",
+  todosActions: "To-do actions",
+  todosStart: "Start",
+  todosLink: "Link",
+  todosNotLinked: "Thread started, not linked",
+  todoSource: "From to-do",
+  todoStartProjectsUnread:
+    "This computer's Projects could not be read, so this draft is a Chat. Go back to To-dos and press Start again to try once more.",
   homeRecent: "Recent",
   statusAllShort: "All",
   homeSeeAll: "See all",
