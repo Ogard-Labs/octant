@@ -1488,10 +1488,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             const streamEnded = (failed: ProviderFailure) => {
               sessionAnnounced.reject(failed);
             };
-            // Status notes and rate-limit frames the runtime sends before it
-            // initializes (a resumed `/compact` does) are held and delivered
-            // right after the initialized message, so a consumer still sees
-            // the session initialize first and the notes in their own order.
+            // Status notes, rate-limit frames and session states the runtime
+            // sends before it initializes (a resumed `/compact` does) are held
+            // and delivered right after the initialized message, so a consumer
+            // still sees the session initialize first and the notes in their
+            // own order.
             const heldBeforeInitialization: ClaudeDecodedMessage[] = [];
             const decodeNext = (message: unknown): readonly ClaudeDecodedMessage[] => {
               if (phase.kind !== "initializing")
@@ -1511,6 +1512,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               const sessionId = rawSessionId(message);
               if (sessionId !== undefined) announce(sessionId);
               if (decoded.kind === "ignored") return [];
+              // Only the latest state matters, so a run of them holds one.
+              if (decoded.kind === "session-state") {
+                const earlier = heldBeforeInitialization.findIndex(
+                  (held) => held.kind === "session-state",
+                );
+                if (earlier !== -1) heldBeforeInitialization.splice(earlier, 1);
+              }
               if (
                 heldBeforeInitialization.length >= MAX_NOTES_BEFORE_INITIALIZATION ||
                 (announcedSessionId !== undefined && decoded.sessionId !== announcedSessionId)

@@ -3331,6 +3331,12 @@ describe("Claude running as itself", () => {
       {
         type: "system",
         subtype: "session_state_changed",
+        state: "idle",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "session_state_changed",
         state: "running",
         session_id: "session-1",
       },
@@ -3359,7 +3365,10 @@ describe("Claude running as itself", () => {
         session_id: "session-1",
       },
     ]);
+    // A state reported before initializing still says the runtime reports
+    // its state; only the latest of them is kept, after the initialized one.
     expect(messages.slice(1)).toEqual([
+      { kind: "session-state", sessionId: "session-1", state: "running" },
       expect.objectContaining({ kind: "task", subtype: "task_started", background: true }),
       { kind: "session-state", sessionId: "session-1", state: "idle" },
       expect.objectContaining({ kind: "task", subtype: "task_notification", taskId: "bash-1" }),

@@ -1305,10 +1305,11 @@ export function decodeMessage(
       return decodeStatus(message, input);
     }
     if (message.type === "rate_limit_event") return decodeRateLimit(message);
-    // The session's state before it initializes says nothing about a turn.
+    // The session's state before it initializes says nothing about a turn,
+    // but it does say the runtime reports its state: dropped, a background
+    // task that ended before the first result could end the turn early.
     if (message.type === "system" && message.subtype === "session_state_changed") {
-      decodeSessionState(message);
-      return { kind: "ignored" };
+      return decodeSessionState(message);
     }
     throw protocol("Claude returned an unsupported runtime message.");
   }
