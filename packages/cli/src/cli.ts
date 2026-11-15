@@ -5,6 +5,7 @@ import {
   createWindowsHostLifecycleControl,
   openWindowsCliHost,
   runWindowsWebCommand,
+  windowsLogonEntryPolicy,
 } from "./windowsHost";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
 import {
@@ -863,9 +864,10 @@ function lifecycleHostDependencies(context: CliContext) {
   if (process.platform === "win32") {
     const host = openWindowsCliHost({ env: context.environment });
     if (host.status === "refused") throw new Error(host.message);
+    const serviceManager = createWindowsCliServiceManager(host, { env: context.environment });
     return {
-      policyStore: host.startup.servicePolicy,
-      serviceManager: createWindowsCliServiceManager(host, { env: context.environment }),
+      policyStore: windowsLogonEntryPolicy(serviceManager),
+      serviceManager,
       control: createWindowsHostLifecycleControl(host),
     };
   }

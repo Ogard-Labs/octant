@@ -18244,7 +18244,9 @@ refuse by name on Windows.
   own `server start`, each argument quoted for Windows' standard argument
   parsing and written by `reg.exe` with an exact argument list. Install and
   enable write it, disable removes it, and uninstall stops the host and
-  removes it. Start launches the server entry hidden and detached and returns
+  removes it. That value is also the CLI's record of automatic startup on
+  Windows: the host's native service-policy record admits a write only from
+  the profile's claimed owner, so the CLI never writes it. Start launches the server entry hidden and detached and returns
   once the native pipe authenticates its owner, or fails when the process
   exits first. Stop sends the authenticated graceful stop and, only when the
   owner outlives it by ten seconds, ends the owner's whole process tree with

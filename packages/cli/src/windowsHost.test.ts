@@ -1,8 +1,11 @@
 import { win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { WindowsHostProfileNative } from "@octant/host-runtime";
+import { runServerLifecycleCommand } from "./serverLifecycle";
+import type { UserServiceManager, UserServiceStatus } from "./serviceManager";
 import {
   createWindowsHostOwnerPort,
+  windowsLogonEntryPolicy,
   openWindowsCliHost,
   windowsNativeHostOwnerPath,
 } from "./windowsHost";
@@ -102,5 +105,64 @@ describe("the CLI's Windows host", () => {
   it("never treats an unreadable owner record as a host it may stop", async () => {
     const owner = createWindowsHostOwnerPort({ native: native({ status: "corrupt" }), paths });
     await expect(owner.observe()).resolves.toEqual({ status: "unanswered" });
+  });
+});
+
+describe("automatic startup on Windows", () => {
+  function logonEntry() {
+    let installed = false;
+    const status = async (): Promise<UserServiceStatus> => ({
+      kind: "run-key",
+      installed,
+      enabled: installed,
+      active: false,
+      session: "active",
+      lingering: "unknown",
+    });
+    const manager: UserServiceManager = {
+      kind: "run-key",
+      install: async () => void (installed = true),
+      uninstall: async () => void (installed = false),
+      start: async () => undefined,
+      stop: async () => undefined,
+      enable: async () => void (installed = true),
+      disable: async () => void (installed = false),
+      status,
+      logs: async () => ({ entries: [], follow: false }),
+    };
+    return { manager, installed: () => installed };
+  }
+  const noOwner = { request: async () => undefined, proveNoOwner: async () => true };
+
+  it("follows the logon entry, so disable and enable never need the owner's policy record", async () => {
+    const entry = logonEntry();
+    const run = (action: "status" | "enable" | "disable") =>
+      runServerLifecycleCommand({
+        action,
+        serviceManager: entry.manager,
+        policyStore: windowsLogonEntryPolicy(entry.manager),
+        control: noOwner,
+        sleep: async () => undefined,
+      });
+
+    await expect(run("status")).resolves.toMatchObject({ state: "disabled" });
+    await expect(run("enable")).resolves.toMatchObject({ policy: { enabled: true } });
+    expect(entry.installed()).toBe(true);
+    await expect(run("disable")).resolves.toMatchObject({ state: "disabled" });
+    expect(entry.installed()).toBe(false);
+    await expect(run("status")).resolves.toMatchObject({ policy: { enabled: false } });
+  });
+
+  it("reports a start as enabled once it has written the logon entry", async () => {
+    const entry = logonEntry();
+    const report = await runServerLifecycleCommand({
+      action: "start",
+      serviceManager: entry.manager,
+      policyStore: windowsLogonEntryPolicy(entry.manager),
+      control: noOwner,
+      sleep: async () => undefined,
+    });
+    expect(report.policy.enabled).toBe(true);
+    expect(report.state).not.toBe("disabled");
   });
 });

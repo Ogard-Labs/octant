@@ -204,13 +204,13 @@ try {
       /Octant server service: disabled/.test(disabled.stdout) &&
       (await runValue()) === undefined,
     "`octant server disable` removes the logon entry",
-    disabled.stdout,
+    `${disabled.stdout}\n${disabled.stderr}`,
   );
   const enabled = await octant("server", "enable");
   check(
     enabled.code === 0 && (await runValue()) === expected,
     "`octant server enable` records the logon entry again",
-    enabled.stdout,
+    `${enabled.stdout}\n${enabled.stderr}`,
   );
 
   // Uninstall is the manager's own operation (the desktop app calls it); it

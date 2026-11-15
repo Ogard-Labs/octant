@@ -10,7 +10,7 @@ import {
   type WindowsHostProfileNative,
   type WindowsHostProfilePaths,
 } from "@octant/host-runtime";
-import type { HostLifecycleControl } from "./serverLifecycle";
+import type { HostLifecycleControl, HostServicePolicyStore } from "./serverLifecycle";
 import { resolveServerStartCommand } from "./serverRun";
 import {
   createWindowsUserServiceManager,
@@ -173,6 +173,28 @@ export function createWindowsCliServiceManager(
     logs: (readOptions) => host.startup.logs.read(readOptions),
     ...(options.runner === undefined ? {} : { runner: options.runner }),
   });
+}
+
+/**
+ * Automatic startup on Windows is the logon entry itself. The host's native
+ * service-policy record admits a write only from the profile's claimed
+ * owner (the host, which Settings reaches), so the CLI reads and changes the
+ * Run value instead: enable and disable write and remove it through the
+ * manager, and nothing else is recorded.
+ */
+export function windowsLogonEntryPolicy(manager: UserServiceManager): HostServicePolicyStore {
+  return {
+    read: async () => ({
+      schemaVersion: 1,
+      enabled: (await manager.status()).installed,
+      updatedAt: new Date().toISOString(),
+    }),
+    setEnabled: async (enabled) => ({
+      schemaVersion: 1,
+      enabled,
+      updatedAt: new Date().toISOString(),
+    }),
+  };
 }
 
 /** The server entry with a fresh instance and bridge secret, marked as the service host. */
