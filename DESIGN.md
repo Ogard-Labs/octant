@@ -1383,6 +1383,23 @@ Surface (measure 880px, or wide)
   Settings groups keep their hairline because their rows have dividers.
 - A page with nothing on it is the empty state alone, centred; search and
   filters appear only once there is something to filter.
+- **Page edges.** A page is laid out on one grid, and its header sits on the
+  content's edges, never beside them:
+  - The page title's text and the first row of content start on the content's
+    left edge (Back's glyph stands on it, the title 30px after).
+  - The header's last action, the search field and the toolbar's last control end
+    on the content's right edge.
+  - A card's label, its rows' glyphs and text, and its notes stand on one inset
+    (16px), and its trailing items (counts, statuses, times, menus) end on the
+    inset's other side, 16px in.
+  - Sibling destinations end their content on the same right edge, so the
+    Inbox and To-dos open to the same width, and a list page whose header holds
+    an icon cluster ends it on the search field's right edge (Issues as Pull
+    requests).
+  - A thread's title band starts the mark 20px in and ends its actions 20px in,
+    the transcript's and the composer's own edges at ordinary widths.
+  - A tile's blocks keep 12px between them, including the blocks a component
+    nests inside one block.
 
 ### Settings page
 
