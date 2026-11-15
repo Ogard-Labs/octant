@@ -11201,6 +11201,61 @@ describe("provider switch handoff", () => {
         },
       );
 
+      it("keeps a merged fork pending through a turn the runtime started, which sends nothing, and carries it on the person's next turn", async () => {
+        const drivers = twoHarnesses();
+        const attachRuntimeTurn = vi.fn(() => Effect.void);
+        Object.assign(drivers.provider, { attachRuntimeTurn });
+        const runtimeTurn = String(operationId(86));
+        const fixture = runtimeFixture({
+          resolveProviderDriver: drivers.resolveProviderDriver,
+          isRuntimeStartedTurn: (operation) => operation === runtimeTurn,
+        });
+        try {
+          await forkWithReply(
+            fixture,
+            drivers,
+            { instance: providerInstance, model: "model-a" },
+            { instance: harnessInstance, model: "harness-model" },
+          );
+          expect(
+            await fixture.runtime.mergeForkContext!(
+              windowId,
+              forkThreadId,
+              String(operationId(90)),
+            ),
+          ).toMatchObject({ status: "merged" });
+
+          // The runtime's own turn attaches to the kept session and sends nothing.
+          await sendOnSource(fixture, 86);
+          await vi.waitFor(() => expect(attachRuntimeTurn).toHaveBeenCalledOnce());
+          await drivers.offer(
+            providerInstance,
+            eventOn(providerInstance, { kind: "completed", sessionId: sourceSession }),
+          );
+          await vi.waitFor(() =>
+            expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+          );
+          expect(
+            (await sourceFrames(fixture, 86)).some(
+              (frame) => frame.event.kind === "fork-context-delivered",
+            ),
+          ).toBe(false);
+
+          // The person's next turn carries the merge.
+          await sendOnSource(fixture, 87);
+          await vi.waitFor(async () =>
+            expect(
+              (await sourceFrames(fixture, 87)).some(
+                (frame) => frame.event.kind === "fork-context-delivered",
+              ),
+            ).toBe(true),
+          );
+        } finally {
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      });
+
       it("merges a fork once, carries it once, and keeps it across a restart", async () => {
         const drivers = twoHarnesses();
         const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });

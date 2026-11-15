@@ -310,6 +310,81 @@ describe("OutlivingSessions", () => {
     expect(runtime.counts()).toEqual({ opened: 1, closed: 1 });
   });
 
+  it("keeps a session that is still stopping in the way of the next turn and of another stop until it has stopped", async () => {
+    let stopped = false;
+    let finishStop: (() => void) | undefined;
+    let opened = 0;
+    const work: ProviderBackgroundWork = {
+      tasks: [{ taskId: "dev" }],
+      turnRunning: false,
+      runtimeTurnWaiting: false,
+      ended: false,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.empty),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      send: () => Effect.void,
+      interrupt: () => Effect.void,
+      // The runtime and its tasks take a while to shut down.
+      stop: () =>
+        Effect.promise(
+          () =>
+            new Promise<void>((resolve) => {
+              finishStop = () => {
+                stopped = true;
+                resolve();
+              };
+            }),
+        ),
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+      backgroundWork: () => ({ current: () => work, watch: () => () => undefined }),
+    };
+    const open = Effect.sync(() => {
+      opened += 1;
+      return connection;
+    });
+    const keeper = keeperFor();
+    const first = Effect.runSync(Scope.make());
+    const held = await Effect.runPromise(
+      Scope.extend(keeper.acquire(key, "same-folder", open), first),
+    );
+    await Effect.runPromise(held.start(start()));
+    await Effect.runPromise(held.stop(sessionId));
+    await Effect.runPromise(Scope.close(first, Exit.void));
+    expect(keeper.liveTasks(key)?.tasks).toHaveLength(1);
+
+    const stopping = keeper.stopThread(key);
+    await vi.waitFor(() => expect(finishStop).toBeDefined());
+    // A Stop pressed again, and a turn sent meanwhile, both wait for it.
+    let secondStop: boolean | undefined;
+    const again = keeper.stopThread(key).then((answer) => {
+      secondStop = answer;
+    });
+    const next = Effect.runSync(Scope.make());
+    let acquired = false;
+    const acquiring = Effect.runPromise(
+      Scope.extend(keeper.acquire(key, "same-folder", open), next),
+    ).then(() => {
+      acquired = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(acquired).toBe(false);
+    expect(secondStop).toBeUndefined();
+    expect(opened).toBe(1);
+
+    finishStop?.();
+    await Promise.all([stopping, again, acquiring]);
+    expect(stopped).toBe(true);
+    expect(secondStop).toBe(true);
+    // The next turn opens its connection only once the old one has stopped.
+    expect(opened).toBe(2);
+    await Effect.runPromise(Scope.close(next, Exit.void));
+    await keeper.close();
+  });
+
   it("stops every kept session at shutdown", async () => {
     const runtime = fakeRuntime();
     const keeper = keeperFor();

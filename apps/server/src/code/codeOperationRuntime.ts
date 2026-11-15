@@ -3185,6 +3185,8 @@ interface ActiveTurn {
   readonly extraFolders: ReadonlyArray<string>;
   /** A kept session's terms, from the Project as it stood when `extraFolders` was read. */
   readonly sessionTerms?: string;
+  /** The runtime started this turn by itself; it attaches to the kept session and sends nothing. */
+  readonly runtimeTurn?: true;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -3940,26 +3942,33 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // that cannot read it refuses rather than dropping it silently.
     let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
     let recoveredMergeInputs = false;
-    try {
-      const replay = this.#events.replay({
-        threadId: input.thread.id,
-        operationId: command.operationId,
-        afterCursor: 0,
-        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
-      });
-      recoveredMergeInputs =
-        replay.status === "ok" &&
-        replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
-      forkMerges =
-        replay.status === "ok"
-          ? await forkMergeDelivery(
-              { events: this.#events, readEvidence: this.#options.evidence.read },
-              { threadId: input.thread.id, frames: replay.frames },
-            )
-          : { status: "refused" };
-    } catch {
-      forkMerges = { status: "refused" };
-    }
+    // A turn the runtime started by itself attaches to its kept session and
+    // sends nothing, so it carries no merged fork and journals no delivery
+    // for one: the merge stays pending for the person's next turn. The mark
+    // is read once, here, and carried on the turn.
+    const runtimeTurn = this.#options.isRuntimeStartedTurn?.(String(command.operationId)) === true;
+    if (runtimeTurn) forkMerges = { status: "ready", blocks: [], records: [] };
+    else
+      try {
+        const replay = this.#events.replay({
+          threadId: input.thread.id,
+          operationId: command.operationId,
+          afterCursor: 0,
+          limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+        });
+        recoveredMergeInputs =
+          replay.status === "ok" &&
+          replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
+        forkMerges =
+          replay.status === "ok"
+            ? await forkMergeDelivery(
+                { events: this.#events, readEvidence: this.#options.evidence.read },
+                { threadId: input.thread.id, frames: replay.frames },
+              )
+            : { status: "refused" };
+      } catch {
+        forkMerges = { status: "refused" };
+      }
     if (forkMerges.status === "refused") {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
@@ -4152,6 +4161,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
       extraFolders,
       ...(sessionTerms === undefined ? {} : { sessionTerms }),
+      ...(runtimeTurn ? { runtimeTurn: true as const } : {}),
       driver,
       firstTurn:
         !priorTurn &&
@@ -6314,9 +6324,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
           ...(wakeups === undefined ? {} : { wakeups }),
-          ...(this.#options.isRuntimeStartedTurn?.(String(active.operationId)) === true
-            ? { runtimeTurn: true as const }
-            : {}),
+          ...(active.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {

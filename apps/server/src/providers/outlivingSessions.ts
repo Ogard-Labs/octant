@@ -112,6 +112,8 @@ interface Kept {
 
 export class OutlivingSessions {
   readonly #kept = new Map<string, Kept>();
+  /** Sessions taken out of `#kept` that are still stopping, by thread. */
+  readonly #closing = new Map<string, Promise<void>>();
   readonly #options: OutlivingSessionsOptions;
   #closed = false;
 
@@ -132,6 +134,14 @@ export class OutlivingSessions {
     terms?: string,
   ): Effect.Effect<ProviderConnection, ProviderFailure, Exclude<R, Scope.Scope> | Scope.Scope> {
     return Effect.gen(this, function* () {
+      if (this.#closed) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unavailable",
+          message: "The host is shutting down.",
+        });
+      }
+      // A session of this thread still stopping holds its native history.
+      yield* Effect.promise(() => this.#closingSettled(key));
       if (this.#closed) {
         return yield* Effect.fail<ProviderFailure>({
           category: "unavailable",
@@ -186,7 +196,10 @@ export class OutlivingSessions {
    */
   async stopThread(key: string): Promise<boolean> {
     const kept = this.#kept.get(key);
-    if (kept === undefined || kept.leased) return false;
+    // A session already stopping is waited for, so a Stop answers only once
+    // the runtime and its tasks are gone.
+    if (kept === undefined) return this.#closingSettled(key);
+    if (kept.leased) return false;
     await this.#dispose(kept);
     return true;
   }
@@ -406,7 +419,9 @@ export class OutlivingSessions {
   }
 
   #dispose(kept: Kept): Promise<void> {
-    kept.disposed ??= (async () => {
+    if (kept.disposed !== undefined) return kept.disposed;
+    const current = this.#kept.get(kept.key) === kept;
+    kept.disposed = (async () => {
       if (this.#kept.get(kept.key) === kept) this.#kept.delete(kept.key);
       kept.leased = false;
       clearTimers(kept);
@@ -419,7 +434,30 @@ export class OutlivingSessions {
         this.#options.onChanged?.(kept.key);
       }
     })();
+    // The entry left the map above, before the provider stop and the scope
+    // close finish. Until they do, the thread's next turn and another Stop
+    // wait for this one: a turn that saw no kept session would otherwise
+    // resume the same native history on a new connection while the old
+    // runtime and its tasks were still shutting down.
+    if (current) {
+      const closing = kept.disposed;
+      this.#closing.set(kept.key, closing);
+      void closing.finally(() => {
+        if (this.#closing.get(kept.key) === closing) this.#closing.delete(kept.key);
+      });
+    }
     return kept.disposed;
+  }
+
+  /** Waits until no session of this thread is still stopping. */
+  async #closingSettled(key: string): Promise<boolean> {
+    let waited = false;
+    for (let closing = this.#closing.get(key); closing !== undefined;) {
+      waited = true;
+      await closing.catch(() => undefined);
+      closing = this.#closing.get(key);
+    }
+    return waited;
   }
 }
 
