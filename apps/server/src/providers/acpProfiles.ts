@@ -618,7 +618,8 @@ const vibeProfile: AcpProviderProfile = {
   nativeSetupSupport: {
     // In Work and Code outside Plan; see `VIBE_ENABLE_SUBAGENTS`.
     subagents: "supported",
-    // Its own web fetch was never switched off; each fetch marks the thread.
+    // Its own web search and fetch are off unless the setup has them on;
+    // each fetch marks the thread.
     webTools: "supported",
     skills: "supported",
     toolServers: "supported",
@@ -692,6 +693,13 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_DEFAULT_AGENT: "ask",
       // Skills have no `default_skill` to resolve, so the deny-all form is safe here.
       VIBE_DISABLED_SKILLS: '["*"]',
+      // Vibe's own web search and fetch stay off unless the setup has web
+      // tools on, so turning "Run as itself" off really removes them rather
+      // than leaving Vibe's defaults in place. Read from the 3.0.3 source: the
+      // tools are named `web_search` and `web_fetch`, `disabled_tools` is
+      // applied after `enabled_tools`, and the environment layer's list is
+      // added to the person's own rather than replacing it.
+      VIBE_DISABLED_TOOLS: '["web_search","web_fetch"]',
     },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
@@ -755,6 +763,7 @@ const vibeProfile: AcpProviderProfile = {
           ...(setup.toolServers ? ["VIBE_MCP_SERVERS", "VIBE_ENABLE_CONNECTORS"] : []),
           ...(setup.hooks ? ["VIBE_ENABLE_EXPERIMENTAL_HOOKS"] : []),
           ...(setup.projectCode ? ["VIBE_TOOL_PATHS"] : []),
+          ...(setup.webTools ? ["VIBE_DISABLED_TOOLS"] : []),
           ...(subagents
             ? [
                 "VIBE_ENABLE_SUBAGENTS",

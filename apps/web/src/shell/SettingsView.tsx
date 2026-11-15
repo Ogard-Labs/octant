@@ -164,6 +164,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { WebSearchSettingsView } from "../settings/WebSearchSettingsView";
 import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
@@ -198,10 +199,7 @@ import {
   NativeHarnessRoutingPanel,
   nativeHarnessSlotsUsing,
 } from "../harness/NativeHarnessRoutingPanel";
-import {
-  nativeHarnessPickerGroups,
-  nativeHarnessProviderOptions,
-} from "../harness/modelRoleOptions";
+import { modelRolePickerGroups, modelRoleProviderOptions } from "../harness/modelRoleOptions";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
@@ -382,6 +380,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
     "Models you add by API key or run locally: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
+  "web-search":
+    "Where Octant's own web search may send a query, the data policy it follows, and the keys it uses.",
   github: "Connection and repository access on the selected host.",
   host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
@@ -415,6 +415,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
+  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
   ...[
@@ -1339,11 +1340,11 @@ function ActiveSectionContent({
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
                 focused={focusedSetting === settingId("model-roles")}
-                groups={nativeHarnessPickerGroups(props.providerController)}
+                groups={modelRolePickerGroups(props.providerController)}
                 key={rolesRevision}
                 hostId={LOCAL_HOST_ID}
                 onOpenModelEndpoints={openModelEndpoints}
-                providers={nativeHarnessProviderOptions(props.providerController)}
+                providers={modelRoleProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
                   : { onVerifyTools: props.providerController.verifyModelTools })}
@@ -1851,6 +1852,16 @@ function ActiveSectionContent({
             />
           )}
         </div>
+      );
+    case "web-search":
+      return (
+        <WebSearchSettingsView
+          {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          onOpenResearchRoute={() =>
+            onApplyDeepLink({ section: "chat", setting: settingId("chat-research-backend") })
+          }
+        />
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable

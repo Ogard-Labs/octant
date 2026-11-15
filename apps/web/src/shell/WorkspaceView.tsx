@@ -90,8 +90,8 @@ import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveC
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
 import {
-  nativeHarnessPickerGroups,
-  nativeHarnessProviderOptions,
+  modelRolePickerGroups,
+  modelRoleProviderOptions,
   nativeHarnessReadinessById,
 } from "../harness/modelRoleOptions";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
@@ -2458,10 +2458,10 @@ function renderNonCodeTab(
           : {
               modelRoles: {
                 client: props.nativeHarnessClient,
-                groups: nativeHarnessPickerGroups(props.providerController),
+                groups: modelRolePickerGroups(props.providerController),
                 hostId: LOCAL_HOST_ID,
                 readiness: nativeHarnessReadinessById(
-                  nativeHarnessProviderOptions(props.providerController),
+                  modelRoleProviderOptions(props.providerController),
                 ),
               },
             })}

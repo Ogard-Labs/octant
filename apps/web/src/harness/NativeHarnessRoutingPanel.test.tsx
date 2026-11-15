@@ -54,13 +54,15 @@ interface EndpointFixture {
   }>;
   readonly readiness?: "ready" | "degraded" | "unauthenticated";
   readonly carriesTools?: boolean;
+  /** A provider that runs the model itself rather than through Octant's harness. */
+  readonly driverKind?: "claude";
 }
 
 function instance(fixture: EndpointFixture): ProviderInstance {
   return {
     id: fixture.id,
     displayName: fixture.name,
-    driverKind: "openai-compatible",
+    driverKind: fixture.driverKind ?? "openai-compatible",
     configuration: {
       kind: "openai-compatible-http",
       baseUrl: "http://127.0.0.1:11434/v1/",
@@ -141,6 +143,17 @@ const local: EndpointFixture = {
     { id: "scribe-2-mini", name: "scribe-2-mini" },
   ],
 };
+const claudeId = "10000000-0000-4000-8000-0000000000c1";
+const claude: EndpointFixture = {
+  id: claudeId,
+  name: "Claude",
+  driverKind: "claude",
+  models: [
+    { id: "opus-5-5", name: "Opus 5.5", images: true },
+    { id: "sonnet-5-5", name: "Sonnet 5.5", images: true },
+    { id: "haiku-5-5", name: "Haiku 5.5", images: true },
+  ],
+};
 const router: EndpointFixture = {
   id: endpointB,
   name: "Model router",
@@ -211,7 +224,7 @@ describe("NativeHarnessRoutingPanel without endpoints", () => {
 
     expect(await screen.findByText("missing-model")).toBeVisible();
     expect(screen.queryByText("No model endpoint yet")).not.toBeInTheDocument();
-    expect(screen.getByText("Not offered by a ready endpoint")).toBeVisible();
+    expect(screen.getByText("Not offered by a ready provider")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Add a model endpoint" }));
     expect(onOpenModelEndpoints).toHaveBeenCalledOnce();
   });
@@ -646,7 +659,7 @@ describe("NativeHarnessRoutingPanel model tags", () => {
       routing: async () => roles({ default: [candidate("missing-provider", "missing-model")] }),
       fixtures: [local],
     });
-    expect(await screen.findByText("Not offered by a ready endpoint")).toBeVisible();
+    expect(await screen.findByText("Not offered by a ready provider")).toBeVisible();
   });
 });
 
@@ -727,5 +740,107 @@ describe("NativeHarnessRoutingPanel jobs", () => {
       expectedVersion: 1,
     });
     expect(await screen.findByText("Which job uses which role · changed")).toBeVisible();
+  });
+});
+
+describe("NativeHarnessRoutingPanel with providers that are not harness endpoints", () => {
+  it("shows the roles when only a provider that runs its own models is connected", async () => {
+    renderPanel({ routing: async () => settings(), fixtures: [claude] });
+    expect(await screen.findByRole("button", { name: "Builder model" })).toBeVisible();
+    expect(screen.queryByText("No model endpoint yet")).not.toBeInTheDocument();
+  });
+
+  it("previews a suggestion for every role and saves nothing until Use these", async () => {
+    const user = userEvent.setup();
+    const updateRouting = vi.fn(async () => ({
+      kind: "routing-settings" as const,
+      settings: settings(),
+    }));
+    renderPanel({ routing: async () => settings(), updateRouting, fixtures: [claude, local] });
+
+    await user.click(await screen.findByRole("button", { name: "Suggest roles" }));
+    const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
+    const lines = within(dialog).getByRole("list", { name: "Suggested models" });
+    expect(lines).toHaveTextContent(/Builder → Sonnet 5.5 \(Claude\)/);
+    expect(lines).toHaveTextContent(/Hard problems → Opus 5.5 \(Claude\)/);
+    // A role that runs no tools takes its fallback from the other provider; the
+    // endpoint's models have no proven tools, so the others stay on Claude.
+    expect(lines).toHaveTextContent(/Fallback: scribe-2-mini \(Scribe Local\)/);
+    expect(lines).not.toHaveTextContent(/Builder → scribe/);
+    expect(updateRouting).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Suggested models" })).not.toBeInTheDocument();
+    expect(updateRouting).not.toHaveBeenCalled();
+  });
+
+  it("saves the suggestion through the versioned command and keeps a role's flags", async () => {
+    const user = userEvent.setup();
+    const updateRouting = vi.fn(async () => ({
+      kind: "routing-settings" as const,
+      settings: settings(),
+    }));
+    const saved = settings(
+      {
+        slots: [
+          {
+            id: "default" as never,
+            candidates: [candidate(endpointA, "scribe-2")],
+            askBeforeUsing: true,
+          },
+        ],
+        jobSlots: [],
+      },
+      4,
+    );
+    renderPanel({ routing: async () => saved, updateRouting, fixtures: [claude, local] });
+
+    await user.click(await screen.findByRole("button", { name: "Suggest roles" }));
+    await user.click(await screen.findByRole("button", { name: "Use these" }));
+
+    await waitFor(() => expect(updateRouting).toHaveBeenCalledOnce());
+    const sent = updateRouting.mock.calls[0] as unknown as readonly [
+      { configuration: NativeHarnessRoutingConfiguration; expectedVersion: number },
+    ];
+    expect(sent[0].expectedVersion).toBe(4);
+    const builder = sent[0].configuration.slots.find((slot) => String(slot.id) === "default");
+    expect(String(builder?.candidates[0]?.modelId)).toBe("sonnet-5-5");
+    expect(builder?.askBeforeUsing).toBe(true);
+    const planner = sent[0].configuration.slots.find((slot) => String(slot.id) === "plan");
+    expect(String(planner?.candidates[0]?.modelId)).toBe("opus-5-5");
+  });
+
+  it("previews one role from its own Suggest button and leaves the others alone", async () => {
+    const user = userEvent.setup();
+    renderPanel({ routing: async () => settings(), fixtures: [claude] });
+
+    await user.click(await screen.findByRole("button", { name: "Suggest a model for Scout" }));
+    const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
+    expect(dialog).toHaveTextContent(/Scout → Haiku 5.5 \(Claude\)/);
+    expect(dialog).not.toHaveTextContent(/Planner/);
+  });
+
+  it("offers Suggest only on the roles suggestions know, never on the Advisor", async () => {
+    const user = userEvent.setup();
+    renderPanel({ routing: async () => settings(), fixtures: [claude] });
+
+    expect(
+      await screen.findByRole("button", { name: "Suggest a model for Scout" }),
+    ).toBeInTheDocument();
+    await openOtherRoles(user);
+    expect(await screen.findByRole("button", { name: "Advisor model" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Suggest a model for Advisor/ })).toBeNull();
+  });
+
+  it("says why a role stays empty when no connected model fits it", async () => {
+    const user = userEvent.setup();
+    renderPanel({ routing: async () => settings(), fixtures: [local] });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Suggest a model for Sees images" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
+    expect(dialog).toHaveTextContent(/Sees images stays as it is/);
+    expect(within(dialog).getByRole("button", { name: "Use these" })).toBeDisabled();
   });
 });

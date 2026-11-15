@@ -307,4 +307,45 @@ describe("ProjectModelRolesSection", () => {
     ).toBeVisible();
     expect(client.projectRoutingState).toHaveBeenCalledTimes(2);
   });
+
+  it("suggests only for a role the Project chose, and only from the models Settings lists for it", async () => {
+    const user = userEvent.setup();
+    const host = configuration({ smol: ["scribe-1", "scribe-2"], quick: ["scribe-1"] });
+    const setProjectRouting = savedOverride(configuration({ smol: ["scribe-2", "scribe-1"] }), 2);
+    const client = renderSection({
+      host,
+      project: configuration({ smol: ["scribe-1"] }),
+      setProjectRouting,
+    });
+
+    // Quick edit uses Settings, so it offers no Suggest; Small jobs is the Project's own.
+    await screen.findByRole("button", { name: "Suggest a model for Small jobs" });
+    expect(
+      screen.queryByRole("button", { name: "Suggest a model for Quick edit" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Suggest a model for Small jobs" }));
+    const dialog = await screen.findByRole("dialog", { name: "Suggested models" });
+    expect(dialog).toHaveTextContent(/Small jobs → scribe-2 \(Scribe Local\)/);
+    // scribe-3 is connected but not in Settings' Small jobs list.
+    expect(dialog).not.toHaveTextContent(/scribe-3/);
+    expect(client.setProjectRouting).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Use these" }));
+    expect(client.setProjectRouting).toHaveBeenCalledWith(projectId, {
+      configuration: configuration({ smol: ["scribe-2", "scribe-1"] }),
+      expectedVersion: 1,
+    });
+  });
+
+  it("leaves the Project's role as it is when the person cancels", async () => {
+    const user = userEvent.setup();
+    const client = renderSection({
+      host: configuration({ smol: ["scribe-1", "scribe-2"] }),
+      project: configuration({ smol: ["scribe-1"] }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Suggest a model for Small jobs" }));
+    await user.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(client.setProjectRouting).not.toHaveBeenCalled();
+  });
 });

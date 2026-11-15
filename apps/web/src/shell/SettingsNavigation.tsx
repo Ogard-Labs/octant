@@ -1,5 +1,6 @@
 import type { SettingsSectionId } from "@octant/contracts";
 import {
+  Search,
   Bell,
   Blocks,
   Brain,
@@ -85,6 +86,7 @@ const SETTINGS_NAVIGATION_META: Readonly<
   work: { group: "AI", icon: FolderOpen },
   code: { group: "AI", icon: Code2 },
   skills: { group: "Tools", icon: Blocks },
+  "web-search": { group: "Tools", icon: Search },
   "computer-use": { group: "Tools", icon: Monitor },
   "device-tools": { group: "Tools", icon: TabletSmartphone },
   github: { group: "Tools", icon: FolderGit2 },

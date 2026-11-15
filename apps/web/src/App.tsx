@@ -428,12 +428,9 @@ import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
-import {
-  chatTranscriptAnswer,
-  codeTranscriptAnswer,
-  useTranscriptSearch,
-  workTranscriptAnswer,
-} from "./shell/useTranscriptSearch";
+import { threadSearchAnswer, useTranscriptSearch } from "./shell/useTranscriptSearch";
+import type { ThreadSearchClient } from "@octant/client-runtime/thread-search-client";
+import type { ThreadSearchScope } from "./shell/threadSearchViewModel";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
@@ -526,6 +523,7 @@ import {
 import { useAppleSimulatorPaneOffer } from "./apple/useAppleSimulatorPaneOffer";
 import { useAndroidEmulatorPaneOffer } from "./android/useAndroidEmulatorPaneOffer";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { decodeCanvasId } from "@octant/contracts/canvas";
 import { resolveThreadHandOffClient } from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import {
@@ -643,6 +641,7 @@ export interface AppProps {
   readonly computerUseClient?: ComputerUseClient;
   readonly contextClient?: ContextClient;
   readonly workThreadClient?: WorkThreadClient;
+  readonly threadSearchClient?: ThreadSearchClient;
   readonly workTurnClient?: WorkTurnClient;
   readonly hostBridge?: OctantHostBridge;
   readonly hostClient?: HostClient;
@@ -1767,6 +1766,9 @@ function LaunchedShell(
         todoClient: props.todoClient,
         todoListHostClient: props.todoListHostClient,
         workThreadClient: props.workThreadClient,
+        ...(props.threadSearchClient === undefined
+          ? {}
+          : { threadSearchClient: props.threadSearchClient }),
         workTurnClient: props.workTurnClient,
       }),
     [
@@ -1790,6 +1792,7 @@ function LaunchedShell(
       props.planClient,
       props.projectWindowCapability,
       props.shipClient,
+      props.threadSearchClient,
       props.todoClient,
       props.todoListHostClient,
       props.workThreadClient,
@@ -1813,6 +1816,7 @@ function LaunchedShell(
     githubTransport,
     hostClient,
     hostResourceClient,
+    threadSearchClient,
     pendingRequestClient,
     projectTerminalClient,
     projectBrowserClient,
@@ -1889,19 +1893,17 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
-  // Message text is searched in the mode the overlay searches, on that mode's
-  // host route, which applies the same listing authority as its sidebar.
-  const searchActiveModeTranscript = useCallback(
+  // Search reads every mode at once (or the one the overlay's filter names)
+  // through the host's search, which searches only the threads each mode
+  // lists for this window.
+  const [searchScope, setSearchScope] = useState<ThreadSearchScope>("all");
+  const searchAcrossModes = useCallback(
     async (query: string) =>
-      activeMode === "chat"
-        ? chatTranscriptAnswer(await chatClient.searchTranscript(query))
-        : activeMode === "work"
-          ? workTranscriptAnswer(await workThreadClient.searchTranscript(query))
-          : codeTranscriptAnswer(await codeClient.searchTranscript(query)),
-    [activeMode, chatClient, codeClient, workThreadClient],
+      threadSearchAnswer(await threadSearchClient.search(query, searchScope)),
+    [searchScope, threadSearchClient],
   );
   const transcriptSearch = useTranscriptSearch({
-    search: searchActiveModeTranscript,
+    search: searchAcrossModes,
     query: searchQuery,
     enabled: searchOpen,
   });
@@ -3769,6 +3771,10 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The Project controller makes a new setter each render; the thread's trust
+  // prompt reads the latest through this ref so the services stay stable.
+  const setProjectNativeProvidersRef = useRef(projectController.setNativeProviders);
+  setProjectNativeProvidersRef.current = projectController.setNativeProviders;
   const threadNativeSetupServices = useMemo(
     () =>
       providerController.threadNativeSetup === undefined
@@ -3776,8 +3782,17 @@ function LaunchedShell(
         : {
             instances: providerController.instances,
             ...providerController.threadNativeSetup,
+            projects: projectController.projects,
+            setProjectNativeProviders: (
+              projectId: ProjectId,
+              providers: Parameters<typeof projectController.setNativeProviders>[1],
+            ) => setProjectNativeProvidersRef.current(projectId, providers),
           },
-    [providerController.instances, providerController.threadNativeSetup],
+    [
+      providerController.instances,
+      providerController.threadNativeSetup,
+      projectController.projects,
+    ],
   );
   // Built once per client and provider list: a new element on every render
   // re-rendered the whole memoized sidebar for each streamed event.
@@ -5183,6 +5198,9 @@ function LaunchedShell(
             ...(thread.coordinator === true ? { coordinator: true } : {}),
             ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.coordinatorChoice === undefined
+              ? {}
+              : { coordinatorChoice: thread.coordinatorChoice }),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
@@ -8785,6 +8803,8 @@ function LaunchedShell(
           searchContentHits={transcriptSearch.hits}
           searchContentListing={threadSearchContentListing}
           searchContentTruncated={transcriptSearch.truncated}
+          searchScope={searchScope}
+          onSearchScopeChange={setSearchScope}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
@@ -8807,6 +8827,19 @@ function LaunchedShell(
             // server-authoritative workspace policy rejects.
             const hitProjectId =
               hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
+            // A Canvas hit opens the Canvas, in its thread's mode and Project
+            // (none for a Chat Canvas owned by a thread outside a Project),
+            // through the same open every Canvas card uses.
+            if (hit.field === "canvas" && hit.canvasId !== undefined) {
+              setRevealTurn(undefined);
+              void controller.openCanvas({
+                mode: hit.mode,
+                title: hit.canvasTitle ?? hit.title,
+                canvasId: decodeCanvasId(hit.canvasId),
+                projectId: hitProjectId ?? null,
+              });
+              return;
+            }
             if (hit.mode === "chat") {
               const threadId = decodeChatThreadId(hit.threadId);
               setRevealTurn(

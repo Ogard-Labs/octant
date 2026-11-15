@@ -60,6 +60,7 @@ interface FixtureOptions {
   readonly createThread?: CodePlannerServiceOptions["createThread"];
   readonly canAccessProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
   readonly isMarkedWithOutsideContent?: (threadId: string) => boolean;
+  readonly rechooseAsBuilder?: CodePlannerServiceOptions["rechooseAsBuilder"];
 }
 
 function fixture(options?: FixtureOptions): {
@@ -122,6 +123,9 @@ function fixture(options?: FixtureOptions): {
         return { kind: "thread-created", thread: createdThread };
       }),
     isMarkedWithOutsideContent: options?.isMarkedWithOutsideContent ?? (() => false),
+    ...(options?.rechooseAsBuilder === undefined
+      ? {}
+      : { rechooseAsBuilder: options.rechooseAsBuilder }),
   });
   return { service, created, contexts, persistence, createdThreads };
 }
@@ -304,6 +308,113 @@ describe("a coordinator's proposed worker", () => {
       creation: managedCreation(),
     });
     expect(at).toMatchObject({ status: "confirmed" });
+  });
+});
+
+describe("a coordinator's proposal chosen from the roles", () => {
+  const deepChoice = { role: "deep", rank: "main" } as const;
+  function proposeDeep(world: ReturnType<typeof fixture>) {
+    const thread = world.createdThreads.get(ids.thread);
+    if (thread === undefined) throw new Error("Expected the fixture thread");
+    world.createdThreads.set(ids.thread, { ...thread, coordinator: true });
+    const proposed = world.service.proposeForCoordinator(threadId, draft, {
+      executionPolicy: "approval-gated",
+      providerInstanceId: ids.provider,
+      modelId: "model-1",
+      choice: { ...deepChoice, why: "a race across two services" },
+      modelName: "Model One",
+    });
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    return proposed.proposal;
+  }
+
+  it("journals the host's choice on the worker when the person approves the proposed model", async () => {
+    const world = fixture();
+    const proposal = proposeDeep(world);
+    expect(proposal.workerOptions).toMatchObject({ modelName: "Model One", choice: deepChoice });
+    await world.service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposal.id,
+      expectedVersion: 1,
+      creation: managedCreation(),
+    });
+    expect(world.contexts[0]).toMatchObject({
+      coordinatorThreadId: ids.thread,
+      coordinatorChoice: { ...deepChoice, why: "a race across two services" },
+    });
+  });
+
+  it("records a person's pick when the approval starts another model", async () => {
+    const world = fixture();
+    const proposal = proposeDeep(world);
+    await world.service.resolveProposal(windowId, {
+      kind: "confirm-planner-work-proposal",
+      proposalId: proposal.id,
+      expectedVersion: 1,
+      creation: { ...managedCreation(), modelId: "model-2" },
+    });
+    expect(world.contexts[0]).toMatchObject({
+      coordinatorChoice: { role: "deep", rank: "person" },
+    });
+  });
+
+  it("chooses again in the Builder role for Use Builder instead and keeps the proposal pending", async () => {
+    const world = fixture({
+      rechooseAsBuilder: () => ({
+        status: "chosen",
+        resolved: {
+          providerInstanceId: ids.provider,
+          modelId: "builder-model",
+          choice: { role: "default", rank: "main" },
+          modelName: "Builder Model",
+        },
+      }),
+    });
+    const proposal = proposeDeep(world);
+    const outcome = await world.service.resolveProposal(windowId, {
+      kind: "use-builder-for-planner-work-proposal",
+      proposalId: proposal.id,
+      expectedVersion: 1,
+    });
+    expect(outcome).toMatchObject({
+      status: "rechosen",
+      proposal: {
+        status: "pending",
+        workerOptions: {
+          executionPolicy: "approval-gated",
+          modelId: "builder-model",
+          modelName: "Builder Model",
+          choice: { role: "default", rank: "main" },
+        },
+      },
+    });
+    expect(world.created).toEqual([]);
+    const stale = await world.service.resolveProposal(windowId, {
+      kind: "use-builder-for-planner-work-proposal",
+      proposalId: proposal.id,
+      expectedVersion: 1,
+    });
+    expect(stale).toMatchObject({ status: "refused", reason: "proposal-changed" });
+  });
+
+  it("refuses Use Builder instead on a proposal whose model was not chosen from the roles", async () => {
+    const world = fixture({
+      rechooseAsBuilder: () => ({ status: "refused", message: "unused" }),
+    });
+    const thread = world.createdThreads.get(ids.thread);
+    if (thread === undefined) throw new Error("Expected the fixture thread");
+    world.createdThreads.set(ids.thread, { ...thread, coordinator: true });
+    const proposed = world.service.proposeForCoordinator(threadId, draft, {
+      executionPolicy: "approval-gated",
+    });
+    if (proposed.status !== "proposed") throw new Error("Expected proposal");
+    expect(
+      await world.service.resolveProposal(windowId, {
+        kind: "use-builder-for-planner-work-proposal",
+        proposalId: proposed.proposal.id,
+        expectedVersion: 1,
+      }),
+    ).toMatchObject({ status: "refused", reason: "builder-unavailable" });
   });
 });
 

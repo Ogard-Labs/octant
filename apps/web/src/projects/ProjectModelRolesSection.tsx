@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   MAX_NATIVE_HARNESS_SLOT_CANDIDATES,
+  nativeHarnessSlotCandidateKey,
   type NativeHarnessProjectRoutingOverride,
   type NativeHarnessRoutingConfiguration,
   type NativeHarnessRoutingSettings,
@@ -12,9 +13,23 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import type { PickerGroup } from "@octant/domain";
+import {
+  MODEL_ROLE_NEEDS,
+  suggestModelRoles,
+  type PickerGroup,
+  type RoleSuggestion,
+} from "@octant/domain";
+import { roomOf } from "../usage/providerRoom";
+import { useProviderRooms } from "../usage/useProviderRooms";
 import { ModelRoleEditor } from "../harness/ModelRoleEditor";
-import { MODEL_ROLES, ROLE_FLAGS_NOTE } from "../harness/modelRoles";
+import { roleSuggestionModels } from "../harness/modelRoleOptions";
+import { RoleSuggestionPreview } from "../harness/RoleSuggestionPreview";
+import {
+  MODEL_ROLES,
+  ROLE_FLAGS_NOTE,
+  rolePresentation,
+  slotFromSuggestion,
+} from "../harness/modelRoles";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -55,6 +70,9 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
   // yet; the host refuses a role without one, so they live here until a model
   // is picked.
   const [choosing, setChoosing] = useState<ReadonlySet<string>>(new Set());
+  const rooms = useProviderRooms();
+  // The suggestion being previewed for one role. Nothing is saved until accepted.
+  const [preview, setPreview] = useState<RoleSuggestion>();
 
   const load = useCallback(async () => {
     try {
@@ -184,6 +202,43 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
     }
   };
 
+  // A Project may use only what Settings lists for the role, so a suggestion
+  // is drawn from that list alone.
+  const suggestFor = (roleId: string) => {
+    const allowed = new Set(
+      (hostSlot(roleId)?.candidates ?? []).map(nativeHarnessSlotCandidateKey),
+    );
+    const models = roleSuggestionModels(
+      props.groups,
+      (instanceId) => roomOf(rooms, instanceId).standing === "limited",
+    ).filter((model) =>
+      allowed.has(`${props.hostId}:${model.providerInstanceId}:${model.modelId}`),
+    );
+    const builder = (projectSlot("default") ?? hostSlot("default"))?.candidates[0];
+    const builderKind =
+      builder === undefined
+        ? undefined
+        : props.groups.find(
+            (group) => String(group.instance.id) === String(builder.providerInstanceId),
+          )?.instance.driverKind;
+    const [suggestion] = suggestModelRoles({
+      models,
+      roleIds: [roleId],
+      ...(builderKind === undefined ? {} : { builderMain: { providerKind: builderKind } }),
+    });
+    if (suggestion !== undefined) setPreview(suggestion);
+  };
+  const useSuggestion = () => {
+    if (preview === undefined) return;
+    const roleId = preview.roleId;
+    const slot = slotFromSuggestion(roleId, projectSlot(roleId), preview, props.hostId);
+    setPreview(undefined);
+    if (slot === undefined) return;
+    void saveOverride(roleId, slot).then((saved) => {
+      if (saved) setChoosing(new Set([...choosing].filter((id) => id !== roleId)));
+    });
+  };
+
   return (
     <div className="project-model-roles">
       <p className="oct-meta">
@@ -233,6 +288,9 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
                   value={chosen ? CHOOSE : USE_SETTINGS}
                 />
               }
+              {...(chosen && MODEL_ROLE_NEEDS.some((need) => need.roleId === role.id)
+                ? { onSuggest: () => suggestFor(role.id) }
+                : {})}
               readOnly={!chosen}
               role={role}
               slot={chosen ? own : hostSlot(role.id)}
@@ -247,6 +305,13 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
           </div>
         );
       })}
+      {preview === undefined ? null : (
+        <RoleSuggestionPreview
+          onCancel={() => setPreview(undefined)}
+          onUse={useSuggestion}
+          suggestions={[{ label: rolePresentation(preview.roleId).label, suggestion: preview }]}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import type { WebSearchBackendEntry } from "@octant/contracts";
-import type { SearxngFetch } from "../chat/research/searxngClient";
-import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
+import type { WebSearchAnswer, WebSearchInput } from "../webSearch/webSearchBackends";
 import type { NativeHarnessToolPorts } from "./nativeHarnessTools";
 
 /**
@@ -11,19 +10,13 @@ import type { NativeHarnessToolPorts } from "./nativeHarnessTools";
  */
 export function harnessWebSearch(options: {
   readonly readEligible: () => ReadonlyArray<WebSearchBackendEntry>;
-  readonly fetch?: SearxngFetch;
+  /** Searches the backends eligible at the call, with fallback, and journals where it went. */
+  readonly search: (input: WebSearchInput) => Promise<WebSearchAnswer>;
 }): NativeHarnessToolPorts["webSearch"] {
   if (options.readEligible().length === 0) return undefined;
   return async (input) => {
-    // Read again per call: a turn may outlive the setting it started with,
-    // and a backend the policy no longer allows must stop receiving queries.
-    const backends = options.readEligible();
-    if (backends.length === 0) return [];
-    const found = await searchWebSearchBackends({
-      backends,
-      search: input,
-      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-    });
-    return found.results;
+    // A backend the policy no longer allows must stop receiving queries.
+    if (options.readEligible().length === 0) return [];
+    return (await options.search(input)).results;
   };
 }

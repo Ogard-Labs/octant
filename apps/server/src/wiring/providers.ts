@@ -130,6 +130,7 @@ import { makeOhMyPiProcessLive, type OhMyPiProcessPort } from "../providers/ohMy
 import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
+import { readThreadProjectCode } from "../providers/threadProjectCode";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -146,6 +147,7 @@ import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsag
 import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanUsageStore";
 import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStore";
 import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
+import { ProviderAvailabilityMarks } from "../providers/providerAvailabilityMarks";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { compactionPointFor, withCompactionPoint } from "../providers/compactionPointDriver";
@@ -681,6 +683,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       new HeldTurnContextFile(join(providerDataDirectory, "providers", "held-turn-context.json")),
     );
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
+    // Every driver's runtime events pass the tap below, so a request that
+    // failed for availability on any thread marks its provider for the next
+    // coordinator worker start (docs/design/coordinator-threads.md).
+    const providerAvailabilityMarks = new ProviderAvailabilityMarks({ now: () => Date.now() });
     const providerAccountPlanUsageStore = new ProviderAccountPlanUsageStore(
       join(providerDataDirectory, "providers", "plan-usage.json"),
     );
@@ -688,6 +694,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     let providerUsageLimitsServiceRef: ProviderUsageLimitsService | undefined;
     const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
       providerRuntimeUsageLimitsStore.record(event);
+      providerAvailabilityMarks.record(event);
       if (event.kind === "rate-limit-window" || event.kind === "rate-limit-bucket") {
         // Saved as it arrives, so a host that closes before the next poll
         // keeps the reading.
@@ -1930,6 +1937,16 @@ export function wireProviders(deps: ProvidersDependencies) {
           }
           return threadNativeSetupStore.set(request.threadId, request.choice, actor);
         },
+        projectCode: (request) =>
+          readThreadProjectCode(
+            {
+              readWorkThread: (threadId) => workThreadProjection.read(threadId),
+              readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+              readProject: (projectId) => persistence.readProject(projectId),
+              readProviderInstance: (id) => persistence.readProviderInstance(id),
+            },
+            request,
+          ),
       },
       service: providerService,
       windowAuthorityStore,
@@ -2311,6 +2328,7 @@ export function wireProviders(deps: ProvidersDependencies) {
     });
     yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
+      providerAvailabilityMarks,
       bindCodeToolHost,
       agentPluginMcpSessionManager,
       githubRoutineEventSources: githubRoutineEventSources(() => mcpServerSignInHolder.current),

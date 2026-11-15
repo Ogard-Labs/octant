@@ -26,6 +26,7 @@ import type {
   ThreadSearchContentHit,
   ThreadSearchHit,
   ThreadSearchProject,
+  ThreadSearchScope,
   ThreadSearchThread,
 } from "./threadSearchViewModel";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -60,6 +61,9 @@ export interface ShellDialogHostProps {
   readonly searchContentHits?: ReadonlyArray<ThreadSearchContentHit>;
   readonly searchContentListing?: ThreadSearchListingStatus;
   readonly searchContentTruncated?: boolean;
+  /** The modes Search reads, and how the overlay's filter changes them. */
+  readonly searchScope?: ThreadSearchScope;
+  readonly onSearchScopeChange?: (scope: ThreadSearchScope) => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onCloseSearch: () => void;
   readonly onNewSearchThread?: () => void;
@@ -135,6 +139,10 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
             {...(props.searchContentTruncated === undefined
               ? {}
               : { contentTruncated: props.searchContentTruncated })}
+            {...(props.searchScope === undefined ? {} : { scope: props.searchScope })}
+            {...(props.onSearchScopeChange === undefined
+              ? {}
+              : { onScopeChange: props.onSearchScopeChange })}
             onClose={props.onCloseSearch}
             {...(props.onNewSearchThread === undefined
               ? {}

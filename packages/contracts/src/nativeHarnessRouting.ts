@@ -105,8 +105,9 @@ function uniqueCandidates(candidates: ReadonlyArray<NativeHarnessSlotCandidate>)
  * Two person-set flags ride with the role. `askBeforeUsing` (absent = off)
  * turns a start in this role into a proposal the person approves.
  * `continueOnFallback` (absent = on) lets a thread with this role carry on
- * with the next model when its own stops. Both are stored and shown today;
- * the resolver does not read them yet. Absent means the default, so settings
+ * with the next model when its own stops. A coordinator worker's start reads
+ * `askBeforeUsing`; the harness resolver reads neither, and nothing reads
+ * `continueOnFallback` yet. Absent means the default, so settings
  * stored before the flags existed decode unchanged.
  */
 export const NativeHarnessSlot = Schema.Struct({
@@ -268,9 +269,22 @@ export const NativeHarnessRouteFailureReason = Schema.Literal(
 );
 export type NativeHarnessRouteFailureReason = typeof NativeHarnessRouteFailureReason.Type;
 
+/**
+ * Why the harness skipped a role's candidate. A role may hold any connected
+ * provider's model, because coordinator workers run as ordinary Code threads;
+ * the harness runs only its own endpoints, so it steps past the rest with
+ * `not-harness-runnable` and never runs them itself.
+ */
+export const NativeHarnessCandidateRejectionReason = Schema.Union(
+  MultiModelCandidateRejectionReason,
+  Schema.Literal("not-harness-runnable"),
+);
+export type NativeHarnessCandidateRejectionReason =
+  typeof NativeHarnessCandidateRejectionReason.Type;
+
 export const NativeHarnessRejectedCandidate = Schema.Struct({
   candidate: NativeHarnessSlotCandidate,
-  reasons: Schema.Array(MultiModelCandidateRejectionReason).pipe(Schema.minItems(1)),
+  reasons: Schema.Array(NativeHarnessCandidateRejectionReason).pipe(Schema.minItems(1)),
 }).annotations(strict);
 export type NativeHarnessRejectedCandidate = typeof NativeHarnessRejectedCandidate.Type;
 

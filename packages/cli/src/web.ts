@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isWindowsSystemRoot } from "./serviceManager";
 import { ensureCanvasPreviewPage, type CanvasPreviewPageOutcome } from "./canvasPreviewPage";
 import {
   attachOrCreateHost,
@@ -334,13 +335,54 @@ function defaultBridgeSecretInput(developmentDataDirectory?: string): BridgeSecr
 }
 
 /** Node's spawn, not Bun's: `octant-nightly` runs under the app's Node runtime. */
-async function defaultOpenBrowser(url: URL): Promise<void> {
-  const command = process.platform === "darwin" ? "open" : "xdg-open";
+export async function defaultOpenBrowser(url: URL): Promise<void> {
+  let command: string;
+  let args: readonly string[];
+  if (process.platform === "win32") {
+    const windows = windowsBrowserOpenCommand(url, process.env.SystemRoot ?? "C:\\Windows");
+    if (windows.status !== "ready") throw new Error("Octant opens only its own loopback links.");
+    ({ command, args } = windows);
+  } else {
+    command = process.platform === "darwin" ? "open" : "xdg-open";
+    args = [url.toString()];
+  }
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, [url.toString()], { stdio: "ignore" });
+    const child = spawn(command, [...args], { stdio: "ignore", shell: false, windowsHide: true });
     child.once("error", reject);
     child.once("exit", () => resolve());
   });
+}
+
+/**
+ * How Windows opens a launch link: rundll32 hands the link to the default
+ * browser's URL protocol handler, started directly with no shell, so `&`,
+ * `^` and `%` in the link are never read as command syntax (as `cmd /c
+ * start` would read them) and Explorer's comma splitting never applies.
+ * Only plain http(s) to this computer's loopback, with no user info, is
+ * opened: every link the CLI opens on Windows comes from the host's own
+ * loopback receipt.
+ */
+export function windowsBrowserOpenCommand(
+  url: URL,
+  systemRoot: string,
+):
+  | { readonly status: "ready"; readonly command: string; readonly args: readonly string[] }
+  | { readonly status: "refused" } {
+  const loopback =
+    url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    !loopback ||
+    url.username !== "" ||
+    url.password !== "" ||
+    !isWindowsSystemRoot(systemRoot)
+  )
+    return { status: "refused" };
+  return {
+    status: "ready",
+    command: win32.join(systemRoot, "System32", "rundll32.exe"),
+    args: ["url.dll,FileProtocolHandler", url.toString()],
+  };
 }
 
 export type { HostLauncherResult, HostInfo };

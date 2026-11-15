@@ -149,3 +149,67 @@ describe("the list a host reads before its person saved one", () => {
     expect(webSearchSettingsFromChatAddress("  ", MIGRATED_ID).backends).toEqual([]);
   });
 });
+
+describe("statements a vendor's terms cannot support", () => {
+  function vendor(
+    kind: WebSearchBackendEntry["kind"],
+    overrides: Partial<Omit<WebSearchBackendEntry, "id" | "kind">> = {},
+  ): WebSearchBackendEntry {
+    return {
+      id: "00000000-0000-4000-8000-0000000000c1" as WebSearchBackendEntry["id"],
+      kind,
+      enabled: true,
+      statesZdr: false,
+      statesEuProcessing: false,
+      ...overrides,
+    };
+  }
+  const save = (backend: WebSearchBackendEntry) =>
+    decideWebSearchSettings({
+      principalKind: "local-window",
+      settings: { policy: "any", backends: [backend] },
+    });
+
+  it("refuses Staan's ZDR statement until it publishes retention terms, and accepts its EU statement", () => {
+    expect(save(vendor("staan", { statesZdr: true }))).toEqual({
+      kind: "refused",
+      code: "statement-not-offered",
+      message:
+        "Staan has not published terms under which it keeps no record of queries (Not published).",
+    });
+    expect(save(vendor("staan", { statesEuProcessing: true })).kind).toBe("allow");
+  });
+
+  it("refuses an EU processing statement for Brave Search and Exa, whose terms offer none", () => {
+    for (const kind of ["brave", "exa"] as const) {
+      expect(save(vendor(kind, { statesEuProcessing: true }))).toMatchObject({
+        kind: "refused",
+        code: "statement-not-offered",
+      });
+      expect(save(vendor(kind, { statesZdr: true })).kind).toBe("allow");
+    }
+  });
+
+  it("accepts both statements where the vendor offers them by agreement", () => {
+    for (const kind of ["mojeek", "linkup"] as const) {
+      expect(save(vendor(kind, { statesZdr: true, statesEuProcessing: true })).kind).toBe("allow");
+    }
+  });
+
+  it("refuses an address for a vendor with one host, and lets Linkup name its agreed host", () => {
+    expect(save(vendor("brave", { address: "https://brave.example/" }))).toMatchObject({
+      kind: "refused",
+      code: "address-not-taken",
+    });
+    expect(save(vendor("linkup", { address: "https://eu.linkup.example/" })).kind).toBe("allow");
+    expect(save(vendor("linkup")).kind).toBe("allow");
+  });
+
+  it("counts a stored statement the vendor does not offer as not made", () => {
+    const stored = vendor("brave", { statesZdr: true, statesEuProcessing: true });
+    expect(webSearchBackendEligibility(stored, "eu-only")).toEqual({
+      kind: "not-eligible",
+      reason: "eu-processing-not-stated",
+    });
+  });
+});

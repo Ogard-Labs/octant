@@ -266,6 +266,30 @@ describe("native harness routing store, per role", () => {
     expect(store.projectOverride(projectId)).toBeUndefined();
   });
 
+  it("keeps a role that lists models from several providers, and a Project may narrow to one", () => {
+    const store = openStore();
+    const other = decodeNativeHarnessSlotCandidate({
+      hostId: host,
+      providerInstanceId: "00000000-0000-4000-8000-000000000009",
+      modelId: "sonnet",
+    });
+    const saved = store.updateHost({
+      configuration: {
+        slots: [{ id: "default" as never, candidates: [other, candidate("small")] }],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    expect(saved.kind).toBe("routing-settings");
+    const narrowed = store.applyProjectCommand({
+      kind: "set-project-routing-override",
+      projectId,
+      configuration: { slots: [{ id: "default" as never, candidates: [other] }], jobSlots: [] },
+      expectedVersion: 0 as never,
+    });
+    expect(narrowed.kind).toBe("project-routing-override");
+  });
+
   it("refuses a Project change made from an older version", () => {
     const store = openStore();
     store.updateHost({

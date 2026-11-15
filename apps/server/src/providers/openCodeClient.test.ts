@@ -391,7 +391,7 @@ describe("official OpenCode client routing", () => {
     ).toBe(true);
   });
 
-  it("replies to 2.x approvals with the decision body 2.0.22 requires and refuses 2.x questions", async () => {
+  it("replies to 2.x approvals with the decision body 2.0.22 requires and answers a question at its form", async () => {
     const requests: Request[] = [];
     vi.stubGlobal(
       "fetch",
@@ -414,14 +414,15 @@ describe("official OpenCode client routing", () => {
 
     await client.replyPermission("ses_1", "req-1", "once");
     await client.replyPermission("ses_1", "req-2", "reject");
-    await expect(client.replyQuestion("ses_1", "q-1", ["Yes"])).rejects.toMatchObject({
-      category: "unsupported",
-    });
+    await client.replyQuestion("ses_1", "frm_1", ["Yes", "Later"]);
 
     expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
       ["POST", "/api/session/ses_1/permission/req-1/reply"],
       ["POST", "/api/session/ses_1/permission/req-2/reply"],
+      ["POST", "/api/session/ses_1/form/frm_1/reply"],
     ]);
+    // Each question is the form field keyed by its position.
+    expect(await requests[2]?.json()).toEqual({ answer: { q0: "Yes", q1: "Later" } });
     // 2.0.22 answers the SDK's `{reply}` body with 400.
     expect(await requests[0]?.json()).toEqual({ decision: "once" });
     expect(await requests[1]?.json()).toEqual({ decision: "reject" });

@@ -46,7 +46,7 @@ export interface ServerRunOptions {
 
 export async function runServerRunCommand(options: ServerRunOptions = {}): Promise<number> {
   const env = options.env ?? process.env;
-  const command = options.serverStartCommand?.() ?? defaultServerStartCommand();
+  const command = options.serverStartCommand?.() ?? resolveServerStartCommand();
   const spawn = options.spawn ?? defaultSpawn;
   const now = options.now ?? Date.now;
   const writeNotice =
@@ -194,6 +194,8 @@ export function startSecretServiceCredentialBroker(
     undefined,
     linkedSecretStores,
     makeStore({ namespace: "ssh-key" }),
+    undefined,
+    makeStore({ namespace: "web-search-credential" }),
   );
 }
 
@@ -232,7 +234,8 @@ function configurationFailureNotice(env: NodeJS.ProcessEnv): string {
   );
 }
 
-function defaultServerStartCommand(): ServerStartCommand {
+/** The server entry this CLI starts: the installed artifact's, or the checkout's. */
+export function resolveServerStartCommand(): ServerStartCommand {
   const artifactRoot = resolveInstalledArtifactRoot(import.meta.url);
   if (artifactRoot !== undefined) {
     return installedArtifactServerStartCommand(artifactRoot, process.execPath);

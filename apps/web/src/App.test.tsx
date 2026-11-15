@@ -4441,7 +4441,7 @@ describe("App", () => {
       } else if (entry === "thread search") {
         await user.keyboard("{Control>}k{/Control}");
         await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-        const dialog = await screen.findByRole("dialog", { name: "Search Code threads" });
+        const dialog = await screen.findByRole("dialog", { name: "Search threads" });
         await user.click(within(dialog).getByRole("button", { name: "New task" }));
       } else {
         await act(async () => startNewAgent?.());
@@ -5223,12 +5223,12 @@ describe("App", () => {
     // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
-    const search = screen.getByRole("combobox", { name: "Search Code threads" });
+    const search = screen.getByRole("combobox", { name: "Search threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
-    expect(screen.getByRole("dialog", { name: "Search Code threads" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Search threads" })).toBeNull();
   }, 15_000);
 
   it("lists an archived Chat thread the host search reports in the Archived group", async () => {
@@ -5249,7 +5249,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     // The Chat bootstrap is deliberately active-only, so the Archived group can
     // only ever be filled by the host's own lifecycle-spanning thread search.
@@ -5277,7 +5277,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     expect(
       await screen.findByText(
@@ -5326,7 +5326,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Code threads" }), "Controller");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Controller");
     await user.click(await screen.findByRole("option", { name: /Controller foundation/ }));
 
     // The hit's thread lives in "Octant" while this window's Code context is
@@ -5344,6 +5344,61 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("opens the Canvas itself, in its thread's mode and Project, from a Canvas search hit", async () => {
+    const user = userEvent.setup();
+    const canvasId = "00000000-0000-4000-8000-0000000009c1";
+    const shellApi = client(codeShellBootstrap());
+    const threadSearchClient = {
+      search: vi.fn(async () => ({
+        status: "ready" as const,
+        search: {
+          query: "pricing",
+          scope: "all" as const,
+          truncated: false,
+          unavailable: [],
+          hits: [
+            {
+              mode: "code" as const,
+              threadId: codeThreadId,
+              field: "canvas" as const,
+              canvasId: canvasId as never,
+              canvasTitle: "Launch plan",
+              title: "Controller foundation",
+              lifecycle: "active" as const,
+              projectId,
+              updatedAt: "2026-11-15T10:00:00.000Z",
+              snippet: "Ship the pricing page on Friday.",
+            },
+          ],
+        },
+      })),
+    };
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+        threadSearchClient={threadSearchClient}
+      />,
+    );
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "pricing");
+    const hit = await screen.findByRole("option", { name: /Ship the pricing page/ });
+    expect(hit).toHaveTextContent("Canvas");
+    await user.click(hit);
+
+    await waitFor(() =>
+      expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain(canvasId),
+    );
+    expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain("Launch plan");
   });
 
   it("opens a palette thread command from a non-active Project with the thread's own Project", async () => {

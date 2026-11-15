@@ -24,6 +24,7 @@ describe("SettingsSectionId", () => {
       "harness",
       "voice",
       "skills",
+      "web-search",
       "computer-use",
       "device-tools",
       "github",

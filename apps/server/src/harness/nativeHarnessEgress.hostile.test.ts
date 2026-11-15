@@ -99,6 +99,7 @@ import {
   PublicFetchRefused,
 } from "./nativeHarnessWebFetch";
 import { harnessWebSearch } from "./nativeHarnessWebSearch";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
 import { webSearchSettingsFromChatAddress } from "@octant/domain";
 import { MIGRATED_SEARXNG_ENTRY_ID } from "../webSearch/webSearchSettingsService";
 import { createNativeHarnessShell } from "./nativeHarnessShell";
@@ -406,6 +407,14 @@ async function hostileCodeLead(options: {
             `http://127.0.0.1:${search.port}/`,
             MIGRATED_SEARXNG_ENTRY_ID,
           ).backends,
+        search: (input) =>
+          searchWebSearchBackends({
+            backends: webSearchSettingsFromChatAddress(
+              `http://127.0.0.1:${search.port}/`,
+              MIGRATED_SEARXNG_ENTRY_ID,
+            ).backends,
+            search: input,
+          }),
       }),
     ...(approvals === undefined ? {} : { approvals }),
     hostId: authority.hostId,

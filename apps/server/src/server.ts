@@ -572,6 +572,7 @@ export function startOctantServer(
       reviewedModelManifest,
       managedWorktreeService,
       skillDiscoveryService,
+      providerAvailabilityMarks,
     } = yield* wireProviders({
       hostResourceBudget,
       serverRegistry,
@@ -870,6 +871,10 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       hostResourceBudget,
+      providerAvailabilityMarks,
+      providerUsageLimitsService,
+      nativeHarnessRoutingStore,
+      isProjectPolicyTargetAllowed,
       threadMoveHolds,
       onThreadArchived,
       codeSessionConversation,
@@ -1433,6 +1438,7 @@ export function startOctantServer(
       workOverviewRoutes,
       workPromotionRoutes,
       workRequestRoutes,
+      threadSearchRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
       agentRunInteractions,
@@ -1875,6 +1881,7 @@ export function startOctantServer(
       workRequestRoutes,
       workResearchRoutes,
       workspacePresetRoutes,
+      threadSearchRoutes,
       workThreadRoutes,
       workTurnRoutes,
       zenBackgroundRoutes,

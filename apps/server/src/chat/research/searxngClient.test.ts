@@ -5,6 +5,7 @@ import {
   SEARXNG_USER_AGENT,
   SearxngClient,
   SearxngSearchFailed,
+  stripMarkup,
 } from "./searxngClient";
 
 const baseUrl = "http://127.0.0.1:8080/";
@@ -336,5 +337,13 @@ describe("SearxngClient.search", () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ category: "interrupted" });
+  });
+});
+
+describe("stripMarkup", () => {
+  it("leaves no tag behind when a result's text nests one tag inside another", () => {
+    expect(stripMarkup("a <scr<b>ipt>alert(1)</scr</b>ipt> b")).toBe("a alert(1) b");
+    expect(stripMarkup("<<b>script>x")).toBe("x");
+    expect(stripMarkup("<b>Bold</b> and <i>italic</i>")).toBe("Bold and italic");
   });
 });

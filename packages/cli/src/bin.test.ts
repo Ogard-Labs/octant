@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { hasInvalidLifecyclePositionals, parseArgs } from "./bin";
-import { agentShorthand } from "./cli";
+import { agentShorthand, refusesOnWindows } from "./cli";
 
 describe("starting the agent without a subcommand", () => {
   it("keeps the prompt's words in order around the agent's switches", () => {
@@ -180,4 +180,32 @@ describe("octant-nightly", { timeout: 60_000 }, () => {
       }
     },
   );
+});
+
+describe("the CLI on Windows", () => {
+  const refusal = (...argv: string[]) => {
+    const args = parseArgs(argv);
+    return args === undefined ? "unparsed" : refusesOnWindows(args);
+  };
+
+  it("runs the service commands, the foreground host and the web launcher", () => {
+    for (const action of ["start", "stop", "restart", "status", "enable", "disable", "logs", "run"])
+      expect(refusal("server", action)).toBeUndefined();
+    expect(refusal("server", "status", "--port", "13773")).toBeUndefined();
+    expect(refusal("web")).toBeUndefined();
+    expect(refusal("web", "--no-open")).toBeUndefined();
+  });
+
+  it("names what it cannot do on Windows yet instead of failing on a POSIX path", () => {
+    for (const argv of [
+      ["agent", "fix the tests"],
+      ["project", "list"],
+      ["server", "install"],
+      ["server", "start", "--pair"],
+      ["web", "--dev"],
+      ["web", "--port", "4000"],
+      ["hub", "enable"],
+    ])
+      expect(refusal(...argv)).toMatch(/not available on Windows yet/);
+  });
 });

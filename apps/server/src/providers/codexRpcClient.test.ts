@@ -149,7 +149,7 @@ describe("CodexRpcClient", () => {
     client.onRequest((message) => requests.push(message));
 
     stdout.write(
-      `${JSON.stringify({ id: 9, method: "item/tool/requestUserInput", params: {} })}\n`,
+      `${JSON.stringify({ id: 9, method: "mcpServer/elicitation/request", params: {} })}\n`,
     );
     await tick();
     expect(requests).toEqual([]);

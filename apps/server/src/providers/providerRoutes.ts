@@ -9,6 +9,7 @@ import {
   decodeThreadNativeSetupRequest,
   type ThreadNativeSetupChoice,
   type ThreadNativeSetupRequest,
+  type ThreadProjectCode,
   type OctantMode,
   type ProviderExecutionPolicy,
   type ProviderFailure,
@@ -39,6 +40,10 @@ export interface ProviderRouteDependencies {
       request: Extract<ThreadNativeSetupRequest, { kind: "set" }>,
       actor: EventActor,
     ): "recorded" | "refused";
+    /** Whether the thread's Project holds untrusted Project code for its provider. */
+    projectCode?(
+      request: Extract<ThreadNativeSetupRequest, { kind: "project-code" }>,
+    ): Promise<ThreadProjectCode>;
   };
 }
 
@@ -169,6 +174,25 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               message: "Thread native setup request is invalid.",
             },
             400,
+            origin,
+          );
+        }
+        if (threadRequest.kind === "project-code") {
+          // A read any client that may open the thread may make; only
+          // `change-project-native-providers` changes the trust it reports.
+          if (store.projectCode === undefined) {
+            return response(
+              { category: "unsupported", message: "Project code detection is unavailable." },
+              503,
+              origin,
+            );
+          }
+          return response(
+            {
+              threadId: threadRequest.threadId,
+              projectCode: await store.projectCode(threadRequest),
+            },
+            200,
             origin,
           );
         }

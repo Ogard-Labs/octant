@@ -1995,6 +1995,17 @@ const ChildActivityEvent = Schema.Struct({
 const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
   .annotations(strict)
   .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
+/**
+ * The runtime started a turn by itself inside this one: background work the
+ * turn started finished or reported, and the runtime woke the model to act on
+ * it. What follows in the operation is the runtime's turn, not the person's;
+ * it ran under the same gate and level. Absent from every turn journaled
+ * before Octant held such turns.
+ */
+const RuntimeTurnStartedEvent = Schema.Struct({
+  kind: Schema.Literal("runtime-turn-started"),
+  trigger: Schema.Literal("background-task"),
+}).annotations(strict);
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
   result: CodeOperationResult,
@@ -2250,6 +2261,7 @@ export const CodeOperationEvent = Schema.Union(
   ProviderLimitEvent,
   ChildActivityEvent,
   ProviderRetryEvent,
+  RuntimeTurnStartedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
