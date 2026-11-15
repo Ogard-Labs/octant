@@ -42,3 +42,20 @@ export const DescribedTurnImages = Schema.Array(DescribedTurnImage).pipe(
   Schema.maxItems(8),
 );
 export type DescribedTurnImages = typeof DescribedTurnImages.Type;
+
+/**
+ * Whether Sees images could describe an image for a thread now, read by a
+ * composer before it accepts an image its thread's model cannot read. It
+ * sends nothing; the turn decides again when it starts.
+ */
+export const SeesImagesAvailability = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("available"),
+    describedBy: ImageDescribedBy,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000)),
+  }).annotations(strict),
+);
+export type SeesImagesAvailability = typeof SeesImagesAvailability.Type;

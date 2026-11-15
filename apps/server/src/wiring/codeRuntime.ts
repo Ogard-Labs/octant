@@ -85,7 +85,7 @@ import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStor
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
-import { modelLabelOf, modelReadsImages } from "./imageDescriber";
+import { modelLabelOf } from "./imageDescriber";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
   readShieldWatcherLabels,
@@ -290,7 +290,7 @@ import { serverPullRequestRepository } from "../serverProjects/serverWorktrees";
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} &   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
+} & Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<HarnessWiring, "shieldServerStore"> &
   Pick<
     AuthorityWiring,

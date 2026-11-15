@@ -1682,7 +1682,7 @@ export class WorkTurnService {
               text,
               sourceKind: "message",
               referenceId: `described-image:${command.turnId}:${index}`,
-              category: "current-request",
+              category: "workspace-context",
               posture: "required",
               block: { kind: "user-message", text },
             }),

@@ -82,6 +82,7 @@ import {
   selectedModelReadsImages,
   useWorkComposerImages,
 } from "../../work/composer/useWorkComposerImages";
+import { useSeesImages } from "../../harness/useSeesImages";
 import { WorkImageAttachmentChips } from "../../work/composer/WorkImageAttachmentChips";
 import {
   ThreadMentionChips,
@@ -367,12 +368,24 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   };
   const mentionListId = "code-new-thread-mentions";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(providerGroups, {
-    ...(props.selectedProviderInstanceId === undefined
-      ? {}
-      : { providerInstanceId: props.selectedProviderInstanceId }),
-    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(providerGroups, {
+      ...(props.selectedProviderInstanceId === undefined
+        ? {}
+        : { providerInstanceId: props.selectedProviderInstanceId }),
+      ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: props.projectId === undefined ? undefined : String(props.projectId),
+    providerInstanceId:
+      props.selectedProviderInstanceId === undefined
+        ? undefined
+        : String(props.selectedProviderInstanceId),
+    modelId: props.selectedModelId === undefined ? undefined : String(props.selectedModelId),
+  }).takesImages;
   const threadMentions = useThreadMentions({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),

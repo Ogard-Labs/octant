@@ -9,6 +9,7 @@ import {
   NativeHarnessRoutingCommandResult,
   type NativeHarnessRoutingConfiguration,
   NativeHarnessRoutingSettings,
+  SeesImagesAvailability,
   type NativeHarnessSessionCommand,
   NativeHarnessSessionCommandResult,
   NativeHarnessSessionView,
@@ -30,6 +31,18 @@ export interface NativeHarnessClientOptions {
 
 export interface NativeHarnessClient {
   routing(signal?: AbortSignal): Promise<NativeHarnessRoutingSettings>;
+  /**
+   * Whether Sees images could describe an image for a thread on this model
+   * in this Project now; it sends nothing.
+   */
+  seesImages(
+    input: {
+      readonly projectId?: string;
+      readonly providerInstanceId: string;
+      readonly modelId: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<SeesImagesAvailability>;
   updateRouting(
     input: {
       readonly configuration: NativeHarnessRoutingConfiguration;
@@ -153,6 +166,16 @@ export function createNativeHarnessClient(
     });
 
   return {
+    async seesImages(input, signal) {
+      const query = new URLSearchParams({
+        providerInstanceId: input.providerInstanceId,
+        modelId: input.modelId,
+        ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      });
+      return decodeHostAnswer(SeesImagesAvailability)(
+        await get(`/api/native-harness/routing/sees-images?${query.toString()}`, signal),
+      );
+    },
     async routing(signal) {
       const body = await get(ROUTING_PATH, signal);
       return decodeHostAnswer(NativeHarnessRoutingSettings)(

@@ -10,6 +10,7 @@ import {
   type Project,
   type ProjectId,
   type ProviderInstanceId,
+  type SeesImagesAvailability,
 } from "@octant/contracts";
 import {
   boundImageDescription,
@@ -91,9 +92,7 @@ export type ImageDescriptionOutcome =
     }
   | { readonly kind: "refused"; readonly reason: string };
 
-export type ImageDescriptionAvailability =
-  | { readonly kind: "available"; readonly describedBy: ImageDescribedBy }
-  | { readonly kind: "refused"; readonly reason: string };
+export type ImageDescriptionAvailability = SeesImagesAvailability;
 
 export interface ImageToDescribe {
   readonly name: string;

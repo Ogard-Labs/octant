@@ -117,7 +117,6 @@ import { createPairedDeviceRouteSlot } from "./remote/pairedDeviceRouteSlot";
 import { createThreadMoveHolds } from "./hub/threadMoveHolds";
 import { createThreadMoveStateStore, heldThreadsOf } from "./hub/threadMoveStateStore";
 import { wireReplica } from "./wiring/replica";
-import { createHostImageDescriber } from "./wiring/imageDescriber";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
 
@@ -618,6 +617,7 @@ export function startOctantServer(
       nativeHarnessEgressRoutes,
       nativeHarnessHooks,
       nativeHarnessRoutingRoutes,
+      imageDescriber,
       shieldServerRoutes,
       shieldServerStore,
       serverProjectRoutes,
@@ -632,6 +632,8 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      providerAvailabilityMarks,
+      isProjectPolicyTargetAllowed,
       toolEffectLedger,
       hostResourceBudget,
       serverConnection,
@@ -679,18 +681,6 @@ export function startOctantServer(
       workTurnProjection,
     });
     yield* Effect.promise(recoverGoogleCliCommands);
-    // Sees images: one describer for Code, Work, and Chat, deciding on the
-    // same facts a coordinator worker's choice reads.
-    const imageDescriber = createHostImageDescriber({
-      persistence,
-      providerRuntimeRegistry,
-      nativeHarnessRoutingStore,
-      providerAvailabilityMarks,
-      providerUsageLimitsService,
-      isProjectPolicyTargetAllowed,
-      configuredDriverOptions: () => configuredDriverOptions,
-      providerDataDirectory,
-    });
     const {
       agentProfileRoutes,
       archivedWorktreeRoutes,
@@ -1065,7 +1055,6 @@ export function startOctantServer(
       threadNotesRoutes,
       workspacePresetRoutes,
     } = yield* wireChat({
-      imageDescriber,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,

@@ -84,7 +84,6 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
-import type { ImageDescriber } from "../harness/imageDescription";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -108,10 +107,8 @@ import type { CanvasWiring } from "./canvas";
  */
 const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 
-export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Sees images; absent on a host started without one. */
-  readonly imageDescriber?: ImageDescriber;
-} &   Pick<
+export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"

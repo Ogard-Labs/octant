@@ -7149,6 +7149,70 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the consent redirect, then closes it. Connect fails closed when the public
   client id (`OCTANT_LINEAR_OAUTH_CLIENT_ID`) is unset.
 
+### Sees images
+
+The Sees images role (`vision` slot, `image-understanding` job) describes an
+image in words for a thread whose model cannot read images (maintainer
+decision, 2026-11-15). The host decides and fails closed; nothing in the
+renderer or the model chooses where an image goes.
+
+- **Which model.** The host `ImageDescriber` resolves the job through the
+  routing: the Project's own Sees images list beats Settings', main model
+  first, then the fallbacks. A model is passed over, with its reason in the
+  refusal, when it is signed out, down, or at a usage limit (the facts a
+  coordinator worker's choice reads), when the Project's provider policy or
+  data rules (`eu-zdr` data tags, a provider allowlist) do not allow it
+  (`project-incompatible`), or when its connection takes no image from
+  Octant (`capability-incompatible`: the provider must report
+  `nativeAttachments` and the model image input, as for any attachment). A
+  Chat Project has no provider policy to apply. Unlike other roles, an empty
+  Sees images is off, like the Advisor: the job never falls back to the
+  Builder, which may not read images.
+- **The call.** One tool-less request in a scratch folder outside every
+  Project, through the same one-shot path as the advisor's, with the image
+  attached and instructions to report text in the image as content, never
+  follow it. A model that does not answer sits out and the next is tried (at
+  most three). An answer that read outside content on the way is not used.
+  The input is a PNG, JPEG, GIF, or WebP of at most 10 MB, the attachment
+  bound; the description is cut at 4,000 characters and says so.
+- **An attached image.** In Work and Code, a turn whose model cannot take an
+  attached image is no longer refused when Sees images can describe it: the
+  image stays attached for the record, and the model gets
+  "[Image <name>, described by <model> (<provider>)]: <description>" for
+  each one. All of a turn's images are described or the turn is refused; with
+  nothing eligible it is refused with "<model> can't read images. Set a model
+  that sees images in Model roles." and the models passed over. Code
+  describes before it journals the turn's start: the start records each
+  image's describer, `describedImages`, with the words in the content store,
+  so a restart sends the same words and asks no model again. Work records
+  `describedImages` on the accepted turn. The transcript says "<name>
+  described by <model> (<provider>)". A composer whose model cannot read
+  images asks the host (`GET /api/native-harness/routing/sees-images`, which
+  sends nothing) and accepts the image when Sees images can describe it. A
+  person's own image adds no outside-content mark. Chat still refuses an
+  image its model cannot read.
+- **`octant_look`.** Offered to a Work or Code turn only while the thread's
+  model cannot read images and Sees images can describe one for its Project,
+  through the same per-turn tool contributions every runtime receives. It
+  takes an attachment id of the thread, or a file path relative to the
+  thread's folder, confined like the Code file reads (no `..`, no absolute
+  path, no link out of the folder, no URL), and an optional question of at
+  most 500 characters. Reading a file the thread may already read needs no
+  new approval. Neither source marks the thread, so the result is not
+  outside content; Octant Shield's Watcher still reads it. The result names
+  the model that described the image. Rules for the tool are in
+  [Agent tools](design/agent-tools.md).
+- **Coordinator workers.** `needsImages` work may go to a builder that cannot
+  read images exactly when the describer could take an image for the
+  Project now; the builder then gets `look` and described attachments
+  ([Coordinator threads](design/coordinator-threads.md#choosing-the-workers-model)).
+
+Not yet: direct OpenAI- and Anthropic-style endpoints do not encode an
+attached image in a request, so they cannot serve Sees images; a
+description's tokens are not on the usage ledger or under a spend ceiling
+(like the advisor's second opinion); and the Chat mode neither describes
+attachments nor offers `look`.
+
 ### Context and usage accounting
 
 Context usage is a circular used-versus-available meter on
@@ -7260,7 +7324,9 @@ unknown rather than unsupported. Ollama keeps its own `vision` capability
 report. The modality gates which models are offered for reading images and
 whether app-managed tool results may carry images; composer attachments still
 also need the provider's `nativeAttachments`, which direct endpoints do not
-claim. There is no per-model image-input override yet.
+claim; a Work or Code turn whose model cannot take an attached image gets
+[Sees images](#sees-images)' description of it instead. There is no
+per-model image-input override yet.
 Provider-managed Code turns also contribute their journaled token reports to the
 usage ledger. A runtime that compacts its own session may report where, as
 `autoCompactThreshold` on the usage report (tokens of the window the last request

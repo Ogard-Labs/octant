@@ -136,6 +136,8 @@ import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { useSeesImages } from "../harness/useSeesImages";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import {
   threadImageOfferKey,
   useThreadImageOffers,
@@ -376,6 +378,10 @@ function WorkTurnHeader(props: {
           windowCapability={props.windowCapability}
         />
       )}
+      <DescribedImagesNote
+        className="work-thread-workspace__handoff"
+        images={props.turn.describedImages}
+      />
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -1326,10 +1332,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ? "idle"
           : "none-left";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
-    ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
-    ...(thread === undefined ? {} : { modelId: thread.modelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(props.providerGroups ?? [], {
+      ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
+      ...(thread === undefined ? {} : { modelId: thread.modelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: thread === undefined ? undefined : String(thread.projectId),
+    providerInstanceId: thread === undefined ? undefined : String(thread.providerInstanceId),
+    modelId: thread === undefined ? undefined : String(thread.modelId),
+  }).takesImages;
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),

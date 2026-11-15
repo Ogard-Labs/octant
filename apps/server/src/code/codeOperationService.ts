@@ -6506,7 +6506,10 @@ export class CodeOperationService {
           ];
     });
     if (images.length !== references.length) {
-      return { status: "refused", reason: "An image attached to this turn could not be described." };
+      return {
+        status: "refused",
+        reason: "An image attached to this turn could not be described.",
+      };
     }
     const [first, ...rest] = images;
     return first === undefined

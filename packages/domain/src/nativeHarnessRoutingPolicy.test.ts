@@ -108,7 +108,10 @@ describe("native harness route resolution", () => {
       slots: [...configured.slots, { id: "vision" as never, candidates: [big] }],
       jobSlots: [],
     };
-    const project = { slots: [{ id: "vision" as never, candidates: [small, spare] }], jobSlots: [] };
+    const project = {
+      slots: [{ id: "vision" as never, candidates: [small, spare] }],
+      jobSlots: [],
+    };
     const decision = resolveNativeHarnessRoute({
       job: "image-understanding",
       host: vision,

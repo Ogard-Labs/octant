@@ -110,16 +110,3 @@ export function modelLabelOf(
     ?.models.find((model) => String(model.id) === String(modelId));
   return observed?.displayName ?? catalog?.displayName ?? String(modelId);
 }
-
-/** Whether the model reads images in a turn: its provider takes attachments and it takes images. */
-export function modelReadsImages(
-  providerRuntimeRegistry: Pick<ProviderRuntimeRegistry, "observedState">,
-  providerInstanceId: ProviderInstance["id"],
-  modelId: ProviderModel["id"],
-): boolean {
-  const observed = providerRuntimeRegistry.observedState(providerInstanceId);
-  if (observed?.capabilities.nativeAttachments !== "supported") return false;
-  return observed.models.some(
-    (model) => String(model.id) === String(modelId) && model.inputModalities.includes("image"),
-  );
-}

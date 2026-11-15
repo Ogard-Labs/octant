@@ -123,7 +123,9 @@ export function parseLookInput(inputJson: string): LookInput | { readonly error:
   if (extra.length > 0) return { error: "The look input takes only image and question." };
   const image = record["image"];
   if (typeof image !== "string" || image.trim().length === 0 || image.length > 1_024) {
-    return { error: "image must name an attachment id or a file path inside this thread's folder." };
+    return {
+      error: "image must name an attachment id or a file path inside this thread's folder.",
+    };
   }
   const question = record["question"];
   if (question !== undefined) {
@@ -145,7 +147,9 @@ async function resolveImage(
   const attached = await options.attachment?.(reference).catch(() => undefined);
   if (attached !== undefined) return attached;
   if (/^[a-z][a-z0-9+.-]*:/i.test(reference)) {
-    return { error: "look reads no URL; name an attachment or a file inside this thread's folder." };
+    return {
+      error: "look reads no URL; name an attachment or a file inside this thread's folder.",
+    };
   }
   if (options.folder === undefined) {
     return { error: "No attachment of this thread has that id, and this thread has no folder." };

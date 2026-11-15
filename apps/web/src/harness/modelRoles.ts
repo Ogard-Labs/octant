@@ -48,7 +48,8 @@ export const MODEL_ROLES: ReadonlyArray<ModelRolePresentation> = [
   {
     id: "vision",
     label: "Sees images",
-    meaning: "Describes screenshots and other images for models that cannot see them.",
+    meaning:
+      "Describes an attached image, or one a thread asks about, for a model that cannot read images. Empty, such images are refused. It needs a model that reads images on a connection that takes images from Octant, such as an agent runtime or an Ollama vision model.",
   },
   {
     id: "smol",
@@ -74,8 +75,10 @@ export function rolePresentation(id: string): ModelRolePresentation {
 /** What an empty role does, in the words its chooser shows. */
 export function emptyRoleLabel(id: string): string {
   if (id === "default") return "Choose model";
-  // The advisor is off until chosen; every other role borrows the Builder.
-  if (id === "advisor") return "Off";
+  // The advisor and Sees images are off until chosen: the advisor costs a
+  // request every turn, and the Builder may not read images at all. Every
+  // other role borrows the Builder.
+  if (id === "advisor" || id === "vision") return "Off";
   return "Same as Builder";
 }
 

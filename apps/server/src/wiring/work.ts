@@ -145,7 +145,7 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
   readonly imageDescriber?: ImageDescriber;
-} &   Pick<
+} & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "automationEventStore"
@@ -806,7 +806,8 @@ export function wireWork(deps: WorkDependencies) {
                   return { name: reference.displayName, mediaType: reference.mediaType, bytes };
                 },
                 folder: input.projectRoot,
-                recordExternalContentIngestion: (mark) => externalContentIngestionStore.record(mark),
+                recordExternalContentIngestion: (mark) =>
+                  externalContentIngestionStore.record(mark),
                 uuid: randomUUID,
               });
         const computerOwner = decodeComputerUseOwner({

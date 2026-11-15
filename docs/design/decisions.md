@@ -45,7 +45,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
 | [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
-| [Native harness](#native-harness)                                                     | 6         | 4       | 2            | 0                   |
+| [Native harness](#native-harness)                                                     | 7         | 4       | 3            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
 | [Sandbox and confinement](#sandbox-and-confinement)                                   | 15        | 10      | 4            | 1                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **261**   | **155** | **102**      | **4**               |
+| **All areas**                                                                         | **262**   | **155** | **103**      | **4**               |
 
 ## Principles and hard lines
 
@@ -960,7 +960,7 @@ A person may make a Code thread a coordinator: a long-lived thread that starts w
 - A coordinator proposal's review starts on the requested provider, model and level and offers no higher level; a device the host's own person paired approves as a local window does (maintainer decision, 2026-11-12; built on the server; not built yet: paired browsers and phones still show pending proposals read-only).
 - Not yet run against a real provider or on the desktop app; the live checks are on the maintainer live-smoke list.
 - Wake, start and hop counts are kept in a host store (forward-only migration), so the hourly bounds and the hop count hold across a restart; the start count never reads fewer than the workers created in the last hour.
-- A worker's model comes from the model roles once Builder has a model (maintainer decision, 2026-11-15): `start` names `task` and `size` (or a `role` or role-card handle with a `why`), raw provider and model ids are refused, and the host's pure `chooseWorkerModel` passes over models that are turned off, signed out, down, at a usage limit (a failed request's limit signal or a plan-usage reading at its limit, until its reset), disallowed by Project policy or data rules, without proven tools, or blind when images are needed and Sees images is empty; it walks the role's fallbacks, borrows the next tier, climbs a tier for a retry and never drops (a named model included), keeps a review off the reviewed provider, and journals the choice (`coordinatorChoice`, no prompt) on the worker. An ask-first role proposes even under Start without asking, with **Use Builder instead** on the card; a worker whose first request failed for availability before any work starts again on the next model. Each turn carries a host-written role card that does not mark. With no roles set up, workers start on the coordinator's model as before. Built; not run against a real provider. Not built: describing images for a model that cannot see, and continuing a running worker on a fallback.
+- A worker's model comes from the model roles once Builder has a model (maintainer decision, 2026-11-15): `start` names `task` and `size` (or a `role` or role-card handle with a `why`), raw provider and model ids are refused, and the host's pure `chooseWorkerModel` passes over models that are turned off, signed out, down, at a usage limit (a failed request's limit signal or a plan-usage reading at its limit, until its reset), disallowed by Project policy or data rules, without proven tools, or blind when images are needed and Sees images cannot describe one for the Project (then the builder gets `look` and described attachments); it walks the role's fallbacks, borrows the next tier, climbs a tier for a retry and never drops (a named model included), keeps a review off the reviewed provider, and journals the choice (`coordinatorChoice`, no prompt) on the worker. An ask-first role proposes even under Start without asking, with **Use Builder instead** on the card; a worker whose first request failed for availability before any work starts again on the next model. Each turn carries a host-written role card that does not mark. With no roles set up, workers start on the coordinator's model as before. Built; not run against a real provider. Not built: continuing a running worker on a fallback.
 - Work coordinators are not built: a Work thread can message a sibling and be woken by one (maintainer decision, 2026-11-13), but the coordinator role, `start` and state notices are Code's.
 - A coordinator's Agents dock lists its workers and draws each worker's subagents under it. A window that holds a current coordinator may read its workers' child runs as facts (task, state, route, effort, ordering links), never a reply, result, recovery text or control; every other caller is refused before a run is read, and the agent is offered none of it (maintainer request, 2026-11-11).
 
@@ -1554,7 +1554,7 @@ Direct-endpoint requests follow one retry policy, and models are chosen by routi
 - A request goes out at most five times and is retried only while nothing has streamed. A spent allowance, rejected credential or malformed event is never retried.
 - When retries are spent, the lead falls back once per other ready model, and a failure after output streamed never moves the turn.
 - Child runs take their model from the role's slot through one admission path; the lead runs on the thread's chosen model.
-- Routing is by slot (default, plan, slow, task, smol, vision, advisor, quick, deep, reviewer, plus custom), and every harness model call names one. An unconfigured slot resolves to default with a visible warning, except the advisor, which stays off. _Here only._
+- Routing is by slot (default, plan, slow, task, smol, vision, advisor, quick, deep, reviewer, plus custom), and every harness model call names one. An unconfigured slot resolves to default with a visible warning, except the advisor and Sees images, which stay off. _Here only._
 - Settings names the slots as model roles: Planner (plan), Scout (task), Quick edit (quick), Builder (default), Hard problems (deep), Reviewer (slow), Sees images (vision) and Small jobs (smol), each an ordered list of a main model and up to 15 fallbacks with a reasoning level per model, on one page with plain tags per model (maintainer decision, 2026-11-15). Built.
 - A role may hold a model from any enabled provider, because coordinator workers run as ordinary Code threads; the harness skips a candidate it cannot run with `not-harness-runnable` and never runs it (maintainer decision, 2026-11-15). Built.
 - **Suggest roles** and a per-row **Suggest** propose models from a shipped tier table checked against the connected providers' facts, previewed with **Use these** and **Cancel** and saved only by a person; a Project suggests only from Settings' list for a role it chose (maintainer decision, 2026-11-15). Built.
@@ -1563,6 +1563,18 @@ Direct-endpoint requests follow one retry policy, and models are chosen by routi
 - The advisor reviews compact turn digests and may cancel, redirect or pause, but never executes tools, edits files or grants approvals. _Here only._
 
 Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Native harness](../architecture.md#native-harness) and [Model endpoints: Model roles](model-endpoints.md#model-roles).
+
+### Sees images
+
+The Sees images role describes an image in words for a thread whose model cannot read images, and the host decides where an image may go (maintainer decision, 2026-11-15).
+
+- The host resolves the `image-understanding` job through the routing: the Project's Sees images list beats Settings', main model first. It passes over a model that is signed out, down, at a usage limit, not allowed by the Project's provider policy or data rules, or on a connection that takes no image from Octant, and says which and why when it refuses. An empty Sees images is off; it never falls back to the Builder.
+- Each describe is one tool-less request in a scratch folder with the image attached; an answer that read outside content is not used; the input is at most 10 MB and the description at most 4,000 characters.
+- In Work and Code, an image attached to a turn whose model cannot take it is described instead of refused: the image stays attached, the model gets "[Image <name>, described by <model> (<provider>)]: <description>", and the transcript says who described it. With no eligible model the turn is refused with "<model> can't read images. Set a model that sees images in Model roles." A person's own image adds no outside-content mark.
+- `octant_look` is offered to a Work or Code turn only while its model cannot read images and Sees images can describe one: an attachment of the thread or a file inside its folder, confined like any file read, with an optional question.
+- Not built: Chat neither describes attachments nor offers `look`; direct OpenAI- and Anthropic-style endpoints cannot serve Sees images because they do not send an attached image; a description is not on the usage ledger. Not run against a real provider.
+
+Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Sees images](../architecture.md#sees-images), [Agent tools](agent-tools.md), and [Model endpoints: Model roles](model-endpoints.md#model-roles).
 
 ### Harness sessions, goals and steering
 
