@@ -285,6 +285,8 @@ function openFixture(options?: {
   /** How long a Stop on a shared-process provider waits for the runtime to confirm it. */
   readonly stopConfirmationMs?: number;
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
+  readonly octantInstructionBlocks?: ChatServiceOptions["octantInstructionBlocks"];
+  readonly personMemoryBlock?: ChatServiceOptions["personMemoryBlock"];
   readonly moveHold?: (threadId: string) => boolean;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
   readonly awaitsHarnessApproval?: (threadId: string) => boolean;
@@ -769,6 +771,12 @@ function openFixture(options?: {
       ? {}
       : { contextMaintenanceShutdownTimeoutMs: options.contextMaintenanceShutdownTimeoutMs }),
     ...(options?.hiddenThreadIds === undefined ? {} : { hiddenThreadIds: options.hiddenThreadIds }),
+    ...(options?.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options?.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
     ...(options?.moveHold === undefined ? {} : { moveHold: options.moveHold }),
     ...(options?.resolveSideChatReturns === undefined
       ? {}
@@ -1913,6 +1921,41 @@ describe("ChatService", () => {
     expect(
       (fakeDriver.sentTurns[0]?.context ?? []).map((block) => block.text).join("\n"),
     ).not.toContain("Referenced thread");
+  });
+
+  it("gives a Chat session your and its Project's instructions after Octant's own and before person memory", async () => {
+    const { service, fakeDriver, contextHarness } = openFixture({
+      nativeConversation: true,
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+      ],
+      personMemoryBlock: () => "Remembered: prefers tables.",
+    });
+    const planSpy = vi.spyOn(contextHarness, "planTurn");
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Instructions",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      prompt: "Hello",
+    });
+
+    const kinds = (fakeDriver.sentTurns[0]?.context ?? []).map((block) => block.kind);
+    const yours = kinds.indexOf("person-instructions");
+    expect(kinds).toContain("instructions");
+    expect(yours).toBeGreaterThan(kinds.lastIndexOf("instructions"));
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(planSpy.mock.calls.at(-1)?.[0].entries.map((entry) => entry.category)).toEqual(
+      expect.arrayContaining(["person-instructions", "project-instructions"]),
+    );
   });
 
   it("sends an unchanged Side Chat source once to a provider that keeps its own history", async () => {

@@ -198,6 +198,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "profile name email avatar gravatar initials colour color picture",
         },
         {
+          id: settingId("your-instructions"),
+          label: "Your instructions",
+          scope: "host",
+          keywords:
+            "instructions rules system prompt custom instructions providers models canvas routines board",
+        },
+        {
           id: settingId("host-phone-notifications"),
           label: "Phone notifications",
           scope: "host",

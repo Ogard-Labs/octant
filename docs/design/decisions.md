@@ -34,7 +34,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Key providers](#key-providers)                                                       | 1         | 0       | 1            | 0                   |
 | [Release scope](#release-scope)                                                       | 7         | 2       | 4            | 1                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
-| [App-managed tools](#app-managed-tools)                                               | 5         | 4       | 1            | 0                   |
+| [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 1            | 1                   |
 | [Canvas authority](#canvas-authority)                                                 | 2         | 0       | 2            | 0                   |
 | [Device transport](#device-transport)                                                 | 3         | 3       | 0            | 0                   |
 | [Modes, Projects and authority](#modes-projects-and-authority)                        | 16        | 10      | 6            | 0                   |
@@ -44,11 +44,11 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 2            | 0                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 14        | 10      | 3            | 1                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 15        | 10      | 4            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 5       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **259**   | **156** | **99**       | **4**               |
+| **All areas**                                                                         | **261**   | **156** | **101**      | **4**               |
 
 ## Principles and hard lines
 
@@ -416,7 +416,7 @@ Desktop is one product on macOS, Linux and Windows, and platform differences are
 - The Windows credential-store building block uses a scoped native Credential Manager helper and private pipes. Its atomic protected blob accepts at most 2,560 UTF-8 bytes and refuses overflow before mutation; the broker transport bound remains 12 KiB. It supplies the seven existing desktop auxiliary ports through distinct closed purpose namespaces, preserving provider target names and family/store isolation. Oversized auxiliary values are refused without mutation, not split or stored elsewhere. A fixed native per-user mutex serializes all purposes/families/stores across processes; exact User/SYSTEM ownership/access and bounded waits refuse unsafe, blocked or abandoned coordination before mutation, without retry. It does not admit host startup or Chat or remove the Work/Code gate.
 - The separate desktop identity service has a closed native Windows CNG/Credential Manager backend: a random32-byte secret, SHA256(raw-secret) fingerprint, HMAC-SHA256 signature, non-exporting ensure/sign/rotate/recovery API, and selected-store/family isolation outside all generic credential purposes. Malformed blobs refuse ensure/sign; explicit atomic rotation recovers them. The existing16KiB request bound remains separate from the2560-byte credential blob cap. This is neither the server/member/roster P-256 identity nor owner unlock/profile identity, and admits no Windows startup or Work/Code. Mac and existing Linux behavior remain unchanged.
 - The simulator, the Apple development workbench and window vibrancy stay macOS-only.
-- The remaining Windows steps are sequenced in [the Windows sequence](../architecture.md#current-release-boundary) (maintainer decision, 2026-11-14): confinement design, then Work and Code with an explicit shell setting, then the CLI, then installer, signing and the signed feed.
+- The remaining Windows steps are sequenced in [the Windows sequence](../architecture.md#current-release-boundary) (maintainer decision, 2026-11-14): confinement design, then Work and Code with an explicit shell setting, then the CLI, then installer, signing and the signed feed. The confinement design is documented and its launcher built dormant ([Windows confinement for confined launches](#windows-confinement-for-confined-launches)); it admits no Windows launch.
 
 Status: Partly built. Since: 2026-10-16; ordering gate lifted 2026-11-06. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
@@ -596,6 +596,20 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - Automatic research routing prefers the provider's own search when the provider has one and falls back to SearXNG, so a fresh install can search with no endpoint configured (maintainer request, 2026-11-14).
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
+
+### Web search backends and data policy
+
+Octant's own `web-search` searches an ordered list of backends the person sets up, filtered by one host data policy (Any, ZDR only, EU only, EU and ZDR), and a provider's own search, in the native harness and in a vendor runtime, follows the same policy, so a person under a zero data retention agreement or an EU data boundary can search (maintainer request, 2026-11-14).
+
+- The tool's name, schema and result shape do not change, and the definition never names a backend; the answering backend is journaled, not returned to the model.
+- A backend is eligible only when the person states ZDR or EU processing for it and its vendor offers that; with no eligible backend the tool is not offered.
+- A query moves to the next backend only when one did not answer, inside a 20-second budget; an empty result does not move on.
+- The policy changes only from a local window or a device the host's own person paired, and is journaled; an organization-set policy is outside the release boundary.
+- The native harness offers a provider's own search only on Anthropic's and OpenAI's own APIs, capped at one search per request, withheld from a tainted thread below Full access, and marking the thread as outside content.
+- Outside Any, the policy turns a vendor runtime's `webTools` off and shows it locked; it adds no second switch beside Chat's research route, whose `searxng` value becomes `octant`.
+- A stored SearXNG address migrates to the first entry under Any; all four delivery slices, provider search in the harness included, are one delivery.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Web search backends and data policy](web-search-backends.md).
 
 ## Canvas authority
 
@@ -1496,7 +1510,7 @@ A person writes instructions for Octant itself, beside each provider's own instr
 - Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
 - They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
 
-Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
+Status: Partly built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 
@@ -1979,6 +1993,21 @@ At Full access an ACP agent launches outside Octant's sandbox with no OS-level d
 - Credentials reach providers only through the credential broker; below Full access the sandbox also denies the credential files and unapproved extension folders.
 
 Status: Built. Since: 2026-10-31. Detail: [Architecture: Security and authority, Approvals](../architecture.md#security-and-authority).
+
+### Windows confinement for confined launches
+
+A confined launch on Windows runs in a fresh AppContainer with ACL grants and a kill-on-close job, applied by a fixed native launcher; the code is built dormant and every Windows launch stays refused until it has run a real provider on a person's Windows machine (maintainer decision, 2026-11-15).
+
+- The container is deny-by-default; grants name only the bound root and extra folders, the temporary directory and write roots, read roots and the program's folder, and a grant ALL APPLICATION PACKAGES already holds writes nothing. A grant whose path passes through a junction or link at any component is refused, with every component held open while the launcher edits. Grants and removals are serialized across launchers by one session lock and remove only their own SID's entries.
+- A read-only bound root beneath a writable grant, a grant beneath an isolated root, and a writable grant beneath an extra write denial are refused, except the launch's own write roots, which the shared port re-allows past both.
+- The secret guard holds as an OS rule: no grant at, inside or above a protected location (a runtime's own account home excepted from inside it), a grant that is itself a pattern match or sits inside one refused, a launch refused when a grant already holds a pattern match or a carve-out falls inside a grant (a deny entry measured unable to carve a file out of a grant), and every path the guard cannot spell refused, 8.3 short names included.
+- Plan and Chat get an active-process limit of one; the job ends the whole tree when the launcher ends, which is the Windows process-tree stop.
+- `none` has no capability and `allow` the client capabilities; `proxied`, the relays, read-everywhere, Seatbelt rules and a non-`.exe` program are refused as incompatible rather than dropped.
+- Full access is the job object alone, with no container or grants.
+- The port refuses `win32` unless its caller passes `unverifiedWindowsConfinement`, which no production caller does; the provider-level Windows refusals stay and the launcher is not packaged.
+- Hosted Windows evidence covers the mechanism on an administrator runner; an ordinary account, a desktop Windows release, ACL propagation cost on a large checkout, terminals and a real provider remain unverified.
+
+Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Current Release Boundary](../architecture.md#current-release-boundary).
 
 ## Terminals, browsers and side surfaces
 

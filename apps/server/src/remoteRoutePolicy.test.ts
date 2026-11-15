@@ -360,6 +360,30 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(4);
   });
 
+  it("forwards your instructions for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(request("/api/octant-instructions"));
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/octant-instructions/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/octant-instructions/commands`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect(classifyProductAction(new Request(`${origin}/api/octant-instructions`))).toBeUndefined();
+  });
+
   it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const post = await fixture.route(

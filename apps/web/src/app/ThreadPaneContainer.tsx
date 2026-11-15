@@ -611,6 +611,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 <ThreadStatsDetailDialog />
                 <WorkspaceView
                   threadHeader={threadHeader}
+                  octantInstructionsClient={props.clients.octantInstructionsClient}
                   threadMenuItems={threadMenuItems}
                   {...(contextClient === undefined ? {} : { contextClient })}
                   {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}

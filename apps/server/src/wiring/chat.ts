@@ -117,6 +117,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "machineChangeFeed"
     | "windowAuthorityStore"
     | "personMemoryAccess"
+    | "octantInstructions"
   > &
   Pick<
     AgentRunsWiring,
@@ -224,6 +225,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    octantInstructions,
     keptImageChoices,
     projectMemoryAccess,
   } = deps;
@@ -418,6 +420,10 @@ export function wireChat(deps: ChatDependencies) {
       // The host setting, read when each attempt starts.
       toolStepsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).toolStepsPerTurn,
+      octantInstructionBlocks: ({ thread }) =>
+        octantInstructions.contextBlocks({
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+        }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",

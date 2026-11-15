@@ -12,6 +12,7 @@ import { CanvasDefinition, CanvasId } from "./canvas";
 import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
+import { PersonInstructionsText, ProjectInstructionsText } from "./octantInstructions";
 import { PersonMemoryEntry } from "./personMemory";
 import { ProjectId, ProjectMemoryView } from "./projects";
 import { ThreadExportBundle } from "./threadExport";
@@ -125,6 +126,23 @@ export type HostExportOmission = typeof HostExportOmission.Type;
 const pageItems = <A, I, R>(item: Schema.Schema<A, I, R>) =>
   Schema.Array(item).pipe(Schema.maxItems(HOST_EXPORT_MAX_PAGE_ITEMS));
 
+/** The instructions the person wrote for Octant, exactly as written. */
+export const HostExportInstructions = Schema.Struct({
+  yours: PersonInstructionsText,
+}).annotations(strict);
+export type HostExportInstructions = typeof HostExportInstructions.Type;
+
+/**
+ * One Project's instructions, exactly as written. A host can hold more
+ * Projects than a page carries, so these travel on their own bounded pages
+ * rather than inside the one `instructions` page.
+ */
+export const HostExportProjectInstructions = Schema.Struct({
+  projectId: ProjectId,
+  instructions: ProjectInstructionsText,
+}).annotations(strict);
+export type HostExportProjectInstructions = typeof HostExportProjectInstructions.Type;
+
 export const HostExportPage = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("header"), octant: HostExportHeader }).annotations(strict),
   Schema.Struct({
@@ -142,6 +160,14 @@ export const HostExportPage = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("person-memory"),
     entries: pageItems(PersonMemoryEntry),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("instructions"),
+    instructions: HostExportInstructions,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-instructions"),
+    projectInstructions: pageItems(HostExportProjectInstructions),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("canvases"),
@@ -195,6 +221,10 @@ export const HostExportBundle = Schema.Struct({
   projectMemory: Schema.Array(HostExportProjectMemory),
   /** The person's memory entries, each with the threads it came from. Absent in older cuts. */
   personMemory: Schema.optional(Schema.Array(PersonMemoryEntry)),
+  /** The person's instructions for Octant. Absent in older cuts. */
+  instructions: Schema.optional(HostExportInstructions),
+  /** Each Project's instructions that are not empty. Absent in older cuts. */
+  projectInstructions: Schema.optional(Schema.Array(HostExportProjectInstructions)),
   canvases: Schema.Array(HostExportCanvas),
   settings: HostExportSettingsSummary,
   usage: Schema.Array(HostExportUsageRow),

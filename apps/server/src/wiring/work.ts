@@ -155,6 +155,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "routineProposalService"
     | "windowAuthorityStore"
     | "personMemoryAccess"
+    | "octantInstructions"
   > &
   Pick<
     AgentRunsWiring,
@@ -344,6 +345,7 @@ export function wireWork(deps: WorkDependencies) {
     workThreadProjection,
     workTurnProjection,
     personMemoryAccess,
+    octantInstructions,
     keptImageChoices,
     projectMemoryAccess,
   } = deps;
@@ -518,6 +520,8 @@ export function wireWork(deps: WorkDependencies) {
       moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "work", threadId }),
       conversationInputTransfer,
       liveTurns,
+      octantInstructionBlocks: ({ thread }) =>
+        octantInstructions.contextBlocks({ projectId: String(thread.projectId) }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "work",

@@ -13,6 +13,7 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { IntegrationClient } from "@octant/client-runtime/integration-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
@@ -93,6 +94,7 @@ export interface ShellSettingsSurfaceProps {
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   readonly desktopPaneClient?: Pick<DesktopPaneClient, "request">;
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
@@ -196,6 +198,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             {...(props.diskCleanupClient === undefined
               ? {}
               : { diskCleanupClient: props.diskCleanupClient })}
+            {...(props.octantInstructionsClient === undefined
+              ? {}
+              : { octantInstructionsClient: props.octantInstructionsClient })}
             {...(props.personMemoryClient === undefined
               ? {}
               : { personMemoryClient: props.personMemoryClient })}

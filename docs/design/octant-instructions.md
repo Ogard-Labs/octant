@@ -9,11 +9,13 @@ own instruction files. Architecture owns the context a turn is built from
 memory ([Person memory](../architecture.md#person-memory)); Coordinator threads
 owns the coordinator role ([Coordinator threads](coordinator-threads.md)).
 
-Status: designed, not built. Today a person can give standing instructions only
-through a provider's own files (`CLAUDE.md`, `AGENTS.md`, and the like), which
-Octant lets each provider read as it does on its own, and through what person
-memory learns. Nothing the person writes tells Octant how to use its own
-features or how to divide work between providers.
+Status: partly built. Built: the contracts and journal events, your
+instructions as a `person-instructions` block in Chat, Work, and Code on every
+provider and in Octant Harness's system prompt, the route that changes them,
+the inspector label, Export my data, the Your instructions field in
+Settings › General, and Project instructions with their `project-instructions`
+block and field beside Project memory. Designed, not built: orchestration
+(delivery slice 4).
 
 ## Why
 
@@ -91,8 +93,15 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
   what Plan or Chat may do: Plan stays read-only and Chat keeps no folder and
   no shell.
 - **Inspector.** The context inspector lists each block by name (Your
-  instructions, Project instructions, Orchestration) with its size, in every
-  mode.
+  instructions, Project instructions, Orchestration) with its size in Chat and
+  Work. A Code window, which is counted by part, counts them with Octant's
+  instructions, as it counts person memory: the runtime's part list is a
+  closed set, and a part per text would widen it for three small blocks.
+- **Key.** Each block carries a fixed key, so an edit is a revision of the copy
+  a session holds rather than a withdrawal. Clearing a text does withdraw it:
+  a running session is sent its whole standing context again without the text
+  (the rule in Held standing context), so a cleared rule never stands alone in
+  its history.
 
 ## Authority
 
@@ -107,18 +116,33 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
 - **Journal.** Each change is journaled with the whole new text under the
   record's expected version (`person-instructions.changed@1`,
   `project-instructions.changed@1`); a stale version is refused. Agents may
-  read the texts only as the context blocks above.
+  read the texts only as the context blocks above. The route
+  (`/api/octant-instructions`) answers a client that does not act as the
+  host's person read-only, refuses its change, and refuses an agent grant's
+  session even a read; the journal refuses a change whose actor is an agent or
+  the host itself.
 - **Secrets.** The editor warns when a text looks like it holds a secret (the
-  same checks person memory runs), and the journal and logs redact secret
-  values as they do everywhere.
+  same checks person memory runs, shared from
+  `@octant/domain/secret-shaped-text-policy`). The text is kept as written,
+  since Octant never rewrites it; logs redact secret values as they do
+  everywhere.
 
 ## Where they are kept
 
 - On this host only. They are not synced to a hub or spoke and travel with no
   thread, the rule person memory follows.
-- Export my data carries them: an `instructions` page with the three texts.
-- Deleting a Project deletes its Project instructions. Turning off a text
+- Export my data carries them: an `instructions` page with your instructions
+  and orchestration, and bounded `project-instructions` pages with each
+  Project's text that is not empty, since a host can hold more Projects than
+  one page carries.
+- Deleting a Project deletes its Project instructions. A Project is archived
+  rather than removed, so this is the Project-scoped purge that already erases
+  Project memory: it erases the `project-instructions` aggregate from the
+  journal and the host stops sending the block at once. Turning off a text
   (clearing it) sends nothing from the next session on.
+- A Project block's key names its Project, so a thread is never sent another
+  Project's text as a revision of its own. A change for a Project that is not
+  on this host is refused.
 
 ## Settings
 
@@ -127,6 +151,11 @@ Settings › General, under Your identity, gains **Your instructions** and
 limit, a line saying what it is for and that a provider's own instruction files
 still apply, and Save. A Project's settings gain **Project instructions**
 beside Project memory. A window that cannot change them shows them read-only.
+The count is the field's length as the limit counts it, and Save stays off
+until the text changed and fits. The likely-secret warning shows while the
+text matches and does not block Save: the person may mean it. A save made
+against a version another window already changed is refused, says so, and the
+field rereads the current text.
 
 ## Delivery
 
