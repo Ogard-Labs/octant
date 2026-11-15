@@ -97,6 +97,36 @@ describe("Claude instruction files", () => {
     ]);
   });
 
+  it("follows a home-relative or absolute import into the account's config folder and no further", async () => {
+    await writeFile(join(configDir, "shared.md"), "Shared: write plain sentences.");
+    await writeFile(join(configDir, "absolute.md"), "Absolute: keep tests close.");
+    const outside = join(base, "elsewhere.md");
+    await writeFile(outside, "Elsewhere: never read.");
+    await writeFile(
+      join(projectRoot, "CLAUDE.md"),
+      [
+        "Project: use tabs.",
+        "See @~/config/shared.md and @" + join(configDir, "absolute.md"),
+        "and @" + outside,
+        "~~~",
+        "@docs/style.md stays text inside a fence",
+        "~~~",
+      ].join("\n"),
+    );
+    const home = process.env.HOME;
+    process.env.HOME = base;
+    try {
+      const text = await instructionsFor();
+      expect(text).toContain("Shared: write plain sentences.");
+      expect(text).toContain("Absolute: keep tests close.");
+      expect(text).not.toContain("Elsewhere: never read.");
+      expect(text).not.toContain("Imported: no semicolons.");
+    } finally {
+      if (home === undefined) delete process.env.HOME;
+      else process.env.HOME = home;
+    }
+  });
+
   it.each(["approval-gated", "plan"] as const)(
     "skips an import the secret guard protects at %s and still loads an ordinary one",
     async (executionPolicy) => {

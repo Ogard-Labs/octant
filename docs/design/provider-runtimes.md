@@ -166,13 +166,14 @@ cached prefix. The account's file is
 `CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
 the Project's are the files Claude Code's loader reads at its root
 (`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
-and the files they import with `@path`, up to five levels. Ancestors above
+and the files they import with `@path`, expanded as below. Ancestors above
 the Project root are outside the Project and are not read, and Claude Code
 loads a nested folder's file only once it reads inside it, so neither is
 added. Where the source is on, Claude Code loads the files itself and Octant
 adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
-not UTF-8 text, or resolving through a symlink or import outside its folder
-is skipped and the reason logged. The host reads these files outside every
+not UTF-8 text, or resolving through a symlink outside its folder, or
+through an import outside the account's and the Project's folders, is skipped
+and the reason logged. The host reads these files outside every
 gate, so below Full access a file or import the secret guard protects (the
 check a `Read` of it meets) is skipped as `protected` before it is opened,
 and at every level so is the account's own sign-in (`.credentials.json`,
@@ -754,8 +755,9 @@ code span or fenced block stays text, a file is loaded once so a cycle ends,
 and imports stop five hops from the first file, past 32 files, or past
 256 KiB, the cut said as truncated. Only a file inside the Project's folders
 or the account's config folders is read, judged at the path it resolves to,
-so a symbolic link out of them is refused. Not built yet: the reader of an
-untrusted Project's `CLAUDE.md` that calls this expansion.
+so a symbolic link out of them is refused. The instruction-file reader above
+expands every file it reads this way, each import meeting the same size,
+text and secret-guard checks as the file that names it before it is opened.
 
 A turn has no tool-call cap. The gate remembers at most 256 tool-use ids and
 forgets the oldest settled ones past that; ids still pending or holding a
