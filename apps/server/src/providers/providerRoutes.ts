@@ -215,7 +215,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               {
                 category: "unsupported",
                 message:
-                  "Only a Claude Code, Codex, OpenCode, or Mistral Vibe thread can change this.",
+                  "Only a Claude Code, Codex, OpenCode, or ACP agent thread can change this.",
               },
               400,
               origin,

@@ -26,6 +26,21 @@ describe("a Project's own code and its trust", () => {
     ).toEqual({ status: "untrusted", provider: "opencode", found: ["settings"] });
   });
 
+  it("asks to trust a Project that holds an ACP agent's own settings, extensions, and skills", () => {
+    expect(
+      projectCodeTrust({
+        driverKind: "gemini",
+        projectType: "code",
+        trusted: false,
+        present: [".gemini/settings.json", ".gemini/extensions", ".agents/skills"],
+      }),
+    ).toEqual({
+      status: "untrusted",
+      provider: "gemini",
+      found: ["settings", "plugins", "skills"],
+    });
+  });
+
   it("reports a Project already trusted for the provider without asking", () => {
     expect(
       projectCodeTrust({

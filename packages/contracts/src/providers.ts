@@ -90,9 +90,16 @@ export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 /**
  * The key providers: the runtimes that run inside Octant as they run on their
  * own, with their own subagents, web tools, skills, configuration, and a
- * trusted Project's code, once the person allows it.
+ * trusted Project's code, once the person allows it. Every ACP agent is one
+ * (maintainer decision, 2026-11-14): each reports in its `nativeSetup`
+ * capability which of those features its launch can load.
  */
-export const KEY_PROVIDER_DRIVER_KINDS = ["claude", "codex", "opencode", "mistral-vibe"] as const;
+export const KEY_PROVIDER_DRIVER_KINDS = [
+  "claude",
+  "codex",
+  "opencode",
+  ...ACP_AGENT_KINDS,
+] as const;
 export const KeyProviderDriverKind = Schema.Literal(...KEY_PROVIDER_DRIVER_KINDS);
 export type KeyProviderDriverKind = typeof KeyProviderDriverKind.Type;
 export const KeyProviderDriverKinds = Schema.Array(KeyProviderDriverKind).pipe(
@@ -1047,8 +1054,8 @@ export const ClaudeProviderInstance = Schema.Struct({
 export type ClaudeProviderInstance = typeof ClaudeProviderInstance.Type;
 /**
  * An instance of any ACP agent; its configuration kind must match its driver
- * kind. Of the ACP agents only Mistral Vibe is a key provider, so only its
- * instance may carry `nativeSetup`.
+ * kind. Every ACP agent is a key provider, so any instance may carry
+ * `nativeSetup`.
  */
 export const AcpAgentProviderInstance = Schema.Struct({
   ...KeyProviderInstanceFields,
@@ -1058,9 +1065,7 @@ export const AcpAgentProviderInstance = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (instance) =>
-        instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind) &&
-        (instance.nativeSetup === undefined || instance.driverKind === "mistral-vibe"),
+      (instance) => instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind),
     ),
   );
 export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
@@ -1315,9 +1320,7 @@ export const ProviderInstanceNativeSetupChanged = Schema.Struct({
     OpenCodeProviderInstance,
     CodexProviderInstance,
     ClaudeProviderInstance,
-    AcpAgentProviderInstance.pipe(
-      Schema.filter((instance) => instance.driverKind === "mistral-vibe"),
-    ),
+    AcpAgentProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceNativeSetupChanged = typeof ProviderInstanceNativeSetupChanged.Type;

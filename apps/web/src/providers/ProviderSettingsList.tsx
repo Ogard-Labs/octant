@@ -18,6 +18,7 @@ import {
   codexAccountUsesAssignedDirectory,
   isAcpAgentInstance,
   isImageProfileDriverKind,
+  isKeyProviderDriverKind,
   isNewerProviderRelease,
   modelCanTakeDelegatedWork,
   subscriptionDescriptorIdOf,
@@ -2231,13 +2232,7 @@ function providerBinaryPath(instance: ProviderInstance): string | undefined {
 function keyProviderAccount(
   instance: ProviderInstance,
 ): ProviderNativeSetupSettingProps["instance"] | undefined {
-  const driverKind =
-    instance.driverKind === "claude" ||
-    instance.driverKind === "codex" ||
-    instance.driverKind === "opencode" ||
-    instance.driverKind === "mistral-vibe"
-      ? instance.driverKind
-      : undefined;
+  const driverKind = isKeyProviderDriverKind(instance.driverKind) ? instance.driverKind : undefined;
   if (driverKind === undefined) return undefined;
   return {
     id: String(instance.id),

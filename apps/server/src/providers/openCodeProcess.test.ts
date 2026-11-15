@@ -863,6 +863,41 @@ describe("OpenCodeProcessPort", () => {
     expect(rules.some((rule) => rule.includes("process-exec"))).toBe(false);
   });
 
+  it("lifts OpenCode's Project configuration switch only for a trusted Project outside Plan", async () => {
+    const launch = async (executionPolicy: "approval-gated" | "plan") => {
+      const root = fixtureRoot("isolation-supported");
+      const binaryPath = join(root, "opencode-project-config-fixture");
+      const recordPath = join(root, ".fake-opencode-project-config");
+      writeFileSync(
+        binaryPath,
+        `#!/bin/sh\ncd '${root}'\nprintf '%s' "\${OPENCODE_DISABLE_PROJECT_CONFIG-<unset>}" > '${recordPath}'\nexec '${fakeCliPath}' "$@"\n`,
+      );
+      chmodSync(binaryPath, 0o755);
+      const server = await Effect.runPromise(
+        Effect.scoped(
+          makeOpenCodeProcessLive({
+            // A wrapping launcher, as the real confinement uses, so isolation
+            // could be attested where the launch allows it.
+            confinement: {
+              prepare: (input) => ({ command: "/bin/sh", args: [input.executable, ...input.args] }),
+            },
+            runtimeConfigResolver: async () => undefined,
+            startupTimeoutMs: 2_000,
+          }).start({ binaryPath, cwd: root, mode: "code", executionPolicy, projectConfig: true }),
+        ),
+      );
+      return { switch: readFileSync(recordPath, "utf8"), server };
+    };
+
+    const trusted = await launch("approval-gated");
+    expect(trusted.switch).toBe("<unset>");
+    // The Project's own plugins and servers may enter, so it is never isolated.
+    expect(trusted.server.isolatedConfiguration).toBeUndefined();
+    const plan = await launch("plan");
+    expect(plan.switch).toBe("1");
+    expect(plan.server.isolatedConfiguration).toBe(true);
+  });
+
   it("keeps Code mode exec allowed without the stand-in exec grant", async () => {
     const fixture = probeWrapper("v2-ready");
     let captured: Parameters<ProcessConfinementPort["prepare"]>[0] | undefined;

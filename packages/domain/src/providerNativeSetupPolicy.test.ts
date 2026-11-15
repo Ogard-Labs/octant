@@ -152,7 +152,7 @@ describe("a key provider running as itself", () => {
   });
 
   it("gives every provider that is not a key provider nothing, at every level", () => {
-    for (const driverKind of ["pi", "kimi-code", "ollama", "openai-compatible"] as const) {
+    for (const driverKind of ["pi", "ollama", "openai-compatible"] as const) {
       expect(
         resolveProviderNativeSetup({
           driverKind,

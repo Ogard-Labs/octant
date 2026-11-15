@@ -57,7 +57,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import type { AcpProviderProfile } from "./acpProfiles";
+import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -272,6 +272,30 @@ function baseCapabilities(
     acpClientCapabilities: "supported",
     nativeSetup: profile.nativeSetupSupport ?? NO_NATIVE_SETUP,
   } as const;
+}
+
+/**
+ * What an approval says when the agent asks about a call Octant never saw.
+ * The agent's own subagents run in Work and Code outside Plan wherever the
+ * person's setup carries them (maintainer decision, 2026-11-14), and a
+ * subagent's request names a call only the child saw, so it is shown plainly
+ * with Allow and Deny under the thread's level instead of failing the turn. A
+ * profile with its own sentence keeps it everywhere; elsewhere, and in Chat
+ * and Plan, such a request still fails the turn.
+ */
+function unnamedPermission(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+  executionPolicy: ProviderExecutionPolicy,
+  nativeSetup: ProviderNativeSetup | undefined,
+): { readonly unnamedPermissionDescription?: string } {
+  if (profile.unnamedPermissionDescription !== undefined) {
+    return { unnamedPermissionDescription: profile.unnamedPermissionDescription };
+  }
+  if (!acpSubagentsRun(mode, executionPolicy, nativeSetup)) return {};
+  return {
+    unnamedPermissionDescription: `A ${profile.displayName} subagent asks to run a tool. ${profile.displayName} doesn't say which.`,
+  };
 }
 
 /** Every ACP agent but a key provider loads none of its own setup. */
@@ -1186,6 +1210,9 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
+      // An unseen subagent's run is journaled before the approval it asks for.
+      if (mapped.kind === "approval")
+        for (const preceding of mapped.preceding ?? []) offer(preceding);
       // Plan is read-only, so nothing it asks for is anyone's to approve. Work
       // and Code share the shell at the thread's level, so an `execute`
       // request reaches the person in Work as it does in Code.
@@ -1222,6 +1249,7 @@ function makeConnection(
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       source: AcpNewSessionResult,
       scope: Scope.CloseableScope,
@@ -1249,9 +1277,7 @@ function makeConnection(
         ...(profile.childRunMetaKey === undefined
           ? {}
           : { childRunMetaKey: profile.childRunMetaKey }),
-        ...(profile.unnamedPermissionDescription === undefined
-          ? {}
-          : { unnamedPermissionDescription: profile.unnamedPermissionDescription }),
+        ...unnamedPermission(profile, mode, input.executionPolicy, input.nativeSetup),
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),
@@ -1527,8 +1553,12 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
+            // A Project trusted for the agent, outside Plan, loads the files
+            // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+                ? profile.refusesProject?.(projectRoot)
+                : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
             if (bridgeTools.length > 0 && process.platform !== "darwin") {
@@ -2041,11 +2071,15 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                if (profile.reviewedCommands !== undefined && prompt.trimStart().startsWith("/")) {
+                if (
+                  profile.reviewedCommands !== undefined &&
+                  (mode === "chat" || state.executionPolicy === "plan") &&
+                  prompt.trimStart().startsWith("/")
+                ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} slash commands are disabled. Rephrase the request without a leading slash.`,
+                      `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }

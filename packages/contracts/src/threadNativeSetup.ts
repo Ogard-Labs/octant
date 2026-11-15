@@ -73,6 +73,7 @@ export const ProjectCodeKind = Schema.Literal(
   "plugins",
   "tools",
   "agents",
+  "commands",
 );
 export type ProjectCodeKind = typeof ProjectCodeKind.Type;
 

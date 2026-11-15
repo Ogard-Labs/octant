@@ -1,10 +1,8 @@
 import { providerRunsAsItself } from "@octant/domain";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
 import {
-  combineOpenCodeSetups,
   openCodeOwnRulesAllow,
   readOpenCodeOwnSetup,
-  readOpenCodeProjectSetup,
   type OpenCodeOwnSetup,
 } from "./openCodeOwnSetup";
 import { OpenCodeMessageParts } from "./openCodeMessageParts";
@@ -142,8 +140,6 @@ export interface OpenCodeDriverOptions {
    * refuses none beyond OpenCode's own `.env` rule.
    */
   readonly protectedPaths?: () => ReadonlyArray<string>;
-  /** A trusted Project's own OpenCode rules and MCP servers; read from its root by default. */
-  readonly readProjectSetup?: (projectRoot: string) => OpenCodeOwnSetup;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -237,6 +233,8 @@ const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false, webT
 interface ResolvedOwnSetup extends OpenCodeOwnSetup {
   readonly toolServers: boolean;
   readonly webTools: boolean;
+  /** The launch loads the trusted Project's own OpenCode configuration. */
+  readonly projectConfig: boolean;
 }
 
 function ownPermissions(setup: ResolvedOwnSetup | undefined): OwnPermissions {
@@ -333,10 +331,9 @@ const capabilities = {
     // stay out of the launch.
     toolServers: "supported",
     hooks: "unsupported",
-    // A trusted Project's own rules and MCP servers join the person's in the
-    // private configuration, under the level's denies; the raw Project files,
-    // and so its plugins, agents, and commands, never load
-    // (`readOpenCodeProjectSetup`).
+    // A trusted Project outside Plan loads its own `opencode.json(c)` and
+    // `.opencode` agents, plugins, and commands as OpenCode does on its own
+    // (`projectConfig` on the launch).
     projectCode: "supported",
   },
 } as const;
@@ -1530,24 +1527,20 @@ function makeConnection(
     const sessionsBySource = new Map<string, SessionState>();
     /**
      * The person's own rules, and their tool servers where those are on,
-     * read from their OpenCode configuration when a session starts, then a
-     * trusted Project's own where its code is on (never in Plan). Nothing
-     * loads unless the setup is on for the session.
+     * read from their OpenCode configuration when a session starts, and a
+     * trusted Project's own configuration where its code is on (never in
+     * Plan), which OpenCode itself loads. Nothing loads unless the setup is
+     * on for the session.
      */
     const ownSetupFor = (setup: ProviderNativeSetup | undefined): ResolvedOwnSetup | undefined => {
       if (!providerRunsAsItself(setup) || setup === undefined) return undefined;
-      const person = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
-      const own = setup.projectCode
-        ? combineOpenCodeSetups(
-            person,
-            (options.readProjectSetup ?? readOpenCodeProjectSetup)(projectRoot),
-          )
-        : person;
+      const own = (options.readOwnSetup ?? readOpenCodeOwnSetup)();
       return {
         rules: own.rules,
         mcp: setup.toolServers ? own.mcp : {},
         toolServers: setup.toolServers,
         webTools: setup.webTools,
+        projectConfig: setup.projectCode,
       };
     };
     const childSessions = new OpenCodeChildSessions();
@@ -1570,6 +1563,8 @@ function makeConnection(
     let runtimeKind: "legacy" | "beta" | undefined;
     let runtimeVersion: string | undefined;
     let runtimeIsolated = false;
+    // The running launch loads a trusted Project's own OpenCode configuration.
+    let runtimeProjectConfig = false;
     let runtimeLoopbackPorts: ReadonlyArray<number> = [];
 
     const offer = (event: ProviderRuntimeEvent) => {
@@ -1814,6 +1809,7 @@ function makeConnection(
       runtimeOwnSetupKey = ownSetupKey(undefined);
       runtimeVersion = undefined;
       runtimeIsolated = false;
+      runtimeProjectConfig = false;
       runtimeLoopbackPorts = [];
       subscriptionReady = undefined;
     };
@@ -1864,6 +1860,7 @@ function makeConnection(
                   ...(ownSetup === undefined || !ownSetup.toolServers
                     ? {}
                     : { ownToolServers: ownSetup.mcp }),
+                  ...(ownSetup?.projectConfig === true ? { projectConfig: true as const } : {}),
                   betaPermissions: betaSessionPermissionRules(
                     executionPolicy,
                     mode,
@@ -1897,6 +1894,7 @@ function makeConnection(
             runtimeKind = started.runtime ?? "legacy";
             runtimeVersion = started.version;
             runtimeIsolated = started.isolatedConfiguration === true;
+            runtimeProjectConfig = ownSetup?.projectConfig === true;
             runtimeLoopbackPorts = loopbackPorts;
             client = nextClient;
             void monitor.exited.then(() => {
@@ -2253,11 +2251,13 @@ function makeConnection(
             ),
             Effect.flatMap((runtimeClient) => {
               // Below Full access the tools reach only a runtime that proved
-              // nothing else can enter it. At Full access they are offered
-              // beside whatever the runtime inherited, reported as mixed.
+              // nothing else can enter it. At Full access, and in a trusted
+              // Project whose own OpenCode configuration the launch loads,
+              // they are offered beside whatever the runtime inherited.
               if (
                 state.managedTools !== undefined &&
                 !runtimeIsolated &&
+                !runtimeProjectConfig &&
                 input.executionPolicy !== "full-access"
               ) {
                 return Effect.promise(() => releaseManagedTools(state)).pipe(
@@ -2534,7 +2534,7 @@ function makeConnection(
               // This gates the turn's own tool offer, so a mixed Full access
               // session carries tools here; the probe is what reports mixed.
               appManagedTools:
-                runtimeIsolated || state.executionPolicy === "full-access"
+                runtimeIsolated || runtimeProjectConfig || state.executionPolicy === "full-access"
                   ? ("supported" as const)
                   : ("unsupported" as const),
             };
@@ -3288,7 +3288,7 @@ const PLAN_READ_TOOLS = [
  * approve anything. They now run without asking inside the Project and its
  * extra folders at every level, Plan included, as Octant's own file-read gate
  * for Claude Code does (maintainer decision, 2026-11-14); `external_directory`
- * still refuses every other folder.
+ * asks for every other folder below Full access, and Plan refuses one.
  */
 const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 
@@ -3336,23 +3336,19 @@ export function permissionRules(
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
-    rules = [
-      { permission: "*", pattern: "*", action: "allow" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-    ];
+    // Full access reaches folders outside the Project, as OpenCode does on
+    // its own (maintainer decision, 2026-11-14); the protected-file refusals
+    // below still hold.
+    rules = [{ permission: "*", pattern: "*", action: "allow" }];
   } else if (policy === "auto-accept-edits") {
     // Edits inside the bound directory proceed; everything else still asks,
-    // and reach outside the directory stays denied outright.
+    // reach outside the directory included (`outsideFolderAllows`).
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
     ];
   } else if (policy === "approval-gated") {
-    rules = [
-      { permission: "*", pattern: "*", action: "ask" },
-      { permission: "external_directory", pattern: "*", action: "deny" },
-    ];
+    rules = [{ permission: "*", pattern: "*", action: "ask" }];
   } else {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
@@ -3378,7 +3374,8 @@ export function permissionRules(
     ...posture,
   ];
   // The person's own rules apply over the level's allows and asks and under
-  // its denies, so Plan's denials and the outside-directory refusal stand.
+  // its denies, so Plan's denials stand, and Octant's outside-directory ask comes
+  // after them (`outsideFolderAllows`).
   rules = insertBeforeFirstDeny(
     rules,
     [...OPENCODE_ENV_READ_RULES, ...own.rules].map((rule) => ({
@@ -3390,16 +3387,13 @@ export function permissionRules(
   );
   // Work and Code share one capability set at the thread's level, so a Work
   // session's bash and task follow the posture above exactly as Code's do.
-  // A Project's extra folder is no outside directory: reaching it is allowed,
-  // and the posture's own rules above then decide reads, edits and commands
-  // there exactly as they do in the bound directory.
-  for (const pattern of extraFolderPatterns(extraFolders)) {
-    rules.push({ permission: "external_directory", pattern, action: "allow" });
-  }
   // The person's tool servers are namespaced tools, which the level decides.
   if (!own.toolServers) rules.push({ permission: "*_*", pattern: "*", action: "deny" });
   if (!own.webTools) {
     for (const permission of WEB_TOOLS) rules.push({ permission, pattern: "*", action: "deny" });
+  }
+  for (const rule of outsideFolderAllows(policy, extraFolders)) {
+    rules.push({ permission: rule.action, pattern: rule.resource, action: rule.effect });
   }
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
@@ -3446,20 +3440,17 @@ export function betaAgentPermissionRules(
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
   protectedPaths: ReadonlyArray<string> = [],
 ): PermissionV2Ruleset {
-  const denyExternal: PermissionV2Ruleset = [
-    { action: "external_directory", resource: "*", effect: "deny" },
-  ];
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
-    rules = [{ action: "*", resource: "*", effect: "allow" }, ...denyExternal];
+    // Outside folders too, at Full access (maintainer decision, 2026-11-14).
+    rules = [{ action: "*", resource: "*", effect: "allow" }];
   } else if (policy === "auto-accept-edits") {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
-      ...denyExternal,
     ];
   } else if (policy === "approval-gated") {
-    rules = [{ action: "*", resource: "*", effect: "ask" }, ...denyExternal];
+    rules = [{ action: "*", resource: "*", effect: "ask" }];
   } else {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
@@ -3481,10 +3472,40 @@ export function betaAgentPermissionRules(
     (rule) => rule.effect === "deny",
   );
   // Work follows the posture as Code does; only Plan denies the shell.
-  for (const resource of extraFolderPatterns(extraFolders)) {
-    rules.push({ action: "external_directory", resource, effect: "allow" });
+  return [
+    ...rules,
+    ...outsideFolderAllows(policy, extraFolders),
+    ...openCodeProtectedReadRefusals(protectedPaths),
+  ];
+}
+
+/**
+ * The folders outside the Project a session may reach. A Project's extra
+ * folder is no outside directory: reaching it is allowed, and the posture's
+ * own rules then decide reads, edits and commands there exactly as they do in
+ * the bound directory. Full access reaches every folder, as OpenCode does on
+ * its own; below it any other folder asks, and Plan, which cannot approve
+ * anything, keeps its deny (maintainer decision, 2026-11-14). These come after
+ * the person's own rules and the namespaced tool deny, whose `*_*` also
+ * matches `external_directory`, and before the protected-file refusals.
+ */
+function outsideFolderAllows(
+  policy: ProviderExecutionPolicy,
+  extraFolders: ReadonlyArray<string>,
+): ReadonlyArray<PermissionV2Rule> {
+  if (policy === "full-access") {
+    return [{ action: "external_directory", resource: "*", effect: "allow" }];
   }
-  return [...rules, ...openCodeProtectedReadRefusals(protectedPaths)];
+  return [
+    ...(policy === "plan"
+      ? []
+      : [{ action: "external_directory", resource: "*", effect: "ask" as const }]),
+    ...extraFolderPatterns(extraFolders).map((resource) => ({
+      action: "external_directory",
+      resource,
+      effect: "allow" as const,
+    })),
+  ];
 }
 
 /**
@@ -3524,7 +3545,12 @@ export function betaSessionPermissionRules(
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
-    ...(own.toolServers ? [] : [{ action: "*_*", resource: "*", effect: "deny" } as const]),
+    ...(own.toolServers
+      ? []
+      : [
+          { action: "*_*", resource: "*", effect: "deny" } as const,
+          ...outsideFolderAllows(policy, extraFolders),
+        ]),
     ...(own.webTools
       ? []
       : WEB_TOOLS.map((action) => ({ action, resource: "*", effect: "deny" }) as const)),
