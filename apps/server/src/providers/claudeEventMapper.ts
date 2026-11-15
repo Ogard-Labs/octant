@@ -87,6 +87,7 @@ const DECODED_MESSAGE_KINDS = new Set([
   "status",
   "compaction",
   "review-denied",
+  "session-state",
   "ignored",
 ]);
 
@@ -239,6 +240,13 @@ function event(
 ): ClaudeMappedMessage {
   return { kind: "event", event: mappedEvent(context, value) };
 }
+
+/**
+ * Claude's tools whose input is a shell command: `Bash`, and `Monitor`, which
+ * keeps a command running and reads each line it prints as an event. Both
+ * name the command in a prompt, and both mark a command that reaches a server.
+ */
+const CLAUDE_COMMAND_TOOLS: ReadonlySet<string> = new Set(["Bash", "Monitor"]);
 
 /** Octant's own tools reach Claude under this prefix; the host records those itself. */
 const OCTANT_TOOL_PREFIX = "mcp__octant__";
@@ -604,8 +612,9 @@ function mapToolUse(
   // A shell command rides on the tool's start only when it reaches a server,
   // so the command can be journaled with its host as Octant Shield's record
   // of it; the start of any other command names the tool and nothing more.
-  const shellCommand =
-    content.toolName === "Bash" ? jsonString(content.input, "command") : undefined;
+  const shellCommand = CLAUDE_COMMAND_TOOLS.has(content.toolName)
+    ? jsonString(content.input, "command")
+    : undefined;
   const remoteArgument =
     shellCommand !== undefined && remoteHostsNamedBy(shellCommand).length > 0
       ? summarizeStepArgument(shellCommand)
@@ -1380,6 +1389,8 @@ export function mapClaudeMessage(
       ];
     }
     case "tool-summary":
+    // The driver reads the runtime's state itself; it carries nothing to show.
+    case "session-state":
       return [{ kind: "ignored" }];
     case "task":
       return mapTask(context, message);
@@ -1618,7 +1629,7 @@ function approvalTarget(
   request: ClaudeToolRequest,
 ): string | undefined {
   const input = request.input;
-  if (request.toolName === "Bash") {
+  if (CLAUDE_COMMAND_TOOLS.has(request.toolName)) {
     const command = input.command;
     if (typeof command !== "string") return undefined;
     let line = command.replace(/\s+/g, " ");

@@ -2299,14 +2299,22 @@ row’s leading edge. Search is a compact in-place filter for the current mode's
 threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
-hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The overlay matches
-titles among the threads the host listed and, in every mode, message text
-through that mode's host read (`GET /api/chat/transcript-search`,
-`/api/work/transcript-search`, `/api/code/transcript-search`), which lists
-the same threads as the sidebar and its Archived group. A message hit shows its
-snippet after the title matches and names the turn that holds it, and opens
-the thread scrolled to that turn in every mode
+hands its text to the command-style overlay; the overlay also stays in the
+command palette. The overlay searches every mode at once by default, with an
+All, Chat, Work, and Code filter under its field, through the host's search
+across modes (`GET /api/search`), which matches thread titles, messages, and
+tool output, attachment names, and Canvas text among the threads each mode's
+sidebar and Archived group list.
+Every word must appear, and a quoted phrase must appear as written. Titles the
+current mode listed match at once; the host's hits follow, each naming its
+mode when the filter is All, `Tool output` when a tool's text matched, and
+`Canvas` when a Canvas the thread made matched; a Canvas hit opens the Canvas
+itself, in its thread's mode and Project. A
+message or tool hit names the turn that holds it and opens the thread
+scrolled to that turn in every mode: Chat reads the page that ends with the
+turn, and Work and Code read earlier pages, one at a time, until it arrives.
+The jump happens once; a turn the thread no longer holds (an edit or rewind
+removed it) leaves the thread at its newest turns
 ([Host reads and commands](host-reads-and-commands.md)). The list's three
 arrangements, Status (the default), the Project tree, and the Activity feed,
 are a visible Status/Projects/Activity switch on the row the Project view

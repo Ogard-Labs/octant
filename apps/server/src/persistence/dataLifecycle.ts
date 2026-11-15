@@ -812,14 +812,24 @@ function removeEmptyStagedArtifactDirectories(staged: StagedStoreArtifacts): voi
   }
 }
 
+/**
+ * The tables that hold rows of their own. A full-text index (a virtual table
+ * and its shadow tables) is left out: triggers on its content table keep it in
+ * step with every delete there, and deleting from a shadow table directly
+ * breaks the index.
+ */
 function userTables(connection: SqliteConnection): ReadonlyArray<string> {
-  return (
-    connection
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-      )
-      .all() as ReadonlyArray<{ readonly name: string }>
-  ).map((row) => row.name);
+  const rows = connection
+    .prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .all() as ReadonlyArray<{ readonly name: string; readonly sql: string | null }>;
+  const virtual = rows
+    .filter((row) => row.sql?.trimStart().toUpperCase().startsWith("CREATE VIRTUAL TABLE") === true)
+    .map((row) => row.name);
+  return rows
+    .map((row) => row.name)
+    .filter((name) => !virtual.some((table) => name === table || name.startsWith(`${table}_`)));
 }
 
 function pruneOrphanedAggregateHeads(

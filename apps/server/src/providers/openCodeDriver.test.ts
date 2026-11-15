@@ -21,8 +21,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
-  betaPermissionEffect,
   betaSessionPermissionRules,
+  betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
   openCodePromptParts,
@@ -949,8 +949,8 @@ describe("OpenCode driver", () => {
     ["plan", "codesearch", "allow"],
     ["plan", "lsp", "allow"],
     ["plan", "list", "allow"],
-    ["plan", "webfetch", "allow"],
-    ["plan", "websearch", "allow"],
+    ["plan", "webfetch", "deny"],
+    ["plan", "websearch", "deny"],
   ] as const)(
     "maps %s %s through official last-match permission semantics",
     async (policy, permission, action) => {
@@ -3003,6 +3003,7 @@ describe("OpenCode driver", () => {
         { action: "read", resource: "*.env.example", effect: "deny" },
       ],
       toolServers: false,
+      webTools: true,
     } as const;
     const key = join(homedir(), ".ssh", "id_ed25519");
     const protectedPaths = [join(homedir(), ".ssh")];
@@ -3026,6 +3027,7 @@ describe("OpenCode driver", () => {
         { action: "edit", resource: "*", effect: "allow" },
       ],
       toolServers: false,
+      webTools: true,
     } as const;
     const legacy = permissionRules("plan", "code", undefined, [], false, own);
     expect(evaluatePermission(legacy, "webfetch")).toBe("deny");
@@ -3063,6 +3065,64 @@ describe("OpenCode driver", () => {
         { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
       ]);
     }
+  });
+
+  it("denies OpenCode's own web search and fetch at every level unless the setup has web tools on", () => {
+    const allowedOwn = {
+      rules: [
+        { action: "websearch", resource: "*", effect: "allow" },
+        { action: "webfetch", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+    } as const;
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits", "full-access"] as const) {
+      for (const action of ["websearch", "webfetch"]) {
+        // Off: denied on both runtimes, the person's own allow included.
+        expect(
+          evaluatePermission(
+            permissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluatePermission(permissionRules(policy, "code"), action)).toBe("deny");
+        expect(
+          evaluateV2Permission(
+            betaSessionPermissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluateV2Permission(betaSessionPermissionRules(policy, "code"), action)).toBe(
+          "deny",
+        );
+      }
+    }
+    // On, Full access lets them run as the level allows, and Plan allows them
+    // as it allows every other read.
+    const on = { rules: [], toolServers: false, webTools: true } as const;
+    expect(
+      evaluatePermission(
+        permissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("plan", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
   });
 
   it("gives 2.x Work mode the shell and child-agent rules Code mode gets at each level", () => {
@@ -3373,6 +3433,7 @@ describe("OpenCode driver", () => {
         { action: "shell", resource: "*", effect: "allow" as const },
       ],
       toolServers: false,
+      webTools: true,
     };
     const plan = betaSessionPermissionRules("plan", "code", undefined, [], true, own);
     expect(evaluateV2Permission([...plan], "edit")).toBe("deny");

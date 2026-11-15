@@ -163,6 +163,7 @@ import {
   type CodeThreadView,
   type WindowId,
   decodeCodeTranscriptSearch,
+  type CodeThread,
   type CodeTranscriptSearch,
 } from "@octant/contracts";
 import {
@@ -306,6 +307,10 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     query: string,
   ) => Promise<CodeTranscriptSearch> | CodeTranscriptSearch;
+  /** The threads search across modes may look in: what bootstrap lists. */
+  readonly listSearchableThreads?: (
+    authenticatedWindowId: WindowId,
+  ) => Promise<ReadonlyArray<CodeThread>>;
   readonly navigation: (
     authenticatedWindowId: WindowId,
   ) => Promise<CodeNavigation> | CodeNavigation;

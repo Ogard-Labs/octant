@@ -150,6 +150,8 @@ export interface CodexThreadConfig {
    */
   readonly model_auto_compact_token_limit?: number;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  /** Codex's own web search, switched off unless the session's native setup has it on. */
+  readonly web_search?: "disabled";
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
   };
@@ -232,6 +234,20 @@ const CODEX_CHAT_CONFIG = {
 const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
   ...CODEX_SHELL_OFF_CONFIG,
   "features.view_image": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * Codex's built-in web search runs only where the session's native setup has
+ * `webTools` on: left unset, Codex searches by default, so a session whose
+ * person or account turned web tools off would still search. Read from the codex-cli 0.169.0 source: the `web_search` config key
+ * (disabled, cached, indexed, or live) wins over the legacy feature flags,
+ * defaults to cached when unset, and `disabled` leaves out both the hosted
+ * search tool and the standalone `web.run` tool; a managed requirement always
+ * accepts `disabled`. Like the other overrides it is forgotten on a plain
+ * resume, so it is sent on every start and resume.
+ */
+const CODEX_WEB_SEARCH_OFF_CONFIG = {
+  web_search: "disabled",
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -591,7 +607,8 @@ const capabilities = {
   nativeSetup: {
     // A subagent's requests reach the parent's approval path at every level.
     subagents: "supported",
-    // Codex's own web search was never switched off; each search marks.
+    // Codex's own web search runs only where the setup has it on; each
+    // search marks the thread.
     webTools: "supported",
     skills: "supported",
     toolServers: "supported",
@@ -1663,7 +1680,11 @@ function makeConnection(
             : mode === "work"
               ? CODEX_WORK_CONFIG
               : {};
-        return skills === undefined ? modeConfig : { ...modeConfig, skills };
+        const webConfig =
+          nativeSetup?.webTools === true
+            ? modeConfig
+            : { ...modeConfig, ...CODEX_WEB_SEARCH_OFF_CONFIG };
+        return skills === undefined ? webConfig : { ...webConfig, skills };
       });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));

@@ -2301,3 +2301,8 @@ html[data-octant-increased-contrast="true"] .turn-message-meta {
   font-size: var(--oct-text-xs);
   padding-right: 2px;
 }
+
+.thread-search__modes {
+  flex-wrap: wrap;
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
+}

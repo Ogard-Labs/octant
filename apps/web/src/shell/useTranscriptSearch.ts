@@ -1,8 +1,4 @@
-import type { ChatTranscriptSearch } from "@octant/contracts/chat";
-import type {
-  CodeTranscriptSearch,
-  WorkTranscriptSearch,
-} from "@octant/contracts/thread-transcript-search";
+import type { ThreadSearchRead } from "@octant/client-runtime/thread-search-client";
 import { useEffect, useState } from "react";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import type { ThreadSearchContentHit } from "./threadSearchViewModel";
@@ -89,54 +85,33 @@ export function useTranscriptSearch(options: TranscriptSearchOptions): Transcrip
   return { hits: answered.hits, truncated: answered.truncated, status: answered.status };
 }
 
-export function chatTranscriptAnswer(result: ChatTranscriptSearch): TranscriptSearchAnswer {
+/**
+ * The host's search across modes as overlay hits. A refused or failed read
+ * throws, so the overlay says message search is unavailable rather than
+ * showing an empty result as if nothing matched.
+ */
+export function threadSearchAnswer(read: ThreadSearchRead): TranscriptSearchAnswer {
+  if (read.status !== "ready") throw new Error(`Search is ${read.status}.`);
   return {
-    truncated: result.truncated,
-    hits: result.hits.map((hit) =>
-      contentHit({ ...hit, threadId: String(hit.threadId), turnId: String(hit.turnId) }),
-    ),
-  };
-}
-
-export function workTranscriptAnswer(result: WorkTranscriptSearch): TranscriptSearchAnswer {
-  return {
-    truncated: result.truncated,
-    hits: result.hits.map((hit) =>
-      contentHit({ ...hit, threadId: String(hit.threadId), turnId: String(hit.turnId) }),
-    ),
-  };
-}
-
-/** A Code hit names its provider turn by operation, which is what the row deep-links to. */
-export function codeTranscriptAnswer(result: CodeTranscriptSearch): TranscriptSearchAnswer {
-  return {
-    truncated: result.truncated,
-    hits: result.hits.map((hit) =>
-      contentHit({ ...hit, threadId: String(hit.threadId), turnId: String(hit.operationId) }),
-    ),
-  };
-}
-
-function contentHit(hit: {
-  readonly threadId: string;
-  readonly title: string;
-  readonly projectId?: string | undefined;
-  readonly lifecycle: "active" | "archived";
-  readonly turnId: string;
-  readonly snippet: string;
-  readonly matchRanges?:
-    | ReadonlyArray<{ readonly start: number; readonly end: number }>
-    | undefined;
-}): ThreadSearchContentHit {
-  return {
-    threadId: hit.threadId,
-    title: hit.title,
-    ...(hit.projectId === undefined ? {} : { projectId: String(hit.projectId) }),
-    lifecycle: hit.lifecycle,
-    turnId: hit.turnId,
-    snippet: hit.snippet,
-    ...(hit.matchRanges === undefined || hit.matchRanges.length === 0
-      ? {}
-      : { matchRanges: hit.matchRanges }),
+    truncated: read.search.truncated,
+    hits: read.search.hits.map((hit): ThreadSearchContentHit => {
+      const turnId = hit.mode === "code" ? hit.operationId : hit.turnId;
+      return {
+        mode: hit.mode,
+        threadId: String(hit.threadId),
+        title: hit.title,
+        ...(hit.projectId === undefined ? {} : { projectId: String(hit.projectId) }),
+        lifecycle: hit.lifecycle,
+        ...(turnId === undefined ? {} : { turnId: String(turnId) }),
+        field: hit.field,
+        ...(hit.canvasId === undefined ? {} : { canvasId: String(hit.canvasId) }),
+        ...(hit.canvasTitle === undefined ? {} : { canvasTitle: hit.canvasTitle }),
+        snippet: hit.snippet,
+        updatedAt: hit.updatedAt,
+        ...(hit.matchRanges === undefined || hit.matchRanges.length === 0
+          ? {}
+          : { matchRanges: hit.matchRanges }),
+      };
+    }),
   };
 }

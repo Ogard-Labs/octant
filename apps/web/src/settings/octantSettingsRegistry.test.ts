@@ -70,6 +70,7 @@ describe("octantSettingsRegistry", () => {
       "harness",
       "voice",
       "skills",
+      "web-search",
       "computer-use",
       "device-tools",
       "github",
@@ -264,6 +265,7 @@ describe("octantSettingsRegistry", () => {
       "provider-deployment-ids",
       "provider-claude-account",
       "provider-claude-artifacts",
+      "provider-web-tools",
       "provider-native-setup",
       "provider-own-memory",
     ]);
@@ -296,7 +298,6 @@ describe("octantSettingsRegistry", () => {
       "chat-personality",
       "chat-research-enabled",
       "chat-research-backend",
-      "chat-searxng-url",
       "chat-restart-continuation",
     ]);
   });
@@ -464,6 +465,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-deployment-ids": "provider-deployment-ids",
   "provider-*-claude-artifacts": "provider-claude-artifacts",
   "provider-*-native-setup": "provider-native-setup",
+  "provider-*-web-tools": "provider-web-tools",
   "provider-*-own-memory": "provider-own-memory",
   "provider-tooling-*": "provider-tooling-configured",
   "*-config-directory": "provider-claude-account",
