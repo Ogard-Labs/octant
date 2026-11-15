@@ -203,8 +203,9 @@ describe("a Code terminal on a Windows host", () => {
       });
       try {
         await handle.receiptReady;
-        // ConPTY reports the exit late (about 25 seconds on windows-2025).
-        await vi.waitFor(() => expect(exitCode).toBe(3), { timeout: 60_000 });
+        // ConPTY reports the exit late: 25 to 52 seconds on windows-2025, the
+        // file above it having been written at once.
+        await vi.waitFor(() => expect(exitCode).toBe(3), { timeout: 120_000 });
         expect(existsSync(join(directory, "written.txt"))).toBe(true);
         expect(readFileSync(join(directory, "written.txt"), "utf8")).toContain(
           "written by the terminal",
@@ -213,7 +214,7 @@ describe("a Code terminal on a Windows host", () => {
         await handle.close();
       }
     },
-    90_000,
+    180_000,
   );
 
   it.runIf(process.platform === "win32")(
