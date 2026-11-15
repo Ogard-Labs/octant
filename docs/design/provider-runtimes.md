@@ -55,12 +55,13 @@ current thread or Project spend ceiling.
 Claude Code, Codex, Mistral Vibe, OpenCode, and every other ACP agent run as
 themselves inside Octant ([Architecture: key providers run as themselves](../architecture.md#providers);
 the other ACP agents are in [ACP agents run as themselves](#acp-agents-run-as-themselves)).
-The switch-offs in the sections below are today's build. Each key provider's
-target wire behaviour, gated by the thread's
-[guardrail level](../architecture.md#security-and-authority) (off at Guarded
-and Reviewed until the person turns it on, on at Full access):
+The person's own setup is on by default, so the switch-offs below apply only
+where the person turned the setup off for an account or a thread. Each key
+provider's wire behaviour, gated by the thread's
+[guardrail level](../architecture.md#security-and-authority) (on by default at
+every level; the person turns it off per account or per thread):
 
-| Provider     | Switched off today                                                                                                                                  | Target                                                                                                                                                                                                   | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Provider     | With the setup off                                                                                                                                  | With the setup on                                                                                                                                                                                        | Built                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Claude Code  | `settingSources: []`, `skills: []`, no subagent tool, `WebSearch` and `WebFetch` left out and refused                                               | The person's setting sources (home and trusted Project), skills, plugins, hooks, and MCP servers; its subagent tool; `WebSearch` and `WebFetch`; `permissionMode: "auto"` as Reviewed's default reviewer | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
 | Codex        | Its subagents; Project skills disabled by path; in Chat each named MCP server switched off; `web_search = "disabled"`                               | Its subagents; Project skills; the person's MCP servers in Chat; `approvalsReviewer: "auto_review"` as Reviewed's default reviewer                                                                       | Reviewed with its own reviewer, in Code                                                                                                                                                                                                                                                                                                                                                                    |
@@ -146,6 +147,38 @@ agents, and commands off; it is removed. Because a Project's plugins and MCP
 servers then share the process, such a launch is never attested as isolated,
 and Octant's app-managed tools are offered beside them below Full access, as
 at Full access, instead of being refused.
+
+Claude always reads the person's global `CLAUDE.md` and the Project's, in
+every Project and in Work, even before the Project is trusted (maintainer
+decision, 2026-11-14). Claude Code loads them only through the `user` and
+`project` setting sources, and the `project` source also loads the Project's
+settings and hooks, so it still waits for trust. Where a source is off,
+Octant reads the files itself (`claudeSessionInstructions` in
+`apps/server/src/providers/claudeDriver.ts`), as text with no authority,
+and appends them to Claude Code's own system prompt. Every Claude launch
+sends `systemPrompt: { type: "preset", preset: "claude_code" }`, with
+Octant's additions only in `append`: agent-sdk 0.3.211 reads a missing
+`systemPrompt` as the custom prompt `""`, which the runtime put in place of
+its default prompt (output styles, commit and pull-request guidance,
+environment details), so until 2026-11-14 Claude ran without its own prompt.
+The appended text is fixed for the session, so it never moves a turn's
+cached prefix. The account's file is
+`CLAUDE.md` in its config folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`);
+the Project's are the files Claude Code's loader reads at its root
+(`CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md`)
+and the files they import with `@path`, up to five levels. Ancestors above
+the Project root are outside the Project and are not read, and Claude Code
+loads a nested folder's file only once it reads inside it, so neither is
+added. Where the source is on, Claude Code loads the files itself and Octant
+adds nothing, so nothing doubles. A file over 64 KiB, past 256 KiB in all,
+not UTF-8 text, or resolving through a symlink or import outside its folder
+is skipped and the reason logged. The host reads these files outside every
+gate, so below Full access a file or import the secret guard protects (the
+check a `Read` of it meets) is skipped as `protected` before it is opened,
+and at every level so is the account's own sign-in (`.credentials.json`,
+`.claude.json` and its backups, a secure-storage folder of its own); at Full
+access the secret guard does not apply, as for Claude's own tools. Chat (no folder) and single-use sessions
+read none.
 
 The setup is on by default for every key provider account at every level;
 the person turns it off per account or per thread
@@ -675,6 +708,17 @@ pre-tool grants (16) stay. A repeat of a forgotten id passes the whole gate
 again. Rationale: the earlier caps of 64 calls a turn and 256 a session
 failed long turns that Claude Code runs to the end in its own app.
 
+#### Image input
+
+Claude reports `nativeAttachments` as `supported` when its catalog has a model
+that takes images, which every Claude model does (maintainer decision,
+2026-11-14: it was `unsupported`). A turn's image attachments go to the
+runtime beside the message text as base64 `image` content blocks in the
+streamed user message; JPEG, PNG, GIF and WebP are the types the Messages API
+takes, and a turn with any other image type is refused before it is sent.
+Work, Code and Chat admit attachments by this capability as they do for
+Codex and OpenCode.
+
 #### Background commands and runtime-started turns
 
 `Bash` with `run_in_background` and `Monitor` command watches run outside
@@ -709,9 +753,24 @@ tool steps, and task rows into the person's turn without a separate marker
 The hold is bounded. The stalled-turn limit counts its silence as it counts
 any other; the person's stop ends it, and on an idle runtime the driver
 reports the turn interrupted and stops the session, which ends every
-background task in it; at the 17th turn the runtime starts by itself, the
-person's turn completes and the session is stopped. A new turn is refused
-while one is held. A `Monitor` call that asks for a WebSocket (opened by the
+background task in it. Below Full access, past the person's count of turns
+the runtime may start by itself (Settings › Permissions › Tool steps, **Turns
+a runtime starts by itself**, `runtimeTurnsPerTurn`, 1 to 4,096, default 256;
+a fixed 16 until the maintainer decision of 2026-11-14), the person's turn
+completes and the session is stopped; at Full access there is no such count.
+A held turn takes messages (maintainer decision, 2026-11-14): a message the
+person sends while a turn is held, through the driver's `send` or `steer`,
+is delivered into it, the runtime answers it in a turn folded in as
+`runtime-turn-started` with `trigger: "person-message"` (never counted), and
+the held completion waits for that answer. A message sent while a turn the
+runtime started is still open marks nothing, since that turn was already
+opened and counted as background work, so a later background start is never
+labelled as the person's. A steered message goes in as text, the turn's
+context inline as on a runtime without the prompt hook; one that carries
+images is refused with a reason (send them once the turn ends) rather than
+sent without them. `steer` answers `unsupported`
+when no turn is held, and the thread's message queue keeps the message for
+the next turn as it does for any running turn. A `Monitor` call that asks for a WebSocket (opened by the
 runtime process, outside the command sandbox and its network rules) or a
 watch for the whole session is refused before the gate. Plan keeps its
 read-only commands in the foreground: `run_in_background` is refused there.

@@ -1,8 +1,4 @@
-import {
-  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
-  MAX_PROVIDER_ATTACHMENTS,
-  MAX_TURN_RUNTIME_EVENTS,
-} from "@octant/contracts";
+import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN, MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -22,6 +18,7 @@ import {
   startTurnMetrics,
   workThreadAccessOf,
   type ThreadToolSteps,
+  turnRuntimeEventBudget,
 } from "@octant/domain";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -69,6 +66,7 @@ import {
 } from "../context/runtimeOutsideContentMark";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
@@ -80,7 +78,6 @@ import {
 } from "../providers/turnBudget";
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // How long a finished turn waits for its provider session to interrupt or stop.
 const CLEANUP_TIMEOUT_MS = 1_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
@@ -377,6 +374,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         input.toolStepLimit === "off"
           ? undefined
           : (input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
+      // The event budget follows the same limit: off, no turn is stopped.
+      const maxEvents = turnRuntimeEventBudget(stepLimit) ?? Number.POSITIVE_INFINITY;
       // An Octant Harness turn's runtime announces no tool call of its own:
       // every tool it has is one Octant runs for it, so the request is the
       // only sign of the call and the host gives it its row.
@@ -505,7 +504,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         pendingRequestCleanups.delete(key);
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
-      const answeredToolRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
       const compactions = new TurnCompactions();
       const events = yield* subscribeThenSend({
         connection,
@@ -513,7 +512,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.map(makeTurnTextParagraphs()),
-            Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
+            Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > maxEvents),
             Stream.tap(() => shareEventLoop),
             Stream.tap((event) => idle.observe(event)),
             // Liveness only restarts the idle clock above; nothing else sees it.
@@ -580,7 +579,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       "full-access",
                   });
                 }
-                if (handledEvents > MAX_EVENTS) return;
+                if (handledEvents > maxEvents) return;
                 input.toolCallRecords?.observe(event);
                 // Kept in the record above; never a step or a turn event.
                 if (event.kind === "tool-call-content") return;
@@ -631,8 +630,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   input.onToolSteps?.(nextToolSteps);
                 }
                 if (event.kind === "tool-request") {
-                  if (answeredToolRequestIds.has(event.requestId)) return;
-                  answeredToolRequestIds.add(event.requestId);
+                  if (!answeredToolRequests.answer(event.requestId)) return;
                   const toolSet = recordedToolSet(input.toolEffects, input.appManagedTools);
                   const offered = toolSet?.definitions.some(
                     (definition) => definition.name === event.toolName,
@@ -811,7 +809,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         releaseRequestHold(requestId);
       }
 
-      if (handledEvents > MAX_EVENTS) {
+      if (handledEvents > maxEvents) {
         return {
           kind: "waiting",
           failure: {

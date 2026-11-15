@@ -1,6 +1,7 @@
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  decodeProviderToolDefinition,
   type ProviderFailure,
   type ProviderModelId,
 } from "@octant/contracts";
@@ -199,8 +200,16 @@ describe("Claude provider conformance", () => {
       },
       isReleased: () => opened.length > 0 && opened.every((query) => query.closed),
     });
+    // The lifecycle runtime above leaves its turn waiting on an approval and a
+    // question, so it never finishes. Claude takes images, so the chat turn is
+    // sent rather than refused, and the harness then waits for its terminal
+    // event and, as Claude takes app tools, for a call to the offered tool:
+    // the chat runtime calls it and replies, as a real session does.
+    const chat = conformanceDriver(
+      (input, sdkSessionId) => new ChatReplyQuery(input, sdkSessionId),
+    );
     const chatEvidence = await runProviderChatConformance({
-      driver,
+      driver: chat.driver,
       probeInput: { instanceId },
       acquireInput: { instanceId, projectRoot },
       sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
@@ -215,9 +224,14 @@ describe("Claude provider conformance", () => {
             bytes: new Uint8Array([1, 2, 3]),
           },
         ],
-        tools: [],
+        tools: [
+          decodeProviderToolDefinition({
+            name: "search_notes",
+            inputSchema: { type: "object", properties: {} },
+          }),
+        ],
       },
-      isReleased: () => opened.length > 0 && opened.every((query) => query.closed),
+      isReleased: () => chat.opened.length > 0 && chat.opened.every((query) => query.closed),
     });
     recordProviderConformanceEvidence("claude", evidence);
     recordProviderChatConformanceEvidence("claude", chatEvidence);
@@ -237,7 +251,17 @@ describe("Claude provider conformance", () => {
       failureClassified: true,
       released: true,
     });
-    expect(chatEvidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
+    expect(chatEvidence).toMatchObject({
+      nativeAttachmentHonest: true,
+      appManagedToolRoundTrip: true,
+      released: true,
+    });
+    expect(chat.opened.flatMap((query) => query.sent)).toEqual([
+      expect.objectContaining({
+        text: "hello",
+        images: [{ mediaType: "image/png", data: Buffer.from([1, 2, 3]).toString("base64") }],
+      }),
+    ]);
   });
 });
 
@@ -306,8 +330,12 @@ class ConformanceQuery implements ClaudeQueryPort {
     );
   }
 
-  readonly send: ClaudeQueryPort["send"] = () =>
-    Effect.tryPromise({
+  /** Every message the driver sent, as the runtime received it. */
+  readonly sent: Array<Parameters<ClaudeQueryPort["send"]>[0]> = [];
+
+  readonly send: ClaudeQueryPort["send"] = (message) => {
+    this.sent.push(message);
+    return Effect.tryPromise({
       try: async () => {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         await this.emit({
@@ -364,6 +392,7 @@ class ConformanceQuery implements ClaudeQueryPort {
       },
       catch: () => ({ category: "provider-failed", message: "Claude fixture failed." }),
     });
+  };
 
   readonly interrupt = () =>
     Effect.promise(async () => {
@@ -478,8 +507,9 @@ class CompletingQuery extends ConformanceQuery {
     this.compactionHold = hold;
   }
 
-  override readonly send: ClaudeQueryPort["send"] = () =>
-    Effect.promise(async () => {
+  override readonly send: ClaudeQueryPort["send"] = (message) => {
+    this.sent.push(message);
+    return Effect.promise(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await this.emit({
         kind: "stream-event",
@@ -496,4 +526,41 @@ class CompletingQuery extends ConformanceQuery {
         permissionDenials: [],
       });
     });
+  };
+}
+
+/**
+ * A runtime that answers a chat message as Claude Code does when the turn
+ * offers an app tool: it calls the tool, waits for Octant's answer, then
+ * replies and finishes the turn. The call runs after `send` returns, as the
+ * SDK's does, so the host can answer it.
+ */
+class ChatReplyQuery extends ConformanceQuery {
+  override readonly send: ClaudeQueryPort["send"] = (message) => {
+    this.sent.push(message);
+    void this.reply(message);
+    return Effect.void;
+  };
+
+  private async reply(message: Parameters<ClaudeQueryPort["send"]>[0]): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const tool = message.appManagedTools?.[0];
+    if (tool !== undefined && message.onAppToolCall !== undefined) {
+      await message.onAppToolCall(tool.name, "{}", new AbortController().signal);
+    }
+    await this.emit({
+      kind: "stream-event",
+      sessionId: this.sdkSessionId,
+      event: { kind: "text-delta", index: 0, text: "a diagram" },
+    });
+    await this.emit({
+      kind: "result",
+      sessionId: this.sdkSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage: usage(),
+      permissionDenials: [],
+    });
+  }
 }

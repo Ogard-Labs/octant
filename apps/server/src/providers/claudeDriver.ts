@@ -1,12 +1,14 @@
 import type { ManagedToolAnswer } from "./managedMcpTools";
+import { readClaudeInstructionFiles } from "./claudeInstructionFiles";
 import { providerApprovalCall } from "./providerApprovalCall";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
   decodeProviderFailure,
   decodeProviderProbeResult,
   type ClaudeAuthentication,
@@ -53,7 +55,9 @@ import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claud
 import {
   claudeNativeQueryOptions,
   isClaudeEffortLevel,
+  CLAUDE_IMAGE_MEDIA_TYPES,
   type ClaudeAgentSdkPort,
+  type ClaudeImageInput,
   type ClaudeDecodedMessage,
   type ClaudeEffortLevel,
   type ClaudeModelInfo,
@@ -193,6 +197,23 @@ function claudeTurnMessage(
     }),
     context: renderOctantInstructions(instructions),
   };
+}
+
+/**
+ * A turn's attachments as Claude image blocks, or undefined when one is a
+ * type the Messages API refuses; the capability check has already refused
+ * anything that is not an image.
+ */
+function claudeImages(
+  attachments: ProviderTurnInput["attachments"],
+): ReadonlyArray<ClaudeImageInput> | undefined {
+  const images: ClaudeImageInput[] = [];
+  for (const attachment of attachments) {
+    const mediaType = CLAUDE_IMAGE_MEDIA_TYPES.find((type) => type === attachment.mediaType);
+    if (mediaType === undefined) return undefined;
+    images.push({ mediaType, data: Buffer.from(attachment.bytes).toString("base64") });
+  }
+  return images;
 }
 
 /**
@@ -353,12 +374,6 @@ const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
 const MAX_PENDING_APPROVALS = 4;
-/**
- * How many turns the runtime may start by itself inside one person's turn.
- * A watch that keeps printing wakes the model on every line; past this the
- * person's turn completes and its session, with the watch, is stopped.
- */
-const MAX_RUNTIME_TURNS = 16;
 const MAX_PRE_TOOL_GRANTS = 16;
 /**
  * How many tool-use ids a session remembers. Settled ids are forgotten oldest
@@ -660,8 +675,10 @@ function claudeRunsSandbox(policy: ProviderExecutionPolicy, fullAccessSandbox = 
 /**
  * Claude's own sandbox for its commands. With `proxyPort` the sandbox's
  * network goes to Octant's egress proxy for the session, which reaches only
- * the Project's egress rules and the person's safe networks; without it (a
- * host that does not route runtimes) the sandbox keeps its own network rules.
+ * the Project's egress rules and the person's safe networks. Without it
+ * (Network limits off, the default, or a host that does not route runtimes)
+ * the sandbox reaches every host: Claude's own proxy would otherwise refuse
+ * or ask about each host, a limit the person did not choose.
  */
 export function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
@@ -687,7 +704,8 @@ export function claudeSandboxSettings(
       allowRead: [projectRoot, ...extraFolders],
       allowWrite: [projectRoot, ...extraFolders],
     },
-    ...(proxyPort === undefined ? {} : { network: { httpProxyPort: proxyPort } }),
+    network:
+      proxyPort === undefined ? { allowedDomains: ["*"] as const } : { httpProxyPort: proxyPort },
   };
 }
 
@@ -698,6 +716,78 @@ function claudeConfigurationDirectory(
   return environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== ""
     ? environment.CLAUDE_CONFIG_DIR
     : join(environment.HOME ?? homedir(), ".claude");
+}
+
+/**
+ * The instruction files a session reads that its setting sources do not
+ * load: the account's `CLAUDE.md` without the `user` source, the Project's
+ * without the `project` source (an untrusted Project). Where a source is on,
+ * Claude Code loads the files itself and nothing is added, so nothing is read
+ * twice. Chat has no folder and a single-use session no Project to follow,
+ * so neither reads any.
+ *
+ * The host reads the files outside every gate, so below Full access a file
+ * or import the secret guard protects is skipped, as Claude's Read of it
+ * would be refused, and at every level the account's own sign-in files are:
+ * an instruction file importing the config folder's `.credentials.json`
+ * would otherwise put the account's tokens into the conversation.
+ */
+export async function claudeSessionInstructions(input: {
+  readonly mode: ProviderAcquireInput["mode"];
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly singleUse: boolean;
+  readonly nativeSetup: ProviderNativeSetup | undefined;
+  readonly projectRoot: string;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly onDiagnostic: (message: string) => void;
+}): Promise<string | undefined> {
+  if (input.mode === "chat" || input.singleUse) return undefined;
+  const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
+  const ownAccountPaths = claudeOwnAccountPaths(input.environment);
+  const configDir = sources.includes("user") ? undefined : ownAccountPaths[0];
+  const guarded = claudeSecretGuardApplies(input.executionPolicy);
+  const read = await readClaudeInstructionFiles({
+    ...(configDir === undefined ? {} : { configDir }),
+    ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
+    refuses: (path) =>
+      isClaudeAccountCredentialFile(path, input.environment) ||
+      (guarded &&
+        claudeFileToolSecretRefusal(
+          "Read",
+          { file_path: path },
+          ownAccountPaths,
+          input.projectRoot,
+          false,
+        ) !== undefined),
+  });
+  for (const skipped of read.skipped) {
+    input.onDiagnostic(`Claude instruction file ${skipped.path} was not read: ${skipped.reason}.`);
+  }
+  if (read.text === undefined) return undefined;
+  return [
+    "Instructions the person keeps for Claude in these files. They are the person's guidance for this work; they grant no permission Octant has not given.",
+    read.text,
+  ].join("\n\n");
+}
+
+/**
+ * The account's own sign-in files, which the secret guard leaves to the
+ * runtime: `.credentials.json` (the subscription login where no Keychain
+ * holds it), `.claude.json` and its backups (which may carry an API key),
+ * and anything in a secure-storage folder of its own.
+ */
+function isClaudeAccountCredentialFile(
+  path: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const name = basename(path);
+  if (name === ".credentials.json" || name.startsWith(".claude.json")) return true;
+  const secureStorage = environment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  return (
+    secureStorage !== undefined &&
+    isAbsolute(secureStorage) &&
+    (path === secureStorage || path.startsWith(`${secureStorage}/`))
+  );
 }
 
 /** The account's own state, which the secret guard leaves to this runtime. */
@@ -970,6 +1060,16 @@ export interface ClaudeDriverOptions {
   readonly toolCallId?: () => string;
   readonly startupTimeoutMs?: number;
   readonly interruptTimeoutMs?: number;
+  /**
+   * How many turns the runtime may start by itself inside one person's turn
+   * below Full access, from Settings; read each time the runtime starts one.
+   * A watch that keeps printing wakes the model on every line; past this the
+   * person's turn completes and its session, with the watch, is stopped. At
+   * Full access there is no such count. Absent uses the default.
+   */
+  readonly runtimeTurnsPerTurn?: () => number;
+  /** Told why an instruction file was not read; absent logs a warning. */
+  readonly onDiagnostic?: (message: string) => void;
 }
 
 export interface ClaudeResumeIdentity {
@@ -1132,7 +1232,8 @@ interface SessionState {
  * the person's turn, each opened by a `runtime-turn-started` event, and pass
  * the same gate at the same level. The completion goes out once no background
  * task runs and the runtime has gone idle; the stalled-turn limit, the
- * person's stop, and {@link MAX_RUNTIME_TURNS} end it sooner.
+ * person's stop, and the runtime-turn setting below Full access end it
+ * sooner. A message the person sends meanwhile is steered into it.
  */
 interface ClaudeHeldTurn {
   /** The completion the runtime's last result made, without its envelope. */
@@ -1148,6 +1249,8 @@ interface ClaudeHeldTurn {
   /** The runtime is running a turn it started itself. */
   runtimeTurnOpen: boolean;
   runtimeTurns: number;
+  /** The person steered a message in, so the next turn the runtime runs answers it. */
+  steered: boolean;
   /**
    * What the person's turn used up to the last result, the runtime's earlier
    * turns included. Each runtime turn counts only its own requests and cost,
@@ -1616,6 +1719,12 @@ function observation(
       input.readiness === "ready"
         ? {
             ...availableCapabilities,
+            // Claude Code takes images as content blocks beside the message.
+            nativeAttachments: (input.models ?? []).some((model) =>
+              model.inputModalities.includes("image"),
+            )
+              ? "supported"
+              : "unsupported",
             sessionCompaction: {
               chat: sessionCompaction,
               work: sessionCompaction,
@@ -2252,6 +2361,7 @@ function makeConnection(
         idle: !state.reportsSessionState,
         runtimeTurnOpen: false,
         runtimeTurns: state.heldTurn?.runtimeTurns ?? 0,
+        steered: false,
         usageBase: state.turnUsage,
       };
       state.context = makeEventContext(state, previous.claudeSessionId, sequence);
@@ -2289,23 +2399,56 @@ function makeConnection(
       }
       releaseHeldTurn(state, held);
     };
+    /**
+     * Delivers a person's message into a held turn (maintainer decision,
+     * 2026-11-14: a held turn takes messages rather than refusing them). The
+     * runtime answers it in a turn of its own, which is folded into the
+     * person's turn as any runtime turn is, opened as `person-message`, so the
+     * held completion waits for that answer. A message sent while a turn
+     * the runtime started is still open marks nothing: that turn was opened
+     * and counted as background work, and marking the next one would label
+     * a later background start as the person's and leave it uncounted.
+     */
+    const steerHeldTurn = (state: SessionState, held: ClaudeHeldTurn, text: string) => {
+      if (!held.runtimeTurnOpen) held.steered = true;
+      held.idle = false;
+      return state.query.send({ text }).pipe(
+        Effect.as("steered" as const),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            held.steered = false;
+            settleHeldTurn(state);
+          }),
+        ),
+      );
+    };
     const openRuntimeTurn = (state: SessionState, held: ClaudeHeldTurn) => {
       const context = state.context;
       if (context === undefined) return;
+      const trigger = held.steered ? "person-message" : "background-task";
+      held.steered = false;
       // A runtime that keeps waking itself ends with the person's turn: the
       // completion goes out, and the session, with its background work, is
-      // stopped rather than left running turns nobody reads.
-      if (held.runtimeTurns >= MAX_RUNTIME_TURNS) {
-        releaseHeldTurn(state, held);
-        closeAfterPublishedTerminal(state);
-        return;
+      // stopped rather than left running turns nobody reads. The count is
+      // the person's setting below Full access, and none at Full access; a
+      // turn the person's own message started is never counted.
+      if (trigger === "background-task") {
+        const limit =
+          state.executionPolicy === "full-access"
+            ? undefined
+            : (options.runtimeTurnsPerTurn?.() ?? DEFAULT_RUNTIME_TURNS_PER_TURN);
+        if (limit !== undefined && held.runtimeTurns >= limit) {
+          releaseHeldTurn(state, held);
+          closeAfterPublishedTerminal(state);
+          return;
+        }
+        held.runtimeTurns += 1;
       }
-      held.runtimeTurns += 1;
       held.runtimeTurnOpen = true;
       held.idle = false;
       publish({
         kind: "runtime-turn-started",
-        trigger: "background-task",
+        trigger,
         instanceId: options.instanceId,
         sessionId: state.sessionId,
         correlationId: state.correlationId,
@@ -3266,6 +3409,17 @@ function makeConnection(
             `[provider] Claude's stored task list was refused: ${storedTaskList.reason}`,
           );
         }
+        const instructions = await claudeSessionInstructions({
+          mode,
+          executionPolicy: input.executionPolicy,
+          singleUse: input.singleUse === true,
+          nativeSetup,
+          projectRoot,
+          environment: environment.environment,
+          onDiagnostic:
+            options.onDiagnostic ?? ((message) => Effect.runSync(Effect.logWarning(message))),
+        });
+        throwIfSetupCancelled(signal);
         const query = await runSetupEffect(
           options.sdk
             .openQuery({
@@ -3297,6 +3451,7 @@ function makeConnection(
               tools: executionOptions.tools,
               ...(withheldTools === undefined ? {} : { withheldTools }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
+              ...(instructions === undefined ? {} : { instructions }),
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
@@ -3565,6 +3720,18 @@ function makeConnection(
           })),
         );
       },
+      steer: ({ sessionId, message }) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || state.terminal || state.released) {
+          return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        // Only a held turn takes a message without starting another turn of
+        // the person's; anything else is queued by the caller.
+        if (state.heldTurn === undefined || state.compaction !== undefined) {
+          return Effect.succeed("unsupported" as const);
+        }
+        return steerHeldTurn(state, state.heldTurn, message);
+      },
       send: (input) => {
         const state = sessions.get(input.sessionId);
         if (state === undefined || state.terminal || state.released) {
@@ -3575,6 +3742,16 @@ function makeConnection(
         if (state.compaction !== undefined) {
           return Effect.fail(failure("unavailable", "Claude is compacting this session."));
         }
+        // A message steered into a held turn goes in as text alone, so one
+        // that carries images is refused rather than sent without them.
+        if (state.heldTurn !== undefined && input.attachments.length > 0) {
+          return Effect.fail(
+            failure(
+              "unavailable",
+              "Claude is still finishing background work in this turn. Send the images once the turn ends.",
+            ),
+          );
+        }
         const observed = options.runtimeRegistry.observedState(options.instanceId);
         const model = observed?.models.find((candidate) => candidate.id === state.modelId);
         const rejected = validateChatTurnInput(
@@ -3583,10 +3760,19 @@ function makeConnection(
           model,
         );
         if (rejected !== undefined) return Effect.fail(rejected);
-        // The runtime may still start turns of its own inside the held one.
-        if (state.heldTurn !== undefined) {
+        const images = claudeImages(input.attachments);
+        if (images === undefined) {
           return Effect.fail(
-            failure("unavailable", "Claude is still finishing background work from the last turn."),
+            failure("unsupported", "Claude takes JPEG, PNG, GIF and WebP images only."),
+          );
+        }
+        // The runtime may still start turns of its own inside the held one,
+        // so the message is steered into it rather than refused. The turn's
+        // context goes inline in the steered text, as on a runtime too old
+        // for the prompt hook, since a steered message passes no hook.
+        if (state.heldTurn !== undefined) {
+          return steerHeldTurn(state, state.heldTurn, renderProviderTurnPrompt(input)).pipe(
+            Effect.asVoid,
           );
         }
         if ((input.tools.length > 0 || state.appToolsEnabled) && state.pendingTurns > 0) {
@@ -3600,6 +3786,7 @@ function makeConnection(
           state.promptHookRuns,
         );
         const delivery = { viaHook: message.context !== undefined, delivered: false };
+        const withImages = images.length === 0 ? message : { ...message, images };
         return Effect.sync(() => {
           if (state.context?.terminal === true && state.pendingTurns === 0) {
             state.context = makeEventContext(state, state.claudeSessionId!, state.context.sequence);
@@ -3614,7 +3801,7 @@ function makeConnection(
         }).pipe(
           Effect.zipRight(
             state.query.send({
-              ...message,
+              ...withImages,
               ...(delivery.viaHook
                 ? {
                     onContextDelivered: () => {

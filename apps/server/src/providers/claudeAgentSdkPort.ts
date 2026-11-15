@@ -94,12 +94,40 @@ export interface ClaudeSandboxSettings {
     readonly allowWrite: readonly [string, ...string[]];
   };
   /**
-   * The sandbox's commands reach the network only through this loopback
-   * port: Octant's egress proxy for the session. The Agent SDK's
-   * `sandbox.network.httpProxyPort` points the sandbox at an outside proxy
-   * instead of its own, so the proxy decides every host.
+   * With Network limits on, the sandbox's commands reach the network only
+   * through this loopback port: Octant's egress proxy for the session. The
+   * Agent SDK's `sandbox.network.httpProxyPort` points the sandbox at an
+   * outside proxy instead of its own, so the proxy decides every host. With
+   * them off, `allowedDomains: ["*"]` keeps Claude's own proxy from
+   * restricting hosts or asking about each one: open network is the default.
    */
-  readonly network?: { readonly httpProxyPort: number };
+  readonly network?: ClaudeSandboxNetwork;
+}
+
+export type ClaudeSandboxNetwork =
+  | { readonly httpProxyPort: number }
+  | { readonly allowedDomains: readonly ["*"] };
+
+/** The SDK's own copy of a sandbox network setting, so a caller's value is never shared. */
+function sdkSandboxNetwork(
+  network: ClaudeSandboxNetwork,
+): { httpProxyPort: number } | { allowedDomains: string[] } {
+  return "httpProxyPort" in network
+    ? { httpProxyPort: network.httpProxyPort }
+    : { allowedDomains: [...network.allowedDomains] };
+}
+
+/**
+ * Claude Code's own system prompt, with Octant's additions only appended.
+ * Every launch sends it: agent-sdk 0.3.211 reads a missing `systemPrompt` as
+ * the custom prompt `""`, and the runtime then replaces its default prompt
+ * (output styles, commit and pull-request guidance, environment details)
+ * with that empty one, so Claude ran without its own prompt.
+ */
+export interface ClaudeSystemPrompt {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+  readonly append?: string;
 }
 
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -159,6 +187,12 @@ export interface ClaudeOpenQueryInput {
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * Instruction files Octant read for this session because its setting
+   * sources do not load them (`claudeSessionInstructions`), appended to
+   * Claude Code's own system prompt and never in place of it.
+   */
+  readonly instructions?: string;
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
   readonly ownMemory?: true;
   /**
@@ -496,8 +530,25 @@ export type ClaudeDecodedMessage =
     }
   | { readonly kind: "ignored" };
 
+/** The image types Claude's Messages API takes as `image` content blocks. */
+export const CLAUDE_IMAGE_MEDIA_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] as const;
+export type ClaudeImageMediaType = (typeof CLAUDE_IMAGE_MEDIA_TYPES)[number];
+
+/** One image the person attached, sent beside the message text as a base64 image block. */
+export interface ClaudeImageInput {
+  readonly mediaType: ClaudeImageMediaType;
+  readonly data: string;
+}
+
 export interface ClaudeUserMessage {
   readonly text: string;
+  /** Images the person attached, sent as image content blocks after the text. */
+  readonly images?: ReadonlyArray<ClaudeImageInput>;
   /**
    * Octant's context for this message, handed to Claude Code by the
    * `UserPromptSubmit` hook so the message itself is only the person's text.
@@ -570,9 +621,25 @@ export interface ClaudeAgentSdkPort {
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
 }
 
+// Mutable because the SDK's `SDKUserMessage` content is; the port builds a
+// fresh one for each message and shares it with no caller.
+type ClaudeAgentSdkInputContent =
+  | string
+  | Array<
+      | { readonly type: "text"; readonly text: string }
+      | {
+          readonly type: "image";
+          readonly source: {
+            readonly type: "base64";
+            readonly media_type: ClaudeImageMediaType;
+            readonly data: string;
+          };
+        }
+    >;
+
 export interface ClaudeAgentSdkInputMessage {
   readonly type: "user";
-  readonly message: { readonly role: "user"; readonly content: string };
+  readonly message: { readonly role: "user"; readonly content: ClaudeAgentSdkInputContent };
   readonly parent_tool_use_id: null;
   readonly origin: { readonly kind: "human" };
   readonly uuid: `${string}-${string}-${string}-${string}-${string}`;
@@ -726,6 +793,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly model: string;
   readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
+  readonly systemPrompt: ClaudeSystemPrompt;
   readonly resume?: string;
   readonly sessionId?: string;
   readonly persistSession?: false;
@@ -926,8 +994,9 @@ const SANDBOX_KEYS = [
   "filesystem",
 ] as const;
 const SANDBOX_FILESYSTEM_KEYS = ["allowRead", "allowWrite", "denyRead"] as const;
-/** The only network setting Octant sends: the session's egress proxy port. */
+/** The only network settings Octant sends: the session's egress proxy port, or every host. */
 const SANDBOX_NETWORK_KEYS = ["httpProxyPort"] as const;
+const SANDBOX_OPEN_NETWORK_KEYS = ["allowedDomains"] as const;
 
 function hasExactKeys(
   value: unknown,
@@ -951,6 +1020,19 @@ export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): b
   return policy === "approval-gated" || policy === "auto-accept-edits";
 }
 
+function isValidSandboxNetwork(network: unknown): boolean {
+  if (hasExactKeys(network, SANDBOX_OPEN_NETWORK_KEYS)) {
+    return isExactPathTuple(network.allowedDomains, "*");
+  }
+  return (
+    hasExactKeys(network, SANDBOX_NETWORK_KEYS) &&
+    typeof network.httpProxyPort === "number" &&
+    Number.isInteger(network.httpProxyPort) &&
+    network.httpProxyPort >= 1 &&
+    network.httpProxyPort <= 65_535
+  );
+}
+
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
     if (
@@ -964,17 +1046,9 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     if (sandbox === undefined) return false;
     const { network, ...rest } = sandbox;
     if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
-    // A network setting is only ever the proxy port: anything that would let
-    // the sandbox pick its own domains, sockets, or bindings is refused.
-    if (
-      network !== undefined &&
-      (!hasExactKeys(network, SANDBOX_NETWORK_KEYS) ||
-        !Number.isInteger(network.httpProxyPort) ||
-        network.httpProxyPort < 1 ||
-        network.httpProxyPort > 65_535)
-    ) {
-      return false;
-    }
+    // A network setting is only ever the proxy port or every host: anything
+    // that would let the sandbox pick its own sockets or bindings is refused.
+    if (network !== undefined && !isValidSandboxNetwork(network)) return false;
     if (
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
@@ -1070,6 +1144,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
         invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
+        systemPrompt: { ...invocation.options.systemPrompt },
         ...(settings === undefined
           ? {}
           : {
@@ -1100,7 +1175,10 @@ function liveBridge(): ClaudeAgentSdkBridge {
           ? {}
           : {
               sandbox: {
-                ...sandbox,
+                enabled: sandbox.enabled,
+                failIfUnavailable: sandbox.failIfUnavailable,
+                autoAllowBashIfSandboxed: sandbox.autoAllowBashIfSandboxed,
+                allowUnsandboxedCommands: sandbox.allowUnsandboxedCommands,
                 filesystem: {
                   denyRead: [...sandbox.filesystem.denyRead],
                   allowRead: [...sandbox.filesystem.allowRead],
@@ -1108,7 +1186,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
                 },
                 ...(sandbox.network === undefined
                   ? {}
-                  : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
+                  : { network: sdkSandboxNetwork(sandbox.network) }),
               },
             }),
         hooks: {
@@ -1462,6 +1540,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
+              systemPrompt: {
+                type: "preset",
+                preset: "claude_code",
+                ...(input.instructions === undefined ? {} : { append: input.instructions }),
+              },
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
               ...(input.resumeSessionId === undefined && input.sessionId !== undefined
                 ? { sessionId: input.sessionId }
@@ -1494,7 +1577,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                       },
                       ...(input.sandbox.network === undefined
                         ? {}
-                        : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
+                        : { network: input.sandbox.network }),
                     },
                   }),
               // The SDK composes the launch and its `SpawnOptions` carry no
@@ -1708,7 +1791,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, context, onContextDelivered, appManagedTools = [], onAppToolCall }) =>
+              send: ({
+                text,
+                images = [],
+                context,
+                onContextDelivered,
+                appManagedTools = [],
+                onAppToolCall,
+              }) =>
                 request(async () => {
                   if (appManagedTools.length > 0) {
                     if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
@@ -1795,7 +1885,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   try {
                     return await prompt.offer({
                       type: "user",
-                      message: { role: "user", content: text },
+                      message: {
+                        role: "user",
+                        content:
+                          images.length === 0
+                            ? text
+                            : [
+                                { type: "text", text },
+                                ...images.map((image) => ({
+                                  type: "image" as const,
+                                  source: {
+                                    type: "base64" as const,
+                                    media_type: image.mediaType,
+                                    data: image.data,
+                                  },
+                                })),
+                              ],
+                      },
                       parent_tool_use_id: null,
                       origin: { kind: "human" },
                       uuid: messageId,

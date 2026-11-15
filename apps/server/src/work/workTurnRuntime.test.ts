@@ -313,14 +313,15 @@ describe("WorkTurnRuntime", () => {
         sessionId: ids.session,
         ...value,
       });
-    // 100 deltas of 1 KiB, each ending in a two-byte character: past the
-    // 64 KiB bound well before the last one.
-    const chunk = `${"a".repeat(1_022)}é`;
+    // 36 deltas of 1 MiB, each ending in a two-byte character: past the
+    // 32 MiB bound Chat and Code share before the last one, and far past the
+    // 64 KiB a Work reply used to keep.
+    const chunk = `${"a".repeat(1_048_574)}é`;
     const events: ProviderRuntimeEvent[] = [
-      ...Array.from({ length: 100 }, (_, index) =>
+      ...Array.from({ length: 36 }, (_, index) =>
         event(index + 1, { kind: "text-delta", text: chunk }),
       ),
-      event(101, { kind: "completed" }),
+      event(37, { kind: "completed" }),
     ];
     const driver: ProviderDriver = {
       kind: "codex",
@@ -338,7 +339,9 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const deltas: string[] = [];
+    const marker = "\n[Output truncated by Octant.]";
+    const truncatedReplies = new Set<string>();
+    let longestUntruncated = 0;
 
     const outcome = await new WorkTurnRuntime().run({
       command: decodeStartWorkThreadTurnCommand({
@@ -361,20 +364,22 @@ describe("WorkTurnRuntime", () => {
       projectRoot: "/tmp/work-project",
       driver,
       signal: new AbortController().signal,
-      onDelta: (response) => deltas.push(response),
+      onDelta: (response) => {
+        if (response.endsWith(marker)) truncatedReplies.add(response);
+        else longestUntruncated = Math.max(longestUntruncated, response.length);
+      },
     });
 
     if (outcome.kind !== "completed") throw new Error(`Expected completed, got ${outcome.kind}.`);
-    const marker = "\n[Output truncated by Octant.]";
+    const bound = 32 * 1024 * 1024;
+    expect(longestUntruncated).toBeGreaterThan(64 * 1024);
     expect(outcome.response.endsWith(marker)).toBe(true);
     expect(outcome.response.indexOf(marker)).toBe(outcome.response.length - marker.length);
-    expect(Buffer.byteLength(outcome.response, "utf8")).toBeLessThanOrEqual(64 * 1024);
-    expect(Buffer.byteLength(outcome.response, "utf8")).toBeGreaterThan(64 * 1024 - 64);
-    expect(outcome.response).not.toContain("\uFFFD");
+    expect(Buffer.byteLength(outcome.response, "utf8")).toBeLessThanOrEqual(bound);
+    expect(Buffer.byteLength(outcome.response, "utf8")).toBeGreaterThan(bound - 64);
+    expect(outcome.response.slice(-1_000)).not.toContain("\uFFFD");
     // Once truncated the reply holds still: later deltas neither grow nor shave it.
-    expect(new Set(deltas.filter((response) => response.endsWith(marker)))).toEqual(
-      new Set([outcome.response]),
-    );
+    expect(truncatedReplies).toEqual(new Set([outcome.response]));
   });
 
   it("parks a provider-declared usage limit as a rate-limited outcome with its reset", async () => {

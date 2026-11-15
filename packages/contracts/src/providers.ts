@@ -3073,7 +3073,7 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("runtime-turn-started"),
-    trigger: Schema.Literal("background-task"),
+    trigger: Schema.Literal("background-task", "person-message"),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

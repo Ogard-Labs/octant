@@ -1,7 +1,12 @@
 import { decodeBrowserThreadId } from "@octant/contracts";
 import { DesignSystemFiles } from "../designSystems/designSystemFiles";
 import { designSystemTurnContext } from "../designSystems/designSystemContext";
-import { appToolThreadLevel, browserToolTransport, usageLimitFromReading } from "@octant/domain";
+import {
+  appToolThreadLevel,
+  browserToolTransport,
+  threadToolStepLimit,
+  usageLimitFromReading,
+} from "@octant/domain";
 import { threadWorkingDirectoryCurrent } from "../threadWorkingDirectoryAuthority";
 import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
@@ -788,6 +793,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime = createCodeOperationRuntime({
         stalledTurnLimitMs: () =>
           stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        toolStepLimit: (fullAccess) =>
+          threadToolStepLimit({
+            fullAccess,
+            settings: persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          }),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),

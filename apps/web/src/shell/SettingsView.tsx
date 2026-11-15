@@ -206,7 +206,9 @@ import {
   LOCAL_HOST_ID,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_THREAD_TOOL_STEPS_SETTING,
-  MAX_TURN_RUNTIME_EVENTS,
+  RUNTIME_EVENTS_PER_TOOL_STEP,
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
+  MAX_RUNTIME_TURNS_PER_TURN_SETTING,
 } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
@@ -1748,7 +1750,7 @@ function ActiveSectionContent({
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
-                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                description={`How many tool calls a Chat, Work or Code turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row. A turn stops after ${RUNTIME_EVENTS_PER_TOOL_STEP} runtime events for each step kept.`}
                 focused={focusedSetting === settingId("tool-steps-per-turn")}
                 label="Tool steps kept per turn"
                 scope="host"
@@ -1763,7 +1765,7 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
+                description="The same limit for a Work or Code turn that runs at Full access. 0 means no limit: every call is kept, no event count stops the turn, and the spend ceiling is what bounds it."
                 focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
                 label="Tool steps kept per turn at Full access"
                 scope="host"
@@ -1777,6 +1779,21 @@ function ActiveSectionContent({
                     props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
                   }
                   value={props.settings.fullAccessToolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description={`How many turns a runtime may start by itself inside one of your turns below Full access, when a background command ends or a watch reports. Default ${DEFAULT_RUNTIME_TURNS_PER_TURN}. Past it your turn completes and its session stops. Full access has no such count, and a message you send meanwhile goes into the turn.`}
+                focused={focusedSetting === settingId("runtime-turns-per-turn")}
+                label="Turns a runtime starts by itself"
+                scope="host"
+                settingId="runtime-turns-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Turns a runtime starts by itself"
+                  max={MAX_RUNTIME_TURNS_PER_TURN_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ runtimeTurnsPerTurn: value })}
+                  value={props.settings.runtimeTurnsPerTurn}
                 />
               </SettingRow>
             </div>

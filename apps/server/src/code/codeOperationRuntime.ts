@@ -393,6 +393,11 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly stalledTurnLimitMs?: () => number | null;
   /**
+   * The person's tool-step limit for a turn at the given level, `undefined`
+   * when it is off; a turn's event budget follows it. Read as each turn starts.
+   */
+  readonly toolStepLimit?: (fullAccess: boolean) => number | undefined;
+  /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off, read as each turn starts.
    * Absent uses the default bound.
@@ -3079,6 +3084,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(input.options.stalledTurnLimitMs === undefined
         ? {}
         : { stalledTurnLimitMs: input.options.stalledTurnLimitMs }),
+      ...(input.options.toolStepLimit === undefined
+        ? {}
+        : { toolStepLimit: input.options.toolStepLimit }),
       ...(input.options.providerToolCallPauseLimitMs === undefined
         ? {}
         : { providerToolCallPauseLimitMs: input.options.providerToolCallPauseLimitMs }),
@@ -6907,8 +6915,11 @@ function normalizedOperationEvent(
       };
     }
   }
-  if (event.category === "runtime-turn" && event.status === "background-task") {
-    return { kind: "runtime-turn-started", trigger: "background-task" };
+  if (
+    event.category === "runtime-turn" &&
+    (event.status === "background-task" || event.status === "person-message")
+  ) {
+    return { kind: "runtime-turn-started", trigger: event.status };
   }
   if (event.category === "completion") return { kind: "operation-state", state: "completed" };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };

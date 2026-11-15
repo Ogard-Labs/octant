@@ -230,6 +230,7 @@ function harness(
     readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
     readonly authorityNow?: () => number;
     readonly maxTrackedToolUses?: number;
+    readonly runtimeTurnsPerTurn?: () => number;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
       options?: ClaudeEnvironmentScopeOptions,
@@ -359,6 +360,9 @@ function harness(
       instanceId,
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       ...(options.configDirectory === undefined
         ? {}
         : { configDirectory: options.configDirectory }),
@@ -1169,6 +1173,8 @@ describe("Claude execution policy", () => {
                 allowRead: [projectRoot],
                 allowWrite: [projectRoot],
               },
+              // No egress proxy routes this host, so no host is limited.
+              network: { allowedDomains: ["*"] },
             }
           : undefined,
       );
@@ -4764,6 +4770,49 @@ describe("Claude driver probe", () => {
     }
   });
 
+  it("sends an attached image to Claude as an image block, and refuses an image type Claude does not take", async () => {
+    const f = harness("subscription");
+    await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const png = {
+      attachmentId: "attachment-1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78, 71]),
+    } as const;
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "what is this?",
+        attachments: [png] as never,
+        tools: [],
+      }),
+    );
+    expect(f.queries.at(-1)?.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "what is this?",
+        images: [
+          { mediaType: "image/png", data: Buffer.from([137, 80, 78, 71]).toString("base64") },
+        ],
+      }),
+    );
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "and this?",
+          attachments: [{ ...png, mediaType: "image/heic" }] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ category: "unsupported" });
+    await acquired.close();
+  });
+
   it("uses only provider-native auth for subscription and releases the probe query scope", async () => {
     const f = harness("subscription");
     const result = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
@@ -4787,7 +4836,8 @@ describe("Claude driver probe", () => {
         streaming: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
-        nativeAttachments: "unsupported",
+        // Every model Claude Code offers takes images.
+        nativeAttachments: "supported",
         nativeWebResearch: "unsupported",
         appManagedTools: "supported",
         citations: "unsupported",
@@ -7320,11 +7370,26 @@ describe("Claude background work", () => {
     event: { kind: "text-delta", index: 0, text: value },
   });
 
-  async function startTurn() {
-    const f = harness();
+  async function startTurn(
+    options: {
+      readonly executionPolicy?: "approval-gated" | "full-access";
+      readonly runtimeTurnsPerTurn?: () => number;
+    } = {},
+  ) {
+    const f = harness(
+      "subscription",
+      "current-session",
+      options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn },
+    );
     const acquired = await acquire(f.driver, "code");
     await Effect.runPromise(
-      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: options.executionPolicy ?? "approval-gated",
+      }),
     );
     const seen: ProviderRuntimeEvent[] = [];
     const collected = Effect.runPromise(
@@ -7374,13 +7439,6 @@ describe("Claude background work", () => {
     await query.emit(state("idle"));
     // The command still runs, so the person's turn is not over.
     expect(seen.some((event) => event.kind === "completed")).toBe(false);
-    await expect(
-      Effect.runPromise(
-        Effect.flip(
-          acquired.connection.send({ sessionId, prompt: "next", attachments: [], tools: [] }),
-        ),
-      ),
-    ).resolves.toMatchObject({ category: "unavailable" });
 
     await query.emit(backgroundEnded);
     await query.emit(state("running"));
@@ -7504,8 +7562,110 @@ describe("Claude background work", () => {
     await acquired.close();
   });
 
-  it("ends the person's turn once the runtime has started as many turns of its own as it may", async () => {
+  it("steers a message the person sends into the held turn and waits for its answer", async () => {
     const { acquired, query, seen, collected } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "also lint", attachments: [], tools: [] }),
+    );
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    expect(query.sent).toEqual(["run the tests", "also lint", "and format"]);
+    // The steered message keeps the turn held even once the command ends.
+    await query.emit(backgroundEnded);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(state("running"));
+    await query.emit(text("Linted."));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await collected;
+
+    expect(seen.find((event) => event.kind === "runtime-turn-started")).toMatchObject({
+      trigger: "person-message",
+    });
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
+  it("refuses a message with images while the turn is held, rather than dropping its images", async () => {
+    const { acquired, query } = await startTurn();
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        acquired.connection.send({
+          sessionId,
+          prompt: "what is this?",
+          attachments: [
+            {
+              attachmentId: "attachment-1",
+              displayName: "screen.png",
+              mediaType: "image/png",
+              bytes: new Uint8Array([137, 80, 78, 71]),
+            },
+          ] as never,
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({
+      category: "unavailable",
+      message: expect.stringContaining("Send the images once the turn ends"),
+    });
+    expect(query.sent).toEqual(["run the tests"]);
+    await acquired.close();
+  });
+
+  it("labels and counts a turn background work starts after the person steered into a runtime turn already open", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 2 });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit(backgroundEnded);
+    await query.emit(state("running"));
+    await query.emit(text("Reading the results."));
+    // The runtime's own turn is open when the person's message arrives.
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "and format" })),
+    ).toBe("steered");
+    await query.emit({ ...backgroundStarted, taskId: "bash-2" });
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    await query.emit({ ...backgroundEnded, taskId: "bash-2" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    // A third wake would pass the limit of two, so the turn ends there.
+    await query.emit({ ...backgroundStarted, taskId: "bash-3" });
+    await query.emit(state("running"));
+    await query.emit(completed(sdk));
+    await collected;
+
+    expect(
+      seen
+        .filter((event) => event.kind === "runtime-turn-started")
+        .map((event) => (event.kind === "runtime-turn-started" ? event.trigger : undefined)),
+    ).toEqual(["background-task", "background-task"]);
+    expect(seen.filter((event) => event.kind === "completed")).toHaveLength(1);
+    await acquired.close();
+  });
+
+  it("refuses to steer when no turn is held, so the message queue keeps it", async () => {
+    const { acquired } = await startTurn();
+    expect(
+      await Effect.runPromise(acquired.connection.steer!({ sessionId, message: "later" })),
+    ).toBe("unsupported");
+    await acquired.close();
+  });
+
+  it("ends the person's turn once the runtime has started as many turns of its own as the person allows", async () => {
+    const { acquired, query, seen, collected } = await startTurn({ runtimeTurnsPerTurn: () => 3 });
     await query.emit(backgroundStarted);
     await query.emit(completed(sdk));
     await query.emit(state("idle"));
@@ -7517,9 +7677,31 @@ describe("Claude background work", () => {
     }
     await collected;
 
-    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(16);
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(3);
     expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     expect(query.close).toHaveBeenCalled();
+    await acquired.close();
+  });
+
+  it("counts no runtime turns at Full access", async () => {
+    const { acquired, query, seen, collected } = await startTurn({
+      executionPolicy: "full-access",
+      runtimeTurnsPerTurn: () => 3,
+    });
+    await query.emit(backgroundStarted);
+    await query.emit(completed(sdk));
+    await query.emit(state("idle"));
+    for (let line = 0; line < 20; line += 1) {
+      await query.emit(state("running"));
+      await query.emit(completed(sdk));
+      await query.emit(state("idle"));
+    }
+    expect(seen.filter((event) => event.kind === "runtime-turn-started")).toHaveLength(20);
+    expect(seen.some((event) => event.kind === "completed")).toBe(false);
+    await query.emit(backgroundEnded);
+    await query.emit(state("idle"));
+    await collected;
+    expect(seen.at(-1)).toMatchObject({ kind: "completed" });
     await acquired.close();
   });
 

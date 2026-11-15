@@ -46,7 +46,14 @@ const boundedNonEmptyText = (maximumBytes: number) =>
     Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
-export const MAX_WORK_TURN_RESPONSE_BYTES = 64 * 1024;
+/**
+ * The most of a Work reply the turn keeps: the 32 MiB streamed-output budget
+ * Chat and Code turns have (maintainer decision, 2026-11-14), so a long Work
+ * answer is no longer cut at 64 KiB. The reply is journaled once, when the
+ * turn settles; a settled turn too heavy for one stream frame is read from
+ * the transcript snapshot instead.
+ */
+export const MAX_WORK_TURN_RESPONSE_BYTES = 32 * 1024 * 1024;
 /**
  * The most one live Work stream frame may weigh. A client refuses a heavier
  * line, so the host sends a view to the transcript snapshot instead of a

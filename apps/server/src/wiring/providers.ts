@@ -279,6 +279,8 @@ export interface ConfiguredProviderDriverOptions {
    */
   readonly compactionShare?: (keeper: "octant" | "runtime") => number | null;
   readonly permissionPersistence: () => PermissionPersistence;
+  /** The person's runtime-turn count from Settings, read when a runtime starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
@@ -437,6 +439,9 @@ export function makeConfiguredProviderDriver(
       // `claudeInstances` is a getter over the journal on the host's options;
       // reading it here at every call keeps a running session on the
       // person's current switch.
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       claudeArtifactDelivery: (instanceId) =>
         options.claudeInstances?.some(
           (candidate) =>
@@ -2094,6 +2099,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      runtimeTurnsPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return keeper === "octant"

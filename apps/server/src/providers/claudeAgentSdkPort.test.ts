@@ -511,6 +511,45 @@ describe("Claude Agent SDK port", () => {
     expect(Object.keys(options?.sandbox?.network ?? {})).toEqual(["httpProxyPort"]);
   });
 
+  test("keeps Claude Code's own system prompt on every launch, with nothing appended by default", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(openInput))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+    });
+  });
+
+  test("appends the instruction files Octant read to Claude Code's own system prompt", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(harness.port.openQuery({ ...openInput, instructions: "Project: use tabs." })),
+      ),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options.systemPrompt).toEqual({
+      type: "preset",
+      preset: "claude_code",
+      append: "Project: use tabs.",
+    });
+  });
+
+  test("lets the sandbox reach every host when Network limits are off", async () => {
+    const harness = makeHarness();
+    const open = {
+      ...openInput,
+      sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } },
+    } as const;
+    await expect(
+      Effect.runPromise(Effect.scoped(harness.port.openQuery(open))),
+    ).resolves.toBeDefined();
+    expect(harness.invocation?.options).toMatchObject({
+      sandbox: { network: { allowedDomains: ["*"] } },
+    });
+  });
+
   test("keeps the sandbox when Full access explicitly asks for it", async () => {
     const harness = makeHarness();
     // A Full access thread that kept its sandbox lets no command out of it.
@@ -604,8 +643,11 @@ describe("Claude Agent SDK port", () => {
       { ...openInput, sandbox: { ...openInput.sandbox, allowUnsandboxedCommands: false } },
     ],
     [
-      "an unsupported sandbox surface",
-      { ...openInput, sandbox: { ...openInput.sandbox, network: { allowedDomains: ["*"] } } },
+      "a sandbox domain list narrower than every host",
+      {
+        ...openInput,
+        sandbox: { ...openInput.sandbox, network: { allowedDomains: ["example.com"] } },
+      },
     ],
     [
       "a network setting beside the proxy port",
@@ -773,6 +815,39 @@ describe("Claude Agent SDK port", () => {
             done: false,
             value: { message: { content: "second" } },
           });
+        }),
+      ),
+    );
+  });
+
+  test("sends attached images as image content blocks after the message text", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.send({
+            text: "what is this?",
+            images: [{ mediaType: "image/png", data: "iVBORw0KGgo=" }],
+          });
+          const offered = yield* Effect.promise(() => iterator.next());
+          expect(offered.value).toMatchObject({
+            message: {
+              role: "user",
+              content: [
+                { type: "text", text: "what is this?" },
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+                },
+              ],
+            },
+          });
+          yield* query.send({ text: "plain" });
+          const plain = yield* Effect.promise(() => iterator.next());
+          expect(plain.value).toMatchObject({ message: { role: "user", content: "plain" } });
         }),
       ),
     );
