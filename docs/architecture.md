@@ -1949,6 +1949,10 @@ except where a bullet says otherwise.
   context inspector lists it as Person memory in Chat and Work, so a person
   can see when it was used; a Code window, which is counted by part, counts
   it with Octant's instructions.
+- **Written instructions.** Instructions the person writes for Octant itself,
+  per person, per Project, and for coordinator threads, beside each
+  provider's own instruction files, are designed, not built
+  ([Octant instructions](design/octant-instructions.md)).
 - **Searching past threads.** `octant_past_threads` is a read-only host tool,
   offered in Chat (not a Side Chat), Work, and Code beside the thread's other
   host tools. It

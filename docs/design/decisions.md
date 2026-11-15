@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **258**   | **156** | **99**       | **3**               |
+| **All areas**                                                                         | **259**   | **156** | **99**       | **4**               |
 
 ## Principles and hard lines
 
@@ -1486,6 +1486,16 @@ A completed event carries a stop reason only when the runtime says why the turn 
 - A turn cut off at the output limit shows a note with Continue, which drafts a follow-up and sends nothing until the person does.
 
 Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons).
+
+### Octant instructions
+
+A person writes instructions for Octant itself, beside each provider's own instruction files: one text for the person, an optional one per Project, and an orchestration text for coordinator threads (maintainer request, 2026-11-14).
+
+- They cover only what Octant knows: which provider or model takes which job, how a coordinator splits and hands back work, and when to use Octant's own features. On how a provider works, its own files (`CLAUDE.md`, `AGENTS.md`) come first.
+- Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
+- They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 
