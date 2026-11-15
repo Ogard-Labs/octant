@@ -433,7 +433,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   The same items appear in a Code thread pane's header menu (right-click the
   header), above Close pane, through the same handlers. On the designated
   planner the role item is left out, since its role follows the designation.
-  Settings › Code › Coordinators holds **Starting workers**, **Show workers**
+  A proposed worker's card above the coordinator's composer reads "<role> ·
+  <model> · <why>" when the roles chose its model, and offers **Use Builder
+  instead** beside Review and approve and Decline when the role is not
+  Builder. Settings › Code › Coordinators holds **Starting workers**, **Show workers**
   and **Open workers per coordinator**, and a Code Project's overview holds its
   own **Starting workers** choice (Use Settings, Start without asking, Propose
   for approval) and its own **Show workers** choice after the Project planner
@@ -455,14 +458,15 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   Sections, in order: **Needs you**, **Working**, **In review** (delivered
   with a pull request still open), **Done** (marked Done, or its pull request
   merged or closed; folded as "Done · N" with **Show more**), and **Put away**
-  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model, the
+  (put away without either, folded the same way; putting away is not Done). Each row has the title, the state in words, the model
+  (with the same fallback or chosen note as the Agents dock's worker row), the
   pull request link when there is one, and when it last changed; a row opens
   the worker. A worker waiting on a person is always under Needs you, whatever
   else is true of it. The panel reads the same window thread list the Agents
   dock's Workers section reads, so a worker this window cannot see is never
   listed, and it is offered only for a thread on this window's host.
 - **Worker cards.** In the coordinator's transcript, each worker it started
-  has a small card (title, model, live state: Working, Needs you, In review,
+  has a small card (title, model with that note, live state: Working, Needs you, In review,
   Done) at the end of the turn that was running when the host created the
   worker, from host facts, never agent text. Clicking a card opens the worker.
   A worker the transcript cannot place (created before the first turn, or turns
@@ -481,7 +485,12 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   its own subagents: one row per worker in the window's thread list, with the
   provider's mark, the title, the thread's state in words (Working, Needs
   attention, Done, Idle), and how many subagents it handed off and how many of
-  them are working. A row opens the worker. In Graph, each worker's subagents
+  them are working. A worker whose model the roles chose also shows the
+  model's name and, when it is not the role's main model, "fallback: <the
+  host's reason>", or "chosen: <the coordinator's why>" for an override, or
+  "chosen by you" after a person changed it
+  ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
   controls are the worker's. The List and Graph switch is offered when the

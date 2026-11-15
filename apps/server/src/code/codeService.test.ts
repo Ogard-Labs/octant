@@ -1259,6 +1259,47 @@ describe("CodeService commands", () => {
     },
   );
 
+  it("reads a worker's later model change as a person's pick unless the host's restart names its own", async () => {
+    const worker = () =>
+      thread({
+        coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+        coordinatorChoice: { role: "default", rank: "main" },
+      });
+    const byPerson = serviceFixture({ threads: [worker()] });
+    const changed = await byPerson.service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(changed).toMatchObject({
+      thread: { coordinatorChoice: { role: "default", rank: "person" } },
+    });
+    const byHost = serviceFixture({ threads: [worker()] });
+    const restarted = await byHost.service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason: "first request on model-a failed before any work",
+        },
+      },
+    );
+    expect(restarted).toMatchObject({
+      thread: { coordinatorChoice: { rank: { fallback: 1 } } },
+    });
+  });
+
   it("returns to provider defaults when a reasoning choice is cleared or the model changes", async () => {
     const fixture = serviceFixture({
       threads: [thread({ modelOptionValues: { effort: "high" } })],
@@ -2727,6 +2768,7 @@ describe("CodeService commands", () => {
       { messageWake: true as const },
       { coordinatorBounds: { rounds: 50 } },
       { coordinatorWorkerLevel: "full-access" as const },
+      { coordinatorChoice: { role: "deep" as const, rank: "main" as const } },
     ]) {
       await expect(
         fixture.service.execute(ids.window, {

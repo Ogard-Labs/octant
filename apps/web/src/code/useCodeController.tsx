@@ -6,6 +6,7 @@ import type {
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
   CoordinatorStartingChoice,
+  CoordinatorWorkerChoice,
   CoordinatorWorkerListing,
   CoordinatorWorkerListingByProject,
   CoordinatorWorkerLevel,
@@ -217,6 +218,8 @@ export interface CodeThreadNavigationItem {
   readonly planner?: true;
   /** The coordinator that started this worker; the host records it at creation. */
   readonly coordinatorThreadId?: CodeThreadId;
+  /** How the host chose a worker's model from the roles. */
+  readonly coordinatorChoice?: CoordinatorWorkerChoice;
   /** The thread's Wake when a message arrives switch is on. */
   readonly messageWake?: true;
   /** A person turned off this worker's Wake for coordinator. */
@@ -2100,6 +2103,9 @@ export function useCodeController(options: CodeControllerOptions) {
             ...(thread.coordinatorThreadId === undefined
               ? {}
               : { coordinatorThreadId: thread.coordinatorThreadId }),
+            ...(thread.coordinatorChoice === undefined
+              ? {}
+              : { coordinatorChoice: thread.coordinatorChoice }),
             ...(thread.messageWake === true ? { messageWake: true as const } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true as const } : {}),
             ...(thread.restartContinuationOff === true
