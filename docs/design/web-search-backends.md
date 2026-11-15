@@ -157,7 +157,9 @@ the failure kind, so the person can see where a query went. The record
 and the provider's tool call id it belongs to, so it reads beside that call;
 the query stays with the thread's own tool call. A vendor's refusal of the query itself
 (an HTTP 4xx other than a refused key or a rate limit) is an answer and does
-not move on. Which entry's key was refused is held in memory, so after a
+not move on; a SearXNG instance's is read the same way, except that it takes
+no key, so its 401 or 403 refuses every query and moves on as a server error.
+Which entry's key was refused is held in memory, so after a
 restart the next search learns it again.
 
 ## Research route

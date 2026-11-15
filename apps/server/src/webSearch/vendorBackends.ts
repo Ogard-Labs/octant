@@ -111,7 +111,7 @@ function results(
   return found;
 }
 
-function failureForStatus(status: number): WebSearchBackendFailure {
+export function failureForStatus(status: number): WebSearchBackendFailure {
   if (status === 401 || status === 403) return "key-refused";
   if (status === 429) return "rate-limited";
   if (status >= 500) return "server-error";

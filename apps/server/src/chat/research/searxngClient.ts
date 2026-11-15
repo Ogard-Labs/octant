@@ -30,11 +30,18 @@ export type SearxngSearchFailureCategory =
 
 export class SearxngSearchFailed extends Error {
   readonly category: SearxngSearchFailureCategory;
+  /**
+   * The HTTP status the instance answered with, when it answered with an
+   * error. The backend list tells a refusal of the query (a 4xx) from an
+   * instance that did not answer, so a refused query goes to no other vendor.
+   */
+  readonly httpStatus: number | undefined;
 
-  constructor(category: SearxngSearchFailureCategory, message: string) {
+  constructor(category: SearxngSearchFailureCategory, message: string, httpStatus?: number) {
     super(message);
     this.name = "SearxngSearchFailed";
     this.category = category;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -327,7 +334,11 @@ export class SearxngClient {
 
         if (!response.ok) {
           await cancelResponseBody(response);
-          fail("unavailable", `The SearXNG request failed with HTTP ${response.status}.`);
+          throw new SearxngSearchFailed(
+            "unavailable",
+            `The SearXNG request failed with HTTP ${response.status}.`,
+            response.status,
+          );
         }
 
         const declared = Number(response.headers.get("content-length"));

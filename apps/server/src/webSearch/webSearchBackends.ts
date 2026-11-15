@@ -9,7 +9,7 @@ import {
   SearxngSearchFailed,
   type SearxngFetch,
 } from "../chat/research/searxngClient";
-import { searchVendor, VendorSearchFailed } from "./vendorBackends";
+import { failureForStatus, searchVendor, VendorSearchFailed } from "./vendorBackends";
 
 export interface WebSearchResult {
   readonly title: string;
@@ -76,8 +76,15 @@ type BackendOutcome =
 function searxngFailure(error: SearxngSearchFailed): WebSearchBackendFailure {
   if (error.category === "timeout") return "timeout";
   if (error.category === "invalid-query") return "refused-query";
-  // SearXNG reports an unreachable instance, an HTTP error, and an unreadable
-  // body alike; none of them is an answer.
+  if (error.httpStatus !== undefined) {
+    // An HTTP error reads as it does for a vendor, so a 4xx refusal of the
+    // query is an answer and goes to no other vendor. An instance takes no
+    // key, so a 401 or 403 is the instance refusing every query (SearXNG
+    // answers 403 when its JSON format is turned off), not a refused key.
+    const failure = failureForStatus(error.httpStatus);
+    return failure === "key-refused" ? "server-error" : failure;
+  }
+  // An unreachable instance and an unreadable body are not answers.
   return error.category === "unavailable" ? "network" : "server-error";
 }
 

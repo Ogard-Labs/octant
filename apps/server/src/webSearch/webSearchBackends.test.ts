@@ -65,8 +65,35 @@ describe("web search fallback", () => {
     expect(routed).toEqual([
       {
         answeredBy: { entryId: searxTwo.id, backend: "searxng" },
-        failed: [{ entryId: searx.id, backend: "searxng", failure: "network" }],
+        failed: [{ entryId: searx.id, backend: "searxng", failure: "server-error" }],
       },
+    ]);
+  });
+
+  it("stops at a SearXNG instance's refusal of the query and sends it to no other vendor", async () => {
+    const fetch = vi.fn<Fetch>(async () => new Response("bad query", { status: 400 }));
+    const { run, routed } = route([searx, brave], fetch);
+    await expect(run).rejects.toBeInstanceOf(WebSearchUnavailable);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(routed[0]?.failed.map((failed) => failed.failure)).toEqual([
+      "refused-query",
+      "not-tried",
+    ]);
+  });
+
+  it("moves on from a SearXNG instance that rate-limits or refuses every query", async () => {
+    const statuses = [429, 403];
+    const fetch = vi.fn<Fetch>(async () =>
+      statuses.length > 0
+        ? new Response("{}", { status: statuses.shift() ?? 200 })
+        : Response.json({}),
+    );
+    const { run, routed } = route([searx, searxTwo, brave], fetch);
+    await run.catch(() => undefined);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(routed[0]?.failed.slice(0, 2).map((failed) => failed.failure)).toEqual([
+      "rate-limited",
+      "server-error",
     ]);
   });
 
@@ -126,7 +153,10 @@ describe("web search fallback", () => {
     const { run, routed } = route([searx, searxTwo], fetch, { now: () => times.shift() ?? 20_000 });
     await expect(run).rejects.toBeInstanceOf(WebSearchUnavailable);
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(routed[0]?.failed.map((failed) => failed.failure)).toEqual(["network", "not-tried"]);
+    expect(routed[0]?.failed.map((failed) => failed.failure)).toEqual([
+      "server-error",
+      "not-tried",
+    ]);
   });
 
   it("stops at once when the turn is cancelled", async () => {
@@ -157,7 +187,7 @@ describe("web search fallback", () => {
     await expect(run).rejects.toBeInstanceOf(WebSearchInterrupted);
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(routed).toEqual([
-      { failed: [{ entryId: searx.id, backend: "searxng", failure: "network" }] },
+      { failed: [{ entryId: searx.id, backend: "searxng", failure: "server-error" }] },
     ]);
   });
 
