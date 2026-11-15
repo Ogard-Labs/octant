@@ -492,8 +492,8 @@ shows the host's refusal as it arrived. A key is asked for only once the list
 holding its entry is saved; it goes to the host's credential store and the
 field empties. Settings › Chat no longer shows the SearXNG address: a link to
 its old row opens this page, and a Chat save carries the stored address
-unchanged. Outside Any, a key provider's card in Providers shows "own web
-search and fetch" as a locked switch with the policy as its reason, beside
-"Run as itself", whose value is kept. A model endpoint's "Where your data
+unchanged. The page says the policy covers only its backends: a provider's
+own search and a key provider's own web search and fetch are not locked by it.
+A model endpoint's "Where your data
 goes" gains "Its own web search keeps no record of my queries" only where its
 provider offers ZDR for its search (Anthropic's and OpenAI's own APIs).

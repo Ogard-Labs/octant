@@ -74,7 +74,9 @@ describe("Settings › Web search", () => {
     expect(brave).toHaveTextContent(
       "Not eligible under this policy: you have not stated it processes in the EU or UK",
     );
-    expect(screen.getByText(/No provider's own search runs/)).toBeVisible();
+    // EU only covers these backends alone; a provider's own search is not withheld.
+    expect(screen.getByText(/The policy covers only the backends below/)).toBeVisible();
+    expect(screen.queryByText(/No provider's own search runs/)).not.toBeInTheDocument();
   });
 
   it("offers only the statements a vendor's terms support, and says why the others are not", async () => {

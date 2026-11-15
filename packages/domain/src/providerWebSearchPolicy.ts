@@ -120,12 +120,3 @@ export function decideProviderOwnSearch(input: {
   }
   return { kind: "allowed", origin: input.origin, basicOnly: false };
 }
-
-/**
- * A vendor runtime's own web tools follow the native-setup policy under Any
- * and are off under every other policy: Octant cannot set which search mode a
- * vendor runtime uses, so it cannot hold one to a stricter policy.
- */
-export function vendorRuntimeWebToolsAllowed(policy: WebSearchDataPolicy): boolean {
-  return policy === "any";
-}

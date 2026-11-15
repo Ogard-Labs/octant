@@ -5002,10 +5002,9 @@ unless the call asks for 1 to 10. It opens no page.
   the next eligible entry only when one did not answer (network, timeout, rate
   limit, server error, refused or missing key), inside a 20-second budget with
   at most 15 seconds each; an empty result stops it. Each call journals where
-  the query went (`web-search.call-routed@1`). Outside Any, a vendor
-  runtime's own web tools resolve off in its native setup
-  (`resolveProviderNativeSetup` reads the policy) while the account's switch
-  keeps its journaled value. A model endpoint carries the person's ZDR
+  the query went (`web-search.call-routed@1`). The policy covers only these
+  backends: a vendor runtime's own web tools follow its native setup under
+  every policy. A model endpoint carries the person's ZDR
   statement for its provider's own search (`providerSearchZdr`), accepted only
   on Anthropic's and OpenAI's own APIs. A provider's own search in the native
   harness under the policy is designed, not built

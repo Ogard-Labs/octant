@@ -6,7 +6,6 @@ import type {
   ProviderInstanceId,
   ProviderNativeSetup,
 } from "@octant/contracts";
-import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
 import { accountRunsAsItself, resolveProviderNativeSetup } from "@octant/domain";
 
 export interface ProviderNativeSetupSources {
@@ -14,8 +13,6 @@ export interface ProviderNativeSetupSources {
   readonly readProject: (id: ProjectId) => Project | undefined;
   /** The thread's own choice, or undefined when it inherits. */
   readonly readThreadNativeSetup?: (threadId: string) => "on" | "off" | undefined;
-  /** The host's web search data policy; outside Any the runtime's own web tools stay off. */
-  readonly readWebSearchPolicy?: () => WebSearchDataPolicy;
 }
 
 export interface SessionNativeSetupInput {
@@ -64,8 +61,5 @@ export function sessionNativeSetup(
     accountAllows: "nativeSetup" in instance ? accountRunsAsItself(instance) : true,
     projectTrusts,
     ...(threadChoice === undefined ? {} : { threadChoice }),
-    ...(sources.readWebSearchPolicy === undefined
-      ? {}
-      : { webSearchPolicy: sources.readWebSearchPolicy() }),
   });
 }

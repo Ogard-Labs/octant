@@ -237,10 +237,9 @@ const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
 } as const satisfies CodexThreadConfig;
 
 /**
- * Codex's built-in web search sends the model's query to OpenAI's search,
- * which Octant cannot hold to the web search data policy or see before it is
- * sent, so it runs only where the session's native setup has `webTools` on.
- * Read from the codex-cli 0.169.0 source: the `web_search` config key
+ * Codex's built-in web search runs only where the session's native setup has
+ * `webTools` on: left unset, Codex searches by default, so a session whose
+ * person or account turned web tools off would still search. Read from the codex-cli 0.169.0 source: the `web_search` config key
  * (disabled, cached, indexed, or live) wins over the legacy feature flags,
  * defaults to cached when unset, and `disabled` leaves out both the hosted
  * search tool and the standalone `web.run` tool; a managed requirement always

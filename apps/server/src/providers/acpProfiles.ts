@@ -693,9 +693,9 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_DEFAULT_AGENT: "ask",
       // Skills have no `default_skill` to resolve, so the deny-all form is safe here.
       VIBE_DISABLED_SKILLS: '["*"]',
-      // Vibe's own web search and fetch send what the model chose to services
-      // Octant cannot hold to the web search data policy, so they stay off
-      // unless the setup has web tools on. Read from the 3.0.3 source: the
+      // Vibe's own web search and fetch stay off unless the setup has web
+      // tools on, so turning "Run as itself" off really removes them rather
+      // than leaving Vibe's defaults in place. Read from the 3.0.3 source: the
       // tools are named `web_search` and `web_fetch`, `disabled_tools` is
       // applied after `enabled_tools`, and the environment layer's list is
       // added to the person's own rather than replacing it.

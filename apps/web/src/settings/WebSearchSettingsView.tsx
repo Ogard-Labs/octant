@@ -27,10 +27,8 @@ import { SettingRow, SettingsCompactRow, SettingsSection, SettingsState } from "
 export interface WebSearchSettingsViewProps {
   readonly client?: Pick<HostControlClient, "readWebSearch" | "setWebSearch" | "setWebSearchKey">;
   readonly focusedSetting?: string;
-  /** Opens another Settings page: the research route in Chat, the locked switches in Providers. */
-  readonly onOpen?: (target: "chat-research" | "providers") => void;
-  /** Told after the host saved a new policy, so pages that read it can refresh. */
-  readonly onSaved?: (policy: WebSearchDataPolicy) => void;
+  /** Opens the research route in Settings › Chat. */
+  readonly onOpenResearchRoute?: () => void;
   /** Supplies ids for new entries; tests pass a fixed sequence. */
   readonly newId?: () => string;
 }
@@ -50,15 +48,11 @@ const POLICY_DESCRIPTIONS: Readonly<Record<WebSearchDataPolicy, string>> = {
   "eu-and-zdr": "Only a backend you state both of may receive a query.",
 };
 
-const PROVIDER_SEARCH: Readonly<Record<WebSearchDataPolicy, string>> = {
-  any: "A provider's own search runs wherever the research route picks it.",
-  "zdr-only":
-    "A provider's own search runs only on Anthropic's or OpenAI's own API where you state ZDR on the model endpoint, and Anthropic's only in its basic mode. Vendor runtimes' own web search and fetch are off.",
-  "eu-only":
-    "No provider's own search runs: none documents EU processing. Vendor runtimes' own web search and fetch are off.",
-  "eu-and-zdr":
-    "No provider's own search runs: none documents EU processing. Vendor runtimes' own web search and fetch are off.",
-};
+// The policy covers Octant's own backends only: a provider's own search and a
+// vendor runtime's own web tools behave as they do on their own (maintainer
+// decision, 2026-11-15), so the page says so once rather than per policy.
+const PROVIDER_SEARCH =
+  "The policy covers only the backends below. A provider's own search, and a vendor runtime's own web search and fetch, run as they do on their own, under your agreement with that provider; the research route chooses between a provider's search and these backends.";
 
 const INELIGIBLE: Readonly<Record<string, string>> = {
   disabled: "Turned off",
@@ -202,7 +196,6 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
       setView(outcome.view);
       setDraft(outcome.view.settings);
       setMessage({ tone: "success", text: "Web search saved." });
-      props.onSaved?.(outcome.view.settings.policy);
     } catch {
       setMessage({ tone: "error", text: "Web search could not be saved." });
     } finally {
@@ -258,27 +251,19 @@ export function WebSearchSettingsView(props: WebSearchSettingsViewProps) {
           />
         </SettingRow>
         <SettingRow
-          description={PROVIDER_SEARCH[draft.policy]}
+          description={PROVIDER_SEARCH}
           label="A provider's own search"
           scope="host"
           settingId="web-search-provider-search"
         >
           <span className="web-search-settings__links">
             <OctantButton
-              onClick={() => props.onOpen?.("chat-research")}
+              onClick={() => props.onOpenResearchRoute?.()}
               size="sm"
               type="button"
               variant="ghost"
             >
               Research route
-            </OctantButton>
-            <OctantButton
-              onClick={() => props.onOpen?.("providers")}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              Providers
             </OctantButton>
           </span>
         </SettingRow>

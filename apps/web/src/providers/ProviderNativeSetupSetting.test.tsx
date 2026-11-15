@@ -2,7 +2,6 @@ import type { ProviderCapabilities } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { WebSearchPolicyContext } from "../settings/webSearchPolicyContext";
 import { ProviderNativeSetupSetting, ProviderOwnMemorySetting } from "./ProviderNativeSetupSetting";
 
 const codex = {
@@ -125,30 +124,5 @@ describe("Run a key provider as itself", () => {
     ).toHaveAccessibleDescription(
       /Not available for Codex yet: its own subagents, web search and fetch, skills/,
     );
-  });
-
-  it("shows the runtime's own web search and fetch locked outside Any and keeps the account's switch as it is", async () => {
-    const onChange = vi.fn(async () => true);
-    const view = (policy: "any" | "eu-only") => (
-      <WebSearchPolicyContext.Provider value={policy}>
-        <ProviderNativeSetupSetting
-          disabled={false}
-          instance={{ ...codex, nativeSetup: true }}
-          onChange={onChange}
-        />
-      </WebSearchPolicyContext.Provider>
-    );
-    const { rerender } = render(view("eu-only"));
-    const locked = screen.getByRole("switch", { name: "Codex work's own web search and fetch" });
-    expect(locked).toHaveAccessibleDescription(/Locked by the web search data policy \(EU only\)/);
-    expect(locked).not.toBeChecked();
-    expect(screen.getByText(/Off while the web search data policy is EU only/)).toBeVisible();
-    expect(screen.getByRole("switch", { name: "Run Codex work as itself" })).toBeChecked();
-    expect(onChange).not.toHaveBeenCalled();
-
-    rerender(view("any"));
-    expect(
-      screen.queryByRole("switch", { name: "Codex work's own web search and fetch" }),
-    ).not.toBeInTheDocument();
   });
 });

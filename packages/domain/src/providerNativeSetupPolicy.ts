@@ -5,8 +5,6 @@ import {
   type ProviderExecutionPolicy,
   type ProviderNativeSetup,
 } from "@octant/contracts/providers";
-import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
-import { vendorRuntimeWebToolsAllowed } from "./providerWebSearchPolicy";
 
 export function isKeyProviderDriverKind(kind: ProviderDriverKind): kind is KeyProviderDriverKind {
   return (KEY_PROVIDER_DRIVER_KINDS as ReadonlyArray<string>).includes(kind);
@@ -37,11 +35,6 @@ export interface ProviderNativeSetupInput {
    * never grants a Project's own code, which still needs the Project's trust.
    */
   readonly threadChoice?: "on" | "off";
-  /**
-   * The host's web search data policy. Outside Any the runtime's own web tools
-   * stay off whatever else allows them; the account's switch keeps its value.
-   */
-  readonly webSearchPolicy?: WebSearchDataPolicy;
 }
 
 /**
@@ -85,7 +78,7 @@ export function resolveProviderNativeSetup(
   const chat = input.mode === "chat";
   return {
     subagents: true,
-    webTools: vendorRuntimeWebToolsAllowed(input.webSearchPolicy ?? "any"),
+    webTools: true,
     skills: true,
     toolServers: !plan,
     hooks: !plan && !chat,

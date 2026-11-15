@@ -17,9 +17,9 @@ route's "Octant web search" label, the migration, the credential broker namespac
 route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
 its 20-second budget, the journaled record of where each query went, Settings ›
 Web search, the endpoint ZDR statement (`set-provider-search-zdr`, journaled
-with the endpoint's data labels), the provider-search offer table, and the
-policy's lock on vendor runtimes' `webTools`, with Claude Code, Codex,
-OpenCode, and Mistral Vibe each launched with its own search off. Not built: a
+with the endpoint's data labels), the provider-search offer table, and
+Claude Code, Codex, OpenCode, and Mistral Vibe each launched with its own
+search off wherever the session's setup has `webTools` off. Not built: a
 generic ACP agent's own web tools, which Octant cannot switch off; a provider's own
 search in the native harness (slice 4), which still refuses any built-in tool
 a provider starts in its stream as `unsupported`, so a harness endpoint
@@ -280,16 +280,16 @@ or publishes one, joins the turn's usage and cost
 A vendor runtime's own web tools in Work and Code (Claude Code's, Codex's,
 OpenCode's, and an ACP agent's) are its native setup's `webTools`, which the
 person already turns on per account
-([Architecture: providers](../architecture.md#providers)). Octant cannot set
-which search mode a vendor runtime uses, so the policy limits that switch:
+([Architecture: providers](../architecture.md#providers)). The data policy
+does not limit them: under every policy `webTools` follows the native-setup
+policy ([Provider runtimes](provider-runtimes.md)), and Settings › Providers
+shows no policy lock beside "Run as itself". Rationale: maintainer decision
+2026-11-15: provider search behaves as it does on its own; the policy governs
+only the backends Octant itself sends a query to.
 
-- Under Any, `webTools` follows the native-setup policy
-  ([Provider runtimes](provider-runtimes.md)), as today.
-- Under any other policy, `webTools` is off, and Settings › Providers shows the
-  switch locked with the policy as its reason. Its journaled value does not
-  change, so returning to Any restores the person's choice.
-
-Off means the runtime cannot search, at every level, Full access included,
+`webTools` is off where the thread's own choice is off, and in Chat and Plan
+where the account does not run as itself. Off means the runtime cannot search,
+at every level, Full access included,
 because each runtime is launched with its own search switched off unless the
 session's setup has `webTools` on, as the provider SDK's `nativeSetup` contract
 already requires of a feature reported supported:
@@ -304,12 +304,12 @@ already requires of a feature reported supported:
 - Mistral Vibe launches with `VIBE_DISABLED_TOOLS` naming `web_search` and
   `web_fetch` (read from the 3.0.3 source).
 
-Rationale: before this, Codex and OpenCode searched whatever the setup said, so
-Settings showed the switch locked off while their queries still reached their
-own search services. A Codex or OpenCode thread whose account does not run as
-itself therefore no longer searches at Guarded and Reviewed either. A generic
-ACP agent reports `webTools` unsupported: Octant has no switch for its own
-web tools, so the policy cannot turn them off, and that is not built.
+Rationale: before this, Codex and OpenCode searched whatever the setup said,
+so a session whose setup had `webTools` off still reached their own search
+services. A Codex or OpenCode thread whose own choice is off therefore no
+longer searches at any level. A generic ACP
+agent reports `webTools` unsupported: Octant has no switch for its own web
+tools, and that is not built.
 
 These tools already mark the thread as having read outside content.
 
@@ -324,8 +324,9 @@ Extensions ([Settings](settings.md#groups-and-pages)). It shows:
   with the reason);
 - Add backend, which asks for the kind, then the address, key, region, and
   statements the kind takes;
-- what the policy allows of a provider's own search, with a link to the
-  research route in Settings › Chat and to the locked `webTools` switches.
+- a line saying the policy covers only these backends, while a provider's own
+  search and a vendor runtime's own web tools run as they do on their own,
+  with a link to the research route in Settings › Chat.
 
 A model endpoint's page in Octant Harness gains the ZDR statement for its
 provider's own search, where the provider offers it. Settings › Chat keeps the
@@ -353,8 +354,8 @@ next one:
 2. The credential broker namespace for search keys, and the Staan, Mojeek,
    Linkup, Brave, and Exa backends with the fallback budget and the journaled
    answer.
-3. Settings › Web search, the endpoint ZDR statement, and the policy's lock
-   on vendor runtimes' `webTools`.
+3. Settings › Web search, the endpoint ZDR statement, and each vendor
+   runtime launched with its own search off wherever `webTools` is off.
 4. A provider's own search in the native harness: the Anthropic and OpenAI
    request builders, the one-search cap and its stream enforcement, the
    tainted-thread withholding, the outside-content marks, journal, and usage,

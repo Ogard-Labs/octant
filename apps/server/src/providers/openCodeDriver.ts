@@ -225,8 +225,8 @@ export interface OwnPermissions {
   readonly toolServers: boolean;
   /**
    * OpenCode's own `webfetch` and `websearch`. Off, both are denied at every
-   * level, Full access included, and after the person's own rules: their
-   * queries go to services Octant cannot hold to the web search data policy.
+   * level, Full access included, and after the person's own rules, so a
+   * session whose setup has web tools off cannot reach them through a rule.
    */
   readonly webTools: boolean;
 }

@@ -6,9 +6,7 @@ import {
   type ProviderNativeSetupFeature,
   type ProviderObservedState,
 } from "@octant/contracts";
-import { useContext } from "react";
 import { SettingRow } from "../settings/primitives";
-import { WebSearchPolicyContext } from "../settings/webSearchPolicyContext";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 
 export interface ProviderNativeSetupSettingProps {
@@ -29,12 +27,6 @@ const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
   opencode: "OpenCode",
   "mistral-vibe": "Mistral Vibe",
 };
-
-const POLICY_NAMES = {
-  "zdr-only": "ZDR only",
-  "eu-only": "EU only",
-  "eu-and-zdr": "EU and ZDR",
-} as const;
 
 const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
   subagents: "its own subagents",
@@ -57,66 +49,46 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
   const name = PROVIDER_NAMES[props.instance.driverKind];
   const settingId = `provider-${props.instance.id}-native-setup`;
   const unsupported = unsupportedFeatures(props.observed?.capabilities);
-  const policy = useContext(WebSearchPolicyContext);
-  const webToolsLocked = policy !== undefined && policy !== "any";
   return (
-    <>
-      <SettingRow
-        description={
-          <>
-            Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
-            subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
-            in its home folder. On by default; each call still follows the thread’s level. Octant
-            still shows each subagent and marks each web read. Turned off, Full access still turns it
-            on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
-            MCP servers, and plugins load only in a Project you trust for {name}.
-            {props.instance.driverKind === "mistral-vibe" ? (
-              <>
-                {" "}
-                Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
-                name, and a subagent running as one of your own Vibe agents may approve its own tools,
-                as in Vibe.
-              </>
-            ) : null}
-            {unsupported.length === 0 ? null : (
-              <>
-                {" "}
-                Not available for {name} yet: {unsupported.join(", ")}.
-              </>
-            )}
-          </>
-        }
-        label={`Run ${name} as itself`}
-        scope="host"
-        settingId={`provider-${props.instance.id}-native-setup`}
-      >
-        <OctantSwitch
-          checked={props.instance.nativeSetup !== false}
-          describedBy={`${settingId}-description`}
-          disabled={props.disabled}
-          label={`Run ${props.instance.displayName} as itself`}
-          onCheckedChange={(next) => {
-            void props.onChange(next);
-          }}
-        />
-      </SettingRow>
-      {webToolsLocked ? (
-        <SettingRow
-          description={`Off while the web search data policy is ${POLICY_NAMES[policy]}: Octant cannot hold ${name}'s own search to it. Your choice above is kept and returns under Any.`}
-          label={`${name}'s own web search and fetch`}
-          scope="host"
-          settingId={`provider-${props.instance.id}-web-tools`}
-        >
-          <OctantSwitch
-            checked={false}
-            disabled
-            disabledReason={`Locked by the web search data policy (${POLICY_NAMES[policy]}).`}
-            label={`${props.instance.displayName}'s own web search and fetch`}
-            onCheckedChange={() => undefined}
-          />
-        </SettingRow>
-      ) : null}
-    </>
+    <SettingRow
+      description={
+        <>
+          Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
+          subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
+          in its home folder. On by default; each call still follows the thread’s level. Octant
+          still shows each subagent and marks each web read. Turned off, Full access still turns it
+          on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
+          MCP servers, and plugins load only in a Project you trust for {name}.
+          {props.instance.driverKind === "mistral-vibe" ? (
+            <>
+              {" "}
+              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
+              name, and a subagent running as one of your own Vibe agents may approve its own tools,
+              as in Vibe.
+            </>
+          ) : null}
+          {unsupported.length === 0 ? null : (
+            <>
+              {" "}
+              Not available for {name} yet: {unsupported.join(", ")}.
+            </>
+          )}
+        </>
+      }
+      label={`Run ${name} as itself`}
+      scope="host"
+      settingId={`provider-${props.instance.id}-native-setup`}
+    >
+      <OctantSwitch
+        checked={props.instance.nativeSetup !== false}
+        describedBy={`${settingId}-description`}
+        disabled={props.disabled}
+        label={`Run ${props.instance.displayName} as itself`}
+        onCheckedChange={(next) => {
+          void props.onChange(next);
+        }}
+      />
+    </SettingRow>
   );
 }
 

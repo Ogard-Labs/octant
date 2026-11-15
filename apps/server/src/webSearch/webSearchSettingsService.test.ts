@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { WebSearchSettings } from "@octant/contracts";
+import { decodeProviderInstance, type WebSearchSettings } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
+import { sessionNativeSetup } from "../providers/providerNativeSetup";
 import {
   MIGRATED_SEARXNG_ENTRY_ID,
   WebSearchSettingsService,
@@ -73,6 +74,34 @@ const own: WebSearchSettings = {
 };
 
 describe("web search settings", async () => {
+  it("leaves a Codex account's own web search on after an EU only policy is saved", async () => {
+    // The policy governs Octant's own backends only; a vendor runtime's own
+    // web tools follow the person's and the account's switches (maintainer
+    // decision, 2026-11-15).
+    const { service } = openHarness({ value: undefined });
+    expect(await service.set({ settings: own }, "local-window")).toMatchObject({
+      kind: "saved",
+      view: { settings: { policy: "eu-only" } },
+    });
+    const codex = decodeProviderInstance({
+      id: "00000000-0000-4000-8000-0000000000c1",
+      displayName: "Codex",
+      driverKind: "codex",
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-11-14T12:00:00.000Z",
+      updatedAt: "2026-11-14T12:00:00.000Z",
+    });
+    expect(
+      sessionNativeSetup(
+        { readProviderInstance: () => codex, readProject: () => undefined },
+        { providerInstanceId: codex.id, mode: "work", executionPolicy: "approval-gated" },
+      ),
+    ).toMatchObject({ webTools: true, subagents: true });
+  });
+
   it("reads Chat's SearXNG address as the first backend under Any until a list is saved", async () => {
     const { service } = openHarness({ value: "https://search.example/" });
     expect(await service.view()).toEqual({

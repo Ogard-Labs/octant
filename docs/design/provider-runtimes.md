@@ -77,8 +77,8 @@ id and are answered through the parent's session. Each runtime's own web
 search and fetch run only where the setup has `webTools` on: Claude Code gains
 `WebSearch` and `WebFetch`, Codex starts without `web_search = "disabled"`,
 OpenCode stops denying `websearch` and `webfetch`, and Mistral Vibe launches
-without `VIBE_DISABLED_TOOLS`; outside the web search data policy's Any,
-`webTools` stays off
+without `VIBE_DISABLED_TOOLS`. The web search data policy does not change
+`webTools`: it governs Octant's own backends only
 ([Web search backends](web-search-backends.md#in-a-vendor-runtime)). Mistral Vibe unsets
 `VIBE_ENABLE_SUBAGENTS` in Work and Code outside Plan, so its subagents
 follow the person's setup at every level there (maintainer decision,

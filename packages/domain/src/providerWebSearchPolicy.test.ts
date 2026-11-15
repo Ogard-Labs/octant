@@ -2,7 +2,6 @@ import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts
 import type { UtcTimestamp } from "@octant/contracts/events";
 import { describe, expect, it } from "vitest";
 import { setProviderSearchZdr } from "./providerPolicy";
-import { resolveProviderNativeSetup } from "./providerNativeSetupPolicy";
 import {
   PROVIDER_OWN_SEARCH_OFFERS,
   decideProviderOwnSearch,
@@ -134,27 +133,5 @@ describe("the endpoint's ZDR statement for its own search", () => {
     expect(() =>
       setProviderSearchZdr(anthropic("https://gateway.example/anthropic/"), true, at),
     ).toThrow("This endpoint's provider does not offer web search with no record kept.");
-  });
-});
-
-describe("a vendor runtime's own web tools under the data policy", () => {
-  const input = {
-    driverKind: "claude" as const,
-    mode: "code" as const,
-    executionPolicy: "full-access" as const,
-    accountAllows: true,
-    projectTrusts: false,
-  };
-
-  it("follow the native-setup policy under Any", () => {
-    expect(resolveProviderNativeSetup({ ...input, webSearchPolicy: "any" })?.webTools).toBe(true);
-  });
-
-  it("stay off under every other policy while the rest of the setup still loads", () => {
-    for (const webSearchPolicy of ["zdr-only", "eu-only", "eu-and-zdr"] as const) {
-      const setup = resolveProviderNativeSetup({ ...input, webSearchPolicy });
-      expect(setup?.webTools).toBe(false);
-      expect(setup?.subagents).toBe(true);
-    }
   });
 });
