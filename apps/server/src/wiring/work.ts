@@ -539,6 +539,7 @@ export function wireWork(deps: WorkDependencies) {
       pinnedExtensionIds,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
+      onUsageLimitStop: (threadId) => workThreadService.handOffAfterUsageLimit(threadId),
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,

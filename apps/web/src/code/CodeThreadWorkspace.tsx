@@ -28,6 +28,7 @@ import {
 import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
 import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
+  parkedStopReleased,
   decidesCodeEffectsByApproval,
   permissionModeOf,
   startedCodeThreadPickerGroups,
@@ -36,6 +37,7 @@ import {
 } from "@octant/domain";
 import { ChevronDown, CirclePause, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useEffect,
@@ -778,10 +780,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.turnStatus === "waiting" &&
     (props.controller.turnErrorCategory === "stale" ||
       props.controller.turnErrorCategory === "tools-changed");
+  // A turn parked on a usage limit stops holding the composer once the thread
+  // has moved off that account: the host records the released stop on the
+  // move, and the queue reads the same record.
+  const releasedStop = parkedStopReleased(
+    thread,
+    props.controller.latestProviderTurnOperationId === undefined
+      ? undefined
+      : String(props.controller.latestProviderTurnOperationId),
+  );
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
-    (props.controller.turnStatus === "waiting" && !parkedTurn);
+    (props.controller.turnStatus === "waiting" && !parkedTurn && !releasedStop);
   const queueFollowUp =
     busy ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -2460,6 +2471,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onPolicyChange={continuation.change}
                 onProviderChange={changeProvider}
                 disabled={busy}
+              />
+              <ThreadAccountControl
+                groups={threadModelGroups}
+                providerInstanceId={thread.providerInstanceId}
+                modelId={thread.modelId}
+                usageLimitHandoff={thread.usageLimitHandoff}
+                onMove={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "move-code-thread-account",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    providerInstanceId,
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The conversation could not be moved. Nothing changed.";
+                }}
+                onUsageLimitHandoffChange={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "set-code-thread-usage-limit-handoff",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The choice could not be saved. Nothing changed.";
+                }}
               />
             </ThreadInfo>
           }

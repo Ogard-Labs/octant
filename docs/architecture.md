@@ -6661,16 +6661,33 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   it, the runtime retries for about six seconds, longer than the sign-in probe
   waits.
   A thread stays on its instance until the person moves it: the thread's
-  **Move to account…** action (or the model picker) moves it to another
-  account, and the next turn starts there with the disclosed handoff of
+  **Move to account…** action (Chat's thread menu; the thread info panel in
+  Work and Code) or the model picker moves it to another account, and the
+  next turn starts there with the disclosed handoff of
   [Handoffs between providers](design/decisions.md#handoffs-between-providers-forks-and-branches),
   whose marker names the new account. The host accepts the move only from the
   person, at a window or on a device they paired, and only while no turn runs
-  and no model pool is on (the pool names the current account);
-  a move from the host itself or an agent is refused, so there is no silent or
-  automatic failover, rotation, or load-balancing between accounts (maintainer
-  decision, 2026-11-14). Built for Chat; Work and Code move through the model
-  picker. An opt-in "on a usage limit, hand off to this account" is not built.
+  and no model pool is on (the pool names the current account); a move from a
+  routine, the host itself or an agent is refused. The person may also set,
+  per thread, **On usage limit → Hand off to** one named account of the same
+  provider (journaled, person-only, refused while a model pool is on). When a
+  turn then stops on a usage limit the provider itself reported, the host
+  moves the thread to that account by the same provider change, so the next
+  turn carries the same disclosed handoff, and records on the thread which
+  account hit its limit and where the conversation went. It acts at most once
+  per stopped turn and only toward the account the person named; when that
+  account is missing, turned off, cannot take the model, or is the account
+  that just hit its limit (so it is limited too), the host does not move the
+  thread and records why, and the thread info panel shows it. It never starts
+  the next turn itself. Either move, the person's or the opt-in's, made while
+  the latest turn is parked on the old account's usage limit records that
+  turn as released on the provider change (`releasedStopId`): the turn keeps
+  its limit in history, and the message queue, the composer and the thread
+  view stop treating it as waiting, so the next message goes to the new
+  account. Without the opt-in a limited thread waits on its
+  account as before, so there is no silent, unchosen or open-ended failover,
+  rotation, or load-balancing between accounts (maintainer decision,
+  2026-11-14).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime
