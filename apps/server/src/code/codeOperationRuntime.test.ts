@@ -5910,6 +5910,116 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("refuses a message sent while the thread is still taking up an outside session, then resumes the adopted session", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const outside = decodeCodeNativeSessionId("outside-session-2");
+    let finishAdoption: (cursor: ProviderResumeCursor) => void = () => undefined;
+    const adopt = vi.fn((_input: { readonly sessionId: ProviderSessionId }) =>
+      Effect.promise(
+        () =>
+          new Promise<ProviderResumeCursor>((resolve) => {
+            finishAdoption = resolve;
+          }),
+      ),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({
+      provider,
+      recordExternalContentIngestion: () => ({
+        kind: "recorded" as const,
+        taint: { externalContentIngested: true, ingestedSources: [] },
+      }),
+    });
+    try {
+      const adoption = fixture.runtime.nativeSessions!.adopt(windowId, threadId, outside);
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(1976),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "waiting",
+          message:
+            "This thread is taking up a session started elsewhere. Send again when it finishes.",
+        },
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+      finishAdoption({ driverKind: "codex", value: `resumed-${outside}` });
+      expect(await adoption).toEqual({
+        kind: "code-native-session-adopted",
+        threadId,
+        nativeSessionId: outside,
+      });
+      const adoptedSessionId = adopt.mock.calls[0]![0].sessionId;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1977),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() =>
+        expect(connection.resume).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: adoptedSessionId,
+            resumeCursor: { driverKind: "codex", value: `resumed-${outside}` },
+          }),
+        ),
+      );
+      expect(connection.start).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses to take up an outside session once a turn has been admitted on the thread", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const adopt = vi.fn(() =>
+      Effect.succeed<ProviderResumeCursor>({ driverKind: "codex", value: "x" }),
+    );
+    const provider: ProviderDriver = {
+      ...providerDriver(connection),
+      nativeSessions: { list: () => Effect.succeed([]), adopt },
+    };
+    const fixture = runtimeFixture({ provider });
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(1978),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(
+        await fixture.runtime.nativeSessions!.adopt(
+          windowId,
+          threadId,
+          decodeCodeNativeSessionId("outside-session-3"),
+        ),
+      ).toEqual({
+        kind: "code-native-session-refused",
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+      });
+      expect(adopt).not.toHaveBeenCalled();
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("moves the thread to Plan only from its next session when the person approves the agent's ask to plan", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const starts: Array<ProviderSessionStart> = [];

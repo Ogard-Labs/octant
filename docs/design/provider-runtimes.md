@@ -984,7 +984,12 @@ journaled; a thread that cannot be marked is not adopted. Only the person
 adopts: a window on the host or the host's own paired device, over a Project
 it can open, never the host acting for a routine; a client this host has not
 paired is refused before anything is read. A thread with a message or a
-session of its own is refused. A session still open in a terminal is not
+session of its own is refused, and so is one with a turn admitted or
+running. While the adoption runs, a message sent to the thread is refused
+with a note to send again when it finishes, and the adoption checks again
+that the thread is empty just before it journals: a turn let in meanwhile
+would journal its own session, and the adopted one written after it would
+be the one the next turn resumes, dropping that conversation. A session still open in a terminal is not
 detected; continuing it in both places writes two branches of one
 conversation. A Work thread cannot be started from a session yet.
 

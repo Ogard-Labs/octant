@@ -1699,7 +1699,38 @@ export function createCodeOperationRuntime(
   };
 
   const fileReviewLeases = new Set<string>();
+  /**
+   * Threads taking up a provider session. A turn admitted meanwhile would
+   * journal its own session, and the adopted one appended after it would then
+   * be the session the next turn resumes, dropping the conversation that just
+   * ran; so turn admission refuses while a thread is here.
+   */
   const adoptingThreads = new Set<string>();
+  /**
+   * Why the thread cannot be started from an outside session because it
+   * already has a conversation, or a turn admitted or running. Read
+   * synchronously so a caller can act on the answer before another turn is
+   * admitted.
+   */
+  const conversationRefusal = (
+    thread: CodeThread,
+  ): { readonly message: string; readonly adopted?: string } | undefined => {
+    const adopted = events.adoptedNativeSession(thread.id);
+    const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
+    if (recovered.status !== "ok") return { message: "This thread's history could not be read." };
+    if (
+      adopted !== undefined ||
+      recovered.priorTurn ||
+      recovered.session !== undefined ||
+      startingTurns.has(String(thread.id)) ||
+      turns.holdsTurn(String(thread.id))
+    )
+      return {
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+        ...(adopted === undefined ? {} : { adopted: adopted.nativeSessionId }),
+      };
+    return undefined;
+  };
   /**
    * What an adoption of a thread's provider session would act on, or why the
    * thread cannot be started from one: only an active, empty thread on this
@@ -1723,22 +1754,8 @@ export function createCodeOperationRuntime(
       return { status: "refused", message: "This thread is unavailable." };
     if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId)))
       return { status: "refused", message: "This thread is not open to this window." };
-    const adopted = events.adoptedNativeSession(thread.id);
-    const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
-    if (recovered.status !== "ok")
-      return { status: "refused", message: "This thread's history could not be read." };
-    if (
-      adopted !== undefined ||
-      recovered.priorTurn ||
-      recovered.session !== undefined ||
-      startingTurns.has(String(thread.id)) ||
-      turns.holdsTurn(String(thread.id))
-    )
-      return {
-        status: "refused",
-        message: "Only a thread with no messages yet can continue a session started elsewhere.",
-        ...(adopted === undefined ? {} : { adopted: adopted.nativeSessionId }),
-      };
+    const occupied = conversationRefusal(thread);
+    if (occupied !== undefined) return { status: "refused", ...occupied };
     if (thread.lifecycle !== "active")
       return { status: "refused", message: "This thread is not active." };
     const checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -2053,6 +2070,20 @@ export function createCodeOperationRuntime(
               decodeCodeFailure({
                 category: "unauthorized",
                 message: "Code operation is unauthorized.",
+              }),
+            );
+          }
+          // Refused rather than held: the adoption may wait on the provider for
+          // a long time, and the message would otherwise run before the session
+          // it was meant to continue exists. This check and the hold below run
+          // in one synchronous step, so an adoption that starts later sees
+          // this turn.
+          if (thread !== undefined && adoptingThreads.has(String(thread.id))) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "waiting",
+                message:
+                  "This thread is taking up a session started elsewhere. Send again when it finishes.",
               }),
             );
           }
@@ -2388,6 +2419,11 @@ export function createCodeOperationRuntime(
           );
           if (adopted._tag === "Left")
             return { kind: "code-native-session-refused", message: adopted.left.message };
+          // The thread must still be empty when the adoption commits. Nothing
+          // yields from here to the journal appends, so no turn slips in.
+          const occupied = conversationRefusal(target.thread);
+          if (occupied !== undefined)
+            return { kind: "code-native-session-refused", message: occupied.message };
           // The session began outside Octant, so whatever it read there is
           // unseen here: the thread carries outside content from its start.
           const marked = options.recordExternalContentIngestion?.({
