@@ -1,3 +1,4 @@
+import { WorkerOfStrip } from "../code/CoordinatorWorkersPanel";
 import {
   decodePaneId,
   decodeWorkspaceLayoutNode,
@@ -734,6 +735,23 @@ describe("SplitWorkspace", () => {
     await openPaneMenu(user, "Second");
     await user.click(await screen.findByRole("menuitem", { name: "Close pane" }));
     expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
+  });
+
+  it("puts a thread's header controls beside its title, and nothing in other panes", () => {
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+        threadHeader={(surface) =>
+          "title" in surface && surface.title === "Second" ? (
+            <WorkerOfStrip coordinatorTitle="Backlog" onBack={vi.fn()} />
+          ) : undefined
+        }
+      />,
+    );
+    expect(screen.getAllByText("Worker of Backlog")).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Back to coordinator" })).toHaveLength(1);
   });
 
   it("adds a thread's coordinator items to its pane's header menu, and nothing to other panes", async () => {

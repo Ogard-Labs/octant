@@ -1945,6 +1945,11 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   gap: var(--oct-space-1);
 }
 
+/* The worker mark is the coordinator mark one step smaller and quieter. */
+.worker-mark {
+  color: var(--oct-meta);
+}
+
 .project-coordinator__workers .sidebar-navigation__thread {
   padding-inline-start: calc(var(--oct-nav-inset) + var(--oct-space-5));
 }

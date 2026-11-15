@@ -17,7 +17,7 @@ export interface NativeHarnessRoutingRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly store: Pick<
     NativeHarnessRoutingStore,
-    "host" | "projectOverride" | "updateHost" | "applyProjectCommand"
+    "host" | "projectOverride" | "projectVersion" | "updateHost" | "applyProjectCommand"
   >;
   readonly now?: () => number;
 }
@@ -100,7 +100,11 @@ export function createNativeHarnessRoutingRouteHandler(
     }
     if (request.method === "GET") {
       const override = dependencies.store.projectOverride(projectId);
-      return json({ override: override ?? null }, 200, origin);
+      return json(
+        { override: override ?? null, version: dependencies.store.projectVersion(projectId) },
+        200,
+        origin,
+      );
     }
     if (request.method === "PUT" || request.method === "DELETE") {
       let body: unknown = {};

@@ -2043,6 +2043,20 @@ export class CodeService {
                 coordinatorStartingByProject:
                   command.coordinatorStartingByProject ?? current.coordinatorStartingByProject,
               }),
+          ...((command.coordinatorWorkerListing ?? current.coordinatorWorkerListing) === undefined
+            ? {}
+            : {
+                coordinatorWorkerListing:
+                  command.coordinatorWorkerListing ?? current.coordinatorWorkerListing,
+              }),
+          ...((command.coordinatorWorkerListingByProject ??
+            current.coordinatorWorkerListingByProject) === undefined
+            ? {}
+            : {
+                coordinatorWorkerListingByProject:
+                  command.coordinatorWorkerListingByProject ??
+                  current.coordinatorWorkerListingByProject,
+              }),
           ...((command.coordinatorOpenWorkerLimit ?? current.coordinatorOpenWorkerLimit) ===
           undefined
             ? {}

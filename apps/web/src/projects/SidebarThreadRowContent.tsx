@@ -2,6 +2,8 @@ import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
 import { Bot, GitBranch, GitPullRequest, Network, type IconComponent } from "../ui/icons";
 import { ProjectMark } from "./ProjectMark";
+import { CoordinatorMark, WorkerMark } from "./coordinatorMarks";
+import type { ReactNode } from "react";
 import { useAgentThreadName } from "../agentAccess/agentThreadAttribution";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
@@ -97,6 +99,12 @@ export function SidebarThreadRowContent(props: {
   readonly coordinator?: boolean;
   /** A worker's coordinator, named as a fact beneath the title. */
   readonly coordinatorName?: string;
+  /**
+   * The thread is a worker of the coordinator with this title, listed outside
+   * that coordinator: it wears the worker mark, the coordinator mark's smaller
+   * pair, instead of its provider's.
+   */
+  readonly workerOf?: string;
   readonly projectName?: string;
   /** The Project the mark names; absent for "No Project", which keeps the folder and asks for nothing. */
   readonly projectId?: string;
@@ -108,6 +116,8 @@ export function SidebarThreadRowContent(props: {
   readonly state?: SidebarThreadRowState;
   /** New activity: a dot with its own name beside the age. */
   readonly unread?: boolean;
+  /** A coordinator's workers that its row stands for, counted beside the title. */
+  readonly workerCounts?: ReactNode;
 }) {
   const startedBy = useAgentThreadName(props.threadId);
   const hasPlace = props.projectName !== undefined || props.checkout !== undefined;
@@ -143,10 +153,16 @@ export function SidebarThreadRowContent(props: {
         )}
       </span>
     );
+  // A coordinator and a coordinator's worker wear their role's mark in place
+  // of the provider's, so the role reads at a glance in every view.
   const provider =
     props.coordinator === true ? (
       <span className="sidebar-navigation__thread-provider" title="Coordinator">
-        <Network aria-label="Coordinator" role="img" size={12} />
+        <CoordinatorMark />
+      </span>
+    ) : props.workerOf !== undefined ? (
+      <span className="sidebar-navigation__thread-provider" title={`Worker of ${props.workerOf}`}>
+        <WorkerMark coordinatorName={props.workerOf} />
       </span>
     ) : props.provider === undefined ? null : (
       <span className="sidebar-navigation__thread-provider" title={props.provider.displayName}>
@@ -183,6 +199,7 @@ export function SidebarThreadRowContent(props: {
       ) : null}
       <span className="sidebar-navigation__thread-main">
         <span className="oct-nav-name sidebar-navigation__thread-title">{props.title}</span>
+        {props.workerCounts}
         {hasPlace ? null : trailing}
         {hasDetail ? null : provider}
       </span>

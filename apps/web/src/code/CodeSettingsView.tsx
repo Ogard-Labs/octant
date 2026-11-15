@@ -7,12 +7,15 @@ import {
   CoordinatorOpenWorkerLimit,
   type CoordinatorStartingByProject,
   type CoordinatorStartingChoice,
+  type CoordinatorWorkerListing,
+  type CoordinatorWorkerListingByProject,
   type PermissionMode,
   type SettingsSettingId,
 } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
 import { SettingRow, SettingsSection } from "../settings/primitives";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -21,6 +24,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { useFullAccessWarning } from "./FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
+import { WORKERS_UNLISTED } from "./coordinatorWorkerListing";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
@@ -41,6 +45,10 @@ export interface CodeSettingsUpdate {
   readonly coordinatorStarting?: CoordinatorStartingChoice;
   /** Absent keeps the stored overrides; a present map replaces them. */
   readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+  /** Absent keeps the stored choice. */
+  readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
+  /** Absent keeps the stored overrides; a present map replaces them. */
+  readonly coordinatorWorkerListingByProject?: CoordinatorWorkerListingByProject;
   /** Absent keeps the stored limit. */
   readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
   /** Absent keeps the stored choice. */
@@ -57,6 +65,46 @@ export const COORDINATOR_STARTING_OPTIONS: ReadonlyArray<{
 ];
 
 const isOpenWorkerLimit = Schema.is(CoordinatorOpenWorkerLimit);
+
+function sameWorkerListing(a: CoordinatorWorkerListing, b: CoordinatorWorkerListing): boolean {
+  return a.sidebar === b.sidebar && a.board === b.board;
+}
+
+/**
+ * The two Show workers checkboxes, shared by Settings and a Project's
+ * overview so both say the same words (docs/design/workspace.md#coordinators).
+ */
+export function CoordinatorWorkerListingChecks(props: {
+  readonly label: string;
+  readonly value: CoordinatorWorkerListing;
+  readonly disabled: boolean;
+  readonly onChange: (next: CoordinatorWorkerListing) => void;
+}) {
+  return (
+    <div aria-label={props.label} className="coordinator-worker-listing" role="group">
+      <label className="coordinator-worker-listing__choice">
+        <OctantCheckbox
+          checked={props.value.sidebar}
+          disabled={props.disabled}
+          onChange={(event) =>
+            props.onChange({ ...props.value, sidebar: event.currentTarget.checked })
+          }
+        />
+        <span>In the sidebar</span>
+      </label>
+      <label className="coordinator-worker-listing__choice">
+        <OctantCheckbox
+          checked={props.value.board}
+          disabled={props.disabled}
+          onChange={(event) =>
+            props.onChange({ ...props.value, board: event.currentTarget.checked })
+          }
+        />
+        <span>On the board</span>
+      </label>
+    </div>
+  );
+}
 
 const OPEN_WORKER_LIMIT_OPTIONS = Array.from(
   { length: MAX_COORDINATOR_OPEN_WORKER_LIMIT },
@@ -148,6 +196,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [coordinatorStarting, setCoordinatorStarting] = useState<CoordinatorStartingChoice>(
     props.settings.coordinatorStarting ?? "start-without-asking",
   );
+  const [workerListing, setWorkerListing] = useState<CoordinatorWorkerListing>(
+    props.settings.coordinatorWorkerListing ?? WORKERS_UNLISTED,
+  );
   const [openWorkerLimit, setOpenWorkerLimit] = useState<number>(
     props.settings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
   );
@@ -157,6 +208,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     setCoordinatorStarting((current) =>
       current === (previousSettings.coordinatorStarting ?? "start-without-asking")
         ? (props.settings.coordinatorStarting ?? "start-without-asking")
+        : current,
+    );
+    setWorkerListing((current) =>
+      sameWorkerListing(current, previousSettings.coordinatorWorkerListing ?? WORKERS_UNLISTED)
+        ? (props.settings.coordinatorWorkerListing ?? WORKERS_UNLISTED)
         : current,
     );
     setOpenWorkerLimit((current) =>
@@ -232,12 +288,16 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     },
   ) {
     const host = hostSettings.current;
     if (change.coordinatorStarting !== undefined) {
       setCoordinatorStarting(host.coordinatorStarting ?? "start-without-asking");
+    }
+    if (change.coordinatorWorkerListing !== undefined) {
+      setWorkerListing(host.coordinatorWorkerListing ?? WORKERS_UNLISTED);
     }
     if (change.coordinatorOpenWorkerLimit !== undefined) {
       setOpenWorkerLimit(host.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT);
@@ -283,6 +343,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
     },
   ) {
@@ -344,6 +405,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.coordinatorStarting === undefined
           ? {}
           : { coordinatorStarting: change.coordinatorStarting }),
+        ...(change.coordinatorWorkerListing === undefined
+          ? {}
+          : { coordinatorWorkerListing: change.coordinatorWorkerListing }),
         ...(change.coordinatorOpenWorkerLimit === undefined
           ? {}
           : { coordinatorOpenWorkerLimit: change.coordinatorOpenWorkerLimit }),
@@ -518,6 +582,23 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               }}
               options={COORDINATOR_STARTING_OPTIONS}
               value={coordinatorStarting}
+            />
+          </SettingRow>
+          <SettingRow
+            description="Workers live inside their coordinator's thread. Choose where else they are listed. Requests from workers always reach Needs you. A Project can choose its own in its overview."
+            focused={props.focusedSetting === "code-coordinator-show-workers"}
+            label="Show workers"
+            scope="mode"
+            settingId="code-coordinator-show-workers"
+          >
+            <CoordinatorWorkerListingChecks
+              disabled={false}
+              label="Show workers"
+              onChange={(next) => {
+                setWorkerListing(next);
+                void commit("coordinators", { coordinatorWorkerListing: next });
+              }}
+              value={workerListing}
             />
           </SettingRow>
           <SettingRow

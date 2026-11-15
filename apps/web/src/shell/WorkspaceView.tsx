@@ -28,7 +28,7 @@ import {
   type OutsideContentThread,
 } from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
-import { decodeContextSubjectRef } from "@octant/contracts";
+import { LOCAL_HOST_ID, decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -89,6 +89,11 @@ import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMove
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
+import {
+  nativeHarnessPickerGroups,
+  nativeHarnessProviderOptions,
+  nativeHarnessReadinessById,
+} from "../harness/modelRoleOptions";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
@@ -139,6 +144,12 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
+import {
+  CoordinatorWorkersPanelSlot,
+  type CoordinatorWorkersSource,
+} from "../code/CoordinatorWorkersPanel";
+import { coordinatorWorkerRows } from "../code/coordinatorWorkerPanel";
+import { modelDisplayName } from "../providers/providerModelLabel";
 import {
   CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
@@ -325,6 +336,7 @@ export interface WorkspaceViewProps {
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
   /** A pane's own thread items for its header menu, such as a Code thread's coordinator items. */
   readonly threadMenuItems?: SplitWorkspaceProps["threadMenuItems"];
+  readonly threadHeader?: SplitWorkspaceProps["threadHeader"];
   readonly onOpenWorkThread?: (
     threadId: WorkThreadId,
     projectId: ProjectId,
@@ -913,6 +925,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {...(props.threadMenuItems === undefined
                 ? {}
                 : { threadMenuItems: props.threadMenuItems })}
+              {...(props.threadHeader === undefined ? {} : { threadHeader: props.threadHeader })}
               activePaneId={props.workspace.activePaneIds[props.mode]}
               {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
               renderSurface={(surface, paneId) => (
@@ -1220,6 +1233,38 @@ function coordinatorWorkersFor(
 }
 
 /**
+ * A coordinator's workers for its Workers panel and transcript cards, from the
+ * window's Code thread list, or undefined for any other thread. Like the
+ * request rows, only a thread on this window's host reads them.
+ */
+function coordinatorWorkersSourceFor(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+): CoordinatorWorkersSource | undefined {
+  if (tab.kind !== "code-overview") return undefined;
+  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
+  const threads = props.codeController.navigation ?? [];
+  const coordinator = threads.find((thread) => String(thread.threadId) === String(tab.threadId));
+  if (coordinator?.coordinator !== true) return undefined;
+  const groups = props.codeProviderGroups ?? props.draftProviderGroups ?? [];
+  return {
+    rows: coordinatorWorkerRows(threads, String(tab.threadId), (thread) =>
+      thread.modelId === undefined
+        ? "Model unknown"
+        : modelDisplayName(groups, {
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }),
+    ),
+    onOpenWorker: (threadId) => {
+      const thread = threads.find((candidate) => String(candidate.threadId) === threadId);
+      if (thread !== undefined)
+        props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
+    },
+  };
+}
+
+/**
  * A coordinator's composer lists its workers' requests beside its child runs'
  * (docs/design/coordinator-threads.md#questions-and-approvals).
  */
@@ -1471,6 +1516,7 @@ function renderCodeTab(
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
   const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
+  const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
   const content = (
     <Suspense
       fallback={
@@ -1507,6 +1553,7 @@ function renderCodeTab(
         onOpenCodeThread={props.onOpenCodeThread}
         {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
         {...(coordinatorWorkerAsks === undefined ? {} : { coordinatorWorkerAsks })}
+        {...(coordinatorWorkers === undefined ? {} : { coordinatorWorkers })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
@@ -1745,6 +1792,18 @@ function renderCodeTab(
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           >
             {content}
+            {coordinatorWorkers === undefined ? null : (
+              <CoordinatorWorkersPanelSlot
+                coordinatorThreadId={String(tab.threadId)}
+                coordinatorTitle={activeThread?.title ?? tab.title}
+                onSelectPullRequest={(row) =>
+                  row.pullRequest === undefined
+                    ? undefined
+                    : props.onSelectPullRequest?.(row.pullRequest.identity)
+                }
+                source={coordinatorWorkers}
+              />
+            )}
           </CodeThreadEnvironment>
         </ThreadActivityPictureInPicture>
       </ThreadPlanProvider>
@@ -2394,6 +2453,18 @@ function renderNonCodeTab(
           ? {}
           : { octantInstructionsClient: props.octantInstructionsClient })}
         memoryProjects={props.projects}
+        {...(props.nativeHarnessClient === undefined
+          ? {}
+          : {
+              modelRoles: {
+                client: props.nativeHarnessClient,
+                groups: nativeHarnessPickerGroups(props.providerController),
+                hostId: LOCAL_HOST_ID,
+                readiness: nativeHarnessReadinessById(
+                  nativeHarnessProviderOptions(props.providerController),
+                ),
+              },
+            })}
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}

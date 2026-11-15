@@ -5,6 +5,7 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
+import { CoordinatorWorkerCards, type CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
@@ -317,6 +318,11 @@ export interface CodeThreadWorkspaceProps {
    * the end of its transcript. Absent on any other thread.
    */
   readonly coordinatorWorkerAsks?: ReactNode;
+  /**
+   * A coordinator's workers, drawn as small cards at the end of the turn that
+   * started each one. Absent on any other thread.
+   */
+  readonly coordinatorWorkers?: CoordinatorWorkersSource;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -1003,6 +1009,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  // A worker's card goes where its turn ended, by the host's creation time for
+  // the worker. A worker the transcript cannot place yet (turns not loaded, or
+  // created before the first turn) is listed at the end, so none is hidden.
+  const workerCardPlacement =
+    props.coordinatorWorkers === undefined
+      ? undefined
+      : placeByTurn(
+          threadTurnSpans(
+            messages,
+            (message) => message.id,
+            (message) => (message.role === "user" ? message.at : undefined),
+          ),
+          props.coordinatorWorkers.rows,
+          (row) => row.createdAt,
+          (row) => row.threadId,
+        );
   const imagePlacement = placeByTurn(
     threadTurnSpans(
       messages,
@@ -1781,6 +1803,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     serverUrl={props.serverUrl}
                     windowCapability={props.windowCapability}
                   />
+                  {props.coordinatorWorkers === undefined ||
+                  workerCardPlacement === undefined ? null : (
+                    <CoordinatorWorkerCards
+                      onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                      rows={props.coordinatorWorkers.rows.filter(
+                        (row) => !workerCardPlacement.placed.has(row.threadId),
+                      )}
+                    />
+                  )}
                   {props.coordinatorWorkerAsks}
                 </>
               }
@@ -1814,11 +1845,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 </>
               }
               {...(canvasClient === undefined &&
-              (imageClient === undefined || imageProfiles === undefined)
+              (imageClient === undefined || imageProfiles === undefined) &&
+              workerCardPlacement === undefined
                 ? {}
                 : {
                     afterItem: (message: (typeof messages)[number]) => (
                       <>
+                        {props.coordinatorWorkers === undefined ? null : (
+                          <CoordinatorWorkerCards
+                            onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                            rows={workerCardPlacement?.byRow.get(message.id) ?? []}
+                          />
+                        )}
                         {canvasClient === undefined ? null : (
                           <ThreadCanvases
                             cards={canvasPlacement.byRow.get(message.id)}

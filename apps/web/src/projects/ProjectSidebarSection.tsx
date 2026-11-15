@@ -1,3 +1,4 @@
+import { CoordinatorWorkerCounts } from "./ProjectThreadList";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
 import type {
   ProjectAvailability,
@@ -1656,7 +1657,10 @@ function ActivityThreadButton(props: {
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
         {...(props.thread.coordinatorTitle === undefined
           ? {}
-          : { coordinatorName: props.thread.coordinatorTitle })}
+          : {
+              coordinatorName: props.thread.coordinatorTitle,
+              workerOf: props.thread.coordinatorTitle,
+            })}
         {...(shows.project ? { projectName: props.thread.projectName } : {})}
         {...(shows.project && props.thread.projectId !== undefined
           ? { projectId: String(props.thread.projectId) }
@@ -1666,6 +1670,17 @@ function ActivityThreadButton(props: {
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
         threadId={props.thread.threadId}
         unread={rowState.unread}
+        {...(shows.status && props.thread.hiddenWorkers !== undefined
+          ? {
+              workerCounts: (
+                <CoordinatorWorkerCounts
+                  coordinatorTitle={props.thread.title}
+                  hidden={props.thread.hiddenWorkers}
+                  workers={[]}
+                />
+              ),
+            }
+          : {})}
         title={props.thread.title}
       />
     </OctantButton>

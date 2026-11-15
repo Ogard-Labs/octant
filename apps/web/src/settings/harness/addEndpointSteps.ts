@@ -255,12 +255,14 @@ export const ASSIGNABLE_ROLES: ReadonlyArray<{
   readonly label: string;
   readonly needsImages?: true;
 }> = [
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.default, label: "Main model" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.plan, label: "Planning" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.slow, label: "Careful review" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.task, label: "Research and lookups" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.smol, label: "Quick jobs" },
-  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.vision, label: "Reading images", needsImages: true },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.default, label: "Builder" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.plan, label: "Planner" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.deep, label: "Hard problems" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.slow, label: "Reviewer" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.task, label: "Scout" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.quick, label: "Quick edit" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.smol, label: "Small jobs" },
+  { id: NATIVE_HARNESS_BUILT_IN_SLOTS.vision, label: "Sees images", needsImages: true },
   { id: NATIVE_HARNESS_BUILT_IN_SLOTS.advisor, label: "Advisor" },
 ];
 
@@ -281,12 +283,17 @@ export function withFirstChoice(
   );
   const candidates = [candidate, ...others].slice(0, MAX_NATIVE_HARNESS_SLOT_CANDIDATES);
   // The overflow promotion may not repeat a model in the chain, so one that
-  // just became the first choice stops being the promotion.
-  const promotion = existing?.overflowPromotion;
-  const slot: NativeHarnessSlot =
-    promotion === undefined || nativeHarnessSlotCandidateKey(promotion) === key
-      ? { id: slotId, candidates }
-      : { id: slotId, candidates, overflowPromotion: promotion };
+  // just became the first choice stops being the promotion. The role's own
+  // flags are the person's and stay as they were.
+  const { overflowPromotion: promotion, ...kept } = existing ?? { id: slotId };
+  const slot: NativeHarnessSlot = {
+    ...kept,
+    id: slotId,
+    candidates,
+    ...(promotion === undefined || nativeHarnessSlotCandidateKey(promotion) === key
+      ? {}
+      : { overflowPromotion: promotion }),
+  };
   return {
     ...configuration,
     slots: [...configuration.slots.filter((entry) => String(entry.id) !== String(slotId)), slot],

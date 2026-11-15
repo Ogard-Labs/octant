@@ -4,14 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
+import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
+import { BottomSheet } from "../ui/BottomSheet";
 import { ListRow, ListSection, NavBar } from "../ui/NativeChrome";
 import {
   mobileQuickAdd,
   mobileTickCommand,
   mobileTodoDetail,
+  mobileTodoLinkCommand,
   mobileTodoSections,
+  type MobileStartedThread,
 } from "./todosPresentation";
 
 /** The host's change feed does not reach the phone; it reads while in front. */
@@ -19,6 +23,11 @@ const REREAD_MS = 30_000;
 
 export interface TodosScreenProps {
   readonly onBack: () => void;
+  /** Opens the new-thread sheet with the to-do in it; nothing starts until the person sends. */
+  readonly onStart: (todo: Todo) => void;
+  /** Threads a Start made that the list did not take, by to-do id. */
+  readonly unlinked: ReadonlyMap<string, MobileStartedThread>;
+  readonly onLinked: (todoId: string, thread: MobileStartedThread, linked: boolean) => void;
 }
 
 /**
@@ -34,6 +43,7 @@ export function TodosScreen(props: TodosScreenProps) {
   const [problem, setProblem] = useState<string>();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [actionTodo, setActionTodo] = useState<Todo>();
   // One id per draft, kept across failed sends so a resent add lands once.
   const draftId = useRef(globalThis.crypto.randomUUID());
   // Every answer is checked against the newest request made to the computer
@@ -82,6 +92,7 @@ export function TodosScreen(props: TodosScreenProps) {
     setProblem(undefined);
     setText("");
     setBusy(false);
+    setActionTodo(undefined);
     sending.current = false;
     draftId.current = globalThis.crypto.randomUUID();
     void load();
@@ -155,6 +166,7 @@ export function TodosScreen(props: TodosScreenProps) {
           color: colors.textPrimary,
           fontSize: 17,
         },
+        actions: { paddingBottom: mobileSpacing.lg },
         note: {
           ...mobileTypography.detail,
           color: colors.textSecondary,
@@ -165,13 +177,22 @@ export function TodosScreen(props: TodosScreenProps) {
     [colors],
   );
 
+  const link = async (todo: Todo, thread: MobileStartedThread) => {
+    if (await send(mobileTodoLinkCommand(String(todo.id), thread))) {
+      props.onLinked(String(todo.id), thread, true);
+      setActionTodo(undefined);
+    }
+  };
+
   const sections = mobileTodoSections(view?.todos ?? []);
+  const actionUnlinked =
+    actionTodo === undefined ? undefined : props.unlinked.get(String(actionTodo.id));
   const row = (todo: Todo, last: boolean) => (
     <ListRow
       accessibilityLabel={
         todo.state === "done" ? `Open ${todo.title} again` : `Tick off ${todo.title}`
       }
-      detail={mobileTodoDetail(todo)}
+      detail={mobileTodoDetail(todo, { unlinked: props.unlinked.has(String(todo.id)) })}
       icon={todo.state === "done" ? "checkmark-circle" : "ellipse-outline"}
       iconTone={todo.state === "done" ? colors.success : colors.textTertiary}
       key={String(todo.id)}
@@ -179,6 +200,9 @@ export function TodosScreen(props: TodosScreenProps) {
       labelTone={todo.state === "done" ? colors.textSecondary : undefined}
       last={last}
       onPress={busy ? undefined : () => void send(mobileTickCommand(todo))}
+      {...(todo.state === "open"
+        ? { onLongPress: () => setActionTodo(todo), longPressLabel: MOBILE_COPY.todosActions }
+        : {})}
       testID={`mobile-todo-${String(todo.id)}`}
     />
   );
@@ -236,6 +260,43 @@ export function TodosScreen(props: TodosScreenProps) {
           </>
         )}
       </ScrollView>
+      <BottomSheet
+        onClose={() => setActionTodo(undefined)}
+        testID="mobile-todo-actions"
+        title={actionTodo === undefined ? "" : formatScreenshotSafeLabel(actionTodo.title)}
+        visible={actionTodo !== undefined}
+      >
+        <View style={styles.actions}>
+          {problem === undefined ? null : <Text style={styles.note}>{problem}</Text>}
+          <ListSection>
+            <ListRow
+              icon="play-outline"
+              label={MOBILE_COPY.todosStart}
+              last={actionUnlinked === undefined}
+              onPress={
+                actionTodo === undefined
+                  ? undefined
+                  : () => {
+                      const todo = actionTodo;
+                      setActionTodo(undefined);
+                      props.onStart(todo);
+                    }
+              }
+              testID="mobile-todo-action-start"
+            />
+            {actionUnlinked === undefined || actionTodo === undefined ? null : (
+              <ListRow
+                detail={MOBILE_COPY.todosNotLinked}
+                icon="link-outline"
+                label={MOBILE_COPY.todosLink}
+                last
+                onPress={busy ? undefined : () => void link(actionTodo, actionUnlinked)}
+                testID="mobile-todo-action-link"
+              />
+            )}
+          </ListSection>
+        </View>
+      </BottomSheet>
     </View>
   );
 }
