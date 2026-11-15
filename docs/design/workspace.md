@@ -2910,6 +2910,24 @@ positioned children of one element, so a tool is never remounted when a
 neighbour joins or leaves, when it moves between columns, or when focus or a
 divider moves; only choosing another tool for a tile replaces it.
 
+**Arranging by drag.** A pane is picked up by its bar: its name, a tab's label
+or the bar's empty run, never a control in it (an action, Arrange, Close, a
+tab's close). While it is dragged the pane reads lifted (a step back in
+opacity) and nothing else moves. The pane under the pointer shows the place
+the dragged one would take as a quiet highlight of that half: above or below
+it, and left or right of it only where the window holds two columns of tools
+side by side beside the thread's minimum and Environment (elsewhere the result
+would stack, so no place beside is offered, in the drag or in the Arrange
+menu). A drop on the right of the last column makes the second column. A pane
+of a tool the bottom panel can hold (Review, Terminal, Browser, Files, Side
+chat) is also offered the panel, as a zone over the foot of the thread's
+column. Escape, or a drop outside every zone, cancels. The drop goes through
+the same tile model the Arrange menu uses, which stays the keyboard's route,
+and a pane moved within its own column shares it evenly with the others. A
+drop never closes or minimises another pane; Environment is not a pane, so it
+is never dragged and never a place; a minimised card is not a place either.
+A pane alone can only go to the bottom panel.
+
 A tool's button carries the placement a tab menu once did. Its context
 menu (right click, the menu key or Shift+F10) offers **Show below** for an open
 tool that is not on screen (disabled when the caps refuse it), and, for a tile in

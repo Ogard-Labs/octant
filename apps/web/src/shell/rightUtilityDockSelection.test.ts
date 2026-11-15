@@ -792,6 +792,14 @@ describe("dock tool tiles", () => {
     expect(moveUtilityTile(sided, "files", "up")).toBe(sided);
   });
 
+  it("gives a pane moved within its own column an equal share of it", () => {
+    let state = showUtilityTabStacked(opened("files", "canvas"), "files");
+    expect(columnsOf(state)).toEqual([["canvas", "files"]]);
+    state = placeUtilityTile(state, "files", "canvas", "top");
+    expect(columnsOf(state)).toEqual([["files", "canvas"]]);
+    expect(state.layout?.columns[0]?.tiles.map((tile) => tile.share)).toEqual([0.5, 0.5]);
+  });
+
   it("drops a tile on another tile's edge, changing only the columns that lose or gain a tile", () => {
     const sided = twoColumnsForMoves();
     expect(columnsOf(sided)).toEqual([["canvas"], ["files", "plan"]]);

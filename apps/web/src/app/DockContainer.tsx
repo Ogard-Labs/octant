@@ -849,6 +849,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
           onShowAlone: actions.showDockTabAlone,
           onShowBelow: actions.showDockTabBelow,
           onShowBeside: actions.showDockTabBeside,
+          bottomSurfaces: bottomPanelSurfaces.map((surface) => surface.id),
+          onMoveToBottom: actions.openBottomTool,
           resolveSurface: dockResolveSurface,
         }}
         width={dockPresentationWidth}

@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   setNativeSurfaceResizeGuard,
   signalNativeSurfaceLayoutChange,
@@ -49,6 +50,8 @@ const MIN_COLUMN_WIDTH = 280;
  * a Browser and a Files pane stood side by side at 300px each.
  */
 const SIDE_BY_SIDE_WIDTH = TILED_DOCK_WIDTH - 2;
+/** How much of the thread's foot takes a pane dragged to the bottom panel. */
+const BOTTOM_ZONE_HEIGHT = 160;
 const KEY_STEP = 0.02;
 const KEY_STEP_LARGE = 0.08;
 
@@ -91,6 +94,20 @@ export interface DockTilesProps {
   readonly onPlaceTile: (tabId: string, targetTabId: string, edge: DockTileEdge) => void;
   /** Whether that placement is allowed; a drop zone shows no indicator where it is not. */
   readonly canPlaceTile?: (tabId: string, targetTabId: string, edge: DockTileEdge) => boolean;
+  /**
+   * Whether the window holds two columns of tools side by side beside the
+   * thread's minimum and Environment. Where it does not, a pane is offered no
+   * place left or right of another: the result would stack, not stand beside.
+   */
+  readonly columnsFit?: boolean;
+  /**
+   * Takes a dragged pane to the bottom panel. Absent, or refusing the pane,
+   * no bottom zone is offered for it.
+   */
+  readonly bottomPanel?: {
+    readonly accepts: (tabId: string) => boolean;
+    readonly onMove: (tabId: string) => void;
+  };
   readonly onShowTileAlone: (tabId: string) => void;
   readonly onResizeColumns: (shares: ReadonlyArray<number>) => void;
   readonly onResizeColumn: (columnIndex: number, shares: ReadonlyArray<number>) => void;
@@ -245,7 +262,10 @@ const EDGE_PHRASE: Readonly<Record<DockTileEdge, string>> = {
   bottom: "Below",
 };
 
-/** The edge of a rectangle the pointer is nearest to. */
+/**
+ * The edge of a rectangle the pointer is nearest to. Without room for columns
+ * side by side only the upper and lower halves are places.
+ */
 function edgeAt(
   rect: {
     readonly left: number;
@@ -254,9 +274,11 @@ function edgeAt(
     readonly height: number;
   },
   point: { readonly clientX: number; readonly clientY: number },
+  sideways: boolean,
 ): DockTileEdge {
   const x = rect.width > 0 ? (point.clientX - rect.left) / rect.width : 0.5;
   const y = rect.height > 0 ? (point.clientY - rect.top) / rect.height : 0.5;
+  if (!sideways) return y < 0.5 ? "top" : "bottom";
   const nearest = Math.min(x, 1 - x, y, 1 - y);
   if (nearest === x) return "left";
   if (nearest === 1 - x) return "right";
@@ -340,8 +362,20 @@ export function DockTiles(props: DockTilesProps) {
     setMoving(undefined);
     setOver(undefined);
   }, [shape]);
+  const sideways = props.columnsFit !== false;
   const allowed = (tabId: string, targetTabId: string, edge: DockTileEdge) =>
-    props.canPlaceTile?.(tabId, targetTabId, edge) ?? true;
+    (sideways || edge === "top" || edge === "bottom") &&
+    (props.canPlaceTile?.(tabId, targetTabId, edge) ?? true);
+  // The bottom panel's zone lies over the thread's foot, outside the dock, for
+  // as long as a pane it can hold is being dragged.
+  const [overBottom, setOverBottom] = useState(false);
+  const bottomZone =
+    moving !== undefined && props.bottomPanel?.accepts(moving) === true
+      ? bottomZoneBox()
+      : undefined;
+  useEffect(() => {
+    if (moving === undefined) setOverBottom(false);
+  }, [moving]);
 
   const placed = arrange(props.layout, preview, stacked, size);
   const labelOf = (tabId: string | undefined) =>
@@ -384,8 +418,10 @@ export function DockTiles(props: DockTilesProps) {
               {...(props.onMinimiseTile === undefined || content.minimisable !== true
                 ? {}
                 : { onMinimise: () => props.onMinimiseTile?.(tabId) })}
+              moving={tabId === moving}
               onMove={(direction) => props.onMoveTile(tabId, direction)}
               onDragStart={() => setMoving(tabId)}
+              sideways={sideways}
               onDragEnd={() => {
                 setMoving(undefined);
                 setOver(undefined);
@@ -408,6 +444,7 @@ export function DockTiles(props: DockTilesProps) {
               onShowAlone={() => props.onShowTileAlone(tabId)}
               panelRef={tabId === props.focusedTabId ? props.panelRef : undefined}
               single={tileCount === 1}
+              draggable={tileCount > 1 || props.bottomPanel?.accepts(tabId) === true}
             />
           );
         })}
@@ -487,7 +524,11 @@ export function DockTiles(props: DockTilesProps) {
                     setOver((current) => (current?.tabId === tabId ? undefined : current))
                   }
                   onDragOver={(event) => {
-                    const next = edgeAt(event.currentTarget.getBoundingClientRect(), event);
+                    const next = edgeAt(
+                      event.currentTarget.getBoundingClientRect(),
+                      event,
+                      sideways,
+                    );
                     if (!allowed(moving, tabId, next)) {
                       setOver(undefined);
                       return;
@@ -501,7 +542,11 @@ export function DockTiles(props: DockTilesProps) {
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
-                    const next = edgeAt(event.currentTarget.getBoundingClientRect(), event);
+                    const next = edgeAt(
+                      event.currentTarget.getBoundingClientRect(),
+                      event,
+                      sideways,
+                    );
                     setMoving(undefined);
                     setOver(undefined);
                     if (allowed(moving, tabId, next)) props.onPlaceTile(moving, tabId, next);
@@ -523,9 +568,47 @@ export function DockTiles(props: DockTilesProps) {
             })}
           </div>
         )}
+        {moving === undefined || bottomZone === undefined
+          ? null
+          : createPortal(
+              <div
+                className="dock-tiles__bottom-zone"
+                data-dock-bottom-zone="true"
+                onDragLeave={() => setOverBottom(false)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setOverBottom(true);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const tabId = moving;
+                  setMoving(undefined);
+                  setOver(undefined);
+                  props.bottomPanel?.onMove(tabId);
+                }}
+                style={bottomZone}
+              >
+                {overBottom ? (
+                  <div className="workspace-drop-overlay dock-tiles__place" data-drop-edge="panel">
+                    <span>Bottom panel</span>
+                  </div>
+                ) : null}
+              </div>,
+              document.body,
+            )}
       </div>
     </div>
   );
+}
+
+/** Where the bottom panel would open: the foot of the thread's own column. */
+function bottomZoneBox(): CSSProperties | undefined {
+  const workspace = document.querySelector(".primary-workspace-layer");
+  if (workspace === null) return undefined;
+  const rect = workspace.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return undefined;
+  const height = Math.min(BOTTOM_ZONE_HEIGHT, rect.height / 2);
+  return { left: rect.left, top: rect.bottom - height, width: rect.width, height };
 }
 
 function Tile(props: {
@@ -536,6 +619,10 @@ function Tile(props: {
   readonly onFocusTile: () => void;
   readonly onHide: () => void;
   readonly onMinimise?: () => void;
+  /** This pane is the one being dragged: it reads lifted until the drop. */
+  readonly moving: boolean;
+  /** Places left and right of another pane exist in this window. */
+  readonly sideways: boolean;
   readonly onMove: (direction: DockTileMove) => void;
   readonly onDragStart: () => void;
   readonly onDragEnd: () => void;
@@ -548,6 +635,8 @@ function Tile(props: {
   readonly onShowAlone: () => void;
   readonly panelRef: Ref<HTMLElement> | undefined;
   readonly single: boolean;
+  /** There is somewhere to take this pane: another tile, or the bottom panel. */
+  readonly draggable: boolean;
 }) {
   const element = useRef<HTMLElement | null>(null);
   const onFocusTile = useRef(props.onFocusTile);
@@ -567,6 +656,7 @@ function Tile(props: {
     };
   }, []);
   const { host: barHost, items: barItems, leadRef } = useDockBarSlot("tiled");
+  const pressedControl = useRef(false);
   const bar = useRef<HTMLDivElement>(null);
   // Every pane has the one bar, alone or among tiles: the same height, insets
   // and controls, so nothing in a pane moves when a neighbour opens or closes.
@@ -590,6 +680,7 @@ function Tile(props: {
       data-dock-tile={content.surface}
       data-dock-tile-edge={box.top === 0 ? "top" : undefined}
       data-focused={props.focused ? "true" : undefined}
+      data-moving={props.moving ? "true" : undefined}
       ref={(node) => {
         element.current = node;
         const forward = props.panelRef;
@@ -606,19 +697,30 @@ function Tile(props: {
         className="dock-tile__bar"
         data-fold={folded}
         data-has-controls={barItems !== undefined && barItems.length > 0 ? "true" : undefined}
+        // The whole bar picks the pane up: its name, a tab's label or its
+        // empty run. A press that began on a control (an action, Arrange,
+        // Close, a tab's close, a field) is that control's, never a drag.
+        draggable={props.draggable}
+        onDragEnd={props.onDragEnd}
+        onDragStart={(event) => {
+          if (pressedControl.current) {
+            event.preventDefault();
+            return;
+          }
+          // Some engines refuse to start a drag that carries no data.
+          event.dataTransfer.setData("text/plain", content.label);
+          event.dataTransfer.effectAllowed = "move";
+          props.onDragStart();
+        }}
+        onPointerDownCapture={(event) => {
+          const from = event.target instanceof Element ? event.target : null;
+          pressedControl.current =
+            from?.closest('button:not([role="tab"]), input, select, textarea, [role="menu"]') !==
+            null;
+        }}
         ref={bar}
       >
-        <div
-          className="dock-tile__lead"
-          draggable={!props.single}
-          onDragEnd={props.onDragEnd}
-          onDragStart={(event) => {
-            // Some engines refuse to start a drag that carries no data.
-            event.dataTransfer.setData("text/plain", content.label);
-            event.dataTransfer.effectAllowed = "move";
-            props.onDragStart();
-          }}
-        >
+        <div className="dock-tile__lead">
           <div className="dock-tile__title">{content.barLeading}</div>
           <div className="dock-tile__lead-slot" ref={leadRef} />
         </div>
@@ -644,7 +746,8 @@ function Tile(props: {
                         ["down", "Move down"],
                       ] as const
                     ).map(([direction, label]) =>
-                      content.moves[direction] ? (
+                      content.moves[direction] &&
+                      (props.sideways || direction === "up" || direction === "down") ? (
                         <OctantMenuItem
                           className="workspace-disclosure__action window-no-drag"
                           key={direction}

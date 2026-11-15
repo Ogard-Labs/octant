@@ -1521,8 +1521,30 @@
   top: 50%;
 }
 
-.dock-tile__lead[draggable="true"] {
+/* A pane is picked up by its bar. While it is dragged it reads lifted (a
+   step back in opacity) and nothing else moves until the drop. */
+.dock-tile__bar[draggable="true"] {
   cursor: grab;
+}
+
+.dock-tile__bar[draggable="true"] :is(button, input, [role="tab"]) {
+  cursor: default;
+}
+
+.dock-tile[data-moving="true"] {
+  opacity: 0.6;
+}
+
+.dock-tile[data-moving="true"] > .dock-tile__bar {
+  cursor: grabbing;
+}
+
+/* The bottom panel's zone, over the foot of the thread's column while a pane
+   the panel can hold is dragged. It is in the overlay layer of the window, not
+   in the dock, so it is placed by the rectangle it stands for. */
+.dock-tiles__bottom-zone {
+  position: fixed;
+  z-index: 6;
 }
 
 /* A tab dropped on the right third or the lower third becomes a tile there. */

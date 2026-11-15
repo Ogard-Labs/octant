@@ -632,9 +632,13 @@ export function placeUtilityTile(
   const joinedColumn = (column: DockTileColumn, row: number): DockTileColumn | undefined => {
     const count = column.tiles.length;
     if (count >= MAX_DOCK_TILES_PER_COLUMN) return undefined;
+    // The tiles that stay keep their ratio out of a whole column: a pane moved
+    // within its own column left the others the share they had beside it, so
+    // one moved above one came out two thirds tall.
+    const held = column.tiles.reduce((sum, tile) => sum + tile.share, 0) || 1;
     const scaled = column.tiles.map((tile) => ({
       ...tile,
-      share: (tile.share * count) / (count + 1),
+      share: ((tile.share / held) * count) / (count + 1),
     }));
     const at = Math.min(Math.max(row, 0), count);
     return {

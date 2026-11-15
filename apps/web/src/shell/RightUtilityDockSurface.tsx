@@ -86,6 +86,10 @@ export interface DockTileControls {
   readonly onShowAlone: (tabId: string) => void;
   readonly onShowBelow: (tabId: string) => void;
   readonly onShowBeside: (tabId: string) => void;
+  /** The tools the bottom panel can hold; a pane of one of them can be dragged there. */
+  readonly bottomSurfaces?: ReadonlyArray<RightUtilityDockSurfaceId>;
+  /** Moves a tool to the bottom panel, as choosing it there does. */
+  readonly onMoveToBottom?: (surface: RightUtilityDockSurfaceId) => void;
 }
 
 /** What a card does with the dock around it, so the keyboard never falls to the page. */
@@ -145,6 +149,11 @@ export interface RightUtilityDockSurfaceProps {
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
   readonly tiles?: DockTileControls;
+  /**
+   * Whether the window holds two columns of tools side by side. Where it does
+   * not, no pane or tool is offered a place beside another.
+   */
+  readonly columnsFit?: boolean;
   /**
    * The handle that sizes the tool columns. With the Environment strip open it
    * stands on the seam between the strip and the tools, so the strip is never
@@ -302,7 +311,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   };
   function zoneAt(event: DragEvent<HTMLElement>): "beside" | "below" | "replace" {
     const rect = event.currentTarget.getBoundingClientRect();
-    if (rect.width > 0 && event.clientX - rect.left > (rect.width * 2) / 3) return "beside";
+    const sideways = props.columnsFit !== false;
+    if (sideways && rect.width > 0 && event.clientX - rect.left > (rect.width * 2) / 3)
+      return "beside";
     if (rect.height > 0 && event.clientY - rect.top > (rect.height * 2) / 3) return "below";
     return "replace";
   }
@@ -515,6 +526,21 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         );
       }}
       onPlaceTile={(tabId, targetTabId, edge) => tiles?.onPlace(tabId, targetTabId, edge)}
+      {...(props.columnsFit === undefined ? {} : { columnsFit: props.columnsFit })}
+      {...(tiles?.onMoveToBottom === undefined || tiles.narrow
+        ? {}
+        : {
+            bottomPanel: {
+              accepts: (tabId: string) => {
+                const surface = surfaceOfTab(tabId);
+                return surface !== undefined && (tiles.bottomSurfaces ?? []).includes(surface);
+              },
+              onMove: (tabId: string) => {
+                const surface = surfaceOfTab(tabId);
+                if (surface !== undefined) tiles.onMoveToBottom?.(surface);
+              },
+            },
+          })}
       onResizeColumn={(index, shares) => {
         if (!strip) return tiles?.onResizeColumn(index, shares);
         const stored = storedTileShares(placementState, split, index, shares);

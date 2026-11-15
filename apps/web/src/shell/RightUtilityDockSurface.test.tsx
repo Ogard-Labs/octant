@@ -281,6 +281,13 @@ describe("tool tiles in the right sidebar", () => {
     readonly narrow?: boolean;
     readonly resolveSurface?: DockTileControls["resolveSurface"];
     readonly pageIcon?: (tabId: string) => string | undefined;
+    /** The window holds two columns of tools side by side; true unless a test says no. */
+    readonly columnsFit?: boolean;
+    /** Tools the bottom panel can hold, and what takes one there. */
+    readonly bottom?: {
+      readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceId>;
+      readonly onMove: (surface: RightUtilityDockSurfaceId) => void;
+    };
   }) {
     const [state, setState] = useState(props.initial);
     const tabs = state.tabs.map((tab) => ({
@@ -412,7 +419,11 @@ describe("tool tiles in the right sidebar", () => {
             onShowAlone: (id) => setState((current) => showUtilityTabAlone(current, id)),
             onShowBelow: (id) => setState((current) => showUtilityTabBelow(current, id)),
             onShowBeside: (id) => setState((current) => showUtilityTabBeside(current, id)),
+            ...(props.bottom === undefined
+              ? {}
+              : { bottomSurfaces: props.bottom.surfaces, onMoveToBottom: props.bottom.onMove }),
           }}
+          {...(props.columnsFit === undefined ? {} : { columnsFit: props.columnsFit })}
           {...(props.narrow === true ? { toolRow: { ...row, dragSource: false } } : {})}
         />
       </>
@@ -714,6 +725,93 @@ describe("tool tiles in the right sidebar", () => {
       await screen.findByRole("separator", { name: "Resize iOS Simulator and Files" }),
     ).toBeInTheDocument();
     expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+  });
+
+  it("picks a pane up by its bar but never by one of the bar's controls", () => {
+    render(<TiledDock initial={tiledState()} />);
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    const files = screen.getByRole("region", { name: "Files" });
+    const bar = files.querySelector(".dock-tile__bar") as HTMLElement;
+    expect(bar).toHaveAttribute("draggable", "true");
+    // A press that began on Close is Close's: no drag starts from it.
+    const close = within(files).getByRole("button", { name: "Close Files" });
+    fireEvent.pointerDown(close);
+    fireEvent.dragStart(close, { dataTransfer });
+    expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    expect(files).not.toHaveAttribute("data-moving");
+    // The bar's own run lifts the pane, and ending the drag (a drop outside
+    // every zone, or Escape) puts everything back.
+    fireEvent.pointerDown(bar);
+    fireEvent.dragStart(bar, { dataTransfer });
+    expect(files).toHaveAttribute("data-moving", "true");
+    expect(document.querySelector('[data-dock-place-zone="ios-simulator"]')).not.toBeNull();
+    fireEvent.dragEnd(bar, { dataTransfer });
+    expect(files).not.toHaveAttribute("data-moving");
+    expect(document.querySelector(".dock-tiles__drag-shield")).toBeNull();
+    expect(
+      screen.getByRole("separator", { name: "Resize Files and iOS Simulator" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers no place beside another pane where the window cannot hold two columns", () => {
+    let state = openUtilityTabState({ tabs: [] }, "files");
+    state = openUtilityTabBesideState(state, "canvas", "canvas", "stacked");
+    render(<TiledDock columnsFit={false} initial={state} />);
+    const bounds = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 100, height: 100 }));
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    const canvas = screen.getByRole("region", { name: "Canvas" });
+    fireEvent.dragStart(canvas.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+    const zone = document.querySelector('[data-dock-place-zone="files"]') as HTMLElement;
+    const over = createEvent.dragOver(zone);
+    // The pointer is at the far right edge: with columns it would be "right of".
+    Object.defineProperties(over, { clientX: { value: 98 }, clientY: { value: 20 } });
+    fireEvent(zone, over);
+    expect(zone.querySelector("[data-drop-edge='right']")).toBeNull();
+    expect(zone.querySelector("[data-drop-edge='top']")).not.toBeNull();
+    fireEvent.dragEnd(canvas.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+    bounds.mockRestore();
+  });
+
+  it("leaves the moves beside another pane out of the Arrange menu there too", async () => {
+    const user = userEvent.setup();
+    let state = openUtilityTabState({ tabs: [] }, "files");
+    state = openUtilityTabBesideState(state, "canvas", "canvas", "stacked");
+    render(<TiledDock columnsFit={false} initial={state} />);
+    await user.click(screen.getByRole("button", { name: "Arrange Canvas" }));
+    expect(await screen.findByRole("menuitem", { name: /above Files/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Move right" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: /right of Files/ })).toBeNull();
+  });
+
+  it("takes a dragged pane to the bottom panel from a zone over the thread's foot", () => {
+    const onMove = vi.fn();
+    const stage = document.createElement("div");
+    stage.className = "primary-workspace-layer";
+    document.body.append(stage);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 0, width: 400, height: 600 }),
+    );
+    try {
+      render(<TiledDock bottom={{ surfaces: ["files"], onMove }} initial={tiledState()} />);
+      const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+      // The simulator cannot stand in the panel, so it is offered no zone.
+      const simulator = screen.getByRole("region", { name: "iOS Simulator" });
+      fireEvent.dragStart(simulator.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      expect(document.querySelector("[data-dock-bottom-zone]")).toBeNull();
+      fireEvent.dragEnd(simulator.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      const files = screen.getByRole("region", { name: "Files" });
+      fireEvent.dragStart(files.querySelector(".dock-tile__bar") as Element, { dataTransfer });
+      const zone = document.querySelector("[data-dock-bottom-zone]") as HTMLElement;
+      fireEvent.dragOver(zone, { dataTransfer });
+      expect(within(zone).getByText("Bottom panel")).toBeInTheDocument();
+      fireEvent.drop(zone, { dataTransfer });
+      expect(onMove).toHaveBeenCalledWith("files");
+      expect(document.querySelector("[data-dock-bottom-zone]")).toBeNull();
+    } finally {
+      stage.remove();
+    }
   });
 
   it("offers the same placement from a tile's Arrange menu for the keyboard", async () => {
