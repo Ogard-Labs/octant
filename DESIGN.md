@@ -469,8 +469,8 @@ compact field heights; a new desktop control takes a recipe height.
 
 Phosphor, imported only through the app's icon module (`apps/web/src/ui/icons`),
 which keeps the names call sites use. The family is drawn as filled outlines at
-fixed weights, so the weight follows the size: regular at 16px and below, light
-at 20px, bold for a tick inside a filled mark, fill for a selected state. A few
+fixed weights: regular at every size (light at 20px read thin and soft beside
+its text), bold for a tick inside a filled mark, fill for a selected state. A few
 glyphs have no exact match (a folder's git badge, a plus on a branch or an
 image) and draw the plain glyph.
 

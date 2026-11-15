@@ -231,3 +231,12 @@ function collectSourceFiles(root: string): ReadonlyArray<string> {
   }
   return files;
 }
+
+describe("icon weight", () => {
+  it("draws a 20px rail glyph at the same regular weight as a 16px one, never thin", () => {
+    const shape = (size: number) =>
+      /<path[^>]*>/.exec(renderToStaticMarkup(createElement(Search, { size })))?.[0];
+    expect(shape(20)).toBeDefined();
+    expect(shape(20)).toBe(shape(16));
+  });
+});

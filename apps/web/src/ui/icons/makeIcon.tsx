@@ -5,13 +5,6 @@ import { forwardRef, type ReactNode } from "react";
 export type IconComponent = Icon;
 export type { IconProps };
 
-/**
- * The size from which an icon is drawn light. A rail or empty-state glyph at
- * 20px or more is large enough that the regular weight reads heavy; the 12, 14
- * and 16px glyphs stay regular so their strokes do not thin out to a hairline.
- */
-const LIGHT_FROM_SIZE = 20;
-
 /** The stroke at which a call site asked for a bold tick (see MARK_TICK_STROKE_WIDTH). */
 const BOLD_FROM_STROKE = 2.5;
 
@@ -26,7 +19,10 @@ function weightFor(props: IconProps): IconWeight {
   // The previous family drew a tick inside a small filled mark with a heavier
   // stroke; the family's own bold weight is that request.
   if (Number(props.strokeWidth) >= BOLD_FROM_STROKE) return "bold";
-  return Number(props.size ?? DEFAULT_SIZE) >= LIGHT_FROM_SIZE ? "light" : "regular";
+  // Every size draws regular. The light weight at 20px and up left the rail's
+  // glyphs thin and soft beside the text they stand for, and blurred on a
+  // display that does not draw a half-pixel stroke crisply.
+  return "regular";
 }
 
 /**
