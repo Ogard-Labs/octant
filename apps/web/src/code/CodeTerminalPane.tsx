@@ -671,12 +671,13 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </div>
       )}
       {result.transcript?.truncated === true ? (
-        <OctantAlert className="code-delivery-pane__warning" tone="warning">
+        <OctantAlert layout="row" className="code-delivery-pane__warning" tone="warning">
           Terminal output is truncated. Earlier output is no longer available.
         </OctantAlert>
       ) : null}
       {browserOn ? (
         <OctantAlert
+          layout="row"
           action={
             <OctantButton
               disabled={browserPending}
@@ -696,11 +697,15 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </OctantAlert>
       ) : null}
       {browserRefusal === undefined ? null : (
-        <OctantAlert className="code-terminal-pane__browser" tone="warning">
+        <OctantAlert layout="row" className="code-terminal-pane__browser" tone="warning">
           {browserRefusal}
         </OctantAlert>
       )}
-      {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
+      {failure === undefined ? null : (
+        <OctantAlert layout="row" tone="warning">
+          {failure}
+        </OctantAlert>
+      )}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
         <p className="code-delivery-pane__notice">Plan mode keeps terminal replay read-only.</p>

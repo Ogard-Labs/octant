@@ -1247,6 +1247,15 @@ is costly to render mounts only while open.
   hug their content (icon, message, second part, action) at the left edge, no
   wider than 480px: a longer message wraps onto a second line, and several
   notices stack, each as wide as its own content.
+- **Row layout.** `layout="row"` is a notice inside a dock tool or pane: one
+  quiet line at the panel's 12px inset with no fill, no outline and no card. The
+  tone's 16px icon is the only colour, the sentence is the secondary ink, and an
+  action (a ghost or secondary small button) follows the words and wraps under
+  them when there is no room. A notice in a panel is always this layout; the
+  card is for the thread column and the composer. Words are for the person: a
+  host message written for an agent (a call to make, a profile to pass) is
+  mapped to one short sentence and an action ("This Private page expired." with
+  Open again), never shown as the host wrote it.
 - **States.** On glass the fill is the dense 96% float; increased contrast and
   reduced transparency make it opaque.
 - **Accessibility.** Warning and danger are `alert`; the others `status`.
@@ -1484,6 +1493,17 @@ one row at the trailing edge (the dismissing answer outlined first, the acting
 - **A lost host connection** is one `OctantAlert` above the transcript; other
   surfaces dim rather than repeat it (wording in
   [Thread view](docs/design/thread-view.md)).
+- **Panel layout.** A dock tool is a column of blocks that never overlap at any
+  width from 320px up. A block keeps its own height or scrolls inside itself (a
+  pane's flex child with a set `min-height` shrinks below its content, so every
+  non-scrolling block is `flex: none`). A header row is flex with `min-width: 0`:
+  the title ellipsises and the controls wrap to a line of their own; a status
+  sentence is a full-width line under the title in the meta ink. One left edge,
+  the panel's 12px inset; no centred text block; a section heading is the
+  section-label role; buttons are the standard secondary or ghost recipes.
+  A tool's empty or loading state is one line, left-aligned at the inset: a
+  16px spinner or icon and the title, with a meta-ink sentence under it.
+  `styles/panels.css` holds these rules and a contract test pins them.
 - Use Badge for status labels, Empty for empty states, Skeleton for loading; add
   no other toast package.
 

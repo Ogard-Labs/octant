@@ -4105,17 +4105,10 @@ form > .work-composer-adapter__attachments {
   animation: browser-spin var(--oct-motion-spin) linear infinite;
 }
 
-/* A confirmation keeps the callout's own tone; only the warning paints amber. */
-.browser-workspace__notice {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  font-size: var(--oct-text-xs);
-}
-
+/* A Browser notice is the callout's quiet row: no fill and no rule, one line
+   at the panel's own inset that wraps its action underneath when narrow. */
 .browser-workspace__message {
-  padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-warn-fg);
-  border-bottom: 1px solid var(--octant-warning-border);
-  background: var(--oct-warn-soft);
+  min-width: 0;
   font-size: var(--oct-text-xs);
 }
 

@@ -158,7 +158,11 @@ export function CodeDiffPane(props: CodeDiffPaneProps) {
     );
   }
   if (props.diff.state === "loading") return <OctantEmpty state="loading" title="Loading diff" />;
-  return <OctantAlert tone="warning">{props.diff.message}</OctantAlert>;
+  return (
+    <OctantAlert layout="row" tone="warning">
+      {props.diff.message}
+    </OctantAlert>
+  );
 }
 
 function AvailableDiff(
@@ -420,7 +424,7 @@ function AvailableDiff(
       ) : null}
 
       {props.staleNotice === undefined ? null : (
-        <OctantAlert className="code-diff-pane__warning" tone="warning">
+        <OctantAlert className="code-diff-pane__warning" layout="row" tone="warning">
           <strong>{props.staleNotice.message}</strong>
           <OctantButton
             size="sm"
@@ -434,7 +438,7 @@ function AvailableDiff(
       )}
 
       {evidence.truncated === true ? (
-        <OctantAlert className="code-diff-pane__warning" tone="warning">
+        <OctantAlert className="code-diff-pane__warning" layout="row" tone="warning">
           <strong>This diff is truncated and is not complete.</strong>
           <p>{evidence.byteLength.toLocaleString("en")} bytes retained</p>
         </OctantAlert>
@@ -442,12 +446,14 @@ function AvailableDiff(
 
       {content.kind === "loading" ? <OctantEmpty state="loading" title="Loading diff" /> : null}
       {content.kind === "unavailable" ? (
-        <OctantAlert tone="warning">{content.message}</OctantAlert>
+        <OctantAlert layout="row" tone="warning">
+          {content.message}
+        </OctantAlert>
       ) : null}
       {content.kind === "ready" &&
       props.requestedCodeReviewFile !== undefined &&
       !files.some((file) => file.path === props.requestedCodeReviewFile?.path) ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The receipt’s file is not in this current comparison. Its original per-turn diff was not
           retained here; no line has been retargeted.
         </OctantAlert>
@@ -457,7 +463,7 @@ function AvailableDiff(
       ) : null}
 
       {selectionMissing ? (
-        <OctantAlert tone="warning">
+        <OctantAlert layout="row" tone="warning">
           The previously selected file is absent from this captured version. Existing notes keep
           their original anchors; choose another file.
         </OctantAlert>

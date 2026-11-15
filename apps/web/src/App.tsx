@@ -218,6 +218,7 @@ import {
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
+import "./styles/panels.css";
 import "./styles/environment.css";
 import { PrepareToShutDownHost } from "./environment/threadMove/PrepareToShutDownHost";
 import { threadMoveClientForBridge } from "./environment/threadMove/threadMoveClient";
