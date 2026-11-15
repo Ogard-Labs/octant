@@ -1,5 +1,6 @@
 /* The plan takes the card's full width under its summary and scrolls inside
-   the card past a few screens of text, so the answer buttons stay in reach. */
+   the card past a few screens of text, so the answer buttons stay in reach.
+   It takes keyboard focus to scroll, and wears the shared focus edge. */
 .provider-level-change__plan {
   flex: 1 1 100%;
   min-width: 0;
@@ -16,8 +17,4 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-.provider-level-change__plan:focus-visible {
-  outline: 2px solid var(--oct-focus-edge);
-  outline-offset: 1px;
 }
