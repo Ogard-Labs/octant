@@ -11725,11 +11725,11 @@ that is not yet effective for the thread is refused and never reaches the model.
   asks for `skill` under the posture instead of denying it; project
   configuration loads only in a Project trusted for OpenCode, outside Plan
   ([Key providers run as themselves](#providers)), and below Full access the
-  confined launch reaches only the Project's skills. The borrowed `CLAUDE.md`
-  prompt (`OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`) is still set on every launch,
-  a recorded gap rather than a rule: OpenCode on its own reads `CLAUDE.md`
-  where no `AGENTS.md` is found, and instruction files are text with no
-  authority (not built yet). Built for
+  confined launch reaches only the Project's skills. No launch sets
+  `OPENCODE_DISABLE_CLAUDE_CODE` or `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT`, so
+  OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it does on its
+  own: instruction files are text with no authority (built;
+  [detail](design/provider-runtimes.md#key-providers)). Built for
   Mistral Vibe: the launch leaves `VIBE_SKILL_PATHS` and
   `VIBE_DISABLED_SKILLS` unset, and any of the person's setup also unsets
   `VIBE_INCLUDE_PROJECT_CONTEXT`, since the Project's context is text. A skill the provider loads that way is the

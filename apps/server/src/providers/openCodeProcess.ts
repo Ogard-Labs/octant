@@ -174,14 +174,20 @@ export interface OpenCodeProcessDependencies {
 
 /**
  * Static switches every OpenCode launch sets: no updater, no model fetch, no
- * borrowed Claude Code integration, no default plugins. The version read keeps
- * them too, since a read with no network and only a scratch home is exactly
- * where an update or fetch attempt can stall.
+ * `.claude` skills, no default plugins. The version read keeps them too, since
+ * a read with no network and only a scratch home is exactly where an update or
+ * fetch attempt can stall.
+ *
+ * `OPENCODE_DISABLE_CLAUDE_CODE` and `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` are
+ * not set, so OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it
+ * does on its own: instruction text grants no authority. Read from the opencode
+ * 1.18.21 source, the broad switch disables both that prompt and `.claude`
+ * skills, so it goes too and `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` alone keeps
+ * the skills off; 2.x reads only `AGENTS.md` and gates `.claude` skills on
+ * either switch, so the skills switch covers it there as well.
  */
 const OPENCODE_GUARDS = {
   OPENCODE_DISABLE_AUTOUPDATE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
   OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
   OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
   OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
@@ -193,15 +199,14 @@ const OPENCODE_GUARDS = {
 /**
  * The guards for a launch whose person let OpenCode load its own skills: the
  * switches that keep OpenCode from reading `.claude/skills` and
- * `.agents/skills` go, and every other guard (updater, model fetch, the
- * borrowed `CLAUDE.md` prompt, default plugins, project configuration)
- * stays. Read from the installed opencode v2.2.0 binary: its server reads
- * `.claude` skills only when neither `OPENCODE_DISABLE_CLAUDE_CODE` nor
- * `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is set, so both go.
+ * `.agents/skills` go, and every other guard (updater, model fetch, default
+ * plugins, project configuration) stays. Read from the installed opencode
+ * v2.2.0 binary: its server reads `.claude` skills only when neither
+ * `OPENCODE_DISABLE_CLAUDE_CODE` nor `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is
+ * set, and no launch sets the first.
  */
 function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   const {
-    OPENCODE_DISABLE_CLAUDE_CODE: _compatibilityOff,
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: _compatibilitySkillsOff,
     OPENCODE_DISABLE_EXTERNAL_SKILLS: _externalSkillsOff,
     ...kept

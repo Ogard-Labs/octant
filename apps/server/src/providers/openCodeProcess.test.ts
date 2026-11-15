@@ -86,7 +86,7 @@ function environmentRecordingWrapper(): {
   const environmentPath = join(root, ".fake-opencode-environment");
   writeFileSync(
     binaryPath,
-    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
+    `#!/bin/sh\nprintf 'broker-url=%s\\nbroker-token=%s\\ndesktop-secret=%s\\nallowed=%s\\nplugins=%s\\nclaude-skills=%s\\nconfig=%s\\n' "\${OCTANT_CREDENTIAL_BROKER_URL-<unset>}" "\${OCTANT_CREDENTIAL_BROKER_TOKEN-<unset>}" "\${OCTANT_DESKTOP_BRIDGE_SECRET-<unset>}" "\${OCTANT_TEST_ALLOWED_ENV-<unset>}" "\${OPENCODE_DISABLE_DEFAULT_PLUGINS-<unset>}" "\${OPENCODE_DISABLE_CLAUDE_CODE_SKILLS-<unset>}" "\${OPENCODE_CONFIG_CONTENT-<unset>}" > '${environmentPath}'\nexec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
   return { binaryPath, environmentPath, root };
@@ -390,7 +390,6 @@ describe("probeOpenCodeBinary", () => {
   it("keeps OpenCode's own skill discovery only for a launch whose person allowed it, and every other guard", () => {
     const root = fixtureRoot();
     const skillSwitches = [
-      "OPENCODE_DISABLE_CLAUDE_CODE",
       "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS",
       "OPENCODE_DISABLE_EXTERNAL_SKILLS",
     ];
@@ -409,7 +408,6 @@ describe("probeOpenCodeBinary", () => {
       }
       for (const name of [
         "OPENCODE_DISABLE_AUTOUPDATE",
-        "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
         "OPENCODE_DISABLE_DEFAULT_PLUGINS",
         "OPENCODE_DISABLE_PROJECT_CONFIG",
         "OPENCODE_DISABLE_MODELS_FETCH",
@@ -426,6 +424,37 @@ describe("probeOpenCodeBinary", () => {
     } finally {
       locked.cleanup();
       own.cleanup();
+    }
+  });
+
+  it("lets OpenCode read CLAUDE.md as it does on its own, while its .claude skills stay off until the person allows them", () => {
+    const root = fixtureRoot();
+    const launches = [
+      createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root),
+      createPrivateOpenCodeProfile({ content: "{}" }, { HOME: root }, () => root, undefined, true),
+      createPrivateOpenCodeProfile(
+        { content: "{}" },
+        { HOME: root },
+        () => root,
+        undefined,
+        false,
+        undefined,
+        true,
+      ),
+    ];
+    try {
+      for (const profile of launches) {
+        // opencode 1.18.21 drops `CLAUDE.md` from its instruction files when
+        // either switch is set; the broad one also turns off `.claude` skills.
+        expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE");
+        expect(profile.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT");
+      }
+      const [locked, own, projectConfig] = launches;
+      expect(locked?.environment.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS).toBe("1");
+      expect(projectConfig?.environment.OPENCODE_DISABLE_CLAUDE_CODE_SKILLS).toBe("1");
+      expect(own?.environment).not.toHaveProperty("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS");
+    } finally {
+      for (const profile of launches) profile.cleanup();
     }
   });
 
@@ -644,7 +673,7 @@ describe("probeOpenCodeBinary", () => {
     // credential in the server's environment cannot reach a replaced binary.
     // OpenCode's own static switches (no updater, no default plugins) stay.
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=<unset>\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(process.env.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
@@ -1484,7 +1513,7 @@ exec env OCTANT_FAKE_OPENCODE_MODE=v2-ready '${fakeCliPath}' "$@"
     );
 
     expect(readFileSync(fixture.environmentPath, "utf8")).toBe(
-      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude=1\nconfig=<unset>\n",
+      "broker-url=<unset>\nbroker-token=<unset>\ndesktop-secret=<unset>\nallowed=allowed-value\nplugins=1\nclaude-skills=1\nconfig=<unset>\n",
     );
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_URL).toBe("http://127.0.0.1:41000/");
     expect(inheritedEnvironment.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
