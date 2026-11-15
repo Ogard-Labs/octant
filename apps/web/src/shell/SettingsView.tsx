@@ -197,8 +197,11 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import {
   NativeHarnessRoutingPanel,
   nativeHarnessSlotsUsing,
-  type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
+import {
+  nativeHarnessPickerGroups,
+  nativeHarnessProviderOptions,
+} from "../harness/modelRoleOptions";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
@@ -208,8 +211,6 @@ import {
   MAX_THREAD_TOOL_STEPS_SETTING,
   MAX_TURN_RUNTIME_EVENTS,
 } from "@octant/contracts";
-import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
-import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -3648,38 +3649,6 @@ function nativeHarnessRolesUsing(
     const { configuration } = await client.routing();
     return nativeHarnessSlotsUsing(configuration, instanceId);
   };
-}
-
-/** The direct-endpoint providers a slot may name, with the models each reports. */
-function nativeHarnessProviderOptions(
-  controller: SettingsViewProps["providerController"],
-): ReadonlyArray<NativeHarnessProviderOption> {
-  if (controller === undefined) return [];
-  return controller.instances
-    .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => ({
-      instanceId: String(instance.id),
-      label: instance.displayName,
-      modelCount: controller.observedByInstance.get(instance.id)?.models.length ?? 0,
-    }));
-}
-
-/**
- * The harness endpoints' models as the compact chooser lists them. Chat's
- * grouping lists every model, Chat-only ones included, because a role may
- * answer without tools and the panel says so beside the choice.
- */
-function nativeHarnessPickerGroups(
-  controller: SettingsViewProps["providerController"],
-): ReadonlyArray<PickerGroup> {
-  if (controller === undefined) return [];
-  return buildModelPickerGroups({
-    instances: controller.instances,
-    observedByInstance: controller.observedByInstance,
-    providerOrder: controller.defaults.providerOrder,
-    hiddenModels: controller.defaults.hiddenModels,
-    mode: "chat",
-  }).filter((group) => group.runtime === "octant-harness");
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {

@@ -9,6 +9,7 @@ import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { modeIcons } from "../shell/ModeSwitcher";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import { OctantButton } from "../ui/base/OctantButton";
+import { WorkerMark } from "../projects/coordinatorMarks";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   childRequestHeadline,
@@ -203,7 +204,11 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
       <div className="pending-request__head">
         {embedded ? null : (
           <>
-            {props.provider === undefined ? (
+            {props.coordinatorTitle !== undefined ? (
+              <span className="pending-request__mark pending-request__mark--worker">
+                <WorkerMark coordinatorName={props.coordinatorTitle} size={14} />
+              </span>
+            ) : props.provider === undefined ? (
               <ModeIcon aria-hidden="true" className="pending-request__mark" size={16} />
             ) : (
               <ProviderGlyph

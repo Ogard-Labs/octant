@@ -68,6 +68,7 @@ import {
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
 import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullRequestSummaries";
+import { WorkerMark } from "../projects/coordinatorMarks";
 
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
@@ -154,7 +155,31 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       ) ??
       "status",
   );
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [pickedFilters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  // The Coordinator filter offers only coordinators whose workers the board
+  // lists (the Show workers setting), and a pick that stops being offered
+  // stops filtering.
+  const titleByCoordinator = props.coordinators?.titleByCoordinator;
+  const workersOnBoard = props.coordinators?.workersOnBoard;
+  const projectByCoordinator = props.coordinators?.projectByCoordinator;
+  const filterableCoordinators = useMemo(() => {
+    if (titleByCoordinator === undefined) return EMPTY_COORDINATOR_TITLES;
+    if (workersOnBoard === undefined) return titleByCoordinator;
+    return new Map(
+      [...titleByCoordinator].filter(([id]) => {
+        const projectId = projectByCoordinator?.get(id);
+        return projectId !== undefined && workersOnBoard(projectId);
+      }),
+    );
+  }, [titleByCoordinator, workersOnBoard, projectByCoordinator]);
+  const filters = useMemo<FilterState>(
+    () =>
+      pickedFilters.coordinatorThreadId === "" ||
+      filterableCoordinators.has(pickedFilters.coordinatorThreadId)
+        ? pickedFilters
+        : { ...pickedFilters, coordinatorThreadId: "" },
+    [pickedFilters, filterableCoordinators],
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
   // The four status lanes are the workflow, so they all show by default:
@@ -364,7 +389,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                 />
               </label>
 
-              {coordinatorTitles.size === 0 ? null : (
+              {filterableCoordinators.size === 0 ? null : (
                 <label>
                   <span>Coordinator</span>
                   <OctantSelectField
@@ -373,10 +398,10 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                     }
                     options={[
                       { id: "", label: "Any" },
-                      ...[...coordinatorTitles].map(([id, title]) => ({ id, label: title })),
+                      ...[...filterableCoordinators].map(([id, title]) => ({ id, label: title })),
                     ]}
                     value={
-                      coordinatorTitles.has(filters.coordinatorThreadId)
+                      filterableCoordinators.has(filters.coordinatorThreadId)
                         ? filters.coordinatorThreadId
                         : ""
                     }
@@ -516,7 +541,14 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         // never a card (docs/design/workspace.md#coordinators). The host
         // leaves it out; an older host may not, so the window does too.
         cardsOf={(view) =>
-          view.cards.filter((card) => !coordinatorTitles.has(String(card.threadId)))
+          view.cards.filter(
+            (card) =>
+              !coordinatorTitles.has(String(card.threadId)) &&
+              // With Show workers off for the Project, its workers are not cards.
+              (card.coordinatorThreadId === undefined ||
+                workersOnBoard === undefined ||
+                workersOnBoard(String(card.projectId))),
+          )
         }
         copy={{
           eyebrow: "Thread board",
@@ -713,6 +745,11 @@ function CodeBoardCardView(props: {
       ) : null}
       <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {props.unread ? <span className="sr-only">Unread</span> : null}
+        {props.coordinatorTitle === undefined ? null : (
+          <span className="code-board__worker-mark">
+            <WorkerMark coordinatorName={props.coordinatorTitle} />
+          </span>
+        )}
         <OctantButton
           className="code-board__card-open"
           onClick={() =>

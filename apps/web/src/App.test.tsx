@@ -6464,15 +6464,18 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Environment" });
     expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
 
+    // Environment is a strip beside the tools, so showing it alone leaves the
+    // tool where it is.
     await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
     await user.click(await screen.findByRole("menuitem", { name: "Show alone" }));
-    await waitFor(() => expect(screen.queryByRole("region", { name: "Files" })).toBeNull());
-    expect(bandTool("Files")).toHaveAttribute("aria-description", "Open");
+    expect(screen.getByRole("region", { name: "Environment" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
 
     await user.pointer({ target: bandTool("Environment"), keys: "[MouseRight]" });
     await user.click(await screen.findByRole("menuitem", { name: "Close Environment" }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Environment" })).toBeNull());
     expect(bandTool("Environment")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
   });
 
   it("shows a tool in the focused tile's place when the tile caps are full, leaving the replaced tool open", async () => {

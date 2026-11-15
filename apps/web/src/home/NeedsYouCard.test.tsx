@@ -278,6 +278,9 @@ describe("the Needs you card", () => {
     });
     expect(within(worker).getByText("via Release coordinator")).toBeInTheDocument();
     expect(
+      within(worker).getByRole("img", { name: "Worker of Release coordinator" }),
+    ).toBeVisible();
+    expect(
       within(
         within(card).getByRole("group", { name: "Quarterly notes is waiting for you" }),
       ).queryByText(/^via /),

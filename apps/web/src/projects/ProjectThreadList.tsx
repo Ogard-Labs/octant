@@ -935,6 +935,9 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         {...(rowAge === undefined || rowState.state !== undefined ? {} : { age: rowAge })}
         {...(rowCheckout === undefined ? {} : { checkout: rowCheckout })}
         {...(props.thread.coordinator === true ? { coordinator: true } : {})}
+        {...(props.thread.coordinatorTitle === undefined
+          ? {}
+          : { workerOf: props.thread.coordinatorTitle })}
         {...(props.thread.provider === undefined ? {} : { provider: props.thread.provider })}
         {...(rowPullRequest === undefined ? {} : { pullRequest: rowPullRequest })}
         {...(rowState.state === undefined ? {} : { state: rowState.state })}
@@ -1371,6 +1374,9 @@ function CoordinatorThreadSection(props: {
         const open = !folded.has(coordinatorId);
         const listId = `${workersId}-${coordinatorId}`;
         const hasWorkers = group.workers.length > 0;
+        // Workers the Show workers setting leaves out of the list: the row
+        // keeps saying how many are working and how many need you, always.
+        const hidden = group.coordinator.hiddenWorkers;
         return (
           <div
             className="project-coordinator"
@@ -1385,7 +1391,9 @@ function CoordinatorThreadSection(props: {
                 label={
                   hasWorkers
                     ? `${open ? "Hide" : "Show"} workers of ${group.coordinator.title}`
-                    : `${group.coordinator.title} has no open workers`
+                    : hidden !== undefined
+                      ? `Workers of ${group.coordinator.title} are in its thread`
+                      : `${group.coordinator.title} has no open workers`
                 }
                 onClick={() => toggle(coordinatorId)}
                 type="button"
@@ -1394,9 +1402,10 @@ function CoordinatorThreadSection(props: {
                 <ChevronRight aria-hidden="true" size={12} />
               </OctantIconButton>
               <div className="project-coordinator__thread">{rows([group.coordinator])}</div>
-              {open ? null : (
+              {open && hidden === undefined ? null : (
                 <CoordinatorWorkerCounts
                   coordinatorTitle={group.coordinator.title}
+                  {...(hidden === undefined ? {} : { hidden })}
                   workers={group.workers}
                 />
               )}
@@ -1419,13 +1428,18 @@ function CoordinatorThreadSection(props: {
  * counts match the marks the worker rows wear once unfolded. It obeys the
  * Status row property, as a folded Project's roll-up does.
  */
-function CoordinatorWorkerCounts(props: {
+export function CoordinatorWorkerCounts(props: {
   readonly coordinatorTitle: string;
   readonly workers: ReadonlyArray<ChatThreadNavigationItem>;
+  /** Workers the list leaves out, already counted. */
+  readonly hidden?: { readonly working: number; readonly attention: number };
 }) {
   const shows = useSidebarRowProperties();
   if (!shows.status) return null;
-  const counts = { working: 0, attention: 0 };
+  const counts = {
+    working: props.hidden?.working ?? 0,
+    attention: props.hidden?.attention ?? 0,
+  };
   for (const worker of props.workers) {
     const facts = threadRowStatusInput(worker);
     if (facts.working) counts.working += 1;

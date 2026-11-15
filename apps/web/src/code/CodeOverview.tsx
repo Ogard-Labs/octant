@@ -29,6 +29,7 @@ import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 import { CodeProjectCoordinatorStarting } from "./CodeProjectCoordinatorStarting";
+import { CodeProjectCoordinatorWorkerListing } from "./CodeProjectCoordinatorWorkerListing";
 import { CodeProjectPlanner } from "./CodeProjectPlanner";
 import type { PlannerProposalReview } from "./plannerProposalCreation";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
@@ -388,6 +389,10 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
     <>
       <CodeProjectPlanner {...props} />
       <CodeProjectCoordinatorStarting controller={props.controller} projectId={props.projectId} />
+      <CodeProjectCoordinatorWorkerListing
+        controller={props.controller}
+        projectId={props.projectId}
+      />
     </>
   );
   // On the Project page (no quick start) the planner and Starting workers are

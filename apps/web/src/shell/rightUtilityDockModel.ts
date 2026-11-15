@@ -124,48 +124,65 @@ export type RightUtilityDockResolution =
 export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["browser", "terminal"]);
 
 /**
- * The width a page or a shell needs to be usable. At the 420px default (and
- * at the narrower widths people had dragged it to) a Browser showed a phone
- * layout of every site and the tab strip had room for one name; opening a
- * Browser or a Terminal widens a narrower dock to this for as long as such a
- * tab stays open. It is not saved: when it was, one Browser left every later
- * Environment and Plan half a window wide.
+ * The width a tool needs to be usable. At the 420px default (and at the
+ * narrower widths people had dragged it to) a Browser showed a phone layout of
+ * every site, a Review had no room for a diff and the tab strip had room for
+ * one name; opening any tool widens a narrower tool column to this for as long
+ * as one stays open. It is not saved: when it was, one Browser left every later
+ * tool column half a window wide.
  */
 export const WORKBENCH_DOCK_WIDTH = 640;
 
 /**
  * Two columns of tools side by side need two usable widths. At 640px each got
  * about 300px, too narrow for a simulator's device or a page's layout, so a
- * dock showing two columns widens to this until the person sizes it. Not saved,
- * for the reason the workbench width is not.
+ * dock showing two tool columns widens to this until the person sizes it. Not
+ * saved, for the reason the workbench width is not.
  */
 export const TILED_DOCK_WIDTH = 840;
 
 /**
- * One width whatever the dock is showing, so a click inside it moves nothing.
- * The empty launcher used to take the 280px minimum while every tool took the
- * stored width, so opening Environment from it threw the dock from 280px to the
- * stored 960px and squeezed the thread beside it. A Browser or Terminal tab that
- * needs more holds that width even while another tab is in front. It is worked
- * out from the open tabs, so a tab restored after a restart gets it too.
+ * The Environment strip: a thin, static column at the dock's leading edge. It
+ * has one width, with no handle, so nothing a tool does beside it moves it.
+ * The stylesheet reads it as `--octant-dock-env-width`, set by the shell.
+ */
+export const ENVIRONMENT_STRIP_WIDTH = 240;
+
+/**
+ * One width for the tool columns whatever the dock is showing, so a click inside
+ * it moves nothing. Any open tool other than Environment holds the workbench
+ * width, even while another tab is in front, and it is worked out from the
+ * open tabs so a tab restored after a restart gets it too. Environment is its
+ * own strip and never asks for tool width.
  */
 export function resolveDockPresentationWidth(input: {
   readonly storedWidth: number;
-  /** The person sized the dock since a Browser or Terminal last opened, so it stays as they left it. */
+  /** The person sized the dock since a tool last opened, so it stays as they left it. */
   readonly widthChosen: boolean;
   readonly tabSurfaces: ReadonlyArray<string>;
   /** How many columns of tool tiles the dock shows; one when it shows a single tool. */
   readonly tileColumns?: number;
 }): number {
   if (input.widthChosen) return input.storedWidth;
-  const holdsWorkbench = input.tabSurfaces.some(
-    (surface) => surface === "browser" || surface === "terminal",
-  );
+  const holdsTool = input.tabSurfaces.some((surface) => surface !== "environment");
   const wanted = Math.max(
-    holdsWorkbench ? WORKBENCH_DOCK_WIDTH : 0,
+    holdsTool ? WORKBENCH_DOCK_WIDTH : 0,
     (input.tileColumns ?? 1) >= 2 ? TILED_DOCK_WIDTH : 0,
   );
   return Math.max(input.storedWidth, wanted);
+}
+
+/**
+ * The dock's whole width: the Environment strip when it is open, plus the tool
+ * columns when any tool is shown. Environment alone is exactly the strip.
+ */
+export function dockTotalWidth(input: {
+  readonly toolsWidth: number;
+  readonly environmentOpen: boolean;
+  readonly toolsShown: boolean;
+}): number {
+  if (!input.environmentOpen) return input.toolsWidth;
+  return ENVIRONMENT_STRIP_WIDTH + (input.toolsShown ? input.toolsWidth : 0);
 }
 
 /**
@@ -179,6 +196,8 @@ export function dockWidthCeiling(
   workspaceWidth: number | undefined,
   options: {
     readonly tileColumns?: number;
+    /** What stands beside the tool columns and is not theirs to take: the Environment strip. */
+    readonly reservedWidth?: number;
     readonly viewportWidth?: number | undefined;
   } = {},
 ): number {
@@ -191,6 +210,7 @@ export function dockWidthCeiling(
   const room =
     (options.tileColumns ?? 1) >= 2
       ? workspaceWidth -
+        (options.reservedWidth ?? 0) -
         ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
           ? TILED_PRIMARY_MIN
           : NARROW_PRIMARY_MIN)

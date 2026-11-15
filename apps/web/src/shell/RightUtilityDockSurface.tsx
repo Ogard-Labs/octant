@@ -27,11 +27,17 @@ import {
   type DockTileMove,
   type ThreadUtilityDockState,
 } from "./rightUtilityDockSelection";
-import type {
-  RightUtilityDockResolution,
-  RightUtilityDockSurfaceDescriptor,
-  RightUtilityDockSurfaceId,
-  RightUtilityDockTabDescriptor,
+import {
+  splitEnvironmentStrip,
+  storedColumnShares,
+  storedTileShares,
+} from "./dockEnvironmentStrip";
+import {
+  ENVIRONMENT_STRIP_WIDTH,
+  type RightUtilityDockResolution,
+  type RightUtilityDockSurfaceDescriptor,
+  type RightUtilityDockSurfaceId,
+  type RightUtilityDockTabDescriptor,
 } from "./rightUtilityDockModel";
 
 function unavailableMessage(): string {
@@ -122,6 +128,12 @@ export interface RightUtilityDockSurfaceProps {
   readonly tests?: ReactNode;
   readonly tiles?: DockTileControls;
   /**
+   * The handle that sizes the tool columns. With the Environment strip open it
+   * stands on the seam between the strip and the tools, so the strip is never
+   * what a drag moves; without the strip the dock draws it on its own edge.
+   */
+  readonly toolResizeHandle?: ReactNode;
+  /**
    * The row of tool buttons, given only where the dock is a drawer: the title
    * band is inert behind it, so the row stands in the drawer's header. Docked,
    * the row lives in the title band and the header is an empty spacer.
@@ -156,6 +168,25 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // the state is kept for the dock that has.
   const shelfDrawn = tiles !== undefined && !tiles.narrow;
   const shelfEntries = shelfDrawn ? (props.shelf?.entries ?? []) : [];
+  const split = splitEnvironmentStrip({
+    tabs: props.tabs.map((tab) => ({ id: tab.id, surface: dockTabSurface(tab).id })),
+    ...(activeTabId === undefined ? {} : { active: activeTabId }),
+    ...(layout === undefined ? {} : { layout }),
+    ...(tiles?.minimised === undefined ? {} : { minimised: tiles.minimised }),
+  });
+  // Environment is a strip of its own beside the tool columns, never a tile
+  // among them, so it keeps its width whatever opens or closes beside it.
+  const environmentTab =
+    split.environmentTabId === undefined
+      ? undefined
+      : props.tabs.find((tab) => tab.id === split.environmentTabId);
+  const strip =
+    environmentTab !== undefined &&
+    shelfDrawn &&
+    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+  // A pages row lives in a tile's bar only where tiles carry bars: with two or
+  // more tools drawn together.
+  const barsDrawn = strip ? split.toolTabIds.length >= 2 : tiled;
   const draggedTool = useDraggedDockTool();
   const [dropZone, setDropZone] = useState<"beside" | "below" | "replace">();
   const root = useRef<HTMLDivElement>(null);
@@ -378,7 +409,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       inset: tool.id === "plan" || tool.id === "delivery" || tool.id === "agents",
       children:
         available.kind === "surface" ? (
-          renderToolBody(tab, tab.id, pages, !tiled)
+          renderToolBody(tab, tab.id, pages, !barsDrawn)
         ) : (
           <OctantEmpty
             message={unavailableMessage()}
@@ -409,27 +440,185 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     tests: props.tests,
   };
 
+  const toolbar = (
+    <header className="dock-head right-utility-dock__toolbar">
+      <div className="right-utility-dock__tabs">
+        {props.toolRow === undefined ? null : <DockToolButtons {...props.toolRow} />}
+      </div>
+      <div className="right-utility-dock__actions">
+        {props.onClose === undefined ? null : (
+          <IconButton
+            icon={X}
+            label="Close right sidebar"
+            onClick={props.onClose}
+            ref={props.closeButtonRef}
+          />
+        )}
+      </div>
+    </header>
+  );
+  // The tiles for what the tool columns show; the stored layout, or the one
+  // focused tool as a single tile.
+  const tilesNode = (
+    <DockTiles
+      focusedTabId={activeTabId}
+      layout={
+        strip
+          ? (split.toolLayout ?? { columns: [] })
+          : tiled
+            ? (layout ?? { columns: [] })
+            : {
+                columns: [{ share: 1, tiles: [{ tabId: activeTab?.id ?? "", share: 1 }] }],
+              }
+      }
+      onCloseTile={closeTool}
+      onFocusTile={props.onSelectSurface}
+      onHideTile={(tabId) => {
+        // From the tile's menu: focus is in a popup, so it is not "inside".
+        const surface = surfaceOfTab(tabId);
+        if (surface !== undefined) setRefocus({ surface });
+        tiles?.onHideTile(tabId);
+      }}
+      onMinimiseTile={(tabId) => {
+        const surface = surfaceOfTab(tabId);
+        if (surface !== undefined) setRefocus({ card: surface });
+        tiles?.onMinimise(tabId);
+      }}
+      onMoveTile={(tabId, direction) => tiles?.onMove(tabId, direction)}
+      canPlaceTile={(tabId, targetTabId, edge) => {
+        // A drop that would leave the tiles where they are is no placement.
+        const order = (state: ThreadUtilityDockState) =>
+          JSON.stringify(
+            state.layout?.columns.map((column) => column.tiles.map((tile) => tile.tabId)),
+          );
+        return (
+          order(placeUtilityTile(placementState, tabId, targetTabId, edge)) !==
+          order(placementState)
+        );
+      }}
+      onPlaceTile={(tabId, targetTabId, edge) => tiles?.onPlace(tabId, targetTabId, edge)}
+      onResizeColumn={(index, shares) => {
+        if (!strip) return tiles?.onResizeColumn(index, shares);
+        const stored = storedTileShares(placementState, split, index, shares);
+        if (stored !== undefined) tiles?.onResizeColumn(stored.column, stored.shares);
+      }}
+      onResizeColumns={(shares) => {
+        if (!strip) return tiles?.onResizeColumns(shares);
+        const stored = storedColumnShares(placementState, split, shares);
+        if (stored !== undefined) tiles?.onResizeColumns(stored);
+      }}
+      onShowTileAlone={(tabId) => tiles?.onShowAlone(tabId)}
+      panelRef={toolPanel}
+      renderTile={renderTile}
+    />
+  );
+  const dragShield =
+    draggedTool !== undefined && tiles !== undefined && !tiles.narrow ? (
+      <div
+        className="dock-tiles__drag-shield"
+        onDragLeave={() => setDropZone(undefined)}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDropZone(zoneAt(event));
+        }}
+        onDrop={dropTool}
+      >
+        {dropZone === undefined || dropZone === "replace" ? null : (
+          <div
+            aria-hidden="true"
+            className="workspace-drop-overlay dock-tiles__drop"
+            data-drop-edge={dropZone === "beside" ? "right" : "bottom"}
+          >
+            <span>{dropZone === "beside" ? "Show beside" : "Show below"}</span>
+          </div>
+        )}
+      </div>
+    ) : null;
+  const shelfNode =
+    shelfEntries.length === 0 || props.shelf === undefined ? null : (
+      <DockShelf
+        entries={shelfEntries}
+        renderCard={(entry) =>
+          props.shelf?.renderCard(entry, {
+            // The card unmounts as the tool is restored; the tool's button
+            // in the row takes the focus the card held.
+            onShow: () => {
+              setRefocus({ surface: entry.surface });
+              props.shelf?.onShow(entry.tabId);
+            },
+            // A closed tool leaves no button open, so the keyboard goes to
+            // the same place a hidden card sends it.
+            onClose: () => {
+              setRefocus({ surface: entry.surface });
+              props.onCloseTab(entry.tabId);
+            },
+            // A card that goes away hands the keyboard to the tool's button.
+            onHide: () => {
+              setRefocus({ surface: entry.surface });
+              props.shelf?.onHide(entry.tabId);
+            },
+          })
+        }
+      />
+    );
+
+  if (strip) {
+    const environmentAvailable = tiles?.resolveSurface("environment") ?? { kind: "surface" };
+    return (
+      <div
+        className="right-utility-dock__surface right-utility-dock__surface--strip"
+        data-dock-surface={activeSurface?.id ?? "empty"}
+        ref={root}
+      >
+        <section
+          aria-label="Environment"
+          className="dock-env-strip"
+          data-shelf={shelfEntries.length === 0 ? undefined : "true"}
+          style={{ width: ENVIRONMENT_STRIP_WIDTH }}
+        >
+          <header className="dock-head right-utility-dock__toolbar dock-env-strip__head">
+            <DockToolIcon surface="environment" />
+            <span className="dock-tile__name">Environment</span>
+            <IconButton
+              icon={X}
+              label="Close Environment"
+              onClick={() => closeTool(environmentTab.id)}
+            />
+          </header>
+          <div className="right-utility-dock__tool dock-env-strip__body">
+            {environmentAvailable.kind === "surface" ? (
+              renderToolBody(environmentTab, environmentTab.id, false, false)
+            ) : (
+              <OctantEmpty
+                message={unavailableMessage()}
+                state="neutral"
+                title="Environment is unavailable"
+              />
+            )}
+          </div>
+          {shelfNode}
+        </section>
+        {split.toolTabIds.length === 0 ? null : (
+          <div className="dock-tool-column">
+            {props.toolResizeHandle}
+            {toolbar}
+            <div className="dock-body right-utility-dock__content">
+              {tilesNode}
+              {dragShield}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="right-utility-dock__surface"
       data-dock-surface={activeSurface?.id ?? "empty"}
       ref={root}
     >
-      <header className="dock-head right-utility-dock__toolbar">
-        <div className="right-utility-dock__tabs">
-          {props.toolRow === undefined ? null : <DockToolButtons {...props.toolRow} />}
-        </div>
-        <div className="right-utility-dock__actions">
-          {props.onClose === undefined ? null : (
-            <IconButton
-              icon={X}
-              label="Close right sidebar"
-              onClick={props.onClose}
-              ref={props.closeButtonRef}
-            />
-          )}
-        </div>
-      </header>
+      {toolbar}
       <div
         className="dock-body right-utility-dock__content"
         data-shelf={shelfEntries.length === 0 ? undefined : "true"}
@@ -451,93 +640,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         ) : activeTab === undefined ? null : (
           // One tile is the single-tool view: the same tree as several, so a
           // tool that gains or loses a neighbour is never remounted.
-          <DockTiles
-            focusedTabId={activeTabId}
-            layout={
-              tiled
-                ? layout
-                : { columns: [{ share: 1, tiles: [{ tabId: activeTab.id, share: 1 }] }] }
-            }
-            onCloseTile={closeTool}
-            onFocusTile={props.onSelectSurface}
-            onHideTile={(tabId) => {
-              // From the tile's menu: focus is in a popup, so it is not "inside".
-              const surface = surfaceOfTab(tabId);
-              if (surface !== undefined) setRefocus({ surface });
-              tiles?.onHideTile(tabId);
-            }}
-            onMinimiseTile={(tabId) => {
-              const surface = surfaceOfTab(tabId);
-              if (surface !== undefined) setRefocus({ card: surface });
-              tiles?.onMinimise(tabId);
-            }}
-            onMoveTile={(tabId, direction) => tiles?.onMove(tabId, direction)}
-            canPlaceTile={(tabId, targetTabId, edge) => {
-              // A drop that would leave the tiles where they are is no placement.
-              const order = (state: ThreadUtilityDockState) =>
-                JSON.stringify(
-                  state.layout?.columns.map((column) => column.tiles.map((tile) => tile.tabId)),
-                );
-              return (
-                order(placeUtilityTile(placementState, tabId, targetTabId, edge)) !==
-                order(placementState)
-              );
-            }}
-            onPlaceTile={(tabId, targetTabId, edge) => tiles?.onPlace(tabId, targetTabId, edge)}
-            onResizeColumn={(index, shares) => tiles?.onResizeColumn(index, shares)}
-            onResizeColumns={(shares) => tiles?.onResizeColumns(shares)}
-            onShowTileAlone={(tabId) => tiles?.onShowAlone(tabId)}
-            panelRef={toolPanel}
-            renderTile={renderTile}
-          />
+          tilesNode
         )}
-        {draggedTool !== undefined && tiles !== undefined && !tiles.narrow ? (
-          <div
-            className="dock-tiles__drag-shield"
-            onDragLeave={() => setDropZone(undefined)}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDropZone(zoneAt(event));
-            }}
-            onDrop={dropTool}
-          >
-            {dropZone === undefined || dropZone === "replace" ? null : (
-              <div
-                aria-hidden="true"
-                className="workspace-drop-overlay dock-tiles__drop"
-                data-drop-edge={dropZone === "beside" ? "right" : "bottom"}
-              >
-                <span>{dropZone === "beside" ? "Show beside" : "Show below"}</span>
-              </div>
-            )}
-          </div>
-        ) : null}
-        {shelfEntries.length === 0 || props.shelf === undefined ? null : (
-          <DockShelf
-            entries={shelfEntries}
-            renderCard={(entry) =>
-              props.shelf?.renderCard(entry, {
-                // The card unmounts as the tool is restored; the tool's button
-                // in the row takes the focus the card held.
-                onShow: () => {
-                  setRefocus({ surface: entry.surface });
-                  props.shelf?.onShow(entry.tabId);
-                },
-                // A closed tool leaves no button open, so the keyboard goes to
-                // the same place a hidden card sends it.
-                onClose: () => {
-                  setRefocus({ surface: entry.surface });
-                  props.onCloseTab(entry.tabId);
-                },
-                // A card that goes away hands the keyboard to the tool's button.
-                onHide: () => {
-                  setRefocus({ surface: entry.surface });
-                  props.shelf?.onHide(entry.tabId);
-                },
-              })
-            }
-          />
-        )}
+        {dragShield}
+        {shelfNode}
       </div>
     </div>
   );

@@ -27,6 +27,29 @@ export const CoordinatorStartingByProject = Schema.Record({
 );
 export type CoordinatorStartingByProject = typeof CoordinatorStartingByProject.Type;
 
+/**
+ * Settings › Code › Coordinators › Show workers: where a coordinator's workers
+ * are listed outside the coordinator's own thread
+ * (docs/design/workspace.md#coordinators). A view preference only; it never
+ * changes what a worker may do or who sees its requests. Both default to off.
+ */
+export const CoordinatorWorkerListing = Schema.Struct({
+  sidebar: Schema.Boolean,
+  board: Schema.Boolean,
+});
+export type CoordinatorWorkerListing = typeof CoordinatorWorkerListing.Type;
+
+/** Per-Project overrides of the Show workers choice; a Project not listed uses Settings. */
+export const CoordinatorWorkerListingByProject = Schema.Record({
+  key: ProjectId,
+  value: CoordinatorWorkerListing,
+}).pipe(
+  Schema.filter((entries) => Object.keys(entries).length <= MAX_COORDINATOR_PROJECT_OVERRIDES, {
+    message: () => "Too many Project overrides.",
+  }),
+);
+export type CoordinatorWorkerListingByProject = typeof CoordinatorWorkerListingByProject.Type;
+
 export const DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT = 6;
 export const MAX_COORDINATOR_OPEN_WORKER_LIMIT = 16;
 export const MAX_COORDINATORS_PER_PROJECT = 4;

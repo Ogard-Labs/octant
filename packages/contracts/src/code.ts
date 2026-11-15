@@ -12,6 +12,8 @@ import {
   CoordinatorBounds,
   CoordinatorOpenWorkerLimit,
   CoordinatorStartingByProject,
+  CoordinatorWorkerListing,
+  CoordinatorWorkerListingByProject,
   CoordinatorStartingChoice,
   CoordinatorWorkerLevel,
 } from "./coordinator";
@@ -575,6 +577,13 @@ export const CodeSettings = Schema.Struct({
    * a Project not listed uses Settings.
    */
   coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+  /**
+   * Settings › Code › Coordinators › Show workers. Absent is off for both the
+   * sidebar and the board.
+   */
+  coordinatorWorkerListing: Schema.optional(CoordinatorWorkerListing),
+  /** Per-Project overrides of {@link coordinatorWorkerListing}; a Project not listed uses Settings. */
+  coordinatorWorkerListingByProject: Schema.optional(CoordinatorWorkerListingByProject),
   /** How many open workers one coordinator may have; absent is the default. */
   coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
   /**
@@ -814,6 +823,10 @@ export const CodeCommand = Schema.Union(
     coordinatorStarting: Schema.optional(CoordinatorStartingChoice),
     /** Absent keeps the stored overrides; a present map replaces them. */
     coordinatorStartingByProject: Schema.optional(CoordinatorStartingByProject),
+    /** Absent keeps the stored choice. */
+    coordinatorWorkerListing: Schema.optional(CoordinatorWorkerListing),
+    /** Absent keeps the stored overrides; a present map replaces them. */
+    coordinatorWorkerListingByProject: Schema.optional(CoordinatorWorkerListingByProject),
     /** Absent keeps the stored limit. */
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
     /** Absent keeps the stored choice. */

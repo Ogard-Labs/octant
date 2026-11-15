@@ -8,13 +8,15 @@ import type {
   ProviderModelId,
 } from "@octant/contracts/providers";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
-import { decodeCodeThreadId } from "@octant/contracts/code";
+import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import { decodeWorkThreadId } from "@octant/contracts";
 import type {
   buildModelPickerGroups,
   CreateHostViewScope,
   listEligibleImageProfiles,
 } from "@octant/domain";
+import { CoordinatorWorkersToggle, WorkerOfStrip } from "../code/CoordinatorWorkersPanel";
+import { threadRowActivity } from "../shell/navigationModel";
 import { memo, useMemo, type ReactNode, type RefObject } from "react";
 import type { useAgentProfiles } from "../agentProfile/useAgentProfiles";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
@@ -457,6 +459,44 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
       <ThreadCoordinatorMenuItems actions={coordinatorActions} thread={row} />
     );
   };
+  // A coordinator's pane header offers its Workers panel; a worker's names its
+  // coordinator and the way back. Both read the window's Code thread list.
+  const threadHeader = (surface: WorkspaceTab): ReactNode => {
+    if (surface.kind !== "code-overview") return undefined;
+    const rows = navigation.codeProjectThreads;
+    const row = rows.find((thread) => String(thread.threadId) === String(surface.threadId));
+    if (row === undefined) return undefined;
+    if (row.coordinator === true) {
+      const workers = rows.filter((thread) => thread.coordinatorThreadId === row.threadId);
+      return (
+        <CoordinatorWorkersToggle
+          coordinatorThreadId={row.threadId}
+          needsYouCount={
+            workers.filter((thread) => threadRowActivity(thread) === "attention").length
+          }
+          workerCount={workers.length}
+        />
+      );
+    }
+    const coordinator =
+      row.coordinatorThreadId === undefined
+        ? undefined
+        : rows.find((thread) => thread.threadId === row.coordinatorThreadId);
+    if (coordinator === undefined) return undefined;
+    return (
+      <WorkerOfStrip
+        coordinatorTitle={coordinator.title}
+        onBack={() =>
+          void openCodeThread(
+            coordinator.threadId as CodeThreadId,
+            coordinator.title,
+            undefined,
+            coordinator.projectId as ProjectId | undefined,
+          )
+        }
+      />
+    );
+  };
   const {
     agentRunClient,
     appleToolchainClient,
@@ -570,6 +610,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 <ComposerContextMeterShortcut />
                 <ThreadStatsDetailDialog />
                 <WorkspaceView
+                  threadHeader={threadHeader}
                   octantInstructionsClient={props.clients.octantInstructionsClient}
                   threadMenuItems={threadMenuItems}
                   {...(contextClient === undefined ? {} : { contextClient })}

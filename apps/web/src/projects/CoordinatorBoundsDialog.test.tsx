@@ -18,9 +18,11 @@ describe("a running coordinator's limits", () => {
     );
     expect(screen.getByRole("dialog", { name: "Coordinator limits" })).toBeInTheDocument();
     expect(screen.getByText(/Backlog/)).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "Wakes an hour" })).toHaveValue(30);
-    expect(screen.getByRole("spinbutton", { name: "Rounds" })).toHaveValue(25);
-    expect(screen.getByRole("spinbutton", { name: "Worker starts an hour" })).toHaveValue(60);
+    expect(screen.getByRole("spinbutton", { name: "Check-ins an hour" })).toHaveValue(30);
+    expect(screen.getByRole("spinbutton", { name: "Back-and-forths" })).toHaveValue(25);
+    expect(screen.getByRole("spinbutton", { name: "New workers an hour" })).toHaveValue(60);
+    // A running coordinator's workers' level is fixed; only the draft offers it.
+    expect(screen.queryByRole("combobox", { name: "Workers start at" })).toBeNull();
   });
 
   it("saves the bounds a person changed and leaves a bound at its default out", async () => {
@@ -35,7 +37,7 @@ describe("a running coordinator's limits", () => {
       />,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Increase Wakes an hour" }));
+    await user.click(screen.getByRole("button", { name: "Increase Check-ins an hour" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onSave).toHaveBeenCalledExactlyOnceWith({ wakesPerHour: 31, rounds: 25 });
 

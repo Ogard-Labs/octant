@@ -52,6 +52,71 @@
   background: var(--oct-bg);
 }
 
+/* Environment is a strip of its own beside the tool columns: no handle, one
+   width (set inline from ENVIRONMENT_STRIP_WIDTH), and a hairline on its
+   leading edge that runs the whole height of the dock. */
+.right-utility-dock[data-dock-environment="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.right-utility-dock__surface--strip {
+  display: flex;
+  grid-template-rows: none;
+}
+
+.dock-env-strip {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+  flex-direction: column;
+  border-left: 1px solid var(--oct-border);
+}
+
+.dock-env-strip__head {
+  flex: none;
+  gap: var(--oct-space-1);
+  color: var(--oct-fg);
+}
+
+.dock-env-strip__head .dock-tile__name {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-env-strip__body {
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden auto;
+}
+
+.dock-env-strip[data-shelf="true"] > .dock-shelf {
+  border-top: 1px solid var(--oct-border);
+}
+
+/* The tool columns take what the strip leaves. The handle straddles the seam
+   between the strip and the tools, and draws the hairline there. */
+.dock-tool-column {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.dock-tool-column > .right-utility-dock__resize {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 7px;
+}
+
 /* The bar is the system's .dock-head; the two-ended layout is ours, because
    the surface tabs sit where .dock-head expects a static label, and so is
    the height: the title rail the thread tab band beside it also takes, with

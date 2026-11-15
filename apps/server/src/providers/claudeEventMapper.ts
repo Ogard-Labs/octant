@@ -53,6 +53,11 @@ const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
   // Publishing runs on claude.ai, and its answer (the page's address, title,
   // and any warnings) reaches the model as content Octant did not write.
   ["Artifact", { source: "hosted-tool", targetKey: "url" }],
+  // The account's other claude.ai services answer the model the same way.
+  ["Projects", { source: "hosted-tool", targetKey: "path" }],
+  ["ClaudeDesign", { source: "hosted-tool", targetKey: "operation" }],
+  ["RemoteTrigger", { source: "hosted-tool", targetKey: "trigger_id" }],
+  ["PushNotification", { source: "hosted-tool", targetKey: "message" }],
 ]);
 // Claude's AskUserQuestion schema itself carries at most this many questions
 // in one tool call; more than that is not a shape the SDK can answer.
@@ -239,13 +244,17 @@ function reportsToolCallContent(state: ClaudeToolState): boolean {
 }
 
 /**
- * The input a record keeps. A file edit or write keeps the path alone: what
- * was written stays out of every event this adapter emits, as it does for the
- * change's diff, and the file itself holds it.
+ * The input a record keeps. A file or notebook edit, or a write, keeps the
+ * path alone: what was written stays out of every event this adapter emits,
+ * as it does for the change's diff, and the file itself holds it.
  */
 function recordedInput(
   content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
 ): string {
+  if (content.toolName === "NotebookEdit") {
+    const notebook = jsonString(content.input, "notebook_path");
+    return notebook === undefined ? "" : JSON.stringify({ notebook_path: notebook });
+  }
   if (content.toolName !== "Edit" && content.toolName !== "Write") {
     return JSON.stringify(content.input);
   }

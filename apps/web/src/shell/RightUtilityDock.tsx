@@ -9,8 +9,10 @@ import {
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import type { DockToolButtonsProps } from "./DockToolButtons";
 import { ShellResizeHandle } from "./ShellResizeHandle";
+import { splitEnvironmentStrip } from "./dockEnvironmentStrip";
 import {
   dockWidthCeiling,
+  ENVIRONMENT_STRIP_WIDTH,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceDescriptor,
   type RightUtilityDockSurfaceId,
@@ -66,8 +68,30 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   // What is drawn, not what is stored: the stylesheet clamps the stored width
   // to the room the thread leaves, and the separator announced the stored one.
   const [drawnWidth, setDrawnWidth] = useState<number>();
+  // With Environment open it is a strip of its own and the handle sizes only
+  // the tool columns beside it.
+  const split = splitEnvironmentStrip({
+    tabs: props.tabs.map((tab) => ({
+      id: tab.id,
+      surface: ("surface" in tab ? tab.surface : tab).id,
+    })),
+    ...(props.activeTabId === undefined ? {} : { active: props.activeTabId }),
+    ...(props.tiles?.layout === undefined ? {} : { layout: props.tiles.layout }),
+    ...(props.tiles?.minimised === undefined ? {} : { minimised: props.tiles.minimised }),
+  });
+  const stripOpen =
+    !props.isNarrow &&
+    props.tiles !== undefined &&
+    split.environmentTabId !== undefined &&
+    !(props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface");
+  const reserved = stripOpen ? ENVIRONMENT_STRIP_WIDTH : 0;
   const ceiling = dockWidthCeiling(workspaceWidth, {
-    tileColumns: props.isNarrow ? 1 : (props.tiles?.layout?.columns.length ?? 1),
+    reservedWidth: reserved,
+    tileColumns: props.isNarrow
+      ? 1
+      : stripOpen
+        ? (split.toolLayout?.columns.length ?? 1)
+        : (props.tiles?.layout?.columns.length ?? 1),
     viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
   });
 
@@ -93,6 +117,22 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   }, [props.isNarrow, props.open]);
 
   if (!props.open && !props.isNarrow) return null;
+
+  const resizeHandle = (
+    <ShellResizeHandle
+      accessibleName="Resize utility dock"
+      className="right-utility-dock__resize"
+      edge="leading"
+      maximum={ceiling}
+      minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
+      {...(props.onCancelWidthPreview === undefined
+        ? {}
+        : { onCancel: props.onCancelWidthPreview })}
+      onCommit={props.onCommitWidth}
+      onPreview={props.onPreviewWidth}
+      value={Math.min((drawnWidth ?? props.width) - reserved, ceiling)}
+    />
+  );
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second
@@ -127,6 +167,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
       {...(props.tiles === undefined ? {} : { tiles: props.tiles })}
+      {...(stripOpen ? { toolResizeHandle: resizeHandle } : {})}
       {...(props.toolRow === undefined ? {} : { toolRow: props.toolRow })}
       {...(props.toolsAwaitingThread === undefined
         ? {}
@@ -160,22 +201,11 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     <aside
       aria-label="Right Utility Dock"
       className="right-utility-dock"
+      data-dock-environment={stripOpen ? "true" : undefined}
       id="right-utility-dock"
       ref={dock}
     >
-      <ShellResizeHandle
-        accessibleName="Resize utility dock"
-        className="right-utility-dock__resize"
-        edge="leading"
-        maximum={ceiling}
-        minimum={MIN_CONTEXT_SIDEBAR_WIDTH}
-        {...(props.onCancelWidthPreview === undefined
-          ? {}
-          : { onCancel: props.onCancelWidthPreview })}
-        onCommit={props.onCommitWidth}
-        onPreview={props.onPreviewWidth}
-        value={Math.min(drawnWidth ?? props.width, ceiling)}
-      />
+      {stripOpen ? null : resizeHandle}
       {surface}
     </aside>
   );

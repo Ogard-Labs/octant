@@ -35,6 +35,10 @@ import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
+import {
+  ProjectModelRolesSection,
+  type ProjectModelRolesSectionProps,
+} from "./ProjectModelRolesSection";
 import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import { ProjectNativeProvidersSection } from "./ProjectNativeProvidersSection";
@@ -142,6 +146,8 @@ export interface ProjectOverviewProps {
   /** The person's instructions for this Project, beside its memory. */
   readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
+  readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
 
 const MAX_ICON_BYTES = 262_144;
@@ -791,6 +797,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 enabled={props.project.statusFile === "enabled"}
                 onChange={(enabled) => props.onWorkStatusFileChange?.(props.project.id, enabled)}
               />
+            ) : null}
+            {props.project.type !== "chat" && props.modelRoles !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-models`}
+                label="Models"
+                summary="Which models this Project's coordinators and helper agents use for each role"
+              >
+                <ProjectModelRolesSection
+                  {...props.modelRoles}
+                  disabled={archived || connectionStale}
+                  projectId={String(props.project.id)}
+                />
+              </ProjectOverviewInspector>
             ) : null}
             {props.spendCeilingClient === undefined ? null : (
               <ProjectOverviewInspector

@@ -1136,7 +1136,7 @@ strong {
          column's own minimum. The handle stops at the same half. */ min(
         var(--octant-context-sidebar-width, 360px),
         calc(100% - var(--octant-wide-primary-min)),
-        50%
+        calc(50% + var(--octant-dock-env-width, 0px))
       )
     );
 }
