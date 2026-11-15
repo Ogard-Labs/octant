@@ -4487,10 +4487,11 @@ describe("Claude artifact delivery", () => {
         behavior: "allow",
       });
       // A workflow rides the same switch, but its script runs as JavaScript
-      // in the runtime process, so starting one asks the person first.
+      // in the runtime process, so starting one keeps Octant's own ask below
+      // Full access, whatever the person's own rules allow.
       expect(open.withheldTools).not.toContain("Workflow");
       await expect(ask("Workflow", { script: "export const meta = {}" }, "wf-1")).resolves.toEqual({
-        behavior: "own-rules",
+        behavior: "ask",
       });
       // A web read asks at Guarded, as Claude Code itself does.
       await expect(ask("WebFetch", { url: "https://example.invalid" }, "fetch-1")).resolves.toEqual(

@@ -625,12 +625,16 @@ function claudeConfinedTarget(
 /**
  * Tools whose ask stays Octant's own even where the person's permission rules
  * would allow them: a question needs the person's answer, a publish snapshots
- * the file the person approves, and a wake-up is answered by Octant from the
- * thread's schedule and must never run in the runtime.
+ * the file the person approves, a wake-up is answered by Octant from the
+ * thread's schedule and must never run in the runtime, and a workflow's script
+ * runs as JavaScript in the runtime process, outside the command sandbox, so
+ * the person approves each start below Full access (maintainer decision,
+ * 2026-11-14).
  */
 const CLAUDE_OCTANT_ASKED_TOOLS = new Set<string>([
   "AskUserQuestion",
   CLAUDE_ARTIFACT_TOOL,
+  CLAUDE_WORKFLOW_TOOL,
   ...CLAUDE_WAKEUP_TOOLS,
 ]);
 

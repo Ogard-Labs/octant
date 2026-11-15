@@ -709,7 +709,8 @@ permission rules run first: the person's `permissions.allow`, `ask`, and
 where Octant raises its approval or Reviewed's reviewer decides (maintainer
 decision, 2026-11-14). A question (`AskUserQuestion`), an Artifact publish,
 and a wake-up keep Octant's own ask, because each needs an answer only Octant
-gives. So do a file tool naming a path outside the folders the session holds,
+gives, and so does a `Workflow` start, whose script runs as JavaScript in the
+runtime process outside the command sandbox. So do a file tool naming a path outside the folders the session holds,
 which asks as Claude Code does on its own and goes to Reviewed's reviewer, and
 a switch into a worktree outside them, which the session holds only once
 `canUseTool` sees the switch allowed. Plan keeps Octant's ask for everything. A call the person's rules
