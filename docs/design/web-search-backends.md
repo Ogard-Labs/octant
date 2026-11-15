@@ -3,8 +3,9 @@
 This topic specification owns where a web search query goes: the ordered list
 of search backends a person sets up for Octant's own `web-search`, the data
 policy that decides which of them may receive a query, the fallback between
-them, and a provider's own built-in search, both in the native harness and in a
-vendor runtime, under that same policy. Architecture owns the tool itself, its
+them, and how a provider's own built-in search, both in the native harness and
+in a vendor runtime, sits beside them outside that policy. Architecture owns
+the tool itself, its
 one definition, and its result shape
 ([Architecture: Web search](../architecture.md#web-search)); the patterns the
 harness refuses on a tainted thread stay in
@@ -15,13 +16,15 @@ Status: partly built. Built: the settings contract and its journaled
 route's "Octant web search" label, the migration, the credential broker namespace
 `/v1/web-search-credentials/*` with its `/api/host-control/web-search/key`
 route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
-its 20-second budget, and the journaled record of where each query went. Not
-built: Settings › Web search (slice 3) and a provider's own search in the
-native harness (slice 4), which still refuses any built-in tool a provider
-starts in its stream as `unsupported`, so a harness endpoint reports
-`nativeWebResearch` as `unsupported`. A per-entry processing region is not
-built: no kind in the table takes one through its API, and Linkup's EU-pinned
-host is the entry's address.
+its 20-second budget, the journaled record of where each query went, Settings ›
+Web search, and Claude Code, Codex, OpenCode, and Mistral Vibe each launched
+with its own search off wherever the session's setup has `webTools` off. Not built: a
+generic ACP agent's own web tools, which Octant cannot switch off; a provider's own
+search in the native harness (slice 4), which still refuses any built-in tool
+a provider starts in its stream as `unsupported`, so a harness endpoint
+reports `nativeWebResearch` as `unsupported`. A per-entry processing region is
+not built: no kind in the table takes one through its API, and Linkup's
+EU-pinned host is the entry's address.
 
 ## Why
 
@@ -37,7 +40,9 @@ grounding from Google and Microsoft retains queries outside their data
 protection terms. EU processing with no retention is reachable only through a
 search service Octant calls itself, under the person's own contract with it.
 A provider's own search is still the simplest search for a person who has only
-a model endpoint, so the native harness offers it where the policy allows.
+a model endpoint, so the native harness offers it, and the policy does not
+govern it: it runs under the person's own agreement with that provider, as it
+does on its own.
 
 ## The tool stays one tool
 
@@ -175,26 +180,28 @@ predates it, for no gain the label does not already give.
 - `searxng` (Octant web search) offers `web-search` when an eligible backend
   exists.
 - `provider-native` offers the provider's own search when the provider supports
-  it and the policy allows it (below).
-- `automatic` keeps the order Architecture's Web search section gives
-  between the two, counting a route as ready only when the policy allows it.
-  A person who wants their own backends ahead of a provider's search chooses
-  Octant web search.
+  it, under every data policy (below).
+- `automatic` keeps the order Architecture's Web search section gives: the
+  provider's own search first when the provider supports it, then Octant web
+  search when an eligible backend exists, so a fresh install searches with no
+  setup. A person who wants their own backends ahead of a provider's search
+  chooses Octant web search.
 
 A native harness thread in Work and Code follows `automatic`. A turn offers
-one search, never `web-search` beside a provider's own. Under a policy that
-withholds the provider's own search, `provider-native` reads unavailable with
-that reason, as it does today for a provider without one. The route's
-existing control in Settings › Chat and on a thread stays the only place it is
-chosen: the policy limits the route; it adds no second switch.
+one search, never `web-search` beside a provider's own. The route's existing
+control in Settings › Chat and on a thread stays the only place it is chosen:
+the policy decides only which of Octant's backends may answer, and adds no
+second switch.
 
 ## A provider's own search
 
 A provider's built-in search runs inside the provider's own loop, so Octant
-cannot choose its vendor, fall back, or see the query before it is sent. That
-decides two rules: the data policy withholds it wherever Octant cannot hold the
-provider to the policy, and the tainted-thread rule withholds it wherever
-Octant cannot refuse a query.
+cannot choose its vendor, fall back, or see the query before it is sent. The
+data policy does not govern it: under every policy it runs where the route
+selects it, as it does on its own, under the person's own agreement with that
+provider. Rationale: maintainer decision 2026-11-15: provider search behaves as
+it does on its own. The tainted-thread rule still withholds it wherever Octant
+cannot refuse a query.
 
 ### What each provider offers
 
@@ -205,20 +212,13 @@ Octant cannot refuse a query.
 | OpenAI API (Responses), web search               | With limits, under the person's ZDR terms   | Not confirmed         |
 | Any other origin or protocol                     | Not offered: Octant cannot tell who runs it | Not offered           |
 
-This table is data beside the provider capabilities in `packages/domain`, with
-the same checked date and source as the backend table. The person states ZDR
-for a provider's search on its model endpoint, as for a backend, and the
-statement is accepted only where the table offers it.
-
-The data policy applies:
-
-- Under Any, a provider's own search is used where the route selects it.
-- Under ZDR only, it is used only where the table offers ZDR and the person
-  stated it, and only in the eligible mode: Anthropic's basic web search,
-  never the version with dynamic filtering. The request builder sets that
-  version.
-- Under EU only and EU and ZDR, no provider's own search is used until a
-  provider documents EU processing for it.
+The table records what each provider's terms said when this design was
+written (November 2026), so a person who needs ZDR or EU processing can see
+why the policy does not reach a provider's search and can choose Octant web
+search as the route instead. It is not data Octant enforces, and a model
+endpoint asks for no statement about its provider's search. The request
+builder still asks Anthropic for its basic web search, never the version with
+dynamic filtering.
 
 ### In the native harness
 
@@ -276,14 +276,36 @@ or publishes one, joins the turn's usage and cost
 A vendor runtime's own web tools in Work and Code (Claude Code's, Codex's,
 OpenCode's, and an ACP agent's) are its native setup's `webTools`, which the
 person already turns on per account
-([Architecture: providers](../architecture.md#providers)). Octant cannot set
-which search mode a vendor runtime uses, so the policy limits that switch:
+([Architecture: providers](../architecture.md#providers)). The data policy
+does not limit them: under every policy `webTools` follows the native-setup
+policy ([Provider runtimes](provider-runtimes.md)), and Settings › Providers
+shows no policy lock beside "Run as itself". Rationale: maintainer decision
+2026-11-15: provider search behaves as it does on its own; the policy governs
+only the backends Octant itself sends a query to.
 
-- Under Any, `webTools` follows the native-setup policy
-  ([Provider runtimes](provider-runtimes.md)), as today.
-- Under any other policy, `webTools` is off, and Settings › Providers shows the
-  switch locked with the policy as its reason. Its journaled value does not
-  change, so returning to Any restores the person's choice.
+`webTools` is off where the thread's own choice is off, and in Chat and Plan
+where the account does not run as itself. Off means the runtime cannot search,
+at every level, Full access included,
+because each runtime is launched with its own search switched off unless the
+session's setup has `webTools` on, as the provider SDK's `nativeSetup` contract
+already requires of a feature reported supported:
+
+- Claude Code leaves `WebSearch` and `WebFetch` out of its tools and refuses
+  them.
+- Codex starts and resumes every thread with `web_search = "disabled"` in the
+  thread's config, which removes its hosted and standalone search tools
+  (read from the codex-cli 0.169.0 source).
+- OpenCode denies `websearch` and `webfetch` after the person's own rules, on
+  1.x and 2.x.
+- Mistral Vibe launches with `VIBE_DISABLED_TOOLS` naming `web_search` and
+  `web_fetch` (read from the 3.0.3 source).
+
+Rationale: before this, Codex and OpenCode searched whatever the setup said,
+so a session whose setup had `webTools` off still reached their own search
+services. A Codex or OpenCode thread whose own choice is off therefore no
+longer searches at any level. A generic ACP
+agent reports `webTools` unsupported: Octant has no switch for its own web
+tools, and that is not built.
 
 These tools already mark the thread as having read outside content.
 
@@ -298,12 +320,11 @@ Extensions ([Settings](settings.md#groups-and-pages)). It shows:
   with the reason);
 - Add backend, which asks for the kind, then the address, key, region, and
   statements the kind takes;
-- what the policy allows of a provider's own search, with a link to the
-  research route in Settings › Chat and to the locked `webTools` switches.
+- a line saying the policy covers only these backends, while a provider's own
+  search and a vendor runtime's own web tools run as they do on their own,
+  with a link to the research route in Settings › Chat.
 
-A model endpoint's page in Octant Harness gains the ZDR statement for its
-provider's own search, where the provider offers it. Settings › Chat keeps the
-research route; its SearXNG address field moves here as the first backend
+Settings › Chat keeps the research route; its SearXNG address field moves here as the first backend
 entry, and a link to the old field opens this page.
 
 ## Migration
@@ -327,12 +348,12 @@ next one:
 2. The credential broker namespace for search keys, and the Staan, Mojeek,
    Linkup, Brave, and Exa backends with the fallback budget and the journaled
    answer.
-3. Settings › Web search, the endpoint ZDR statement, and the policy's lock
-   on vendor runtimes' `webTools`.
+3. Settings › Web search, and each vendor runtime launched with its own
+   search off wherever `webTools` is off.
 4. A provider's own search in the native harness: the Anthropic and OpenAI
    request builders, the one-search cap and its stream enforcement, the
-   tainted-thread withholding, the outside-content marks, journal, and usage,
-   and the policy applied to it. Its acceptance includes a live search on each
+   tainted-thread withholding, the outside-content marks, journal, and usage.
+   Its acceptance includes a live search on each
    of the two origins.
 
 ## Open questions

@@ -129,6 +129,7 @@ export type CodeTurnEventCategory =
   | "research"
   | "completion"
   | "retry"
+  | "runtime-turn"
   | "waiting"
   | "interruption"
   | "failure";
@@ -1175,6 +1176,8 @@ function normalizeProviderEvent(
           `Retrying ${event.attempt}/${event.maxAttempts} in ${Math.max(1, Math.round(event.delayMs / 1000))} s.`,
         ),
       });
+    case "runtime-turn-started":
+      return Effect.succeed({ ...base, category: "runtime-turn", status: event.trigger });
     case "waiting":
       return Effect.succeed({ ...base, category: "waiting", text: text(event.message) });
     case "interrupted":

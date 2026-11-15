@@ -52,17 +52,34 @@ export interface ThreadSearchHit {
   /** The result is a worker of the coordinator with this title; it wears the worker mark. */
   readonly workerOf?: string;
   readonly turnId?: string;
+  /** Where the host found the text; absent on a title match made from the listed threads. */
+  readonly field?: ThreadSearchField;
+  /** The Canvas whose words matched, on a `canvas` hit, and its own title. */
+  readonly canvasId?: string;
+  readonly canvasTitle?: string;
   readonly snippet?: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
 }
 
-/** One authorized message-body hit from the host transcript search. */
+/** Where in a thread the host matched the text. */
+export type ThreadSearchField = "title" | "prompt" | "reply" | "tool" | "canvas";
+
+/** Which modes the overlay searches: every mode, or one. */
+export type ThreadSearchScope = "all" | SidebarActivityMode;
+
+/** One authorized hit from the host's search. */
 export interface ThreadSearchContentHit {
+  /** The hit's own mode; absent means the mode the overlay searches. */
+  readonly mode?: SidebarActivityMode;
   readonly threadId: string;
   readonly title: string;
   readonly projectId?: string;
   readonly lifecycle: "active" | "archived";
-  readonly turnId: string;
+  /** Absent on a title or Canvas match, which names no turn. */
+  readonly turnId?: string;
+  readonly field?: ThreadSearchField;
+  readonly canvasId?: string;
+  readonly canvasTitle?: string;
   readonly snippet: string;
   readonly matchRanges?: ReadonlyArray<ThreadSearchMatchRange>;
   readonly updatedAt?: string;
@@ -88,6 +105,12 @@ export const THREAD_SEARCH_GROUP_LIMIT = 50;
 
 export interface BuildThreadSearchResultsInput {
   readonly mode: SidebarActivityMode;
+  /**
+   * The modes searched. The listed threads belong to `mode`, so their title
+   * matches show only when the scope includes it; the host's hits carry
+   * their own mode. Defaults to `mode` alone.
+   */
+  readonly scope?: ThreadSearchScope;
   readonly query: string;
   readonly threads: ReadonlyArray<ThreadSearchThread>;
   readonly projects: ReadonlyArray<ThreadSearchProject>;
@@ -98,11 +121,11 @@ export interface BuildThreadSearchResultsInput {
 }
 
 /**
- * Current-mode thread search.
+ * Thread search, in the current mode or across every mode.
  *
  * Title matches use only the threads the host already listed for this window.
- * The current mode's contentHits from the host transcript search join the
- * same live/archived groups with snippets and turn deep-links. Project,
+ * The host's hits (titles, messages, and tool text, each in its own mode) join
+ * the same live/archived groups with snippets and turn deep-links. Project,
  * `Recents`, and `Unfiled` remain folder words on a hit, never filters.
  */
 export function buildThreadSearchResults(
@@ -113,16 +136,24 @@ export function buildThreadSearchResults(
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const unfiledLabel = input.unfiledLabel ?? "No Project";
 
+  const scope = input.scope ?? input.mode;
   const titleMatches = input.threads
-    .filter((thread) => thread.mode === input.mode)
+    .filter((thread) => thread.mode === input.mode && (scope === "all" || scope === input.mode))
     .filter((thread) => thread.lifecycle === "active" || thread.lifecycle === "archived")
     .filter((thread) => needle === "" || normalize(thread.title).includes(needle))
     .sort(compareThreads);
 
+  // A host title match for a thread the listed titles already matched would
+  // print the same row twice.
+  const listedTitles = new Set(titleMatches.map((thread) => `${thread.mode}:${thread.threadId}`));
   const contentMatches =
     needle !== ""
       ? (input.contentHits ?? []).filter(
-          (hit) => hit.lifecycle === "active" || hit.lifecycle === "archived",
+          (hit) =>
+            (hit.lifecycle === "active" || hit.lifecycle === "archived") &&
+            !(
+              hit.field === "title" && listedTitles.has(`${hit.mode ?? input.mode}:${hit.threadId}`)
+            ),
         )
       : [];
 
@@ -180,7 +211,9 @@ function mergeGroupHits(
   limit: number,
 ): { readonly hits: ReadonlyArray<ThreadSearchHit>; readonly truncated: boolean } {
   const titleHits = titleThreads.map((thread) => toTitleHit(thread, projectNames, unfiledLabel));
-  const bodyHits = contentHits.map((hit) => toContentHit(mode, hit, projectNames, unfiledLabel));
+  const bodyHits = contentHits.map((hit) =>
+    toContentHit(hit.mode ?? mode, hit, projectNames, unfiledLabel),
+  );
   // Title rows first so a known thread stays easy to open; content rows follow
   // with their snippets rather than replacing the title match.
   const merged = [...titleHits, ...bodyHits];
@@ -222,9 +255,13 @@ function toContentHit(
     ...(hit.projectId === undefined ? {} : { projectId: hit.projectId }),
     folderLabel,
     archived: hit.lifecycle === "archived",
-    turnId: hit.turnId,
-    snippet: hit.snippet,
-    ...(hit.matchRanges === undefined || hit.matchRanges.length === 0
+    ...(hit.turnId === undefined ? {} : { turnId: hit.turnId }),
+    ...(hit.field === undefined ? {} : { field: hit.field }),
+    ...(hit.canvasId === undefined ? {} : { canvasId: hit.canvasId }),
+    ...(hit.canvasTitle === undefined ? {} : { canvasTitle: hit.canvasTitle }),
+    // A title match's snippet is the title the row already shows.
+    ...(hit.field === "title" ? {} : { snippet: hit.snippet }),
+    ...(hit.field === "title" || hit.matchRanges === undefined || hit.matchRanges.length === 0
       ? {}
       : { matchRanges: hit.matchRanges }),
   };

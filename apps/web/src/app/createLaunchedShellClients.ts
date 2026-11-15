@@ -122,6 +122,10 @@ import {
   createHostResourceClient,
   type HostResourceClient,
 } from "@octant/client-runtime/host-resource-client";
+import {
+  createThreadSearchClient,
+  type ThreadSearchClient,
+} from "@octant/client-runtime/thread-search-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createSafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -177,6 +181,7 @@ export interface CreateLaunchedShellClientsOptions {
   readonly todoClient?: TodoClient | undefined;
   readonly todoListHostClient?: TodoListHostClient | undefined;
   readonly workThreadClient: WorkThreadClient | undefined;
+  readonly threadSearchClient?: ThreadSearchClient | undefined;
   readonly workTurnClient: WorkTurnClient | undefined;
 }
 
@@ -212,6 +217,7 @@ export interface LaunchedShellClients {
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
   readonly hostResourceClient: HostResourceClient;
+  readonly threadSearchClient: ThreadSearchClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
@@ -399,6 +405,7 @@ export function createLaunchedShellClients(
       fetch,
       windowCapability: options.windowCapability,
     }),
+    threadSearchClient: options.threadSearchClient ?? createThreadSearchClient(port),
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),

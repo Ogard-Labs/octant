@@ -5015,8 +5015,10 @@ unless the call asks for 1 to 10. It opens no page.
   the next eligible entry only when one did not answer (network, timeout, rate
   limit, server error, refused or missing key), inside a 20-second budget with
   at most 15 seconds each; an empty result stops it. Each call journals where
-  the query went (`web-search.call-routed@1`). A provider's own search in the
-  native harness under the policy is designed, not built
+  the query went (`web-search.call-routed@1`). The policy covers only these
+  backends: a vendor runtime's own web tools follow its native setup under
+  every policy, and a provider's own search is not governed by it. A
+  provider's own search in the native harness is designed, not built
   ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research
@@ -6489,10 +6491,25 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 
   | Provider     | Today                                                                                                                                                                                              | Rule                                                                                                                                                                                                                 | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
   | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and the task tools are not built yet                                                                                                                                                                                                                                                                                                                                                                                                                          |
+  | Claude Code  | With the setup off: own subagents off; `WebSearch` and `WebFetch` never offered and a session reporting them refused; Project skills off; no setting sources, so home config and skills never read | All on when the person allows: native subagents, web search and fetch, Project and home skills, home settings and a trusted Project's hooks, MCP servers, and plugins; automatic mode as Reviewed's default reviewer | Reviewed with its own reviewer, in Work and Code; subagents (shown as child runs), web search and fetch, home skills, home settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers, and plugins. The account's own MCP servers start only with a trusted Project's, because `strictMcpConfig` governs both. In Work and Code outside Plan, Claude Code's whole built-in tool set less a short withheld list, with any tool Octant has no rule of its own for asking below Full access (the account's claude.ai service tools included) and session-internal tools such as `ToolSearch` running unasked, and no cap on tool calls in a turn ([detail](design/provider-runtimes.md#full-built-in-tool-set)); background commands and `Monitor` command watches, with the turns the runtime starts for them held inside the person's turn ([detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)); `Workflow`, `CronCreate`, `ScheduleWakeup` and the task tools are not built yet                                                                                                                                                                                |
   | Codex        | Own subagents off; Project skills disabled by path; in Chat every person-added tool server switched off by name                                                                                    | Own subagents, Project skills, and the person's tool servers on, Chat included; its own approval review as Reviewed's default reviewer                                                                               | Reviewed with its own reviewer, in Work and Code; with the setup on, Project skills on, the person's tool servers on in Chat, and its own subagents at every level, each shown as a child run with its approvals and app-tool calls answered through the parent's approval path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
   | Mistral Vibe | Project and home skills off; Project context off; runs through the ACP bridge only                                                                                                                 | Its own skills, a trusted Project's tools and MCP servers, and its auto-approve mode as Reviewed's default reviewer; first-class with the same promise                                                               | Reviewed with its auto-approve mode, in Work and Code; with the setup on, its skills (registry skills included where the person's configuration opts in), Project context, the account's MCP servers, connectors, and hooks, and a trusted Project's `.vibe` tools, MCP servers, hooks, plugins, and agents; its own subagents in Work and Code outside Plan, shown as child runs; a subagent's request names no tool (3.0.3 source, read 2026-11-14), so its approval says "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which." with Allow and Deny under the thread's level; a subagent runs as one of the person's own custom or installed agents at every level there, and may approve its own tools as in Vibe itself; Octant cannot see those calls, so each child run names the agent and says so, and a run as any agent but Vibe's read-only `explore` marks the thread as having read outside content (maintainer decisions, 2026-11-14); its `accept-edits` mode at Accept edits in Work and Code; its questions on 3.0.3 through the shared questionnaire (maintainer decision, 2026-11-14). Stays on the ACP bridge by choice ([why](design/provider-runtimes.md#mistral-vibe-surface)) |
   | OpenCode     | Shell and delegation follow the level in Work as in Code; Project skills off; Octant's denies outrank the person's saved OpenCode grants; approvals answered `once`, never `always`                | The person's own OpenCode permission rules apply; "always" allowed; its delegation on; its skills on; Reviewed through Octant Shield                                                                                 | With the setup on: its skills on, and a remembered 2.x approval answered `always` and saying the grant lives in OpenCode's own store. its delegation followed as child runs, the MCP servers and permission rules in the person's own OpenCode configuration and, in a trusted Project outside Plan, those of the Project's `opencode.json(c)` files, read into the launch's private configuration under the level's denies while the raw Project files, and so its plugins, agents, and commands, stay off ([why](design/provider-runtimes.md#key-providers)), and a tool those rules allow running without a card; Reviewed through Octant Shield at Auto. At every level, Plan included, it reads, finds, searches and lists inside the Project and its extra folders without asking, as Octant's Claude Code file gate allows, with outside folders, `.env` files and Octant's protected files refused. In Plan on both runtimes, its other read-only tools (task list, code search, language server, web fetch and search) run without asking, web reads still marking the thread; edits, shell, delegation and outside folders stay denied (maintainer decision, 2026-11-14)                                    |
+
+  A turn has an origin. A person's send starts one; a runtime may also
+  start one by itself when background work it ran finishes or reports.
+  Octant never lets the runtime's turn start on its own: the person's turn
+  that started the work is held open until the work ends, and each turn the
+  runtime starts inside it is folded in, marked by the runtime event
+  `runtime-turn-started` and, in Code, the journaled operation frame of the
+  same name, so the journal records that it was the runtime's and replay
+  rebuilds it. It passes the same gate at the same level, the person's stop
+  ends it with the session and every background task in it, and a cap and
+  the stalled-turn limit bound it (maintainer decision, 2026-11-14; built for
+  Claude Code's background commands and `Monitor` watches, [detail](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
+  A wake-up scheduled for a later time (`CronCreate`, `ScheduleWakeup`)
+  stays withheld: a session lasts one turn, so it would never fire, or, kept
+  durably, would fire unseen in a later session.
 
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -7992,8 +8009,8 @@ deleted thread is refused).
 
 The judge thread is a plain Chat turn. It selects no extension components, so
 Octant offers it no MCP or connector tools, and Chat has no shell or files. The
-provider's own tools that Chat leaves on for that provider (for example web
-tools where the capability matrix lists them as never switched off) are not
+provider's own tools that Chat leaves on for that provider (for example a
+generic ACP agent's own web tools, which Octant cannot switch off) are not
 switched off by the benchmark, so a judge on such a provider can still reach
 them. Octant has no per-turn switch that starts a Chat turn with none, and this
 slice does not add one.
@@ -14911,7 +14928,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   | `reviewVerdicts.allow`        | `unsupported`; an approval is not reported                                                    | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `reviewVerdicts.deny`         | `supported`                                                                                   | `supported`                                                                                              | `absent`                                                                                                                                          | `absent`                                                                                          | `absent`                                                                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.subagents`       | `supported`; shown as a child run, each call through the parent's gate                        | `supported`; shown as child runs, their requests through the parent's approval path                      | `supported`; its `task` children shown as child runs, their requests through the parent's approval path                                           | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported` in Work and Code outside Plan, shown as child runs, its requests shown without a tool name | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
-  | `nativeSetup.webTools`        | `supported`; asks below Full access and marks the thread                                      | `supported`; never switched off, each search marks the thread                                            | `supported`; never switched off outside Plan, each call marks                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, its fetch never switched off                                                              | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
+  | `nativeSetup.webTools`        | `supported`; asks below Full access and marks the thread                                      | `supported`; off unless the setup has it on (`web_search = "disabled"`), each search marks the thread    | `supported`; `websearch` and `webfetch` denied unless the setup has them on, each call marks                                                      | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, its search and fetch off unless the setup has them on                                     | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.skills`          | `supported`; a Project's skills only in a trusted Project                                     | `supported`; no Project skill switched off by path                                                       | `supported`; `.claude` and `.agents` skills, the `skill` permission asked                                                                         | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.toolServers`     | `unsupported`; they start only with a Project's `.mcp.json`                                   | `supported`; the person's servers and plugins stay on in Chat                                            | `supported`; the MCP servers in the person's own OpenCode configuration, their tools following the level                                          | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`, connectors included                                                                       | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
   | `nativeSetup.hooks`           | `supported`                                                                                   | `supported`; the account home's hooks were never switched off                                            | `unsupported`                                                                                                                                     | `absent`                                                                                          | `varies`: `unsupported`, and on Mistral Vibe `supported`                                                                                            | `absent`                                                                                | `absent`                                                                                                  | `absent`                                                                                     | `absent`                              |
@@ -18193,8 +18210,8 @@ Silicon technical preview with the provider-neutral plugin/skill marketplace.
 Builds of `main` are meant to publish daily on the `preview` ring as the second
 app Octant Nightly, and on-demand pre-releases of the next stable on the
 `candidate` ring as Octant's Preview channel, as GitHub pre-releases named
-`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip and a linux-x64
-AppImage. Nightly is a usable client; a scheduled or rollback Nightly run is
+`v0.1.0-<ring>.<date>.<build>`; each carries a macOS zip, a linux-x64
+AppImage and a signed per-user Windows installer. Nightly is a usable client; a scheduled or rollback Nightly run is
 built and published only after its secret-free
 [usable-client preflight](design/nightly-app.md#the-usable-client-preflight)
 passes, and the first scheduled publication still needs a maintainer's
@@ -18352,8 +18369,9 @@ QA readers and build directories never enter the archive. Packaged Electron
 loads the native owner without acquiring a profile, and the credential fixture
 uses only owned synthetic entries and verifies their removal.
 This unsigned QA archive is not an installer, a usable Windows release, or an
-enabled signed-update channel; native host admission and credentials remain
-separate prerequisites. Windows Work and Code below Full access stay
+enabled signed-update channel, and no workflow publishes it to a release;
+native host admission and credentials remain separate prerequisites. The
+release form is the signed per-user installer of step 5 below. Windows Work and Code below Full access stay
 unavailable until an approved Windows confinement design is documented: the confinement port
 supports only macOS and Linux and refuses every other platform, so the guarded
 levels fail closed there. Full access uses no confinement, but running Work
@@ -18449,7 +18467,91 @@ refuse by name on Windows.
 
 5. An installer, Authenticode signing, and a signed update feed that builds
    on the Linux signed-feed trust root once that path has been exercised on a
-   real image; the unsigned QA ZIP stays QA-only.
+   real image; the unsigned QA ZIP stays QA-only. Partly built (maintainer
+   request, 2026-11-15: build it now, with the signing certificate in Azure).
+   The installer and signing are built and the feed is signed and published;
+   the app does not read the Windows feed yet, because the Linux path it
+   builds on has not been exercised on a real image. Detail below.
+
+**Windows installer and signing** (step 5).
+
+- **Installer.** An NSIS installer (`scripts/windows-installer/octant.nsi`,
+  built by `scripts/package-windows-installer.ts` from the packaged
+  `win32-x64` directory) installs for the current user only: its manifest
+  asks for no elevation, it writes only
+  `%LOCALAPPDATA%\Programs\<product>` (a fixed location, so an update always
+  finds the copy it replaces), a Start menu entry and an Apps list entry under
+  `HKCU`, and nothing machine-wide. `/S` installs silently. The data folders
+  (`%LOCALAPPDATA%\<product>`, `%APPDATA%\<product>`) are never touched. The
+  uninstaller deletes exactly the files its version installed, then each of
+  their folders only if empty (never a recursive delete), the Start menu and
+  Apps list entries, and the `octant:` link and login item the app registered,
+  only while they still name this copy's program; it refuses to act from
+  anywhere but the fixed location. An install or uninstall waits up to a
+  minute for the installed program to stop running (a window or a host), then
+  refuses and changes nothing. Installing over an existing copy first runs
+  that copy's own uninstaller in update mode, which keeps the Start menu and
+  Apps list entries. A package path containing `$`, a quote, a control
+  character, or one that would pass 259 characters under the longest
+  possible user profile refuses the build. NSIS 3.11 is fetched per job and
+  pinned by SHA-256, because the hosted Windows images carry none.
+- **Signing.** Every Windows program in a release is signed with Authenticode
+  through Azure Artifact Signing, in `release-windows.yml`, called by every
+  release workflow. The job that builds runs the source with no credential
+  (a Nightly rollback packages its tag but runs this revision's installer
+  tooling, and a tag from before Windows packaging gets no installer);
+  the job that signs runs only the workflow's own scripts, signs in with
+  GitHub's OIDC token (`azure/login`, no stored password) in the ring's
+  environment (`preview` or the approval-gated `stable`), and signs, with
+  RFC 3161 timestamps, every program in the package that Windows does not
+  already accept as validly signed (found by PE headers, so native modules
+  and helpers are included) plus the uninstaller, builds the installer from
+  those signed files (the uninstaller is written by a first build that only
+  writes it, so it can be signed before the installer carries it), then signs
+  the installer. Each program must then read Valid, and every program it
+  signed must name Octant's publisher (`OCTANT_WINDOWS_PUBLISHER`, the
+  certificate's common name); signtool also verifies the installer under the
+  default Authenticode policy. Any unset Azure variable
+  (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+  `AZURE_ARTIFACT_SIGNING_ENDPOINT`, `AZURE_ARTIFACT_SIGNING_ACCOUNT`,
+  `AZURE_ARTIFACT_SIGNING_PROFILE`) or failed check fails the release: a
+  Windows release is signed or not built. Only the signed installer is
+  attached to a release, and the ring's `win32-x64` feed is signed over its
+  hash with the ring's own key, as for the other platforms.
+- **Update hand-off (built, not wired in).** A Windows copy updates only
+  through the installer. Given the hand-off (`windowsInstallerUpdate.ts`), the
+  updater offers releases only to a copy at the installer's own location with
+  its uninstaller beside it; after the feed signature and artifact hash verify
+  and the person relaunches with no work in flight, it writes the installer to
+  a new private temporary folder, hashes it again from disk, and asks Windows
+  (`Get-AuthenticodeSignature`, through PowerShell by absolute path, no shell,
+  the path in an environment variable) for its signature, which must be
+  Valid and name exactly Octant's publisher. That is the Windows counterpart
+  of the macOS code-signature check, never "validly signed" alone. Only then
+  does it start the installer detached with `/S /relaunch` and quit; the
+  installer waits for the app to exit, replaces it and starts it again, or
+  refuses, leaves the copy as it was and starts it again. Any other result
+  removes the download and starts nothing. The packaged app is not given the
+  hand-off, so Windows still refuses with "untrusted-signature" before any
+  request; wiring it is the step that trusts the Windows feed, after the
+  Linux signed-feed path has been exercised on a real image.
+- **Not yet known.** No release has been signed: the certificate's subject,
+  and so the exact publisher name, is first seen on the first release run
+  (a different name fails that run, not an install). Whether a detached
+  installer survives the app's quit, and an update over a running host, have
+  not been exercised on a person's machine. Installers carry NSIS's default
+  icon.
+- **Evidence.** The hand-off's refusals, the file lists, the build commands
+  and the signing decisions are pure tests on Linux CI. The `Windows
+installer` workflow builds the package and both installer builds unsigned on
+  `windows-2025`, refuses that installer through the real signature check,
+  installs it silently for the runner's user, starts the installed app (with
+  a user-owned token, since the runner's elevated token is refused by the
+  native profile) until it shows a window and creates its host profile,
+  refuses an install while the installed program runs, installs over the
+  stopped copy, and uninstalls, keeping a file the person added and the data
+  folders. Signing runs only in a release run with the Azure federation
+  configured.
 
 **Windows confinement design** (step 2; maintainer decision, 2026-11-15:
 write it now, knowing it cannot yet run on a person's Windows machine). A
@@ -18794,9 +18896,13 @@ Work and Code below Full access remain refused until their native confinement bo
   waits, for at most a minute, until that process has exited (on Linux, exited but
   not yet reaped counts) before it asks for
   the single-instance lock, so it never starts a host while the old one is
-  still stopping; the old instance keeps its lock until it exits. A platform
-  with no signed channel (`supportsSignedDesktopUpdateChannel`:
-  macOS and Linux today) refuses with "untrusted-signature".
+  still stopping; the old instance keeps its lock until it exits. A Windows
+  copy updates only through the signed installer, after its Authenticode
+  signature names Octant's publisher
+  ([Windows installer and signing](#current-release-boundary)); that hand-off
+  is not wired in yet. A platform with no signed channel
+  (`supportsSignedDesktopUpdateChannel`: macOS and Linux today, Windows only
+  once its installer hand-off is wired in) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
   version that is not strictly newer, wrong app, platform or ring, unreachable
   service, or mismatched artifact yields no install, no override, and a

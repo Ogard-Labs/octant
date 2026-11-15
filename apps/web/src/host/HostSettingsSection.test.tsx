@@ -84,6 +84,13 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         kind: "refused-online",
         guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
       })),
+    readWebSearch: async () => ({
+      settings: { policy: "any", backends: [] },
+      source: "saved",
+      states: [],
+    }),
+    setWebSearch: async () => ({ kind: "refused", code: "unauthorized", message: "Not here." }),
+    setWebSearchKey: async () => ({ kind: "refused", code: "unauthorized", message: "Not here." }),
     readDataMap: async () => ({
       host: {
         hostId: "host-1",

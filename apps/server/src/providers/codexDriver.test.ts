@@ -1170,7 +1170,7 @@ describe("Codex thread and turn lifecycle", () => {
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
-      config: { model_reasoning_effort: "low", skills: { config: [] } },
+      config: { model_reasoning_effort: "low", web_search: "disabled", skills: { config: [] } },
     });
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
@@ -1178,7 +1178,7 @@ describe("Codex thread and turn lifecycle", () => {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
-      config: { skills: { config: [] } },
+      config: { web_search: "disabled", skills: { config: [] } },
     });
     await acquired.close();
   });
@@ -1793,6 +1793,7 @@ describe("Codex thread and turn lifecycle", () => {
   it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
     const workOff = {
       project_doc_max_bytes: 0,
+      web_search: "disabled",
       skills: { config: [] },
     };
     const f = fixture();
@@ -1844,6 +1845,7 @@ describe("Codex thread and turn lifecycle", () => {
       "features.plugins": false,
       "features.apps": false,
       mcp_servers: { node_repl: { enabled: false }, "docs.local": { enabled: false } },
+      web_search: "disabled",
       skills: { config: [] },
     };
     const f = fixture({
@@ -2062,7 +2064,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(valid.resumeCursor).toEqual({ driverKind: "codex", value: "thread-existing" });
     expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
       threadId: "thread-existing",
-      config: { skills: { config: [] } },
+      config: { web_search: "disabled", skills: { config: [] } },
     });
     for (const resumeCursor of [
       { driverKind: "opencode" as const, value: "thread-existing" },
@@ -2930,7 +2932,7 @@ describe("Codex execution authority and approvals", () => {
         approvalPolicy,
         sandbox,
         approvalsReviewer: "user",
-        config: { skills: { config: [] } },
+        config: { web_search: "disabled", skills: { config: [] } },
       });
       await acquired.close();
     },
@@ -3966,6 +3968,39 @@ describe("Codex running as itself", () => {
       config: { "features.plugins": false, mcp_servers: { node_repl: { enabled: false } } },
     });
     await lockedDown.close();
+  });
+
+  it("switches Codex's own web search off on start and every resume unless the setup has web tools on", async () => {
+    for (const [nativeSetup, searches] of [
+      [undefined, false],
+      [{ ...ownSetup, webTools: false }, false],
+      [ownSetup, true],
+    ] as const) {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "full-access",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId: "session-resumed" as never,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "full-access",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      for (const method of ["thread/start", "thread/resume"]) {
+        const config = f.calls.find((call) => call.method === method)?.input;
+        if (searches) expect(config).not.toHaveProperty(["config", "web_search"]);
+        else expect(config).toMatchObject({ config: { web_search: "disabled" } });
+      }
+      await acquired.close();
+    }
   });
 
   it("runs Codex's own subagents at every level once the person allows them, on a process of their own", async () => {

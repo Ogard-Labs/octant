@@ -23,6 +23,7 @@ export const SETTINGS_SECTION_IDS = [
   "harness",
   "voice",
   "skills",
+  "web-search",
   "computer-use",
   "device-tools",
   "github",
