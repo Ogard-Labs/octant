@@ -614,7 +614,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Chat",
       scope: "app",
       keywords:
-        "chat defaults provider model fallback backup web research backend routing searxng base url personality instructions new threads",
+        "chat defaults provider model fallback backup web research backend routing octant searxng base url personality instructions new threads",
       settings: [
         {
           id: settingId("stream-replies"),
@@ -650,7 +650,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("chat-research-backend"),
           label: "Default research backend",
           scope: "app",
-          keywords: "research backend web search searxng",
+          keywords: "research backend web search octant searxng",
         },
         {
           id: settingId("chat-searxng-url"),

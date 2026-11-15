@@ -52,7 +52,7 @@ describe("ChatSettingsView", () => {
     await chooseSelectFieldOption(
       user,
       screen.getByRole("combobox", { name: "Default research backend" }),
-      "SearXNG",
+      "Octant web search",
     );
     await user.type(screen.getByLabelText("SearXNG base URL"), "https://search.example/");
     await user.clear(screen.getByLabelText("Instructions for new Chat threads"));

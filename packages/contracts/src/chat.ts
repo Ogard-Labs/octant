@@ -75,6 +75,12 @@ export type ChatCitationId = typeof ChatCitationId.Type;
 export const ThreadWorkItemId = brandedUuid("ThreadWorkItemId");
 export type ThreadWorkItemId = typeof ThreadWorkItemId.Type;
 
+/**
+ * The research route. `searxng` is Octant's own `web-search` over the host's
+ * backend list, whatever backends it holds; the value keeps its name from when
+ * SearXNG was the only backend so stored threads, settings, and older clients
+ * read it unchanged, and the UI labels it "Octant web search".
+ */
 export const ChatResearchRouting = Schema.Literal("automatic", "searxng", "provider-native");
 export type ChatResearchRouting = typeof ChatResearchRouting.Type;
 
@@ -242,6 +248,7 @@ export const ChatCitation = Schema.Struct({
   attemptId: ChatAttemptId,
   sourceTitle: Schema.NonEmptyTrimmedString,
   sourceUrl: Schema.NonEmptyTrimmedString,
+  /** `searxng` is Octant's own search, whichever of the host's backends answered. */
   backend: Schema.Literal("searxng", "provider-native"),
   snippetRef: Schema.optional(ChatContentReference),
   retrievedAt: UtcTimestamp,
@@ -1150,6 +1157,12 @@ export type ChatThreadWindowRequest = typeof ChatThreadWindowRequest.Type;
 export const ChatBootstrap = Schema.Struct({
   settings: ChatSettings,
   threads: Schema.Array(ChatThread),
+  /**
+   * Whether the host's data policy leaves one of its web search backends
+   * eligible, so the `searxng` research route can be ready. Absent from a host
+   * that predates the backend list, where Chat's SearXNG address decides.
+   */
+  webSearchReady: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type ChatBootstrap = typeof ChatBootstrap.Type;
 

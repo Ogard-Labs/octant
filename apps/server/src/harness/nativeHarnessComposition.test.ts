@@ -30,7 +30,9 @@ import { createNativeHarnessShell } from "./nativeHarnessShell";
 import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
-import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
+import { harnessWebSearch } from "./nativeHarnessWebSearch";
+import { webSearchSettingsFromChatAddress } from "@octant/domain";
+import { MIGRATED_SEARXNG_ENTRY_ID } from "../webSearch/webSearchSettingsService";
 
 const authority = {
   hostId: "00000000-0000-4000-8000-0000000000aa",
@@ -174,7 +176,12 @@ describe("native harness composition", () => {
         }),
       },
       isHarnessProvider: () => true,
-      resolveWebSearch: () => searxngHarnessWebSearch({ readBaseUrl: () => searxngBaseUrl, fetch }),
+      resolveWebSearch: () =>
+        harnessWebSearch({
+          readEligible: () =>
+            webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID).backends,
+          fetch,
+        }),
       hostId: authority.hostId,
       readThreadTaint: () => false,
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
