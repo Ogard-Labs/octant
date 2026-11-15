@@ -1,4 +1,3 @@
-import type { ChatThreadId, ChatTurnId } from "@octant/contracts/chat";
 import type { HostId } from "@octant/contracts/host";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -46,7 +45,11 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { useShellController } from "../shell/useShellController";
 import type { useWorkspaceSurfaceDrag } from "../shell/useWorkspaceTabDrag";
-import { WorkspaceView, type WorkspaceViewProps } from "../shell/WorkspaceView";
+import {
+  WorkspaceView,
+  type RevealedThreadTurn,
+  type WorkspaceViewProps,
+} from "../shell/WorkspaceView";
 import { ThreadStatsDetailDialog } from "../threadStats/ThreadStatsDetail";
 import { ThreadStatsProvider } from "../threadStats/threadStatsScope";
 import type { useThreadTurnMetrics } from "../threadStats/useThreadTurnMetrics";
@@ -158,8 +161,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectWorkDeveloperTools"
     | "setUsageOpen"
     | "setWorkComposerSelection"
-    | "spendRevealChatTurn"
-    | "spendRevealThreadTurn"
+    | "spendRevealTurn"
     | "splitPane"
     | "touchMemoryRevision"
     | "viewAllChatProjectThreads"
@@ -240,12 +242,7 @@ export interface ThreadPaneContainerProps {
   readonly projectClient: ProjectController["client"];
   readonly providerController: ProviderController;
   readonly providerReady: boolean;
-  readonly revealChatTurn?: { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId };
-  readonly revealThreadTurn?: {
-    readonly mode: "work" | "code";
-    readonly threadId: string;
-    readonly turnId: string;
-  };
+  readonly revealTurn?: RevealedThreadTurn;
   readonly serverUrl: string;
   readonly settings: NonNullable<ShellController["settings"]>;
   readonly tabActivation: ShellController["tabActivation"];
@@ -341,8 +338,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     projectClient,
     providerController,
     providerReady,
-    revealChatTurn,
-    revealThreadTurn,
+    revealTurn,
     serverUrl,
     settings,
     tabActivation,
@@ -443,8 +439,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectWorkDeveloperTools,
     setUsageOpen,
     setWorkComposerSelection,
-    spendRevealChatTurn,
-    spendRevealThreadTurn,
+    spendRevealTurn,
     splitPane,
     touchMemoryRevision,
     viewAllChatProjectThreads,
@@ -631,10 +626,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   chatClient={chatClient}
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
-                  {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
-                  onChatTurnRevealed={spendRevealChatTurn}
-                  {...(revealThreadTurn === undefined ? {} : { revealThreadTurn })}
-                  onThreadTurnRevealed={spendRevealThreadTurn}
+                  {...(revealTurn === undefined ? {} : { revealTurn })}
+                  onTurnRevealed={spendRevealTurn}
                   {...(zen.enabled
                     ? {
                         onPinTerminal: (request: Parameters<typeof zen.pinTerminal>[0]) =>

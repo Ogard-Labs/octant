@@ -148,6 +148,8 @@ export const MOBILE_COPY = {
   attachFailed: "Could not attach that file.",
   attachLimit: (limit: number) => `A message can carry at most ${limit} attachments.`,
   attachPending: "Attached",
+  threadEarlierPage: "Showing an earlier part of this thread",
+  threadJumpToLatest: "Jump to latest",
   attachSheetTitle: "Attach",
   forkFromHere: "Fork from here",
   forking: "Forking…",

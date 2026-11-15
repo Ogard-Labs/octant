@@ -167,7 +167,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
 
   const chat = useChatThread({ ...shared(targetFor("chat")), modelOptions: models.options });
   const work = useWorkThread(shared(targetFor("work")));
-  const code = useCodeThread(shared(targetFor("code")));
+  const code = useCodeThread(shared(targetFor("code")), props.focusTurnId);
   // The Project the selected Work or Code thread belongs to, once it has loaded.
   const routinesProjectId =
     mode === "work"
@@ -335,18 +335,30 @@ export function ThreadScreen(props: ThreadScreenProps) {
         onPress: () => void usageResume(mode, thread, { kind: "cancel" }),
       };
     }
-    // Work knows a turn stopped at a usage limit from the turn itself; the phone's
-    // Code conversation carries no failure, so Code offers only a scheduled resume.
-    const last = selected?.mode === "work" ? work.turns?.at(-1) : undefined;
-    const limit = last?.failure?.usageLimit;
-    if (last === undefined || limit === undefined || last.status !== "waiting") return undefined;
-    const detail = resetLabel(limit.resetsAt);
+    // A turn knows it stopped at a usage limit from the turn itself. Only the
+    // thread's latest turn can resume, so an earlier page a search hit opened
+    // offers nothing; the host re-checks the whole premise either way.
+    const stopped = (() => {
+      if (selected?.mode === "work") {
+        const last = work.turns?.at(-1);
+        const limit = last?.failure?.usageLimit;
+        return last === undefined || limit === undefined || last.status !== "waiting"
+          ? undefined
+          : { turnId: String(last.turnId), limit };
+      }
+      if (code.conversation?.hasLater !== false) return undefined;
+      const last = code.conversation.turns.at(-1);
+      return last?.usageLimit === undefined
+        ? undefined
+        : { turnId: last.operationId, limit: last.usageLimit };
+    })();
+    if (stopped === undefined) return undefined;
+    const detail = resetLabel(stopped.limit.resetsAt);
     return {
       label: "Usage limit reached",
       ...(detail === undefined ? {} : { detail }),
       actionLabel: "Resume when it resets",
-      onPress: () =>
-        void usageResume("work", thread, { kind: "schedule", turnId: String(last.turnId) }),
+      onPress: () => void usageResume(mode, thread, { kind: "schedule", turnId: stopped.turnId }),
     };
   })();
   const composerEditable =
@@ -686,6 +698,16 @@ export function ThreadScreen(props: ThreadScreenProps) {
             </Text>
           ))}
         </View>
+      ) : null}
+      {selected.mode === "code" && code.conversation?.hasLater === true ? (
+        <ResumeBar
+          busy={false}
+          offer={{
+            label: MOBILE_COPY.threadEarlierPage,
+            actionLabel: MOBILE_COPY.threadJumpToLatest,
+            onPress: () => void code.jumpToLatest(),
+          }}
+        />
       ) : null}
       {resumeOffer === undefined ? null : <ResumeBar busy={resumeBusy} offer={resumeOffer} />}
       {selected.mode === "chat" ? (

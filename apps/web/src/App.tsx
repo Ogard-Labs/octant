@@ -1,3 +1,4 @@
+import type { RevealedThreadTurn } from "./shell/WorkspaceView";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
@@ -109,7 +110,6 @@ import {
   decodeChatTurnId,
   type ChatAttachmentId,
   type ChatThreadId,
-  type ChatTurnId,
 } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import {
@@ -1227,30 +1227,20 @@ function LaunchedShell(
     setSidebarListRequest((current) => ({ view, sequence: (current?.sequence ?? 0) + 1 }));
   }, []);
   // Deep-link target from a content search hit; cleared when Search opens again.
-  const [revealChatTurn, setRevealChatTurn] = useState<
-    { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
-  >(undefined);
+  const [revealTurn, setRevealTurn] = useState<RevealedThreadTurn | undefined>(undefined);
   // A search hit is a one-time jump: once the transcript has shown it, the
   // target is dropped, so a list that mounts again (a jumped-to run joining
   // the newest messages, or Jump to latest followed by Load earlier) does not
   // jump the reader back to it.
-  const spendRevealChatTurn = useCallback(() => setRevealChatTurn(undefined), []);
-  // The same one-time jump for a Work turn or a Code provider turn.
-  const [revealThreadTurn, setRevealThreadTurn] = useState<
-    | { readonly mode: "work" | "code"; readonly threadId: string; readonly turnId: string }
-    | undefined
-  >(undefined);
-  const spendRevealThreadTurn = useCallback(() => setRevealThreadTurn(undefined), []);
+  const spendRevealTurn = useCallback(() => setRevealTurn(undefined), []);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
-    setRevealChatTurn(undefined);
-    setRevealThreadTurn(undefined);
+    setRevealTurn(undefined);
     setSearchOpen(true);
   }, []);
   const searchEveryThread = useCallback((query: string) => {
     setSearchQuery(query);
-    setRevealChatTurn(undefined);
-    setRevealThreadTurn(undefined);
+    setRevealTurn(undefined);
     setSearchOpen(true);
   }, []);
   const closeThreadSearch = useCallback(() => {
@@ -1528,18 +1518,6 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
       : activeChatThreadTabId(controller.workspace.layouts.chat, activePaneId);
-  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
-  // coming back opens it on its newest messages instead of jumping to the hit
-  // again after they had already gone back to the newest ones.
-  const previousActiveChatThreadId = useRef(activeChatThreadId);
-  useEffect(() => {
-    const previous = previousActiveChatThreadId.current;
-    previousActiveChatThreadId.current = activeChatThreadId;
-    if (previous === undefined || String(previous) === String(activeChatThreadId ?? "")) return;
-    setRevealChatTurn((current) =>
-      current !== undefined && String(current.threadId) === String(previous) ? undefined : current,
-    );
-  }, [activeChatThreadId]);
   const activeCodeThreadId =
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "code"
       ? undefined
@@ -1548,6 +1526,30 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "work"
       ? undefined
       : activeWorkThreadTabId(controller.workspace.layouts.work, activePaneId);
+  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
+  // coming back opens it on its newest messages instead of jumping to the hit
+  // again after they had already gone back to the newest ones.
+  const previousActiveThreadIds = useRef({
+    chat: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+    work: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+    code: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+  });
+  useEffect(() => {
+    const previous = previousActiveThreadIds.current;
+    const now = {
+      chat: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+      work: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+      code: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+    };
+    previousActiveThreadIds.current = now;
+    setRevealTurn((current) => {
+      if (current === undefined) return current;
+      const left = previous[current.mode];
+      return left !== undefined && left === String(current.threadId) && left !== now[current.mode]
+        ? undefined
+        : current;
+    });
+  }, [activeChatThreadId, activeCodeThreadId, activeWorkThreadId]);
   const activeDraftKey =
     controller.workspace === undefined || activePaneId === undefined
       ? undefined
@@ -5747,8 +5749,7 @@ function LaunchedShell(
       setChatThreadRestartContinuation: chatController.setThreadRestartContinuation,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
-      spendRevealChatTurn,
-      spendRevealThreadTurn,
+      spendRevealTurn,
       splitPane: controller.splitPane,
       startNewThreadDraft,
       toggleBottomPanel,
@@ -8501,8 +8502,7 @@ function LaunchedShell(
                       workspaceVersion={controller.workspaceVersion}
                       providerController={providerController}
                       providerReady={providerReady}
-                      {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
-                      {...(revealThreadTurn === undefined ? {} : { revealThreadTurn })}
+                      {...(revealTurn === undefined ? {} : { revealTurn })}
                       serverUrl={props.launch.serverUrl}
                       settings={controller.settings}
                       threadStatsSummary={threadStatsSummary}
@@ -8678,8 +8678,7 @@ function LaunchedShell(
             // (none for a Chat Canvas owned by a thread outside a Project),
             // through the same open every Canvas card uses.
             if (hit.field === "canvas" && hit.canvasId !== undefined) {
-              setRevealChatTurn(undefined);
-              setRevealThreadTurn(undefined);
+              setRevealTurn(undefined);
               void controller.openCanvas({
                 mode: hit.mode,
                 title: hit.canvasTitle ?? hit.title,
@@ -8690,37 +8689,31 @@ function LaunchedShell(
             }
             if (hit.mode === "chat") {
               const threadId = decodeChatThreadId(hit.threadId);
-              if (hit.turnId === undefined) {
-                setRevealChatTurn(undefined);
-              } else {
-                setRevealChatTurn({
-                  threadId,
-                  turnId: decodeChatTurnId(hit.turnId),
-                });
-              }
+              setRevealTurn(
+                hit.turnId === undefined
+                  ? undefined
+                  : { mode: "chat", threadId, turnId: decodeChatTurnId(hit.turnId) },
+              );
               void controller.openChatThread(threadId, hit.title, hitProjectId);
               return;
             }
-            setRevealThreadTurn(
-              hit.turnId === undefined
-                ? undefined
-                : { mode: hit.mode, threadId: hit.threadId, turnId: hit.turnId },
-            );
             if (hit.mode === "work") {
-              void controller.openWorkThread(
-                decodeWorkThreadId(hit.threadId),
-                hit.title,
-                undefined,
-                hitProjectId,
+              const threadId = decodeWorkThreadId(hit.threadId);
+              setRevealTurn(
+                hit.turnId === undefined
+                  ? undefined
+                  : { mode: "work", threadId, turnId: decodeWorkTurnId(hit.turnId) },
               );
+              void controller.openWorkThread(threadId, hit.title, undefined, hitProjectId);
               return;
             }
-            void controller.openCodeThread(
-              decodeCodeThreadId(hit.threadId),
-              hit.title,
-              undefined,
-              hitProjectId,
+            const threadId = decodeCodeThreadId(hit.threadId);
+            setRevealTurn(
+              hit.turnId === undefined
+                ? undefined
+                : { mode: "code", threadId, operationId: decodeCodeOperationId(hit.turnId) },
             );
+            void controller.openCodeThread(threadId, hit.title, undefined, hitProjectId);
           }}
           zenActive={zen.active}
           {...(activeCodeThreadView === undefined ? {} : { activeCodeThreadView })}

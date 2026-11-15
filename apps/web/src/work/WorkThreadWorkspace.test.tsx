@@ -1989,14 +1989,14 @@ describe("WorkThreadWorkspace", () => {
       );
     });
 
-    it("reads the page before when a search hit names an older turn, then spends the jump once it is shown", async () => {
+    it("opens a search hit older than the loaded turns at that turn", async () => {
       const client = pagedClient();
       const onTurnRevealed = vi.fn();
       render(
         <WorkThreadWorkspace
           initialThread={workThread()}
           onTurnRevealed={onTurnRevealed}
-          revealTurnId="turn-5"
+          revealTurnId={"turn-3" as never}
           threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
           threadId={threadId}
           title="Long brief"
@@ -2010,7 +2010,27 @@ describe("WorkThreadWorkspace", () => {
         { limit: 30, before: "request-20" },
         expect.any(AbortSignal),
       );
-      expect(screen.getAllByText("Prompt 5").length).toBeGreaterThan(0);
+      expect(screen.getByText("Prompt 3")).toBeInTheDocument();
+    });
+
+    it("spends a search hit the thread no longer holds once nothing earlier is left", async () => {
+      const client = pagedClient();
+      const onTurnRevealed = vi.fn();
+      render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          onTurnRevealed={onTurnRevealed}
+          revealTurnId={"turn-rewound" as never}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Long brief"
+          turnClient={client as never}
+        />,
+      );
+
+      await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+      expect(await screen.findByText("No earlier messages")).toBeVisible();
+      expect(client.transcriptWindow).toHaveBeenCalledTimes(2);
     });
 
     it("says a page failed and loads it when asked again", async () => {

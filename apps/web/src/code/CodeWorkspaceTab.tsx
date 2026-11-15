@@ -30,15 +30,14 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
+  readonly revealOperationId?: CodeWorkspaceProps["revealOperationId"];
+  readonly onTurnRevealed?: () => void;
   readonly holdAccessNotice?: CodeThreadControllers["holdAccessNotice"];
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
   readonly tab: CodeWorkspaceTab;
-  /** A provider turn to bring into view once, from a search hit. */
-  readonly revealOperationId?: string;
-  readonly onTurnRevealed?: () => void;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];

@@ -117,7 +117,14 @@ on coming back to the thread) never jumps back to it; a run that joins the
 newest turns keeps the reader's rows. The detached range is let go when a newest
 read counts a different number of superseded turns than the range was last
 known whole at. The client holds at most the newest run and one detached range,
-never two runs with a gap shown as one.
+never two runs with a gap shown as one. A Work or Code transcript on the desktop jumps
+to a hit that is not loaded by reading earlier pages, one at a time, until the
+turn is among them, so the run stays one with the newest turns and needs no
+detached range; a page that fails, or a thread with nothing earlier left (a
+rewind removed the turn), spends the jump and leaves the reader at the newest
+turns. The phone shows one Code page at a time: a hit older than the newest
+page opens the page `through` its turn, which stays anchored across refreshes
+until the reader chooses Jump to latest or sends a follow-up.
 Readers that need the whole thread read the unchanged whole-thread route: the
 Markdown copy and save, and the thread's attachment, source, and turn counts
 in the Environment panel while it is open. Those routes (`GET
