@@ -618,12 +618,12 @@ export class TerminalProcessPort {
     // A shell that already exited has no tree left to reach: taskkill finds
     // children through their parent, which is gone.
     if (shellExited()) return;
-    // Listening before the stop: a shell that ends at once would otherwise
-    // report its exit before anyone waited for it.
-    const exited = this.#dependencies.waitForExit(pty, this.#dependencies.gracefulTimeoutMs);
     const stopped = await this.#dependencies.stopWindowsTree(pty.pid);
     if (stopped === "failed") throw new Error("Terminal process tree did not stop.");
-    if (!(await exited) && stopped !== "absent")
+    // Judged by the shell's pid, not ConPTY's exit event: measured on
+    // windows-2025, the event for a PowerShell that had already ended came
+    // about 25 seconds later, while the process itself was gone at once.
+    if (!(await this.#waitForProcessGroupExit(pty.pid)))
       throw new Error("Terminal process tree did not exit.");
   }
 

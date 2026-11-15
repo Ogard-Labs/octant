@@ -18310,7 +18310,9 @@ deliverable and keeps every gate above:
      the receipt's process identity has no Windows form yet (measured on
      `windows-2025`, every terminal's receipt failed and its fail-closed stop
      reached nothing); closing it ends its tree, and a host restart does not
-     find a terminal it left behind.
+     find a terminal it left behind. Close confirms the stop by the shell's
+     pid, because ConPTY reports a shell's exit about 25 seconds after the
+     process ends (measured on `windows-2025`).
    - **Process-tree stop.** Windows has no process groups, and
      `ChildProcess.kill` there ends only the root. Every stop that signals a
      process group elsewhere (each provider family's runtime, owned-process

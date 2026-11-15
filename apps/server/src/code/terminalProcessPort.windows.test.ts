@@ -95,14 +95,16 @@ describe("a Code terminal on a Windows host", () => {
   it("opens the named PowerShell at Full access in the folder and ends its whole tree on close", async () => {
     const pty = fakePty();
     const spawn = vi.fn(() => pty);
+    let shellRunning = true;
     const stopWindowsTree = vi.fn(async () => {
-      queueMicrotask(() => pty.exit());
+      shellRunning = false;
       return "stopped" as const;
     });
     const port = new TerminalProcessPort({
       platform: "win32",
       spawn,
       stopWindowsTree,
+      processGroupExists: () => shellRunning,
       processIdentity: async () => "fixture",
       confinement: confinementThatMustNotRun(),
     });
@@ -201,7 +203,8 @@ describe("a Code terminal on a Windows host", () => {
       });
       try {
         await handle.receiptReady;
-        await vi.waitFor(() => expect(exitCode).toBe(3), { timeout: 30_000 });
+        // ConPTY reports the exit late (about 25 seconds on windows-2025).
+        await vi.waitFor(() => expect(exitCode).toBe(3), { timeout: 60_000 });
         expect(existsSync(join(directory, "written.txt"))).toBe(true);
         expect(readFileSync(join(directory, "written.txt"), "utf8")).toContain(
           "written by the terminal",
@@ -210,7 +213,7 @@ describe("a Code terminal on a Windows host", () => {
         await handle.close();
       }
     },
-    60_000,
+    90_000,
   );
 
   it.runIf(process.platform === "win32")(
@@ -240,8 +243,10 @@ describe("a Code terminal on a Windows host", () => {
       await handle.receiptReady;
       expect(exited).toBe(false);
       await handle.close();
-      await vi.waitFor(() => expect(exited).toBe(true), { timeout: 10_000 });
+      // ConPTY reports the exit well after the process is gone (about 25
+      // seconds on windows-2025); close itself has already confirmed it by pid.
+      await vi.waitFor(() => expect(exited).toBe(true), { timeout: 60_000 });
     },
-    60_000,
+    90_000,
   );
 });
