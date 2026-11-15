@@ -3,6 +3,7 @@ import {
   PERSON_INSTRUCTIONS_MAX_CHARACTERS,
   PROJECT_INSTRUCTIONS_MAX_CHARACTERS,
   decodeOctantInstructionsCommand,
+  decodeOrchestrationInstructionsChanged,
   decodePersonInstructionsChanged,
   decodeProjectInstructionsChanged,
 } from "./octantInstructions";
@@ -19,13 +20,15 @@ describe("Octant instructions contracts", () => {
     ).toEqual({ projectId, instructions: "Ship from main only." });
   });
 
-  it("carries orchestration in the person's record, held to 4,000 characters", () => {
-    expect(decodePersonInstructionsChanged({ instructions: "", orchestration: "Split." })).toEqual({
-      instructions: "",
+  it("carries orchestration on its own event, held to 4,000 characters, never in the person's", () => {
+    expect(decodeOrchestrationInstructionsChanged({ orchestration: "Split." })).toEqual({
       orchestration: "Split.",
     });
     expect(() =>
-      decodePersonInstructionsChanged({ instructions: "", orchestration: "a".repeat(4_001) }),
+      decodeOrchestrationInstructionsChanged({ orchestration: "a".repeat(4_001) }),
+    ).toThrow();
+    expect(() =>
+      decodePersonInstructionsChanged({ instructions: "", orchestration: "Split." }),
     ).toThrow();
   });
 

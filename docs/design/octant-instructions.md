@@ -119,15 +119,18 @@ it. Limiting the texts to what only Octant knows keeps Octant a supplement.
   device the host's own person paired (maintainer decision, 2026-11-12). No
   agent, routine, peer, hub, or spoke may read-modify-write them, and no tool
   writes them.
-- **Journal.** Each change is journaled with the whole new text under the
-  record's expected version; orchestration shares the person's record, so its
-  event carries both texts (`person-instructions.changed@1`,
-  `project-instructions.changed@1`); a stale version is refused. Agents may
-  read the texts only as the context blocks above. The route
-  (`/api/octant-instructions`) answers a client that does not act as the
-  host's person read-only, refuses its change, and refuses an agent grant's
-  session even a read; the journal refuses a change whose actor is an agent or
-  the host itself.
+- **Journal.** Each text is its own record, and each change is journaled with
+  the whole new text under that record's expected version
+  (`person-instructions.changed@1`, `project-instructions.changed@1`,
+  `orchestration-instructions.changed@1`); a stale version is refused.
+  Orchestration has its own record so that saving it never makes an open edit
+  of your instructions stale, and the person record's event keeps the shape
+  earlier builds decode. Agents may read the texts only as the context blocks
+  above. The route (`/api/octant-instructions`) answers a client that does not
+  act as the host's person read-only, refuses its change, and refuses an agent
+  grant's session even a read; the store itself refuses a change whose actor
+  is an agent or the host itself, or that does not come from the host's own
+  person.
 - **Secrets.** The editor warns when a text looks like it holds a secret (the
   same checks person memory runs, shared from
   `@octant/domain/secret-shaped-text-policy`). The text is kept as written,

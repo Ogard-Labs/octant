@@ -187,7 +187,7 @@ export function OctantInstructionsSettings(props: OctantInstructionsSettingsProp
             }
           : {
               kind: "change-orchestration-instructions",
-              expectedVersion: view.version,
+              expectedVersion: view.orchestrationVersion,
               orchestration: text,
             },
       );

@@ -13,6 +13,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import {
+  ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
   PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
   PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
   decodeOctantInstructionsCommand,
@@ -162,6 +163,7 @@ describe("your instructions for Octant", () => {
       instructions: "Second rule.",
       orchestration: "",
       version: 2,
+      orchestrationVersion: 0,
       canChange: true,
     });
     connection.close();
@@ -304,7 +306,7 @@ describe("your instructions for Octant", () => {
 });
 
 describe("orchestration", () => {
-  it("journals orchestration with your instructions kept, and keeps both across a restart", () => {
+  it("journals orchestration on its own record, and keeps both texts across a restart", () => {
     const connection = openConnection();
     const journal = journalOn(connection);
     const store = storeOn(journal);
@@ -316,7 +318,7 @@ describe("orchestration", () => {
     const result = store.change(
       {
         kind: "change-orchestration-instructions",
-        expectedVersion: 1,
+        expectedVersion: 0,
         orchestration: "Start a worker per failing test.",
       },
       person,
@@ -325,28 +327,74 @@ describe("orchestration", () => {
     expect(result).toMatchObject({
       instructions: "Plan in Work.",
       orchestration: "Start a worker per failing test.",
-      version: 2,
+      version: 1,
+      orchestrationVersion: 1,
     });
-    expect(events(journal).at(-1)?.payload).toEqual({
-      instructions: "Plan in Work.",
-      orchestration: "Start a worker per failing test.",
-    });
+    expect(events(journal).map((event) => event.payload)).toEqual([
+      { instructions: "Plan in Work." },
+    ]);
+    expect(
+      journal
+        .replayAggregateType({
+          aggregateType: ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+          afterSequence: 0,
+          limit: 10,
+        })
+        .map((event) => [event.eventName, event.payload]),
+    ).toEqual([
+      [
+        "orchestration-instructions.changed@1",
+        { orchestration: "Start a worker per failing test." },
+      ],
+    ]);
     expect(storeOn(journalOn(connection)).view(true)).toMatchObject({
       instructions: "Plan in Work.",
       orchestration: "Start a worker per failing test.",
+      version: 1,
+      orchestrationVersion: 1,
     });
     expect(
       store.change(
-        { kind: "change-orchestration-instructions", expectedVersion: 1, orchestration: "x" },
+        { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "x" },
         person,
       ),
     ).toMatchObject({ reason: "stale-version" });
     expect(
       store.change(
-        { kind: "change-orchestration-instructions", expectedVersion: 2, orchestration: "x" },
+        { kind: "change-orchestration-instructions", expectedVersion: 1, orchestration: "x" },
         agent,
       ),
     ).toMatchObject({ reason: "not-the-person" });
+    connection.close();
+  });
+
+  it("never makes an open edit of your instructions stale by saving orchestration", () => {
+    const connection = openConnection();
+    const store = storeOn(journalOn(connection));
+    const opened = store.view(true);
+
+    store.change(
+      {
+        kind: "change-orchestration-instructions",
+        expectedVersion: opened.orchestrationVersion,
+        orchestration: "Split.",
+      },
+      person,
+    );
+    const saved = store.change(
+      {
+        kind: "change-person-instructions",
+        expectedVersion: opened.version,
+        instructions: "Plan in Work.",
+      },
+      person,
+    );
+
+    expect(saved).toMatchObject({
+      kind: "octant-instructions",
+      instructions: "Plan in Work.",
+      orchestration: "Split.",
+    });
     connection.close();
   });
 
@@ -363,7 +411,7 @@ describe("orchestration", () => {
       person,
     );
     store.change(
-      { kind: "change-orchestration-instructions", expectedVersion: 1, orchestration: "Split." },
+      { kind: "change-orchestration-instructions", expectedVersion: 0, orchestration: "Split." },
       person,
     );
     store.change(

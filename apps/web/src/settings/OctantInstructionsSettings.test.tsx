@@ -23,6 +23,7 @@ function view(overrides: Partial<OctantInstructionsView> = {}): OctantInstructio
     instructions: "Use Work for research.",
     orchestration: "",
     version: 3,
+    orchestrationVersion: 7,
     canChange: true,
     ...overrides,
   };
@@ -76,7 +77,7 @@ describe("Your instructions in Settings", () => {
   it("offers Orchestration under Your instructions, with its 4,000 character limit, and saves it on its own", async () => {
     const user = userEvent.setup();
     const { client, change } = fakeClient(view(), () =>
-      view({ orchestration: "Start a worker for each failing test.", version: 4 }),
+      view({ orchestration: "Start a worker for each failing test.", orchestrationVersion: 8 }),
     );
     render(<OctantInstructionsSettings client={client} />);
 
@@ -90,7 +91,7 @@ describe("Your instructions in Settings", () => {
 
     expect(change).toHaveBeenCalledWith({
       kind: "change-orchestration-instructions",
-      expectedVersion: 3,
+      expectedVersion: 7,
       orchestration: "Start a worker for each failing test.",
     });
   });

@@ -7,12 +7,16 @@ import {
   type EventActor,
 } from "@octant/contracts";
 import {
+  ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+  ORCHESTRATION_INSTRUCTIONS_CHANGED,
+  OrchestrationInstructionsChanged,
   PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
   PERSON_INSTRUCTIONS_CHANGED,
   PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
   PROJECT_INSTRUCTIONS_CHANGED,
   PersonInstructionsChanged,
   ProjectInstructionsChanged,
+  decodeOrchestrationInstructionsChanged,
   decodePersonInstructionsChanged,
   decodeProjectInstructionsChanged,
   type OctantInstructionsCommand,
@@ -38,6 +42,8 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 
 /** The one person record on this host. */
 const PERSON_INSTRUCTIONS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000e2";
+/** The one orchestration record on this host. */
+const ORCHESTRATION_INSTRUCTIONS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000e3";
 
 /**
  * The key every copy of the person's instructions carries, so a session that
@@ -67,6 +73,7 @@ export interface OctantInstructionsBlock {
 export function registerOctantInstructionsEvents(registry: EventRegistry): EventRegistry {
   return registry
     .register(PERSON_INSTRUCTIONS_CHANGED, 1, PersonInstructionsChanged)
+    .register(ORCHESTRATION_INSTRUCTIONS_CHANGED, 1, OrchestrationInstructionsChanged)
     .register(PROJECT_INSTRUCTIONS_CHANGED, 1, ProjectInstructionsChanged);
 }
 
@@ -110,17 +117,15 @@ export function refusedOctantInstructions(
   return { kind: "octant-instructions-refused", reason, message: REFUSAL_MESSAGES[reason] };
 }
 
+/** One journaled record: its whole current text and the version it is at. */
 interface InstructionsRecord {
   instructions: string;
   version: number;
 }
 
-interface PersonRecord extends InstructionsRecord {
-  orchestration: string;
-}
-
 type InstructionsEvent =
-  | { readonly kind: "person"; readonly instructions: string; readonly orchestration: string }
+  | { readonly kind: "person"; readonly instructions: string }
+  | { readonly kind: "orchestration"; readonly instructions: string }
   | { readonly kind: "project"; readonly projectId: string; readonly instructions: string };
 
 /**
@@ -134,7 +139,8 @@ export class OctantInstructionsStore {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #projectExists: (projectId: string) => boolean;
-  readonly #person: PersonRecord = { instructions: "", orchestration: "", version: 0 };
+  readonly #person: InstructionsRecord = { instructions: "", version: 0 };
+  readonly #orchestration: InstructionsRecord = { instructions: "", version: 0 };
   readonly #projects = new Map<string, InstructionsRecord>();
 
   constructor(options: {
@@ -155,8 +161,9 @@ export class OctantInstructionsStore {
     return {
       kind: "octant-instructions",
       instructions: this.#person.instructions,
-      orchestration: this.#person.orchestration,
+      orchestration: this.#orchestration.instructions,
       version: this.#person.version,
+      orchestrationVersion: this.#orchestration.version,
       canChange,
     };
   }
@@ -176,27 +183,11 @@ export class OctantInstructionsStore {
     }
     if (!actsAsPerson(author)) return refusedOctantInstructions("not-the-person");
     const actor = author.actor;
-    if (
-      command.kind === "change-person-instructions" ||
-      command.kind === "change-orchestration-instructions"
-    ) {
+    if (command.kind === "change-person-instructions") {
       if (command.expectedVersion !== this.#person.version) {
         return refusedOctantInstructions("stale-version");
       }
-      // The record's whole new state: the text this command changes and the
-      // other as it stands, so replay never needs an earlier event.
-      const instructions =
-        command.kind === "change-person-instructions"
-          ? command.instructions
-          : this.#person.instructions;
-      const orchestration =
-        command.kind === "change-orchestration-instructions"
-          ? command.orchestration
-          : this.#person.orchestration;
-      const payload = decodePersonInstructionsChanged({
-        instructions,
-        ...(orchestration.length === 0 ? {} : { orchestration }),
-      });
+      const payload = decodePersonInstructionsChanged({ instructions: command.instructions });
       this.#append(
         PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
         PERSON_INSTRUCTIONS_AGGREGATE_ID,
@@ -206,7 +197,24 @@ export class OctantInstructionsStore {
         actor,
       );
       this.#person.instructions = payload.instructions;
-      this.#person.orchestration = payload.orchestration ?? "";
+      return this.view(true);
+    }
+    if (command.kind === "change-orchestration-instructions") {
+      if (command.expectedVersion !== this.#orchestration.version) {
+        return refusedOctantInstructions("stale-version");
+      }
+      const payload = decodeOrchestrationInstructionsChanged({
+        orchestration: command.orchestration,
+      });
+      this.#append(
+        ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
+        ORCHESTRATION_INSTRUCTIONS_AGGREGATE_ID,
+        this.#orchestration,
+        ORCHESTRATION_INSTRUCTIONS_CHANGED,
+        payload,
+        actor,
+      );
+      this.#orchestration.instructions = payload.orchestration;
       return this.view(true);
     }
     const projectId = String(command.projectId);
@@ -284,7 +292,7 @@ export class OctantInstructionsStore {
     }
     const orchestration =
       scope.orchestrates === true
-        ? orchestrationInstructionsBlockText(this.#person.orchestration)
+        ? orchestrationInstructionsBlockText(this.#orchestration.instructions)
         : undefined;
     if (orchestration !== undefined) {
       blocks.push({
@@ -344,14 +352,17 @@ export class OctantInstructionsStore {
   #hydrate(): void {
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       PERSON_INSTRUCTIONS_AGGREGATE_TYPE,
+      ORCHESTRATION_INSTRUCTIONS_AGGREGATE_TYPE,
       PROJECT_INSTRUCTIONS_AGGREGATE_TYPE,
     ])) {
       const event = decodeEvent(envelope.eventName, envelope.payload);
       if (event === undefined) continue;
-      if (event.kind === "person") {
-        this.#person.orchestration = event.orchestration;
-      }
-      const record = event.kind === "person" ? this.#person : this.#project(event.projectId);
+      const record =
+        event.kind === "person"
+          ? this.#person
+          : event.kind === "orchestration"
+            ? this.#orchestration
+            : this.#project(event.projectId);
       record.version = envelope.aggregateVersion;
       record.instructions = event.instructions;
     }
@@ -360,11 +371,12 @@ export class OctantInstructionsStore {
 
 function decodeEvent(eventName: string, payload: unknown): InstructionsEvent | undefined {
   if (eventName === PERSON_INSTRUCTIONS_CHANGED) {
-    const decoded = decodePersonInstructionsChanged(payload);
+    return { kind: "person", instructions: decodePersonInstructionsChanged(payload).instructions };
+  }
+  if (eventName === ORCHESTRATION_INSTRUCTIONS_CHANGED) {
     return {
-      kind: "person",
-      instructions: decoded.instructions,
-      orchestration: decoded.orchestration ?? "",
+      kind: "orchestration",
+      instructions: decodeOrchestrationInstructionsChanged(payload).orchestration,
     };
   }
   if (eventName === PROJECT_INSTRUCTIONS_CHANGED) {
