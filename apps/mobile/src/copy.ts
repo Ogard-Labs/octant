@@ -209,6 +209,7 @@ export const MOBILE_COPY = {
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on your computer…",
+  turnWaitingOnUsageLimit: "Waiting for the usage limit to reset",
   routineReceiptLabel: "Created automation",
   routineReceiptPaused: "created paused",
   threadRoutineLabel: "Scheduled",
