@@ -2686,6 +2686,7 @@ Every start screen shows one question and its composer. Code Home adds one calm 
 - Suggestions sit directly under the composer, and everything below ends on the composer's edges.
 
 Status: Built. Since: —. Detail: [Workspace: Start-screen cards](workspace.md#start-screen-cards), [Start screen: The list](start-screen.md#the-list) and [Card registry](start-screen.md#card-registry).
+
 - The start list is laid out from its first frame and nothing above a section moves while it loads: rows are one fixed height whether skeleton, stored or live; the last settled answer per host and Project is painted first (inert, a small spinner in each updating heading) and replaced in place; a first start shows skeleton rows; counts, statuses and self-drawn actions end on one right edge with the menu in its own gutter (maintainer request, 2026-11-15; detail in [Start screen: The list](start-screen.md#the-list)).
 
 ### Needs you across surfaces

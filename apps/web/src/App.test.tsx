@@ -1513,8 +1513,8 @@ describe("App", () => {
 
       const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
       await user.click(within(quickStart).getByRole("button", { name: "Provider and model" }));
-      const level = screen.getByRole("slider", { name: "Effort level" });
-      fireEvent.change(level, { target: { value: level.getAttribute("max") } });
+      const levels = screen.getByRole("group", { name: "Effort level" });
+      await user.click(within(levels).getByRole("button", { name: "High" }));
       await user.keyboard("{Escape}");
       await user.type(
         within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
@@ -2531,8 +2531,8 @@ describe("App", () => {
 
     const prompt = await screen.findByRole("textbox", { name: "Start a new task" });
     await user.click(screen.getByRole("button", { name: "Provider and model" }));
-    const level = screen.getByRole("slider", { name: "Effort level" });
-    fireEvent.change(level, { target: { value: level.getAttribute("max") } });
+    const levels = screen.getByRole("group", { name: "Effort level" });
+    await user.click(within(levels).getByRole("button", { name: "High" }));
     await user.keyboard("{Escape}");
     await user.type(prompt, "Keep this overview draft");
     await user.click(screen.getByRole("button", { name: "Start task" }));
