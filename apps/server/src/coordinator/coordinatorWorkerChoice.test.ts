@@ -123,6 +123,8 @@ function harness(
     slots,
     settings: undefined as CodeSettings | undefined,
     latest: new Map<string, string>(),
+    /** The admission's answer to the next host turns, when it refuses them. */
+    refuseHostTurns: undefined as string | undefined,
   };
   const ports: CoordinatorServicePorts = {
     readThread: (id) => threads.get(id),
@@ -156,6 +158,10 @@ function harness(
       throw new Error("unexpected command");
     },
     startHostTurn: async (threadId, prompt) => {
+      if (self.refuseHostTurns !== undefined) {
+        hostTurns.push({ threadId: String(threadId), prompt });
+        return { status: "refused", message: self.refuseHostTurns };
+      }
       turnCount += 1;
       hostTurns.push({ threadId: String(threadId), prompt });
       const operationId = `turn-${String(turnCount)}`;
@@ -515,5 +521,172 @@ describe("choosing a worker's model from the roles", () => {
       needsImages: true,
       reviewedProviderKind: "claude-code",
     });
+  });
+});
+
+const WORKER = "20000000-0000-4000-8000-0000000000bb";
+
+describe("continuing a running worker on its role's fallback", () => {
+  function running(
+    slots: ReadonlyArray<NativeHarnessSlot>,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const h = harness(slots);
+    h.threads.set(
+      WORKER,
+      codeThread(WORKER, {
+        coordinatorThreadId: COORDINATOR,
+        modelId: "sonnet",
+        coordinatorChoice: { role: "default", rank: "main" },
+        ...overrides,
+      }),
+    );
+    h.latest.set(WORKER, "stopped-turn");
+    return h;
+  }
+  const workerTurns = (h: ReturnType<typeof harness>) =>
+    h.hostTurns.filter((turn) => turn.threadId === WORKER);
+
+  it("moves a worker that hit its usage limit mid-run to the next model and continues with one host turn", async () => {
+    const h = running(standardRoles);
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("continued");
+    expect(h.moves).toEqual([
+      {
+        workerId: WORKER,
+        model: astra,
+        choice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason: "sonnet name (Anthropic) at usage limit; continued on astra name (OpenAI)",
+          move: "continued-on-fallback",
+        },
+      },
+    ]);
+    expect(workerTurns(h)).toHaveLength(1);
+    expect(workerTurns(h)[0]?.prompt).toContain(
+      "Octant moved this thread from sonnet name (Anthropic) to astra name (OpenAI) because sonnet name hit its usage limit",
+    );
+    expect(workerTurns(h)[0]?.prompt).toContain("continue where you left off");
+  });
+
+  it("moves a worker whose provider failed for availability mid-run, and marks it down", async () => {
+    const h = running(standardRoles);
+    expect(await h.service.continueOnFallback(WORKER, "down")).toBe("continued");
+    expect(h.downMarks).toEqual([ANTHROPIC]);
+    expect(h.moves[0]?.model).toBe(astra);
+    expect(workerTurns(h)[0]?.prompt).toContain("because sonnet name was unavailable");
+  });
+
+  it("moves within the same provider by the ordinary model change the runtime switches on", async () => {
+    const h = running([slot("default", [sonnet, opus, astra])]);
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("continued");
+    // The same provider change a person's model pick makes: the runtime
+    // carries the session on with a model switch where the provider supports
+    // one, and starts a disclosed hand-off where it does not.
+    expect(h.moves[0]?.model).toBe(opus);
+    expect(h.moves[0]?.choice).toMatchObject({ rank: { fallback: 1 } });
+  });
+
+  it("passes over a sibling model the host's own facts hold at the limit too", async () => {
+    const h = running([slot("default", [sonnet, opus, astra])]);
+    h.facts.set("opus", { usageLimit: {} });
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("continued");
+    expect(h.moves[0]?.model).toBe(astra);
+    expect(h.moves[0]?.choice).toMatchObject({ rank: { fallback: 2 } });
+  });
+
+  it("counts a stop with no availability signal only while the host's facts hold the account at its limit", async () => {
+    const h = running(standardRoles);
+    expect(await h.service.continueOnFallback(WORKER, undefined)).toBe("stays");
+    expect(h.moves).toHaveLength(0);
+    h.latest.set(WORKER, "another-stop");
+    h.facts.set("sonnet", { usageLimit: { until: "2026-11-15T14:00:00.000Z" } });
+    expect(await h.service.continueOnFallback(WORKER, undefined)).toBe("continued");
+    expect(h.moves[0]?.model).toBe(astra);
+  });
+
+  it("pauses as before when the role's Continue on the fallback box is off", async () => {
+    const h = running([
+      { ...slot("default", [sonnet, astra]), continueOnFallback: false } as NativeHarnessSlot,
+    ]);
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+    expect(h.moves).toHaveLength(0);
+    expect(h.hostTurns).toHaveLength(0);
+  });
+
+  it("never moves a worker whose model a person changed", async () => {
+    const h = running(standardRoles, { coordinatorChoice: { role: "default", rank: "person" } });
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+    expect(h.moves).toHaveLength(0);
+  });
+
+  it("never moves a thread a person started, the coordinator itself, or one put away, Done, snoozed or archived", async () => {
+    const person = running(standardRoles, {
+      coordinatorThreadId: undefined,
+      coordinatorChoice: undefined,
+    });
+    expect(await person.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+    const coordinator = running(standardRoles);
+    coordinator.latest.set(COORDINATOR, "its-turn");
+    expect(await coordinator.service.continueOnFallback(COORDINATOR, "usage-limit")).toBe("stays");
+    for (const rest of [
+      { completedAt: now },
+      { markedDoneAt: now },
+      { snooze: { until: "2026-11-16T09:00:00.000Z", at: now } },
+      { lifecycle: "archived" },
+    ]) {
+      const h = running(standardRoles, rest);
+      expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+      expect(h.moves).toHaveLength(0);
+    }
+    expect(person.moves).toHaveLength(0);
+    expect(coordinator.moves).toHaveLength(0);
+  });
+
+  it("leaves a worker with the person's own usage-limit hand-off to that hand-off", async () => {
+    const h = running(standardRoles, { usageLimitHandoff: { providerInstanceId: OPENAI } });
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+  });
+
+  it("walks the list once and pauses at its end, never looping back", async () => {
+    const h = running([slot("default", [sonnet, astra])]);
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("continued");
+    // The same stop reported twice moves the worker once.
+    h.latest.set(WORKER, "stopped-turn");
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("stays");
+    // The continuing turn stops too: nothing is left after astra, so it pauses.
+    h.latest.set(WORKER, "continued-turn-stopped");
+    expect(await h.service.continueOnFallback(WORKER, "down")).toBe("stays");
+    expect(h.moves).toHaveLength(1);
+    expect(workerTurns(h)).toHaveLength(1);
+  });
+
+  it("tells the coordinator with a continued-on-fallback notice of host facts that does not mark it", async () => {
+    const h = running(standardRoles);
+    await h.service.continueOnFallback(WORKER, "usage-limit");
+    const context = h.service.contextFor(COORDINATOR) ?? "";
+    expect(context).toContain(`${WORKER}@${PROJECT} continued-on-fallback at ${now}`);
+    expect(context).not.toContain("A title an agent wrote");
+    expect(h.marked.size).toBe(0);
+    // The notice woke the idle coordinator under the ordinary wake bounds.
+    expect(h.hostTurns.some((turn) => turn.threadId === COORDINATOR)).toBe(true);
+  });
+
+  it("treats a refused continuing turn as an ordinary refusal: moved, told, and no turn", async () => {
+    const h = running(standardRoles);
+    h.refuseHostTurns = "This Project reached its spend ceiling.";
+    expect(await h.service.continueOnFallback(WORKER, "usage-limit")).toBe("continued");
+    expect(h.moves).toHaveLength(1);
+    expect(h.latest.get(WORKER)).toBe("stopped-turn");
+    expect(h.service.contextFor(COORDINATOR)).toContain("continued-on-fallback");
+  });
+
+  it("leaves a first turn that failed before any work to the first-request move", async () => {
+    const h = harness(standardRoles);
+    await h.service.start(start({ task: "feature", size: "normal" }));
+    const operationId = h.latest.get(NEW_WORKER) ?? "";
+    h.failedFirstTurns.add(operationId);
+    expect(await h.service.continueOnFallback(NEW_WORKER, "down")).toBe("stays");
+    expect(h.moves).toHaveLength(0);
   });
 });

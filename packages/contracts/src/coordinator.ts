@@ -177,6 +177,17 @@ export const CoordinatorWorkerState = Schema.Literal(
 export type CoordinatorWorkerState = typeof CoordinatorWorkerState.Type;
 
 /**
+ * What a state notice to a coordinator says about one worker: a state the
+ * roster carries, or `continued-on-fallback` when the host moved a running
+ * worker to the next model of its role because its own stopped.
+ */
+export const CoordinatorWorkerNotice = Schema.Literal(
+  ...CoordinatorWorkerState.literals,
+  "continued-on-fallback",
+);
+export type CoordinatorWorkerNotice = typeof CoordinatorWorkerNotice.Type;
+
+/**
  * Where in its role's list the model a worker started on sits. `main` is the
  * role's first model; `fallback` the n-th one after it; `borrowed` a model
  * of another role's list because every model of this role was unavailable;
@@ -204,6 +215,11 @@ export const MAX_COORDINATOR_CHOICE_REASON_LENGTH = 400;
  * reason is host-written from its own facts ("main at usage limit until
  * 14:00"); `why` is the coordinator's reason for an override, as it wrote it.
  * Never the prompt.
+ *
+ * `needsImages` and `reviewedProviderKind` are the start's own filters, kept
+ * so a later move to the role's next model applies them again. `move` says
+ * the host wrote this choice when it moved a running worker on: the model
+ * stopped and the role's **Continue on the fallback** setting allowed it.
  */
 export const CoordinatorWorkerChoice = Schema.Struct({
   role: CoordinatorWorkerRole,
@@ -214,5 +230,8 @@ export const CoordinatorWorkerChoice = Schema.Struct({
   why: Schema.optional(
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_COORDINATOR_START_WHY_LENGTH)),
   ),
+  needsImages: Schema.optional(Schema.Literal(true)),
+  reviewedProviderKind: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  move: Schema.optional(Schema.Literal("continued-on-fallback")),
 }).annotations({ parseOptions: { onExcessProperty: "error" } });
 export type CoordinatorWorkerChoice = typeof CoordinatorWorkerChoice.Type;

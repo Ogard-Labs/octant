@@ -24,12 +24,7 @@ import { useProviderRooms } from "../usage/useProviderRooms";
 import { ModelRoleEditor } from "../harness/ModelRoleEditor";
 import { roleSuggestionModels } from "../harness/modelRoleOptions";
 import { RoleSuggestionPreview } from "../harness/RoleSuggestionPreview";
-import {
-  MODEL_ROLES,
-  ROLE_FLAGS_NOTE,
-  rolePresentation,
-  slotFromSuggestion,
-} from "../harness/modelRoles";
+import { MODEL_ROLES, rolePresentation, slotFromSuggestion } from "../harness/modelRoles";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 
@@ -243,7 +238,7 @@ export function ProjectModelRolesSection(props: ProjectModelRolesSectionProps) {
     <div className="project-model-roles">
       <p className="oct-meta">
         Each role uses Settings unless this Project chooses its own. A Project can pick only models
-        Settings lists for the role. {ROLE_FLAGS_NOTE}
+        Settings lists for the role.
       </p>
       {message === undefined ? null : (
         <p className="oct-meta" role="status">

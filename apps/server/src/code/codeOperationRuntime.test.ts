@@ -5976,6 +5976,65 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it.each([
+    [{ category: "unavailable", message: "Connection refused." }, "down"],
+    [{ category: "provider-failed", message: "Provider process died." }, undefined],
+  ] as const)(
+    "reports a turn that stopped on a provider failure once it closed, saying whether the provider was unavailable: %o",
+    async (failure, availability) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const stops: Array<readonly [string, string | undefined]> = [];
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        onProviderStop: async (stopped, said) => {
+          stops.push([String(stopped), said]);
+        },
+      });
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(45),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "failed", failure })));
+      await vi.waitFor(() => expect(stops).toEqual([[String(threadId), availability]]));
+      fixture.close();
+    },
+  );
+
+  it("never reports a turn a person cancelled as a provider stop", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const stops: string[] = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      onProviderStop: async (stopped) => {
+        stops.push(String(stopped));
+      },
+    });
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(46),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(queue, providerEvent({ kind: "interrupted", message: "Stopped by you." })),
+    );
+    await vi.waitFor(() =>
+      expect(fixture.runtimeWorks().at(-1)).toMatchObject({ state: "interrupted" }),
+    );
+    expect(stops).toEqual([]);
+    fixture.close();
+  });
+
   it("fails closed when provider, credential, or gh executable authority is missing", async () => {
     const missingProvider = runtimeFixture({ provider: undefined });
     await expect(
@@ -10468,6 +10527,7 @@ function runtimeFixture(options: {
   >[0]["acpTerminalConfinement"];
   /** Whether the provider can carry a session on to another of its models. */
   supportsModelSwitch?: boolean;
+  onProviderStop?: Parameters<typeof createCodeOperationRuntime>[0]["onProviderStop"];
   terminalExit?: { readonly exitCode: number };
   pullRequestPort?: Parameters<typeof createCodeOperationRuntime>[0]["pullRequestPort"];
   pullRequestTarget?: boolean;
@@ -10915,6 +10975,7 @@ function runtimeFixture(options: {
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: () => options.supportsModelSwitch ?? false }),
+    ...(options.onProviderStop === undefined ? {} : { onProviderStop: options.onProviderStop }),
     ...(options.providerSwitchContext === "none"
       ? {}
       : { providerSwitchContext: options.providerSwitchContext ?? selectConversation }),

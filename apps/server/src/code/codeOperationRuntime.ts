@@ -467,6 +467,17 @@ export interface CodeOperationRuntimeOptions {
    * rejection is ignored: the stop is journaled and stays.
    */
   readonly onUsageLimitStop?: (threadId: CodeThreadId) => Promise<void>;
+  /**
+   * The thread's provider turn just stopped on a failure that was not a usage
+   * limit the provider reported: `down` when the provider could not take the
+   * work (refused connection, 5xx, overloaded, timeout), else undefined. A
+   * cancelled turn never fires it. Fires once the turn has closed; a
+   * rejection is ignored.
+   */
+  readonly onProviderStop?: (
+    threadId: CodeThreadId,
+    availability: "down" | undefined,
+  ) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -5633,6 +5644,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       }),
     };
     let stoppedOnUsageLimit = false;
+    let stoppedOnFailure: { readonly availability: "down" | undefined } | undefined;
     const folderWatch =
       active.folderCurrent === undefined
         ? undefined
@@ -5891,6 +5903,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                           sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
                   if (failure?.usageLimit !== undefined) stoppedOnUsageLimit = true;
+                  else if (failure !== undefined && outcome !== "interrupted") {
+                    stoppedOnFailure = {
+                      availability: failure.availability === "down" ? "down" : undefined,
+                    };
+                  }
                   this.#persistOutcome(
                     active,
                     outcome,
@@ -5960,6 +5977,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           this.#active.delete(String(active.thread.id));
         if (stoppedOnUsageLimit) {
           void this.#options.onUsageLimitStop?.(active.thread.id).catch(() => undefined);
+        } else if (stoppedOnFailure !== undefined) {
+          void this.#options
+            .onProviderStop?.(active.thread.id, stoppedOnFailure.availability)
+            .catch(() => undefined);
         }
       });
   }
