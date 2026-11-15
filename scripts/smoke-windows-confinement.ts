@@ -35,6 +35,10 @@ writeFileSync(join(granted, "inside.txt"), "inside-content");
 writeFileSync(join(granted, "profile", "Cookies"), "cookie-content");
 writeFileSync(join(readOnly, "readable.txt"), "readable-content");
 writeFileSync(join(outside, "secret.txt"), "outside-secret");
+// cmd.exe does not read the backslash-escaped quotes Windows argument
+// quoting writes inside one argument, so the fixture paths carry no spaces
+// and the command lines name them unquoted.
+if (/\s/u.test(root) || /\s/u.test(home)) throw new Error("Fixture paths must not contain spaces.");
 const homeFile = join(home, `octant-confine-smoke-${randomBytes(6).toString("hex")}.txt`);
 writeFileSync(homeFile, "home-secret");
 
@@ -79,57 +83,65 @@ function check(name: string, passed: boolean, detail: unknown) {
 }
 
 const shell = (line: string) => ["/d", "/c", line];
+// A refusal counts only when Windows says access was denied: a syntax error
+// or a missing file also exits non-zero and proves nothing.
+const accessDenied = (result: { readonly stderr: string }) =>
+  /Access is denied/iu.test(result.stderr);
 
 try {
   const exit = run(cmd, shell("exit 7"));
   check("relays the command's exit code", exit.status === 7, exit);
 
-  const inside = run(cmd, shell(`type "${join(granted, "inside.txt")}"`));
+  const inside = run(cmd, shell(`type ${join(granted, "inside.txt")}`));
   check(
     "reads inside the bound root",
     inside.status === 0 && inside.stdout.includes("inside-content"),
     inside,
   );
 
-  const readable = run(cmd, shell(`type "${join(readOnly, "readable.txt")}"`));
+  const readable = run(cmd, shell(`type ${join(readOnly, "readable.txt")}`));
   check(
     "reads a read root",
     readable.status === 0 && readable.stdout.includes("readable-content"),
     readable,
   );
 
-  const write = run(cmd, shell(`echo written> "${join(granted, "written.txt")}"`));
+  const write = run(cmd, shell(`echo written> ${join(granted, "written.txt")}`));
   check(
     "writes inside the bound root",
     write.status === 0 && existsSync(join(granted, "written.txt")),
     write,
   );
 
-  const readOnlyWrite = run(cmd, shell(`echo refused> "${join(readOnly, "refused.txt")}"`));
+  const readOnlyWrite = run(cmd, shell(`echo refused> ${join(readOnly, "refused.txt")}`));
   check(
     "refuses a write to a read root",
-    readOnlyWrite.status !== 0 && !existsSync(join(readOnly, "refused.txt")),
+    readOnlyWrite.status !== 0 &&
+      accessDenied(readOnlyWrite) &&
+      !existsSync(join(readOnly, "refused.txt")),
     readOnlyWrite,
   );
 
-  const outsideRead = run(cmd, shell(`type "${join(outside, "secret.txt")}"`));
+  const outsideRead = run(cmd, shell(`type ${join(outside, "secret.txt")}`));
   check(
     "refuses a folder it was not granted",
-    outsideRead.status !== 0 && !outsideRead.stdout.includes("outside-secret"),
+    outsideRead.status !== 0 &&
+      accessDenied(outsideRead) &&
+      !outsideRead.stdout.includes("outside-secret"),
     outsideRead,
   );
 
-  const homeRead = run(cmd, shell(`type "${homeFile}"`));
+  const homeRead = run(cmd, shell(`type ${homeFile}`));
   check(
     "refuses a file in the person's home folder",
-    homeRead.status !== 0 && !homeRead.stdout.includes("home-secret"),
+    homeRead.status !== 0 && accessDenied(homeRead) && !homeRead.stdout.includes("home-secret"),
     homeRead,
   );
 
-  const cookies = run(cmd, shell(`type "${join(granted, "profile", "Cookies")}"`));
+  const cookies = run(cmd, shell(`type ${join(granted, "profile", "Cookies")}`));
   check(
     "denies a browser store found beneath a grant",
-    cookies.status !== 0 && !cookies.stdout.includes("cookie-content"),
+    cookies.status !== 0 && accessDenied(cookies) && !cookies.stdout.includes("cookie-content"),
     cookies,
   );
 
@@ -142,18 +154,38 @@ try {
   const noChild = run(cmd, shell("cmd /d /c echo nested-ran"), { allowProcessFork: false });
   check(
     "refuses a child to a launch that may create no process",
-    !noChild.stdout.includes("nested-ran"),
+    !noChild.stdout.includes("nested-ran") && /quota/iu.test(noChild.stderr),
     noChild,
   );
 
-  const offline = run(curl, ["-s", "-m", "15", "--head", "-o", "NUL", "https://example.com"]);
-  check("reaches no network with no capability", offline.status !== 0, offline);
-  const online = run(curl, ["-s", "-m", "15", "--head", "-o", "NUL", "https://example.com"], {
-    networkEgress: "allow",
-  });
-  check("reaches the internet with the client capability", online.status === 0, online);
+  // The same program, the same request and the same output file differ only
+  // in the capability: curl writes its body into the granted temporary
+  // directory, since the container may not open every device a host may.
+  const fetch = (into: string) => [
+    "-s",
+    "-S",
+    "-m",
+    "20",
+    "-o",
+    join(temporary, into),
+    "https://example.com",
+  ];
+  const offline = run(curl, fetch("offline.html"));
+  // 6 is curl's "could not resolve host", 7 "could not connect": the request
+  // never left the container. Any other failure proves nothing about policy.
+  check(
+    "reaches no network with no capability",
+    (offline.status === 6 || offline.status === 7) && !existsSync(join(temporary, "offline.html")),
+    offline,
+  );
+  const online = run(curl, fetch("online.html"), { networkEgress: "allow" });
+  check(
+    "reaches the internet with the client capability",
+    online.status === 0 && existsSync(join(temporary, "online.html")),
+    online,
+  );
 
-  const grantVisible = run(cmd, shell(`icacls "${granted}"`));
+  const grantVisible = run(cmd, shell(`icacls ${granted}`));
   check(
     "names the container in the bound root's DACL while it runs",
     /Octant\.Confined\.|S-1-15-2-\d+-\d+/u.test(grantVisible.stdout),
