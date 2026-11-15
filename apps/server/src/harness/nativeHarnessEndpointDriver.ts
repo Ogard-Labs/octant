@@ -110,6 +110,12 @@ export function runOnNativeHarness(
         ...(host.harness?.leadFallback === undefined
           ? {}
           : { leadFallback: host.harness.leadFallback }),
+        ...(host.harness?.ownSearchOn === undefined
+          ? {}
+          : {
+              ownSearchOn: ({ providerInstanceId }) =>
+                host.harness?.ownSearchOn?.(providerInstanceId) === true,
+            }),
         admitTurn,
         contextWindow: (modelId) => {
           const model = host.runtimeRegistry

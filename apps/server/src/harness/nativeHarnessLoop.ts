@@ -162,6 +162,14 @@ export interface NativeHarnessConnectionOptions {
    */
   readonly leadFallback?: NativeHarnessLeadFallback;
   /**
+   * Whether a model the lead falls back to runs the provider's own search,
+   * as its endpoint's origin says. The compatible endpoints send their own
+   * search only on their own origin, so a fallback without one is offered
+   * Octant's `web-search` instead. Absent, only the lead's own instance is
+   * taken to run it.
+   */
+  readonly ownSearchOn?: (target: NativeHarnessLeadTarget) => boolean;
+  /**
    * The model's window as the request-fitting rules settle on it, read when a
    * request is sent; undefined when nothing names one. It gives the lead its
    * window fill when no compaction point carries a window.
@@ -201,6 +209,23 @@ function resultsMessage(pending: PendingStep): NativeHarnessMessage {
   };
 }
 
+/**
+ * One built-in search as its reports have described it so far. Its research
+ * and citations are journaled once, when the request that ran it settles:
+ * `persistCitation` keeps every citation event as a new row, so a page first
+ * cited by a later report, or first reported without a title, could not be
+ * corrected after an earlier emission.
+ */
+interface ProviderSearchRecord {
+  readonly toolCallId: string;
+  query: string | undefined;
+  /** The lines the Watcher has already read. */
+  readonly watched: Set<string>;
+  /** Each page by its address, with the first title any report gave it. */
+  readonly sources: Map<string, string | undefined>;
+  journaled: boolean;
+}
+
 interface SessionState {
   readonly sessionId: ProviderSessionId;
   /** The journal aggregate this session appends to; a resumed session keeps its original one. */
@@ -231,11 +256,11 @@ interface SessionState {
    */
   providerWebSearchWithdrawn: boolean;
   /**
-   * What each built-in search already brought in, by its id. The endpoint
-   * reports a search as soon as its results arrive and again with what the
-   * reply cited, so the second report adds only what is new.
+   * Each built-in search the turn's requests reported, by its id. The
+   * endpoint reports a search as soon as its results arrive and again with
+   * what the reply cited, so a later report adds only what is new.
    */
-  readonly providerSearchesSeen: Map<string, Set<string>>;
+  readonly providerSearches: Map<string, ProviderSearchRecord>;
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
@@ -258,6 +283,8 @@ interface SessionState {
     | {
         readonly target: NativeHarnessLeadTarget;
         readonly endpoint: NativeHarnessTransportSession;
+        /** Whether the fallback's endpoint runs the provider's own search. */
+        readonly ownSearch: boolean;
       }
     | undefined;
   /** Models this turn already ran on and gave up on. */
@@ -341,9 +368,10 @@ export function createNativeHarnessConnection(
     /**
      * A built-in search the provider ran: the thread is marked as having read
      * outside content before the model's next step, whatever the Watcher
-     * finds, and the search is journaled as research with the provider as its
-     * backend. The Watcher reads the titles, addresses, and cited text only:
-     * the provider never returns page text Octant can read.
+     * finds. The Watcher reads the titles, addresses, and cited text only:
+     * the provider never returns page text Octant can read. The search is
+     * journaled as research by `journalProviderSearches` once its request
+     * settles, since a later report can still add pages and titles.
      */
     const reportProviderWebSearch = (
       state: SessionState,
@@ -352,74 +380,82 @@ export function createNativeHarnessConnection(
       if (state.providerWebSearch?.withdrawAfterFirstStep === true) {
         state.providerWebSearchWithdrawn = true;
       }
-      const toolCallId = `provider-web-search-${search.searchId}`.slice(0, 120);
       const query = search.query?.trim().slice(0, 1_024);
-      const seen = state.providerSearchesSeen.get(search.searchId);
-      if (seen !== undefined) {
-        // A later report of a search already marked and journaled: the
-        // Watcher reads what it adds, and each new page is cited.
-        const added = [
-          ...search.sources.map((source) =>
-            source.title === undefined ? source.url : `${source.title} ${source.url}`,
-          ),
-          ...search.citedText,
-        ].filter((line) => !seen.has(line));
-        for (const line of added) seen.add(line);
-        const text = added.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
-        if (text.trim().length > 0) {
-          emit(state, {
-            kind: "outside-content-result",
-            toolCallId,
-            toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
-            source: "web-search",
-            text,
-          });
-        }
-        return;
+      const reported = query === undefined || query.length === 0 ? undefined : query;
+      const known = state.providerSearches.get(search.searchId);
+      const record: ProviderSearchRecord = known ?? {
+        toolCallId: `provider-web-search-${search.searchId}`.slice(0, 120),
+        query: reported,
+        watched: new Set(),
+        sources: new Map(),
+        journaled: false,
+      };
+      if (known === undefined) {
+        state.providerSearches.set(search.searchId, record);
+        emit(state, {
+          kind: "outside-content-read",
+          toolCallId: record.toolCallId,
+          toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+          source: "web-search",
+          ...(reported === undefined ? {} : { target: reported }),
+        });
       }
-      emit(state, {
-        kind: "outside-content-read",
-        toolCallId,
-        toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
-        source: "web-search",
-        ...(query === undefined || query.length === 0 ? {} : { target: query }),
-      });
-      const lines = [
+      record.query ??= reported;
+      for (const source of search.sources) {
+        if (record.sources.get(source.url) === undefined) {
+          record.sources.set(source.url, source.title);
+        }
+      }
+      const added = [
         ...search.sources.map((source) =>
           source.title === undefined ? source.url : `${source.title} ${source.url}`,
         ),
         ...search.citedText,
-      ];
-      state.providerSearchesSeen.set(search.searchId, new Set(lines));
-      const watched = lines.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
-      if (watched.trim().length > 0) {
+      ].filter((line) => !record.watched.has(line));
+      for (const line of added) record.watched.add(line);
+      const text = added.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+      if (text.trim().length > 0) {
         emit(state, {
           kind: "outside-content-result",
-          toolCallId,
+          toolCallId: record.toolCallId,
           toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
           source: "web-search",
-          text: watched,
+          text,
         });
       }
-      emit(state, {
-        kind: "research-started",
-        researchId: toolCallId,
-        query: query === undefined || query.length === 0 ? "(query not reported)" : query,
-        backend: "provider-native",
-      });
-      for (const [index, source] of search.sources.entries()) {
+    };
+    /**
+     * Journals each search a request reported as research with the provider
+     * as its backend, one citation per page under its best title, once the
+     * request settles, before its tool calls, completion, or failure: a
+     * search the request ran before it failed or was cancelled is still kept.
+     * The endpoint reports a search only within the request that ran it, so
+     * a report after that adds to what the Watcher reads, not to citations.
+     */
+    const journalProviderSearches = (state: SessionState) => {
+      for (const record of state.providerSearches.values()) {
+        if (record.journaled) continue;
+        record.journaled = true;
         emit(state, {
-          kind: "citation",
-          citationId: `${toolCallId.slice(0, 116)}-${index}`,
-          sourceTitle: (source.title ?? source.url).slice(0, 512),
-          sourceUrl: source.url.slice(0, 2_048),
+          kind: "research-started",
+          researchId: record.toolCallId,
+          query: record.query ?? "(query not reported)",
+          backend: "provider-native",
+        });
+        for (const [index, [url, title]] of [...record.sources].entries()) {
+          emit(state, {
+            kind: "citation",
+            citationId: `${record.toolCallId.slice(0, 116)}-${index}`,
+            sourceTitle: (title ?? url).slice(0, 512),
+            sourceUrl: url.slice(0, 2_048),
+          });
+        }
+        emit(state, {
+          kind: "research-completed",
+          researchId: record.toolCallId,
+          sourceCount: record.sources.size,
         });
       }
-      emit(state, {
-        kind: "research-completed",
-        researchId: toolCallId,
-        sourceCount: search.sources.length,
-      });
     };
     const cursorFor = (state: SessionState): ProviderResumeCursor => ({
       driverKind: options.driverKind,
@@ -497,7 +533,7 @@ export function createNativeHarnessConnection(
       tools: input.tools ?? [],
       providerWebSearch: undefined,
       providerWebSearchWithdrawn: false,
-      providerSearchesSeen: new Map(),
+      providerSearches: new Map(),
       pending: undefined,
       answered: new Set(),
       todoTaskIds: new Map(),
@@ -584,8 +620,14 @@ export function createNativeHarnessConnection(
       state.steps += 1;
       state.requestEstimateUsd = undefined;
       const step = sendOnLead(state, request, controller.signal)
-        .then((response) => settleResponse(state, response))
+        // Journaled in both settlements rather than in a `finally`, which
+        // would delay the step's tool requests by a tick.
+        .then((response) => {
+          journalProviderSearches(state);
+          return settleResponse(state, response);
+        })
         .catch((error: unknown) => {
+          journalProviderSearches(state);
           if (state.latestReportedUsage !== undefined) {
             // Replace the partial request reports so an unfinished retry cannot
             // leave a whole-turn estimate, without adding the known tokens twice.
@@ -766,9 +808,14 @@ export function createNativeHarnessConnection(
             outcome.endpoint.release();
             throw error;
           }
+          // The search offer follows the endpoint the request now goes to:
+          // the provider's own where that endpoint runs one, `web-search`
+          // otherwise, so a fallback is never left with neither.
+          const ownSearch = runsOwnSearch(outcome.target);
+          const { tools: _tools, providerWebSearch: _offered, ...unsearched } = current;
           const moved = fitRequest(
             outcome.endpoint,
-            { ...current, modelId: outcome.target.modelId },
+            { ...unsearched, modelId: outcome.target.modelId, ...searchOffer(state, ownSearch) },
             { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
@@ -780,7 +827,7 @@ export function createNativeHarnessConnection(
           }
           state.fallback?.endpoint.release();
           state.pricingBoundariesKnown = false;
-          state.fallback = { target: outcome.target, endpoint: outcome.endpoint };
+          state.fallback = { target: outcome.target, endpoint: outcome.endpoint, ownSearch };
           current = moved;
         }
       }
@@ -1326,31 +1373,44 @@ export function createNativeHarnessConnection(
       return noted === request || state.endpoint.fits(noted) ? noted : request;
     };
 
-    const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) => {
-      // A request offers one search: the provider's own while it is offered,
-      // Octant's `web-search` otherwise, never both.
+    /** Whether a model the lead falls back to runs the provider's own search. */
+    const runsOwnSearch = (target: NativeHarnessLeadTarget): boolean =>
+      String(target.providerInstanceId) === String(options.instanceId) ||
+      options.ownSearchOn?.(target) === true;
+
+    /**
+     * A request offers one search: the provider's own while it is offered and
+     * the endpoint the request goes to runs it, Octant's `web-search`
+     * otherwise, never both.
+     */
+    const searchOffer = (
+      state: SessionState,
+      ownSearch: boolean,
+    ): Pick<NativeHarnessRequest, "tools" | "providerWebSearch"> => {
       const providerSearch =
-        state.providerWebSearch !== undefined && !state.providerWebSearchWithdrawn
-          ? state.providerWebSearch
-          : undefined;
-      const tools = sortToolDefinitionsByName(
-        providerSearch === undefined
-          ? state.tools
-          : state.tools.filter((tool) => tool.name !== WEB_SEARCH_TOOL_DEFINITION.name),
-      );
-      return fitRequest(
+        ownSearch && state.providerWebSearch !== undefined && !state.providerWebSearchWithdrawn;
+      return providerSearch
+        ? {
+            tools: sortToolDefinitionsByName(
+              state.tools.filter((tool) => tool.name !== WEB_SEARCH_TOOL_DEFINITION.name),
+            ),
+            providerWebSearch: true,
+          }
+        : { tools: sortToolDefinitionsByName(state.tools) };
+    };
+
+    const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
+      fitRequest(
         state.endpoint,
         {
           sessionId: state.sessionId,
           modelId: state.modelId,
           system: state.system,
           history,
-          tools,
-          ...(providerSearch === undefined ? {} : { providerWebSearch: true as const }),
+          ...searchOffer(state, state.fallback?.ownSearch ?? true),
         },
         { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
-    };
 
     return {
       subscribe: Stream.fromPubSub(events, { scoped: true }),

@@ -5103,10 +5103,12 @@ unless the call asks for 1 to 10. It opens no page.
   search per response and refuse a second, and every other built-in tool, as
   `unsupported`. Below Full access a tainted thread is not offered it and
   searches through `web-search` when a backend is eligible, and the offer ends
-  within a turn at its first search or tool answer. Each search marks the
+  within a turn at its first search or tool answer. A lead that falls back to
+  another model keeps the offer only when the fallback's endpoint runs its own
+  search, and is offered `web-search` otherwise. Each search marks the
   thread as having read outside content (`outside-content-read`, with titles,
   addresses, and cited text for the Watcher) and is journaled as
-  provider-native research with its citations
+  provider-native research with its citations once its request settles
   ([Web search backends and data policy](design/web-search-backends.md)).
 
 - **Where.** A Chat thread is offered it on every provider while its research

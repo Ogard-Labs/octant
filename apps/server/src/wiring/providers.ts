@@ -234,6 +234,7 @@ import {
   isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
+  providerOwnSearchOrigin,
   resolveModelContextWindow,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
@@ -1654,6 +1655,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       leadFallback: {
         next: (input) => nativeHarnessLeadFallback.next(input),
+      },
+      ownSearchOn: (instanceId) => {
+        const instance = persistence.readProviderInstance(instanceId);
+        return instance !== undefined && providerOwnSearchOrigin(instance) !== undefined;
       },
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;

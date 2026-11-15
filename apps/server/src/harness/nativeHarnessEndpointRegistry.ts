@@ -30,6 +30,8 @@ export class NativeHarnessEndpointRegistry {
 export interface NativeHarnessEndpointHooks {
   readonly endpoints?: NativeHarnessEndpointRegistry;
   readonly leadFallback?: NativeHarnessLeadFallback;
+  /** Whether an instance a lead falls back to runs the provider's own web search. */
+  readonly ownSearchOn?: (instanceId: ProviderInstanceId) => boolean;
   /** A test replaces the clock and the random source so no real time passes. */
   readonly retry?: EndpointRetryOptions;
   /** Where what a request teaches about its model's window is kept past the session. */

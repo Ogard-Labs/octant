@@ -281,9 +281,24 @@ Responses request asks for every source with `include:
 returns page text encrypted, so the Watcher reads only the titles, URLs, and
 cited text, and the journal entry says so.
 
+**Fallback model.** When the lead's model keeps failing and the turn moves to
+a fallback model, the offer is decided again for the fallback's endpoint: it
+keeps the provider's own search only when that endpoint is on one of the two
+origins above, and is offered `web-search` otherwise, for the rest of the
+turn. Rationale: the compatible endpoints send their built-in search only on
+their own origin, so carrying the lead's offer over would leave a fallback with
+neither search.
+
 **Journal and usage.** The call is journaled as a `web-search` activity with the
 query the provider reports, after the fact, the provider as the backend, and
-the result URLs. Each search's count, and its price where the provider reports
+the result URLs. The Responses stream reports a search twice, when its results
+arrive and again with the pages the reply cited, so the research and its
+citations are journaled once the request that ran it settles: one citation per
+page, under the first title any report gave it. A request that fails or is
+stopped after it searched still journals that search before its failure.
+Rationale: each citation event is kept as a new citation, so one emitted at the
+first report could neither gain a page the reply cited later nor replace an
+address standing in for a missing title. Each search's count, and its price where the provider reports
 or publishes one, joins the turn's usage and cost
 ([Architecture: context and usage accounting](../architecture.md#context-and-usage-accounting)).
 
