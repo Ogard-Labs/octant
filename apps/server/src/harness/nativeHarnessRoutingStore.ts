@@ -75,6 +75,19 @@ export class NativeHarnessRoutingStore {
     return this.#projects.get(String(projectId));
   }
 
+  /**
+   * The aggregate version a next change must assert. A cleared override has no
+   * value to read but still has a version, so a client that finds none can set
+   * one again.
+   */
+  projectVersion(projectId: ProjectId): number {
+    return (
+      this.#projects.get(String(projectId))?.version ??
+      this.#clearedVersions.get(String(projectId)) ??
+      0
+    );
+  }
+
   updateHost(input: {
     readonly configuration: NativeHarnessRoutingConfiguration;
     readonly expectedVersion: number;

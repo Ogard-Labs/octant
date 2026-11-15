@@ -2814,7 +2814,7 @@ current eligible catalog, including Project policy and supported reasoning
 values. A provider that can answer counts even when its catalog is
 degraded (a Foundry deployment its models route does not list); a direct
 endpoint model is a target only once its tools are verified. With no explicit target, both harnesses use the same role-to-slot
-mapping and host/Project model slots (Settings names them model roles). An unconfigured route can inherit the
+mapping and host/Project model slots (Settings names them model roles: Planner, Scout, Quick edit, Builder, Hard problems, Reviewer, Sees images and Small jobs, with Advisor kept as it was). An unconfigured route can inherit the
 authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
 visible. Off, paused, and unauthorized parents cannot start helpers. A parent
@@ -9654,7 +9654,15 @@ the model at another size.
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns
   and a per-slot circuit breaker. Child runs take their model from the role's
   slot through `admitAgentRunControlRequest`, the one path that starts a
-  subagent. The lead is the exception: it runs on the model its thread chose,
+  subagent. The built-in slots include `quick` and `deep` beside the earlier
+  seven, and a slot may carry two person-set flags, `askBeforeUsing` (absent
+  means off) and `continueOnFallback` (absent means on); the resolver does not
+  read them yet (designed, not built: a start in an ask-first role becomes a
+  proposal, and a thread with the role carries on with its next model when its
+  own stops). A Project override is per role: a slot it lists replaces Settings'
+  for that role and an unlisted role uses Settings, still only with models
+  Settings lists for that role (`not-a-subset`). Only a person's window changes
+  either layer (maintainer decision, 2026-11-15). The lead is the exception: it runs on the model its thread chose,
   and the `default` slot decides only where it continues once that model has
   failed (below).
 - **Endpoint failures.** Every direct-endpoint request goes through
