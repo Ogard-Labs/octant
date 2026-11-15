@@ -31,10 +31,9 @@ describe("EnvironmentGitGroup", () => {
 
     expect(screen.getByText("Uncommitted changes")).toBeVisible();
     const worktree = screen.getByTitle(readyObservation.worktreeRoot);
-    expect(worktree).toHaveTextContent("Worktree");
-    // The worktree is named plainly with its branch and where it lives.
+    // The worktree is a row that says so, with where it lives as its detail.
     expect(worktree).toHaveTextContent(
-      "Worktreefeature/issue-52-reference-faithful-shell·…/.agent-worktrees/issue-52-reference-faithful-shell",
+      "Worktree…/.agent-worktrees/issue-52-reference-faithful-shell",
     );
     // The header names the repository; the card does not repeat it.
     expect(screen.queryByText("Octant")).not.toBeInTheDocument();
@@ -107,7 +106,7 @@ describe("EnvironmentGitGroup", () => {
   it("shows one concise state while loading", () => {
     renderGroup({ observation: undefined, status: "loading" });
 
-    expect(screen.getByRole("status")).toHaveTextContent("Loading repository environment");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading repository");
     expect(screen.queryAllByRole("term")).toHaveLength(0);
   });
 
@@ -125,7 +124,9 @@ describe("EnvironmentGitGroup", () => {
       },
     });
 
-    expect(screen.getByText("Octant")).toBeVisible();
+    // One muted row with a short line; the whole reason is its tooltip and description.
+    expect(screen.getByText("Repository unavailable")).toBeVisible();
+    expect(screen.getByTitle(reason)).toBeInTheDocument();
     expect(screen.queryAllByRole("term")).toHaveLength(0);
     expect(screen.getByRole("alert")).toHaveTextContent(reason);
   });

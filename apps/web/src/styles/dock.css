@@ -53,8 +53,10 @@
 }
 
 /* Environment is a strip of its own beside the tool columns: no handle, one
-   width (set inline from ENVIRONMENT_STRIP_WIDTH), and a hairline on its
-   leading edge that runs the whole height of the dock. */
+   width (set inline from ENVIRONMENT_STRIP_WIDTH). It is not a pane: it is the
+   thread's own surface continued to the right, on the thread's fill, with the
+   thread's one hairline on its leading edge, from under the title band to the
+   window's bottom. The band above it carries the tool buttons. */
 .right-utility-dock[data-dock-environment="true"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -70,31 +72,42 @@
   min-height: 0;
   flex: none;
   flex-direction: column;
-  border-left: 1px solid var(--oct-border);
-}
-
-.dock-env-strip__head {
-  flex: none;
-  gap: var(--oct-space-1);
-  color: var(--oct-fg);
-}
-
-.dock-env-strip__head .dock-tile__name {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: var(--oct-title-rail-h);
+  background: var(--octant-pane-fill, var(--oct-bg));
+  border-left: 1px solid var(--octant-pane-line, var(--oct-border));
 }
 
 .dock-env-strip__body {
+  padding-top: var(--oct-space-2);
   min-height: 0;
   flex: 1 1 0;
   overflow: hidden auto;
 }
 
-.dock-env-strip[data-shelf="true"] > .dock-shelf {
-  border-top: 1px solid var(--oct-border);
+/* Minimised tools flow with the list: after the last section, set off by the
+   same hairline, one card per row at the section's width. The head has no box;
+   only the picture is rounded, at a fixed ratio so nothing jumps when it
+   arrives. */
+.dock-env-strip .dock-shelf {
+  display: grid;
+  max-height: none;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  overflow: visible;
+  border-top: 1px solid var(--octant-pane-line, var(--oct-border));
+}
+
+.dock-env-strip .dock-mini-card {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.dock-env-strip .dock-mini-card__preview {
+  height: auto;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--oct-radius-md);
 }
 
 /* The tool columns take what the strip leaves. The handle straddles the seam

@@ -2628,19 +2628,53 @@ drawer.
 ### Right dock and bottom panel
 
 The right dock is two things side by side, left to right: the **Environment
-strip** and the **tool columns**. Environment is a thin, static, full-height
-strip, 240px wide (`ENVIRONMENT_STRIP_WIDTH`; the shell sets it as
-`--octant-dock-env-width`), with no resize handle and no expand, arrange or
-pop-out control; its header has the tool's name and a close. Its leading hairline
-runs from the top of the dock to the window's bottom edge, and the minimised
-cards stand at the foot of the strip inside it, so that hairline is unbroken.
-Every other tool opens in the tool columns to the right of the strip, never
-stacked under Environment, and only they take the person's width: opening or
-closing a tool never moves or resizes the strip, closing the last tool leaves the
-strip alone at 240px, and with only Environment open the dock is exactly the
-strip's width. The tool columns' handle stands on the seam between the strip and
+section** and the **tool columns**. Environment is not a pane. It is the thread's
+own surface continued to the right: 300px wide (`ENVIRONMENT_STRIP_WIDTH`; the
+shell sets it as `--octant-dock-env-width`), on the thread's fill, with the
+thread's one hairline on its leading edge running from under the title band to
+the window's bottom. It has no header, close button, resize handle, expand,
+arrange or pop-out control, and draws nothing in the title band; the band's
+tool buttons above it toggle it, and its landmark is the region named
+Environment. Closing the last tool leaves it alone at exactly 300px, and with
+only Environment open the dock is exactly its width. It is hidden in the narrow
+layout (`isNarrow`: windows 960px wide or less, where the dock becomes a sheet), where the
+thread would otherwise drop below its minimum.
+
+Its content is a flat list. The first section ("Environment") carries the
+thread's place as rows: the Project (folder icon, its name, then its folder
+path in muted ink, home shortened to `~`, the path cut before the name), the
+branch with its checkout kind (Worktree, Main folder or Shared folder), then
+the checkout's state. An unavailable checkout is one muted warning row whose
+short text has the full reason as tooltip and description. "Changes" follows,
+with Commit or push and Create pull request as plain action rows. A section is a
+muted 12px sentence-case label over rows; a row is a 16px muted icon, a 13px
+label in body ink and an optional right-aligned detail in muted ink as plain
+text (no chip, no border), 28px tall, filled across its width by the pointer
+only, with no ring on click and a chevron only on hover for a row that opens
+something. The label ellipsises first; the detail keeps its whole value. A
+hairline sets sections apart and rows have none. Minimised Browsers and
+terminals appear after the last section, set off by the same hairline, as live
+previews that flow with the list: a head row (the page's mark or the tool's
+icon, its title, then show and close), and a rounded 16:10 picture below with no
+box around the head. With Environment hidden the cards keep their place at the
+foot of the dock.
+
+Every tool has one of two size classes (`rightUtilityDockModel.ts`). **Fixed**
+tools are Environment (300px) and the panel tools (Vitals, Plan, Agents,
+Delivery, Side Chat, Artifacts, Pull requests, Tests and Debug) at 360px
+(`COMPACT_DOCK_WIDTH`): they never change width whatever opens or closes beside
+them and have no resize handle. **Flexible** tools (Browser, Terminal, Review,
+Canvas, Document, Files, iOS Simulator, Android Emulator and Desktop;
+`FLEXIBLE_DOCK_SURFACES`) open at 640px, resize between 480px
+(`FLEXIBLE_DOCK_MIN_WIDTH`) and the dock's ceiling, and carry the handle on
+their column's edge. When a flexible and a fixed tool share the tool column, the
+column follows the flexible rules; when only fixed tools are open it is fixed at
+360px with no handle. Opening or closing any tool never changes the Environment
+section's width or position.
+
+The tool columns' handle stands on the seam between the strip and
 the tools, and with Environment closed on the dock's own edge (and the shelf stays
-at the foot of the dock body, as before). Opening any tool other than Environment
+at the foot of the dock body, as before). Opening a flexible tool
 widens a narrower tool column to 640px once (the person can drag it back; the
 next such opening widens it again). A terminal in the dock is an inset,
 rounded plate rather than an edge-to-edge slab; under Glass the plate and
@@ -2728,7 +2762,7 @@ still appears in only one region at a time.
 The tool columns have one width whatever they show, so a click inside them moves
 nothing: the launcher and every tool use the width the person last dragged them
 to. They never take more than half the workspace, and their handle stops at the
-same half. Any open tool other than Environment holds 640px while that tab stays
+same half. Any open flexible tool holds 640px (and a column of only fixed tools 360px) while that tab stays
 open, including one restored after a restart, and does not save it. A width the
 person drags to stands until the next tool opens. A pane appears at its final
 size: no width animates from narrow to wide.

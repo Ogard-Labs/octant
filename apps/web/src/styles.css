@@ -3885,7 +3885,7 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
    right. Name, address, and state sit in fixed columns so the state label
    lines up down the list instead of trailing each address's own width. */
 .thread-environment-dock .local-servers__row {
-  min-height: 32px;
+  min-height: var(--environment-row-h, 28px);
   gap: var(--oct-space-2);
   padding: 0;
 }
@@ -3920,9 +3920,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
 .thread-environment-dock .local-servers__more > span {
   display: none;
 }
-.thread-environment-dock .local-servers__row + .local-servers__row {
-  border-top: 1px solid var(--oct-hairline);
-}
 .thread-environment-dock .local-servers__name {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -3951,10 +3948,6 @@ html:not([data-octant-reduced-transparency="true"]) .shell--material-translucent
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.environment-pull-requests__list li + li {
-  border-top: 1px solid var(--oct-border);
 }
 
 .environment-pull-requests__row {

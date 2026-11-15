@@ -464,7 +464,7 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("names the checkout in the header and says in the checkout card which worktree the thread is in", async () => {
+  it("leads with the thread's place as rows: the Project with its folder, the branch with its checkout kind", async () => {
     render(
       <CodeThreadEnvironment
         environmentOpen
@@ -477,10 +477,12 @@ describe("CodeThreadEnvironment", () => {
     );
     await openEnvironment();
     const header = screen.getByRole("region", { name: "Environment details" });
-    expect(within(header).getAllByText("feature/issue-204")).toHaveLength(2);
+    expect(header.querySelector(".environment-card__caption")).toHaveTextContent("Environment");
     expect(within(header).getByText("~/Dev/Repos/octant/.worktrees/issue-204")).toBeVisible();
+    const branch = within(header).getByText("feature/issue-204").closest(".environment-row");
+    expect(branch).toHaveTextContent("feature/issue-204Worktree");
     expect(screen.getByTitle(readyObservation().worktreeRoot)).toHaveTextContent(
-      "Worktreefeature/issue-204·…/.worktrees/issue-204",
+      "Worktree…/.worktrees/issue-204",
     );
   });
 
