@@ -57,6 +57,8 @@ export interface ModelRoleEditorProps {
   readonly readOnly?: boolean;
   /** Sits at the end of the role's heading line: a Project's Use Settings choice. */
   readonly headAction?: ReactNode;
+  /** Previews a suggestion for this role only; absent hides the button. */
+  readonly onSuggest?: () => void;
 }
 
 function when(isoTime: string | undefined): string | undefined {
@@ -224,7 +226,7 @@ export function ModelRoleEditor(props: ModelRoleEditorProps) {
           ? "Not ready"
           : undefined;
     if (picker === undefined && unready === undefined) {
-      out.push({ key: "missing", text: "Not offered by a ready endpoint" });
+      out.push({ key: "missing", text: "Not offered by a ready provider" });
     }
     if (picker?.model.inputModalities.includes("image")) {
       out.push({ key: "images", text: "Reads images" });
@@ -276,6 +278,17 @@ export function ModelRoleEditor(props: ModelRoleEditorProps) {
           {role.label}
         </span>
         <span className="oct-meta">{role.meaning}</span>
+        {props.onSuggest === undefined || readOnly ? null : (
+          <OctantButton
+            aria-label={`Suggest a model for ${role.label}`}
+            disabled={busy}
+            onClick={props.onSuggest}
+            size="sm"
+            variant="ghost"
+          >
+            Suggest
+          </OctantButton>
+        )}
         {props.headAction === undefined ? null : (
           <span className="model-role__head-action">{props.headAction}</span>
         )}
