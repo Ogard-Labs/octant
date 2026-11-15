@@ -159,7 +159,7 @@
     "apps/server/src/agentRun/authorizeAgentRunCreation.ts": 3,
     "apps/server/src/browser/browserAuthorityResolver.ts": 1,
     "apps/server/src/canvasRoutes.ts": 1,
-    "apps/server/src/chat/threadMentionService.ts": 1,
+    "apps/server/src/chat/threadMentionService.ts": 2,
     "apps/server/src/fleetActivityService.ts": 3,
     "apps/server/src/hub/departedThreadWindow.ts": 1,
     "apps/server/src/persistence/hostIdentityTransforms.ts": 3,

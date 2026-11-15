@@ -221,6 +221,8 @@ export const ThreadMentionCommand = Schema.Union(
       Schema.minItems(1),
       Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN),
     ),
+    /** The composing thread, so a send's preflight judges the reach its search did. */
+    readerThreadId: Schema.optional(MentionableThreadId),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("open-side-chat"),

@@ -89,7 +89,11 @@ import type { ImageGenerationClient } from "@octant/client-runtime/image-generat
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
-import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
+import {
+  decodeBrowserThreadId,
+  decodeImageGenerationScopeId,
+  decodeMentionableThreadId,
+} from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
@@ -460,6 +464,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     draft: props.controller.pendingDraft,
     dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
+    // The host lists and accepts only what this thread's own Project reaches,
+    // the same set a send resolves, so a pick is never refused at send.
+    ...(activeThreadId === undefined
+      ? {}
+      : { readerThreadId: decodeMentionableThreadId(String(activeThreadId)) }),
   });
   threadMentionChipsRef.current = threadMentions.chips;
   const threadDropKey = useComposerThreadDropRegistration({
