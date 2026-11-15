@@ -249,7 +249,10 @@ The design rests on a small set of invariants that every package obeys:
   read-only. Below Full access, Octant's
   own tool launches are OS-confined; one provider runtime is not yet
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
-  [Security and authority](#security-and-authority). Every driver starts a
+  [Security and authority](#security-and-authority). A provider with a
+  sandbox of its own is to run in it below Full access, with Octant's sandbox
+  as the opt-in Strict setting and the fallback (designed, not built;
+  [Providers run in their own sandbox](#security-and-authority)). Every driver starts a
   Work session with its shell and Git at the thread's level, as in Code, and
   Work threads reach Full access
   ([Modes](#modes-chat-work-and-code) lists what each driver does).
@@ -3271,8 +3274,10 @@ Which path reaches the forge depends on the thread's
   use, not a requirement. The Octant Harness, whose shell is Octant's own,
   still refuses a recognizable push or pull-request write before its shell
   runs it and sends the agent to those tools. Claude Code runs its commands
-  in its own sandbox below Full access, which cannot read `~/.ssh`,
-  `~/.gitconfig` or `~/.config/gh`; a push or `gh` call the sandbox stopped
+  in its own sandbox below Full access, which today cannot read `~/.ssh`,
+  `~/.gitconfig` or `~/.config/gh` (once
+  [Providers run in their own sandbox](#security-and-authority) is built,
+  that sandbox follows the person's own Claude Code settings instead); a push or `gh` call the sandbox stopped
   is retried outside it (`dangerouslyDisableSandbox`), and Octant always
   asks about that retry itself, whatever the person's own permission rules
   allow, naming it as a command outside the sandbox, so once approved git
@@ -14153,6 +14158,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
   | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
+  The Claude Code and Codex columns are today's; their sandboxes change per
+  [Providers run in their own sandbox](#security-and-authority) (designed,
+  not built).
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
   `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
@@ -14676,15 +14684,74 @@ approval-gated` command that undoes it. The terminal shows no one-time
   journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The state below, which `providerProcessConfinement.test.ts`
-  pins against this table, is the accepted one: Claude keeps its own sandbox
+  pins against this table, is the accepted one today: Claude keeps its own sandbox
   outside Plan, and closing that gap is not an open goal. Octant says so rather than promising a boundary it
-  does not draw; a runtime that can be wrapped without losing what it needs is
-  taken as its own change. Full access gets no wrapper at all: every
+  does not draw. Full access gets no wrapper at all: every
   runtime and every command it runs launches as the program itself, with no
   profile, no Bubblewrap bind, and no credential-file or extension denials
   (maintainer decision, 2026-10-31: "softer guard — full access is full
   access"). Programs that apply a sandbox of their own, such as `swift package`
-  and headless Chromium, therefore run without extra flags.
+  and headless Chromium, therefore run without extra flags. The table and the
+  per-runtime notes after it describe the build as it ships; below Full access
+  they change per provider as the next rule says.
+
+  **Providers run in their own sandbox** (maintainer decision, 2026-11-15;
+  designed, not built). Octant's sandbox becomes the opt-in and the fallback:
+  - **The provider's own sandbox by default.** Below Full access, every
+    provider that has a sandbox of its own runs in it, as it does on its own.
+    Octant configures that sandbox, Claude Code excepted (below), rather
+    than wrapping it in Octant's Seatbelt or Bubblewrap profile: its writable roots are the Project's
+    folders, its network follows Network limits
+    ([provider runtime network](#provider-runtime-network)), and Octant's
+    protected paths ([secret guard](#secret-guard)) become its deny rules
+    wherever the provider supports them.
+  - **Native escalation is an Octant approval.** When the provider asks to
+    run one command outside its sandbox, the ask reaches the person as an
+    Octant approval at Guarded and Accept edits and Reviewed's reviewer at
+    Reviewed. Approved runs that one command; denied or unanswered stays
+    refused, and nothing is remembered for a later command.
+  - **Strict: Octant's sandbox as an opt-in.** A per-account setting, set the
+    way the [opt-in sandbox at Full access](#security-and-authority) is,
+    runs the provider inside Octant's profile instead of its own sandbox
+    (for Codex, the profile the table below shows). Strict keeps provider sign-ins, `~/.ssh` and cloud keys unreadable, and
+    turns native escalation off, so a command that needs to leave fails.
+  - **Octant's sandbox stays the default** for providers with no sandbox of
+    their own: OpenCode, Mistral Vibe and Pi.
+  - **Per provider.** Codex runs its native workspace-write sandbox and its
+    own escalation; macOS refuses a Seatbelt profile inside another, so the
+    native sandbox replaces Octant's profile rather than running in it.
+    Claude Code is the exception to Octant configuring the native sandbox:
+    Octant leaves Claude's sandbox alone. It runs exactly as the person's own
+    Claude Code settings configure it, as in Claude Code on its own, and
+    Octant passes it no sandbox settings at all: no writable roots, no
+    network, no read or deny rules, and no change to when sandboxed commands
+    run unasked. Claude's own request to run a command outside its sandbox
+    becomes the Octant approval above. Plan keeps its read-only confinement,
+    and Octant's sandbox applies to Claude Code only under Strict. Gemini CLI and Qwen Code use their
+    native sandboxes. Copilot CLI and Cursor follow once their ACP releases
+    are checked for a sandbox Octant can configure, and Grok Build once it is
+    known why its launch sets `GROK_SANDBOX=off`; until then each keeps
+    Octant's profile.
+  - **Unchanged.** Server-side approval authority and journaling; Plan's
+    read-only enforcement and no shell in Chat; the paired-device and
+    routine rules; environment scrubbing, and never handing one provider
+    another's credentials; outside-content tracking; and Full access, which
+    keeps no sandbox unless the thread keeps one.
+  - **Not built, and not part of this rule:** a host-side command executor
+    that runs a provider's commands for it, and restarting a session at wider
+    authority.
+
+  Rationale: a provider's own sandbox carries its native escalation, so a
+  command that needs to leave asks the person instead of failing at Octant's
+  wall (Codex cannot raise that ask under an external sandbox, as the Codex
+  notes below record), and the provider then behaves as its own
+  documentation says; Claude Code is left wholly to the person's own Claude
+  Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
+  it on macOS, which refuses nested Seatbelt, so keeping the wall means
+  giving the native sandbox up. The accepted trade-off: below Full access a
+  provider's native sandbox may allow reads outside the Project, other
+  credentials included, as the provider on its own does; a person who wants
+  those reads closed turns Strict on.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -14749,7 +14816,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   wall; Ask first and Accept edits run `untrusted` and keep asking. Codex
   cannot ask to leave Octant's wall under an external sandbox, so a command
   that needs to fails there (not built yet: carrying that ask; see
-  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Approving a command no
+  [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Under
+  [Providers run in their own sandbox](#security-and-authority) (designed,
+  not built) Codex leaves Octant's profile below Full access for its native
+  workspace-write sandbox, whose escalation carries that ask, and stays in
+  Octant's profile, as described here, only under Strict. Approving a command no
   longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
@@ -14766,7 +14837,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   (`allowUnsandboxedCommands` with `dangerouslyDisableSandbox` on `Bash`),
   only after it asks at Guarded and Accept edits or passes the reviewer at
   Reviewed, and never in Plan (maintainer decision, 2026-11-14;
-  [detail](design/provider-runtimes.md#full-built-in-tool-set)).
+  [detail](design/provider-runtimes.md#full-built-in-tool-set)). Today Octant
+  sets that sandbox's folders and network and keeps sandboxed commands
+  asking; under [Providers run in their own sandbox](#security-and-authority)
+  (designed, not built) it passes Claude's sandbox no settings at all.
   At Full access a Codex command reaches the whole disk,
   and the launch environment is the same in every posture. Octant
   therefore gives the Codex runtime no reusable cloud credential the person

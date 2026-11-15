@@ -730,6 +730,13 @@ command sandbox keeps its own folders, so below Full access a sandboxed shell
 command cannot reach an outside folder. Redaction of logs, the journal, and
 exports applies at every level.
 
+Under [Providers run in their own sandbox](../architecture.md#security-and-authority)
+(maintainer decision, 2026-11-15; designed, not built), Octant passes Claude's
+sandbox no settings: it runs as the person's own Claude Code settings
+configure it, Claude's own escape request reaches the person as an Octant
+approval, Plan keeps its read-only confinement, and Octant's sandbox applies
+only under Strict. The sandbox settings described next are today's build.
+
 Below Full access Claude's command sandbox lets a command out the way Claude
 Code does on its own (maintainer decision, 2026-11-14): the launch sets
 `sandbox.allowUnsandboxedCommands: true` (the bundled SDK 0.3.211 and Claude
@@ -1173,7 +1180,12 @@ rules (see [Native plan capture](#native-plan-capture)).
 
 Below Full access every Codex app-server runs under Octant's profile, and the
 [confinement matrix](../architecture.md#security-and-authority) owns what that
-profile allows and why. The wire mapping that follows from it:
+profile allows and why. That changes under
+[Providers run in their own sandbox](../architecture.md#security-and-authority)
+(maintainer decision, 2026-11-15; designed, not built): Codex is to run its
+native workspace-write sandbox and escalation in place of Octant's profile,
+keeping the mapping below only under Strict. The wire mapping that follows
+from today's profile:
 
 - A process carries one lease: a thread's root, mode, and posture, or a catalog
   lease for account and model reads. The driver leases it when a connection's

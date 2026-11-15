@@ -48,7 +48,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 15        | 9       | 5            | 1                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 5            | 2                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 11        | 5       | 6            | 0                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **265**   | **158** | **103**      | **4**               |
+| **All areas**                                                                         | **266**   | **158** | **103**      | **5**               |
 
 ## Principles and hard lines
 
@@ -1928,8 +1928,25 @@ A provider runtime launch is wrapped when the process carries exactly one thread
 - A runtime that makes its own API call resolves provider-endpoints-only below Full access. On macOS and Linux, with Network limits on (they ship off), the runtime then runs on its own egress proxy, reaching its provider's endpoints, its Project's rules and the person's safe networks; OpenCode on Linux still materializes it as plain network allow.
 - A new module may not launch a provider process without the shared confinement builder unless the matrix names it.
 - Runtimes get no reusable cloud credential the person did not configure for that account; shared-config and default-chain cloud sign-in is refused.
+- Below Full access this matrix changes per provider under [Providers run in their own sandbox](#providers-run-in-their-own-sandbox) (designed, not built).
 
 Status: Built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
+
+### Providers run in their own sandbox
+
+Below Full access, a provider that has a sandbox of its own runs in it, as it does on its own; Octant's sandbox becomes the opt-in Strict setting and the fallback (maintainer decision, 2026-11-15).
+
+- Octant configures the native sandbox rather than wrapping it in its own profile: writable roots are the Project's folders, network follows Network limits, and Octant's protected paths become the provider's deny rules wherever it supports them.
+- Claude Code is the exception: Octant passes its sandbox no settings (no writable roots, network, read or deny rules, or auto-allow change), so it runs as the person's own Claude Code settings configure it; Plan keeps its read-only confinement.
+- The provider's request to run one command outside its sandbox reaches the person as an Octant approval (Reviewed's reviewer at Reviewed); approved runs that one command, and denied or unanswered stays refused.
+- Strict is a per-account opt-in that follows the opt-in sandbox at Full access: the provider runs inside Octant's profile, provider sign-ins, `~/.ssh` and cloud keys stay unreadable, and native escalation is off.
+- Octant's sandbox stays the default for providers with no sandbox of their own: OpenCode, Mistral Vibe and Pi.
+- Per provider: Codex takes its native workspace-write sandbox and escalation in place of Octant's profile, since macOS refuses nested Seatbelt; Gemini CLI and Qwen Code use their native sandboxes; Copilot CLI and Cursor follow after their ACP releases are checked, and Grok Build after a check of why it launches with `GROK_SANDBOX=off`.
+- Accepted trade-off: below Full access a native sandbox may allow reads outside the Project, other credentials included, as the provider on its own does.
+- Unchanged: server-side approval authority and journaling, read-only Plan and no shell in Chat, the paired-device and routine rules, environment scrubbing and never handing one provider another's credentials, and outside-content tracking.
+- Not part of this rule: a host-side command executor, and restarting a session at wider authority.
+
+Status: Designed, not built. Since: 2026-11-15. Detail: [Architecture: Security and authority, Providers run in their own sandbox](../architecture.md#security-and-authority).
 
 ### Work shell at the shared access level
 
@@ -1963,6 +1980,7 @@ A key provider's app-server runtime runs inside Octant's sandbox, not its own, i
 - A command cannot read the home folder outside the root and the account home, and cannot write the account home's configuration, rules, skills, hooks, plugins or instructions.
 - The launch environment carries no cloud profile, shared-config location or IAM key at any posture; a cloud sign-in that reads shared config or general-purpose keys is refused as incompatible.
 - At Full access its commands reach the whole disk.
+- Below Full access Codex moves to its native sandbox, keeping Octant's only under Strict, per [Providers run in their own sandbox](#providers-run-in-their-own-sandbox) (designed, not built).
 
 Status: Partly built. Since: —. Detail: [Architecture: Security and authority, Sandbox](../architecture.md#security-and-authority).
 
