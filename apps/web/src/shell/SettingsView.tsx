@@ -197,10 +197,7 @@ import {
   NativeHarnessRoutingPanel,
   nativeHarnessSlotsUsing,
 } from "../harness/NativeHarnessRoutingPanel";
-import {
-  nativeHarnessPickerGroups,
-  nativeHarnessProviderOptions,
-} from "../harness/modelRoleOptions";
+import { modelRolePickerGroups, modelRoleProviderOptions } from "../harness/modelRoleOptions";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
@@ -1363,11 +1360,11 @@ function ActiveSectionContent({
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
                 focused={focusedSetting === settingId("model-roles")}
-                groups={nativeHarnessPickerGroups(props.providerController)}
+                groups={modelRolePickerGroups(props.providerController)}
                 key={rolesRevision}
                 hostId={LOCAL_HOST_ID}
                 onOpenModelEndpoints={openModelEndpoints}
-                providers={nativeHarnessProviderOptions(props.providerController)}
+                providers={modelRoleProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
                   : { onVerifyTools: props.providerController.verifyModelTools })}

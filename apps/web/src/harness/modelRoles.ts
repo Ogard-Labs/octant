@@ -5,6 +5,7 @@ import {
   type NativeHarnessSlotCandidate,
   type NativeHarnessSlotId,
 } from "@octant/contracts";
+import type { RoleSuggestion } from "@octant/domain";
 
 export interface ModelRolePresentation {
   readonly id: string;
@@ -135,3 +136,32 @@ export function hasCandidate(
 /** Said once on each page that shows the two flags, not under every role. */
 export const ROLE_FLAGS_NOTE =
   "Ask before using and Continue on the fallback are saved with each role. Octant does not act on them yet; they take effect when coordinators start using roles.";
+
+/**
+ * The role as a suggestion would leave it. The person's flags stay (the saved
+ * role is the base). A reasoning level the person set on a model stays with
+ * that model; the suggestion's own hint goes in only when the row was empty.
+ * A suggestion with no model changes nothing.
+ */
+export function slotFromSuggestion(
+  id: string,
+  saved: NativeHarnessSlot | undefined,
+  suggestion: RoleSuggestion,
+  hostId: string,
+): NativeHarnessSlot | undefined {
+  if (suggestion.picks.length === 0) return saved;
+  const wasEmpty = (saved?.candidates.length ?? 0) === 0;
+  const candidates = suggestion.picks.map((pick): NativeHarnessSlotCandidate => {
+    const candidate = {
+      hostId: hostId as never,
+      providerInstanceId: pick.providerInstanceId as never,
+      modelId: pick.modelId as never,
+    };
+    const kept = saved?.candidates.find(
+      (entry) => nativeHarnessSlotCandidateKey(entry) === nativeHarnessSlotCandidateKey(candidate),
+    )?.reasoning;
+    const reasoning = wasEmpty ? pick.reasoning : kept;
+    return reasoning === undefined ? candidate : { ...candidate, reasoning };
+  });
+  return slotWithCandidates(id, saved, candidates);
+}

@@ -216,6 +216,7 @@ export * from "./canvasChoiceAnswerPolicy";
 export * from "./canvasTagsPolicy";
 export * from "./workspacePresetPolicy";
 export * from "./appUpdatePolicy";
+export * from "./modelRoleSuggestionPolicy";
 export * from "./nativeHarnessRoutingPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";

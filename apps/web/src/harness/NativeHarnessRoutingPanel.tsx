@@ -15,7 +15,15 @@ import {
   NativeHarnessClientFailure,
   type NativeHarnessClient,
 } from "@octant/client-runtime/native-harness-client";
-import type { PickerGroup, PickerModel } from "@octant/domain";
+import {
+  MODEL_ROLE_NEEDS,
+  suggestModelRoles,
+  type PickerGroup,
+  type PickerModel,
+  type RoleSuggestion,
+} from "@octant/domain";
+import { roomOf } from "../usage/providerRoom";
+import { useProviderRooms } from "../usage/useProviderRooms";
 import type { ModelToolVerification } from "../providers/useProviderController";
 import { SettingsDisclosure, SettingsSection, useRevealedFocus } from "../settings/primitives";
 import { settingId } from "../settings/registry";
@@ -23,12 +31,14 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ModelRoleEditor } from "./ModelRoleEditor";
-import { nativeHarnessReadinessById } from "./modelRoleOptions";
+import { nativeHarnessReadinessById, roleSuggestionModels } from "./modelRoleOptions";
+import { RoleSuggestionPreview } from "./RoleSuggestionPreview";
 import {
   ADVISOR_ROLE,
   MODEL_ROLES,
   ROLE_FLAGS_NOTE,
   rolePresentation,
+  slotFromSuggestion,
   slotWithCandidates,
 } from "./modelRoles";
 import "./native-harness.css";
@@ -90,6 +100,15 @@ const EDITABLE_JOBS = NativeHarnessJob.literals.filter(
 const STALE_MESSAGE = "Changed elsewhere. Reloaded; make your change again.";
 
 /** The roles, by their Settings names, that list a model from this endpoint. */
+
+/**
+ * Only the roles the suggestion policy knows get Suggest: an Advisor or a
+ * custom role had the button and opened an empty preview whose Use these
+ * could never be pressed.
+ */
+const SUGGESTABLE_ROLE_IDS: ReadonlySet<string> = new Set(
+  MODEL_ROLE_NEEDS.map((need) => need.roleId),
+);
 export function nativeHarnessSlotsUsing(
   configuration: NativeHarnessRoutingConfiguration,
   providerInstanceId: string,
@@ -117,6 +136,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState<string>();
   const landing = useRef<HTMLDivElement>(null);
+  const rooms = useProviderRooms();
+  // The suggestion being previewed. Nothing is saved until the person accepts.
+  const [preview, setPreview] = useState<ReadonlyArray<RoleSuggestion>>();
   useRevealedFocus(landing, props.focused === true && status === "ready");
 
   const load = useCallback(async () => {
@@ -240,6 +262,46 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
     configuration.slots.some((slot) => slot.candidates.length > 0) || !standardJobs;
 
   const readiness = nativeHarnessReadinessById(props.providers);
+  const suggest = (roleIds: ReadonlyArray<string>) => {
+    // A single Reviewer is chosen against the Builder the person has saved.
+    const builder = slotFor("default")?.candidates[0];
+    const builderKind =
+      builder === undefined
+        ? undefined
+        : props.groups.find(
+            (group) => String(group.instance.id) === String(builder.providerInstanceId),
+          )?.instance.driverKind;
+    setPreview(
+      suggestModelRoles({
+        models: roleSuggestionModels(
+          props.groups,
+          (instanceId) => roomOf(rooms, instanceId).standing === "limited",
+        ),
+        roleIds,
+        ...(roleIds.length === 1 && builderKind !== undefined
+          ? { builderMain: { providerKind: builderKind } }
+          : {}),
+      }),
+    );
+  };
+  const useSuggestions = () => {
+    if (preview === undefined) return;
+    let next = configuration;
+    for (const suggestion of preview) {
+      const saved = next.slots.find((slot) => String(slot.id) === suggestion.roleId);
+      const slot = slotFromSuggestion(suggestion.roleId, saved, suggestion, props.hostId);
+      if (slot === saved) continue;
+      next = {
+        ...next,
+        slots: [
+          ...next.slots.filter((entry) => String(entry.id) !== suggestion.roleId),
+          ...(slot === undefined ? [] : [slot]),
+        ],
+      };
+    }
+    setPreview(undefined);
+    void commit(next);
+  };
   const editor = (role: {
     readonly id: string;
     readonly label: string;
@@ -251,6 +313,9 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
       hostId={props.hostId}
       key={role.id}
       onChange={(next) => void commit(withSlot(role.id, next))}
+      {...(hasModels && SUGGESTABLE_ROLE_IDS.has(role.id)
+        ? { onSuggest: () => suggest([role.id]) }
+        : {})}
       readiness={readiness}
       {...(props.onVerifyTools === undefined ? {} : { onVerifyTools: props.onVerifyTools })}
       role={role}
@@ -338,6 +403,22 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
                 </OctantButton>
               </div>
             )}
+            {hasModels ? (
+              <div className="native-harness-roles__suggest">
+                <span className="oct-meta">
+                  Suggest roles proposes a model for each role from what is connected, and shows it
+                  before anything is saved.
+                </span>
+                <OctantButton
+                  disabled={saving}
+                  onClick={() => suggest(MODEL_ROLES.map((role) => role.id))}
+                  size="sm"
+                  variant="secondary"
+                >
+                  Suggest roles
+                </OctantButton>
+              </div>
+            ) : null}
             <p className="oct-meta native-harness-roles__flags">{ROLE_FLAGS_NOTE}</p>
             {MODEL_ROLES.map((role) =>
               role.id === "default" ? (
@@ -398,6 +479,16 @@ export function NativeHarnessRoutingPanel(props: NativeHarnessRoutingPanelProps)
           </div>
         )}
       </SettingsSection>
+      {preview === undefined ? null : (
+        <RoleSuggestionPreview
+          onCancel={() => setPreview(undefined)}
+          onUse={useSuggestions}
+          suggestions={preview.map((suggestion) => ({
+            label: rolePresentation(suggestion.roleId).label,
+            suggestion,
+          }))}
+        />
+      )}
     </section>
   );
 }
