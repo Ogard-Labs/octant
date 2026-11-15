@@ -9666,7 +9666,13 @@ the model at another size.
   own stops). A Project override is per role: a slot it lists replaces Settings'
   for that role and an unlisted role uses Settings, still only with models
   Settings lists for that role (`not-a-subset`). Only a person's window changes
-  either layer (maintainer decision, 2026-11-15). The lead is the exception: it runs on the model its thread chose,
+  either layer (maintainer decision, 2026-11-15). A slot's candidates may name a
+  model of any enabled provider, since coordinator workers run as ordinary Code
+  threads; the harness resolver skips a candidate its own runtime cannot run
+  (not a harness endpoint) with the rejection reason `not-harness-runnable`,
+  journaled with the route decision, and never runs it in the harness. Suggested
+  roles are the pure `suggestModelRoles` in `@octant/domain`, previewed and saved
+  only by a person through the same versioned command. The lead is the exception: it runs on the model its thread chose,
   and the `default` slot decides only where it continues once that model has
   failed (below).
 - **Endpoint failures.** Every direct-endpoint request goes through
