@@ -246,7 +246,8 @@ try {
     await new Promise((done) => setTimeout(done, 500));
     concurrent = containerSids().size;
   }
-  for (const child of waiting) child.stdin.end("\r\n");
+  // `set /p` exits 1 on an empty line, so each launch is released with a word.
+  for (const child of waiting) child.stdin.end("go\r\n");
   const codes = await Promise.all(exits);
   const leftAfter = containerSids().size;
   check(
