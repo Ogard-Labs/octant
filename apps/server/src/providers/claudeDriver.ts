@@ -789,10 +789,14 @@ export async function claudeSessionInstructions(input: {
   if (input.mode === "chat" || input.singleUse) return undefined;
   const sources = claudeNativeQueryOptions(input.nativeSetup).settingSources;
   const ownAccountPaths = claudeOwnAccountPaths(input.environment);
-  const configDir = sources.includes("user") ? undefined : ownAccountPaths[0];
+  const accountDir = ownAccountPaths[0];
   const guarded = claudeSecretGuardApplies(input.executionPolicy);
   const read = await readClaudeInstructionFiles({
-    ...(configDir === undefined ? {} : { configDir }),
+    // With the `user` source on, Claude Code loads the account's CLAUDE.md
+    // itself, but a Project file Octant reads may still import from the
+    // account's folder, so that folder stays an import root.
+    ...(accountDir === undefined || sources.includes("user") ? {} : { configDir: accountDir }),
+    ...(accountDir === undefined ? {} : { importRoots: [accountDir] }),
     ...(sources.includes("project") ? {} : { projectRoot: input.projectRoot }),
     refuses: (path) =>
       isClaudeAccountCredentialFile(path, input.environment) ||

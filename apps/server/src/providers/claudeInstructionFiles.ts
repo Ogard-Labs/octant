@@ -61,10 +61,16 @@ interface Reading {
  * names: a file or import the session may not read is skipped before it is
  * opened. An import left out because the import bound was reached is
  * skipped the same way.
+ *
+ * `importRoots` names more folders an import may load from without reading
+ * their top-level files: the account's folder stays one when Claude Code
+ * loads the account's own CLAUDE.md, so a Project file's `@~/.claude/...`
+ * import still resolves.
  */
 export async function readClaudeInstructionFiles(input: {
   readonly configDir?: string;
   readonly projectRoot?: string;
+  readonly importRoots?: ReadonlyArray<string>;
   readonly refuses?: (path: string) => boolean;
 }): Promise<ClaudeInstructionFiles> {
   const reading: Reading = {
@@ -75,10 +81,11 @@ export async function readClaudeInstructionFiles(input: {
     seen: new Set(),
     bytes: 0,
   };
-  for (const folder of [input.configDir, input.projectRoot]) {
+  for (const folder of [input.configDir, input.projectRoot, ...(input.importRoots ?? [])]) {
     if (folder === undefined || !isAbsolute(folder)) continue;
     try {
-      reading.roots.push(await realpath(folder));
+      const root = await realpath(folder);
+      if (!reading.roots.includes(root)) reading.roots.push(root);
     } catch {
       // A folder that does not resolve holds nothing to import.
     }

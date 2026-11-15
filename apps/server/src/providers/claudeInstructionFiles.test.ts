@@ -127,6 +127,44 @@ describe("Claude instruction files", () => {
     }
   });
 
+  it("still follows an import into the account's folder when Claude Code loads the account's own file", async () => {
+    await writeFile(join(configDir, "shared.md"), "Shared: write plain sentences.");
+    await writeFile(join(configDir, "absolute.md"), "Absolute: keep tests close.");
+    await writeFile(
+      join(projectRoot, "CLAUDE.md"),
+      `Project: use tabs.\n\nSee @~/config/shared.md and @${join(configDir, "absolute.md")}`,
+    );
+    const home = process.env.HOME;
+    process.env.HOME = base;
+    const diagnostics: string[] = [];
+    try {
+      // Native skills turn the `user` source on in an untrusted Project, so
+      // Claude Code loads the account's CLAUDE.md and Octant reads only the
+      // Project's.
+      const text = await instructionsFor(
+        {
+          nativeSetup: {
+            subagents: false,
+            webTools: false,
+            skills: true,
+            toolServers: false,
+            hooks: false,
+            projectCode: false,
+          },
+        },
+        diagnostics,
+      );
+      expect(text).not.toContain("Global: answer briefly.");
+      expect(text).toContain("Project: use tabs.");
+      expect(text).toContain("Shared: write plain sentences.");
+      expect(text).toContain("Absolute: keep tests close.");
+      expect(diagnostics).toEqual([]);
+    } finally {
+      if (home === undefined) delete process.env.HOME;
+      else process.env.HOME = home;
+    }
+  });
+
   it("says which imports were left out once the import bound is reached", async () => {
     const names = Array.from({ length: 33 }, (_, index) => `rule-${index + 1}.md`);
     for (const [index, name] of names.entries()) {
