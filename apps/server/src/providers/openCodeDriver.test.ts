@@ -3150,10 +3150,10 @@ describe("OpenCode driver", () => {
     const projectFile = "/work/project/src/index.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
     const credentials = join(homedir(), ".aws", "credentials");
-    const protectedPaths = [
-      { ruleId: "ssh-private-keys", path: join(homedir(), ".ssh") },
-      { ruleId: "cloud-credentials", path: credentials },
-    ] as const;
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), credentials],
+      atFullAccess: [],
+    };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(
         policy,
@@ -3196,7 +3196,7 @@ describe("OpenCode driver", () => {
       webTools: true,
     } as const;
     const key = join(homedir(), ".ssh", "id_ed25519");
-    const protectedPaths = [{ ruleId: "ssh-private-keys", path: join(homedir(), ".ssh") }] as const;
+    const protectedPaths = { belowFullAccess: [join(homedir(), ".ssh")], atFullAccess: [] };
     for (const policy of ["approval-gated", "plan"] as const) {
       const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
         (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
@@ -3322,10 +3322,10 @@ describe("OpenCode driver", () => {
     const outside = "/elsewhere/notes/a.ts";
     const key = join(homedir(), ".ssh", "id_ed25519");
     const signIn = join(homedir(), ".codex", "auth.json");
-    const protectedPaths = [
-      { ruleId: "ssh-private-keys", path: join(homedir(), ".ssh") },
-      { ruleId: "provider-sign-ins", path: signIn },
-    ] as const;
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), signIn],
+      atFullAccess: [signIn],
+    };
     const rulesFor = (policy: "full-access" | "approval-gated" | "plan") => [
       permissionRules(
         policy,
@@ -3363,12 +3363,11 @@ describe("OpenCode driver", () => {
     const added = "/opt/vault/token";
     const codexSignIn = join(homedir(), ".codex", "auth.json");
     const claudeSignIn = join(homedir(), ".claude", ".credentials.json");
-    const protectedPaths = [
-      { ruleId: "cloud-credentials", path: cloud },
-      { ruleId: "added", path: added },
-      { ruleId: "provider-sign-ins", path: codexSignIn },
-      { ruleId: "provider-sign-ins", path: claudeSignIn },
-    ] as const;
+    // The host resolves both lists; the driver only chooses one by level.
+    const protectedPaths = {
+      belowFullAccess: [cloud, added, codexSignIn, claudeSignIn],
+      atFullAccess: [codexSignIn, claudeSignIn],
+    };
     const own = {
       rules: [{ action: "read", resource: "*.env.example", effect: "deny" }],
       toolServers: false,

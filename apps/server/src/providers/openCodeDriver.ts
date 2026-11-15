@@ -1,6 +1,5 @@
 import { providerCommandOf, providerCommandRefusal, providerRunsAsItself } from "@octant/domain";
 import { readBoundedResponseBody } from "../extensions/boundedResponseBody";
-import { protectedAtLevel, type ProtectedPath } from "../process/secretGuard";
 import { advertisedSlashCommands } from "./providerSlashCommands";
 import { OpenCodeChildSessions } from "./openCodeChildSessions";
 import {
@@ -149,6 +148,19 @@ export interface OpenCodeClientPort {
   ) => Promise<void>;
 }
 
+/**
+ * The host's protected files in force, as absolute paths, at each level: the
+ * full list below Full access, and the narrower list Octant's own file tools
+ * still refuse at Full access. The host picks both lists; the driver only
+ * chooses between them by the session's execution policy.
+ */
+export interface OpenCodeProtectedPaths {
+  readonly belowFullAccess: ReadonlyArray<string>;
+  readonly atFullAccess: ReadonlyArray<string>;
+}
+
+const NO_PROTECTED_PATHS: OpenCodeProtectedPaths = { belowFullAccess: [], atFullAccess: [] };
+
 export interface OpenCodeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
@@ -162,13 +174,13 @@ export interface OpenCodeDriverOptions {
   /** The person's own OpenCode rules and MCP servers; read from their configuration by default. */
   readonly readOwnSetup?: () => OpenCodeOwnSetup;
   /**
-   * The host's protected files and folders in force, as absolute paths with
-   * the group that protects each, which a session refuses to read or list:
-   * every one below Full access, only the provider sign-ins at it. The host
-   * resolves them, so the driver never reads its protected-file configuration
-   * itself. Absent refuses none beyond OpenCode's own `.env` rule.
+   * The host's protected files and folders in force, as absolute paths, which
+   * a session refuses to read or list: one list below Full access, one at it.
+   * The host resolves both, so the driver never reads its protected-file
+   * configuration or policy itself. Absent refuses none beyond OpenCode's own
+   * `.env` rule.
    */
-  readonly protectedPaths?: () => ReadonlyArray<ProtectedPath>;
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   readonly correlationId?: () => string;
@@ -191,7 +203,7 @@ interface SessionState {
   /** The person's own permission rules this session applies, empty when none. */
   readonly own: OwnPermissions;
   /** The host's protected paths when the session started, refused last in its rules. */
-  readonly protectedPaths: ReadonlyArray<ProtectedPath>;
+  readonly protectedPaths: OpenCodeProtectedPaths;
   readonly approvals: Set<string>;
   /**
    * The delegated session each pending approval or question came from, when it
@@ -1656,7 +1668,7 @@ function acquireRuntime(
     [],
     false,
     NO_OWN_PERMISSIONS,
-    options.protectedPaths?.() ?? [],
+    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
   );
   return options.runtimeRegistry.acquireRuntime(options.instanceId, {
     idleMs: options.idleLeaseMs ?? 30_000,
@@ -2105,7 +2117,7 @@ function makeConnection(
                     extraFolders,
                     ownSkills,
                     ownPermissions(ownSetup),
-                    options.protectedPaths?.() ?? [],
+                    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
                   ),
                   ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
                   onProcessStarted: (process) =>
@@ -2473,7 +2485,7 @@ function makeConnection(
             input.nativeSetup,
             rememberedEdits,
             ownPermissions(ownSetup),
-            options.protectedPaths?.() ?? [],
+            options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
@@ -2644,7 +2656,7 @@ function makeConnection(
                 input.nativeSetup,
                 rememberedEdits,
                 ownPermissions(ownSetup),
-                options.protectedPaths?.() ?? [],
+                options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -3170,7 +3182,7 @@ function newSessionState(
   nativeSetup: ProviderNativeSetup | undefined,
   rememberedEdits: Set<string>,
   own: OwnPermissions,
-  protectedPaths: ReadonlyArray<ProtectedPath>,
+  protectedPaths: OpenCodeProtectedPaths,
 ): SessionState {
   return {
     sessionId,
@@ -3641,10 +3653,12 @@ const OPENCODE_ENV_READ_RULES: ReadonlyArray<PermissionV2Rule> = [
  */
 export function openCodeProtectedReadRefusals(
   policy: ProviderExecutionPolicy,
-  protectedPaths: ReadonlyArray<ProtectedPath>,
+  protectedPaths: OpenCodeProtectedPaths,
 ): ReadonlyArray<PermissionV2Rule> {
   const patterns = new Set<string>();
-  for (const { path } of protectedAtLevel(protectedPaths, policy === "full-access")) {
+  const inForce =
+    policy === "full-access" ? protectedPaths.atFullAccess : protectedPaths.belowFullAccess;
+  for (const path of inForce) {
     patterns.add(path);
     patterns.add(`${path}/*`);
   }
@@ -3660,7 +3674,7 @@ export function permissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<ProtectedPath> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionRuleset {
   let rules: PermissionRuleset;
   if (policy === "full-access") {
@@ -3766,7 +3780,7 @@ export function betaAgentPermissionRules(
   _mode: "chat" | "work" | "code",
   extraFolders: ReadonlyArray<string> = [],
   ownRules: ReadonlyArray<PermissionV2Rule> = [],
-  protectedPaths: ReadonlyArray<ProtectedPath> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionV2Ruleset {
   let rules: PermissionV2Ruleset;
   if (policy === "full-access") {
@@ -3869,7 +3883,7 @@ export function betaSessionPermissionRules(
   extraFolders: ReadonlyArray<string> = [],
   ownSkills = false,
   own: OwnPermissions = NO_OWN_PERMISSIONS,
-  protectedPaths: ReadonlyArray<ProtectedPath> = [],
+  protectedPaths: OpenCodeProtectedPaths = NO_PROTECTED_PATHS,
 ): PermissionV2Ruleset {
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),

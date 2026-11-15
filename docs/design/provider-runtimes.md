@@ -1268,7 +1268,10 @@ since OpenCode's wildcards cannot say a regular expression. At Full access
 the secret-path refusals do not apply, as for Octant's own file tools: only
 the Provider sign-ins group stays refused there, on 1.x and 2.x alike, still
 last, and the person's added paths and every other group are readable
-(`protectedAtLevel`; maintainer decision, 2026-11-15). A Full access launch
+(maintainer decision, 2026-11-15). The host narrows the list
+(`protectedAtLevel`) and passes the driver both lists, below and at Full
+access, as plain paths; the driver only picks one by level and imports no
+host policy. A Full access launch
 runs outside Octant's sandbox, so no OS rule narrows with it; one that kept
 its sandbox keeps the Accept edits wall and its whole OS deny list. Plan also allows
 OpenCode's other read-only tools without asking: `todowrite`, `todoread`,

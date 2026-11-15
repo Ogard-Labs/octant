@@ -186,12 +186,6 @@ const FULL_ACCESS_PROTECTED_RULES: ReadonlySet<ResolvedProtectedEntry["ruleId"]>
   "provider-sign-ins" satisfies BuiltInProtectedFilesId,
 ]);
 
-/** A protected file or folder in force, as an absolute path, with the group that protects it. */
-export interface ProtectedPath {
-  readonly ruleId: ResolvedProtectedEntry["ruleId"];
-  readonly path: string;
-}
-
 /**
  * The protected entries a caller at this level still refuses: every one
  * below Full access, and at Full access only {@link FULL_ACCESS_PROTECTED_RULES}.

@@ -248,7 +248,8 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import { secretGuardEntries, type ProtectedPath } from "../process/secretGuard";
+import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
+import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
   readonly openCodeProcess: OpenCodeProcessPort;
@@ -269,8 +270,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths with their groups. */
-  readonly protectedPaths?: () => ReadonlyArray<ProtectedPath>;
+  /** The host's protected files and folders in force, as absolute paths at each level. */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -535,15 +536,19 @@ function runDirectEndpointOnNativeHarness(
 }
 
 /**
- * The protected files in force on this host, resolved here so a provider driver
- * receives the list and never reads the protected-file configuration itself.
- * A name pattern is given as its whole folder.
+ * The protected files in force on this host at each level, resolved here so a
+ * provider driver receives plain lists and never reads the protected-file
+ * configuration or its Full access policy itself. A name pattern is given as
+ * its whole folder.
  */
-function hostProtectedPaths(): ReadonlyArray<ProtectedPath> {
-  return secretGuardEntries({ platform: process.platform }).map((entry) => ({
-    ruleId: entry.ruleId,
-    path: entry.kind === "path" ? entry.path : entry.directory,
-  }));
+function hostProtectedPaths(): OpenCodeProtectedPaths {
+  const entries = secretGuardEntries({ platform: process.platform });
+  const pathOf = (entry: (typeof entries)[number]) =>
+    entry.kind === "path" ? entry.path : entry.directory;
+  return {
+    belowFullAccess: protectedAtLevel(entries, false).map(pathOf),
+    atFullAccess: protectedAtLevel(entries, true).map(pathOf),
+  };
 }
 
 export function pathIsProjectConfined(projectRoot: string, absolutePath: string): boolean {

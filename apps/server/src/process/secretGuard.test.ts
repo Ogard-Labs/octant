@@ -8,6 +8,7 @@ import {
   applyProtectedFilesChoice,
   configureSecretGuardLocations,
   isProtectedSecretPath,
+  protectedAtLevel,
   secretGuardEntries,
   secretGuardLinuxPaths,
   secretGuardRefusal,
@@ -159,6 +160,17 @@ describe("secret guard refusals for host file tools", () => {
     expect(mixed).toContain("Cloud command-line credentials");
     expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
     expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
+  });
+
+  it("keeps only provider sign-ins in force at Full access and every protected entry below it", () => {
+    const home = fakeHome();
+    applyProtectedFilesChoice({ added: ["~/project/token"], removed: [] });
+    const entries = secretGuardEntries({ platform: "darwin", homeDirectory: home });
+    const groups = (fullAccess: boolean) =>
+      new Set(protectedAtLevel(entries, fullAccess).map((entry) => entry.ruleId));
+    expect(groups(false)).toEqual(new Set(entries.map((entry) => entry.ruleId)));
+    expect(groups(false).has("added")).toBe(true);
+    expect(groups(true)).toEqual(new Set(["provider-sign-ins"]));
   });
 
   it("refuses a search rooted inside a browser profile whose stores the list names by pattern", () => {
