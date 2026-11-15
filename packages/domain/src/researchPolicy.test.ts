@@ -19,8 +19,15 @@ describe("research backend routing", () => {
     });
   });
 
-  it("automatic prefers configured SearXNG when app-managed tools are supported", () => {
+  it("automatic prefers the provider's own search even when SearXNG is configured", () => {
     expect(resolveResearchBackend(input())).toEqual({
+      kind: "selected",
+      backend: "provider-native",
+    });
+  });
+
+  it("automatic falls back to configured SearXNG when the provider has no search of its own", () => {
+    expect(resolveResearchBackend(input({ nativeResearch: "unsupported" }))).toEqual({
       kind: "selected",
       backend: "searxng",
     });
@@ -51,7 +58,7 @@ describe("research backend routing", () => {
       ),
     ).toEqual({
       kind: "unavailable",
-      reason: "native-research-unsupported",
+      reason: "searxng-not-configured",
     });
   });
 

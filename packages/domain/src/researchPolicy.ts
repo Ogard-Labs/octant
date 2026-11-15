@@ -55,10 +55,13 @@ export function resolveResearchBackend(input: ResearchBackendInput): ResearchBac
     return selectNative(input);
   }
 
-  const searxng = selectSearxng(input);
-  if (searxng.kind === "selected") {
-    return searxng;
+  // Automatic prefers the provider's own search: it needs no endpoint, so a
+  // fresh install searches without setup. SearXNG is the fallback for a
+  // provider that has none.
+  const native = selectNative(input);
+  if (native.kind === "selected") {
+    return native;
   }
 
-  return selectNative(input);
+  return selectSearxng(input);
 }

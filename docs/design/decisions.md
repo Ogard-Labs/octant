@@ -44,7 +44,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Transcript records](#transcript-records)                                             | 1         | 0       | 1            | 0                   |
 | [Persistence](#persistence)                                                           | 12        | 6       | 6            | 0                   |
 | [Providers](#providers)                                                               | 7         | 5       | 2            | 0                   |
-| [Context and usage](#context-and-usage)                                               | 9         | 8       | 1            | 0                   |
+| [Context and usage](#context-and-usage)                                               | 10        | 8       | 1            | 1                   |
 | [Native harness](#native-harness)                                                     | 6         | 5       | 1            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 7         | 6       | 1            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **259**   | **156** | **99**       | **4**               |
+| **All areas**                                                                         | **260**   | **156** | **99**       | **5**               |
 
 ## Principles and hard lines
 
@@ -338,12 +338,14 @@ Status: Partly built. Since: 2026-10-31. Detail: [Architecture: Octant Shield](.
 
 The key providers run inside Octant as they run on their own, with their native subagents, web tools, skills, home configuration, and a trusted Project's hooks, MCP servers and plugins, plus Octant's journal and views.
 
-- Where a native feature reaches beyond Octant's view, the level decides its default: off until the person turns it on at Guarded and Reviewed, on at Full access, in Work and Code alike.
+- The person's own setup is on by default at every level, as in the provider's own app: Octant adds capabilities and does not take core features away (maintainer decision, 2026-11-14, replacing the default that kept it off at Guarded and Reviewed until the person turned it on). Each call still meets the thread's level: Guarded asks, Reviewed's reviewer decides, Full access runs without asking.
+- With the default on, the person's home hooks run at Guarded and Reviewed as they do in the provider's own app, outside Octant's approval cards (Chat and Plan still run none); OpenCode applies the person's own saved permission rules, Octant's denies still winning; and Chat loads the person's MCP servers, skills and subagents, keeping no folder and no shell (maintainer decisions, 2026-11-14).
+- The person may turn it off for an account (stored as `nativeSetup: false`) or a thread. Before this default, turning an account off left no stored value, so on upgrade every account reads as running as itself, including accounts the person had turned off; they turn it off again if they want (maintainer decision, 2026-11-14). An older build cannot decode `nativeSetup: false`, so downgrade is not supported. An account turned off still keeps the runtime's own web search and fetch in Work and Code outside Plan; with only these on a session is not running as itself, so OpenCode keeps Octant's permissions and `once` approvals and Mistral Vibe keeps its Project-context guard.
 - Plan stays read-only and Chat's filesystem and shell stay withheld at every level.
 - Turning a native feature on never turns on a provider's own memory, telemetry or self-update. The provider's own memory has a setting of its own per key provider account, off by default; telemetry and self-update stay off (maintainer request, 2026-11-12). Built for Claude Code (its auto-memory) and Codex (its memories), in Work and Code sessions outside Plan: a person at a local window or a paired device sets it (maintainer decision, 2026-11-12; not built yet: today a paired device is refused), the change is journaled, and Run as itself, a trusted Project and Full access never turn it on. OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant sets, so their accounts carry no setting. Not built yet: Chat, where it stays off at every setting.
 - Octant still journals a native child run, marks outside content a native web tool read, and reports each capability honestly.
 - Every other provider keeps the deny rules for Project code and skills until it is promoted the same way.
-- A person turns it on for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
+- A person turns it off for a key provider account (Run as itself) or trusts a Work or Code Project for a key provider (Trusted providers), only from a window on the host; both are journaled and the host resolves them for every session it starts or resumes.
 - A Project's own settings, hooks, MCP servers and plugins load only in a Project the person trusted for that provider, at every level.
 - A thread may turn a key provider's own setup on or off for itself (Account default, On, Off), only from a window on the host and journaled; Off beats Full access, and On never grants a Project's code, which still needs the Project's trust (built for all four key providers).
 - Claude Code loads its own subagents (each shown as a child run, every call through the parent's gate), web search and fetch (asking below Full access, marking the thread), home skills, settings and hooks, and a trusted Project's settings, hooks, skills, MCP servers and plugins; its account's MCP servers start only with a trusted Project's.
@@ -591,6 +593,7 @@ Octant has one web search definition, `web-search`, offered to every Chat provid
 - A harness Chat thread gets it once, from the harness; the turn adds no second copy.
 - A missing, empty or over-long query is invalid and searches nothing; no other text stands in for it.
 - A successful result marks the thread as having read outside content. The harness's tainted-query refusal applies to harness threads, as before, and not to a Chat thread on another provider.
+- Automatic research routing prefers the provider's own search when the provider has one and falls back to SearXNG, so a fresh install can search with no endpoint configured (maintainer request, 2026-11-14).
 
 Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md#web-search).
 
@@ -1497,6 +1500,16 @@ A completed event carries a stop reason only when the runtime says why the turn 
 - A turn cut off at the output limit shows a note with Continue, which drafts a follow-up and sends nothing until the person does.
 
 Status: Built. Since: —. Detail: [Architecture: Stop reasons](../architecture.md#stop-reasons).
+
+### Octant instructions
+
+A person writes instructions for Octant itself, beside each provider's own instruction files: one text for the person, an optional one per Project, and an orchestration text for coordinator threads (maintainer request, 2026-11-14).
+
+- They cover only what Octant knows: which provider or model takes which job, how a coordinator splits and hands back work, and when to use Octant's own features. On how a provider works, its own files (`CLAUDE.md`, `AGENTS.md`) come first.
+- Octant never writes them into any file a provider reads and never replaces a provider's system prompt; they travel as standing context blocks after Octant's instructions and before person memory, and reach every turn, routines and coordinators' workers included.
+- They grant no authority. Only a person at a local window or a device the host's own person paired changes them, each change is journaled, and they stay on this host.
+
+Status: Designed, not built. Since: 2026-11-14. Detail: [Octant instructions](octant-instructions.md).
 
 ## Native harness
 
