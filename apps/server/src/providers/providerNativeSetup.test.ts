@@ -176,4 +176,22 @@ describe("a session's native setup read from the journal", () => {
       )?.skills,
     ).toBe(true);
   });
+
+  it("keeps the runtime's own web tools off outside Any and leaves the account's switch as stored", () => {
+    const instance = codex({ nativeSetup: true });
+    const input = {
+      providerInstanceId: instance.id,
+      projectId,
+      mode: "code" as const,
+      executionPolicy: "approval-gated" as const,
+    };
+    const under = (policy: "any" | "zdr-only" | "eu-only" | "eu-and-zdr") =>
+      sessionNativeSetup(
+        { ...sources(instance, codeProject()), readWebSearchPolicy: () => policy },
+        input,
+      );
+    expect(under("any")?.webTools).toBe(true);
+    expect(under("eu-only")).toMatchObject({ webTools: false, subagents: true });
+    expect("nativeSetup" in instance && instance.nativeSetup).toBe(true);
+  });
 });

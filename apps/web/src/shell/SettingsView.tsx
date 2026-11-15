@@ -162,6 +162,9 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { WebSearchSettingsView } from "../settings/WebSearchSettingsView";
+import { WebSearchPolicyContext } from "../settings/webSearchPolicyContext";
+import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
 import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
@@ -278,6 +281,8 @@ export interface SettingsViewProps {
   readonly onOpenUsageSubject?: (subjectType: string, subjectId: string) => void;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Told by Settings › Web search after it saved a policy; the shell passes it down. */
+  readonly onWebSearchPolicyChange?: (policy: WebSearchDataPolicy) => void;
   /** Settings › Data & privacy › Browser profiles; absent where the host keeps none. */
   readonly browserAutomationClient?: Pick<
     BrowserAutomationClient,
@@ -376,6 +381,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
     "Models you add by API key or run locally: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
+  "web-search":
+    "Where Octant's own web search may send a query, the keys it uses, and what a provider's own search may do.",
   github: "Connection and repository access on the selected host.",
   host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
@@ -409,6 +416,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
+  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
   ...[
@@ -483,6 +491,25 @@ export function SettingsView(props: SettingsViewProps) {
   });
   const narrow = props.isNarrow === true;
   const sheet = !narrow && props.presentation === "sheet";
+  // The host's web search policy, which locks vendor runtimes' own web tools
+  // in Settings › Providers outside Any. Read once; the Web search page tells
+  // Settings when it saves another.
+  const [webSearchPolicy, setWebSearchPolicy] = useState<WebSearchDataPolicy>();
+  const hostControlClient = props.hostControlClient;
+  useEffect(() => {
+    if (hostControlClient === undefined) return;
+    let live = true;
+    // A client from before the web search routes answers nothing to read.
+    Promise.resolve()
+      .then(() => hostControlClient.readWebSearch())
+      .then(
+        (read) => live && setWebSearchPolicy(read.settings.policy),
+        () => undefined,
+      );
+    return () => {
+      live = false;
+    };
+  }, [hostControlClient]);
   const contentRef = useRef<HTMLDivElement>(null);
   const previousSection = useRef(route.activeSection);
   const [navigationOpen, setNavigationOpen] = useState(false);
@@ -884,17 +911,19 @@ export function SettingsView(props: SettingsViewProps) {
               <SettingsOutlineRegistration.Provider value={registerSection}>
                 <SettingsPageScope.Provider value={activeSectionScope}>
                   <SecretStoresClientContext.Provider value={props.secretStoresClient}>
-                    <ActiveSectionContent
-                      activeSection={route.activeSection}
-                      capabilities={capabilities}
-                      focusedSetting={route.focusedSetting}
-                      onApplyDeepLink={route.applyDeepLink}
-                      onHarnessEndpointChange={setHarnessEndpoint}
-                      onCatalogEntryChange={setCatalogEntry}
-                      harnessEndpointOpen={subPage !== undefined}
-                      pluginSettingsEntryPoints={pluginSettingsEntryPoints}
-                      props={savingProps}
-                    />
+                    <WebSearchPolicyContext.Provider value={webSearchPolicy}>
+                      <ActiveSectionContent
+                        activeSection={route.activeSection}
+                        capabilities={capabilities}
+                        focusedSetting={route.focusedSetting}
+                        onApplyDeepLink={route.applyDeepLink}
+                        onHarnessEndpointChange={setHarnessEndpoint}
+                        onCatalogEntryChange={setCatalogEntry}
+                        harnessEndpointOpen={subPage !== undefined}
+                        pluginSettingsEntryPoints={pluginSettingsEntryPoints}
+                        props={{ ...savingProps, onWebSearchPolicyChange: setWebSearchPolicy }}
+                      />
+                    </WebSearchPolicyContext.Provider>
                   </SecretStoresClientContext.Provider>
                 </SettingsPageScope.Provider>
               </SettingsOutlineRegistration.Provider>
@@ -1869,6 +1898,23 @@ function ActiveSectionContent({
             />
           )}
         </div>
+      );
+    case "web-search":
+      return (
+        <WebSearchSettingsView
+          {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          onOpen={(target) =>
+            onApplyDeepLink(
+              target === "chat-research"
+                ? { section: "chat", setting: settingId("chat-research-backend") }
+                : { section: "providers" },
+            )
+          }
+          {...(props.onWebSearchPolicyChange === undefined
+            ? {}
+            : { onSaved: props.onWebSearchPolicyChange })}
+        />
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable

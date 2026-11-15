@@ -73,6 +73,7 @@ export function providerSettingsViewProps(
     onSetProviderNativeSetup: controller.setProviderNativeSetup,
     onSetProviderOwnMemory: controller.setProviderOwnMemory,
     onDataTagsChange: controller.setDataTags,
+    onProviderSearchZdrChange: controller.setProviderSearchZdr,
     onModelDataTagsChange: controller.setModelDataTags,
     onModelContextWindowChange: controller.setModelContextWindow,
     probingIds: controller.probingIds,

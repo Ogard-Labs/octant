@@ -15,13 +15,15 @@ Status: partly built. Built: the settings contract and its journaled
 route's "Octant web search" label, the migration, the credential broker namespace
 `/v1/web-search-credentials/*` with its `/api/host-control/web-search/key`
 route, the Staan, Mojeek, Linkup, Brave, and Exa backends, the fallback with
-its 20-second budget, and the journaled record of where each query went. Not
-built: Settings › Web search (slice 3) and a provider's own search in the
-native harness (slice 4), which still refuses any built-in tool a provider
-starts in its stream as `unsupported`, so a harness endpoint reports
-`nativeWebResearch` as `unsupported`. A per-entry processing region is not
-built: no kind in the table takes one through its API, and Linkup's EU-pinned
-host is the entry's address.
+its 20-second budget, the journaled record of where each query went, Settings ›
+Web search, the endpoint ZDR statement (`set-provider-search-zdr`, journaled
+with the endpoint's data labels), the provider-search offer table, and the
+policy's lock on vendor runtimes' `webTools`. Not built: a provider's own
+search in the native harness (slice 4), which still refuses any built-in tool
+a provider starts in its stream as `unsupported`, so a harness endpoint
+reports `nativeWebResearch` as `unsupported`. A per-entry processing region is
+not built: no kind in the table takes one through its API, and Linkup's
+EU-pinned host is the entry's address.
 
 ## Why
 

@@ -1,6 +1,8 @@
 import type { WindowsHostProfilePaths, WindowsSqliteStores } from "@octant/host-runtime";
 import { win32 } from "node:path";
 import { readThreadNativeSetup } from "./threadNativeSetupProjection";
+import { readSavedWebSearchSettings } from "./webSearchSettingsProjection";
+import type { WebSearchDataPolicy } from "@octant/contracts/web-search";
 import { homedir } from "node:os";
 import type {
   AgentProfile,
@@ -230,6 +232,8 @@ export interface PersistenceService {
   readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
   /** A thread's own choice about its key provider's native setup; undefined when it inherits. */
   readonly readThreadNativeSetup: (threadId: string) => "on" | "off" | undefined;
+  /** The host's web search data policy, Any until the person saves one. */
+  readonly readWebSearchPolicy?: () => WebSearchDataPolicy;
   readonly readRemovedProviderInstanceIds?: () => ReadonlyArray<string>;
   readonly readProviderDefaults: () => ProviderDefaults;
   readonly readProviderCatalog?: (
@@ -659,6 +663,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProviderInstance: (instanceId) => readProviderInstance(connection, instanceId),
       readProviderInstances: () => readProviderInstances(connection),
       readThreadNativeSetup: (threadId) => readThreadNativeSetup(connection, threadId),
+      readWebSearchPolicy: () => readSavedWebSearchSettings(connection)?.policy ?? "any",
       readRemovedProviderInstanceIds: () => readRemovedProviderInstanceIds(connection),
       readProviderDefaults: () => readProviderDefaults(connection),
       readProviderCatalog: (instanceId) => readProviderCatalog(connection, instanceId),

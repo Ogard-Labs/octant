@@ -1,3 +1,4 @@
+import { PROVIDER_OWN_SEARCH_OFFERS, providerOwnSearchOrigin } from "@octant/domain";
 import type {
   HiddenProviderModelRef,
   HostPlatform,
@@ -90,6 +91,7 @@ export type ModelEndpointDetailProps = Pick<
   | "onOpenExternalUrl"
   | "onSetEnabled"
   | "onDataTagsChange"
+  | "onProviderSearchZdrChange"
   | "onModelDataTagsChange"
   | "onModelContextWindowChange"
   | "onRemove"
@@ -653,6 +655,9 @@ function DataSection(props: ModelEndpointDetailProps & { readonly disabled: bool
   const models = props.observed?.models ?? [];
   const ownTags = models.filter((model) => (model.dataTags ?? []).length > 0).length;
   const dataId = useId();
+  const searchOrigin = providerOwnSearchOrigin(instance);
+  const searchOffer =
+    searchOrigin === undefined ? undefined : PROVIDER_OWN_SEARCH_OFFERS[searchOrigin];
   return (
     <SettingsSection
       description="You set these; Octant can't check them. A Project that requires one only uses models marked with it."
@@ -676,6 +681,31 @@ function DataSection(props: ModelEndpointDetailProps & { readonly disabled: bool
             </span>
           </label>
         ))}
+        {searchOffer === undefined || !searchOffer.zdr.offered ? null : (
+          <label className="endpoint-data__choice">
+            <OctantCheckbox
+              aria-describedby={`${dataId}-search-zdr`}
+              aria-label="Its own web search keeps no record of my queries"
+              checked={instance.providerSearchZdr === true}
+              disabled={props.disabled || props.onProviderSearchZdrChange === undefined}
+              onChange={() =>
+                void props.onProviderSearchZdrChange?.(
+                  instance.id,
+                  instance.providerSearchZdr !== true,
+                )
+              }
+            />
+            <span>
+              <span className="endpoint-data__label">
+                Its own web search keeps no record of my queries
+              </span>
+              <span className="endpoint-data__detail" id={`${dataId}-search-zdr`}>
+                {searchOffer.label}: {searchOffer.zdr.terms}. Under a ZDR policy in Settings › Web
+                search, this provider's own search runs only while this is ticked.
+              </span>
+            </span>
+          </label>
+        )}
         {models.length === 0 ? null : (
           <SettingsDisclosure
             {...(ownTags === 0

@@ -1,3 +1,4 @@
+import { PROVIDER_OWN_SEARCH_OFFERS, providerOwnSearchOrigin } from "./providerWebSearchPolicy";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import {
   acpAgentChangeCommandKind,
@@ -2019,6 +2020,32 @@ export function setProviderEnabled(
     version: nextVersion(provider.version),
     updatedAt: input.updatedAt,
   };
+}
+
+/**
+ * Records or withdraws the person's ZDR statement for the endpoint's own web
+ * search. It is accepted only where the provider offers ZDR for its search;
+ * a statement no agreement could make true is refused with the reason.
+ */
+export function setProviderSearchZdr(
+  provider: ProviderInstance,
+  stated: boolean,
+  updatedAt: UtcTimestamp,
+): ProviderInstance {
+  const origin = providerOwnSearchOrigin(provider);
+  if (stated && (origin === undefined || !PROVIDER_OWN_SEARCH_OFFERS[origin].zdr.offered)) {
+    reject(
+      "invalid-configuration",
+      "This endpoint's provider does not offer web search with no record kept.",
+    );
+  }
+  const { providerSearchZdr: _previous, ...rest } = provider;
+  return {
+    ...rest,
+    ...(stated ? { providerSearchZdr: true as const } : {}),
+    version: nextVersion(provider.version),
+    updatedAt,
+  } as ProviderInstance;
 }
 
 export function setProviderDataTags(
