@@ -505,7 +505,11 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
 
       if (input.operation === "delegate") {
         if (input.task === undefined) return failure("invalid-agents-input");
-        const result = await startAgentRunDelegation(options, { ...input, task: input.task }, signal);
+        const result = await startAgentRunDelegation(
+          options,
+          { ...input, task: input.task },
+          signal,
+        );
         if (
           result.status === "refused" &&
           (result.reason === "delegate-tainted" || result.reason === "delegate-target-unavailable")

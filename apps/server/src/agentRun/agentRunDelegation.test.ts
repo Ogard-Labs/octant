@@ -204,8 +204,8 @@ describe("agentRunTargetAvailability", () => {
         type: "work",
         providerPolicy: {
           mode: "whitelist",
-          providerInstanceIds: [codex.id, acp.id, starting.id].map((id) =>
-            decodeProviderInstance({ ...resident, id }).id,
+          providerInstanceIds: [codex.id, acp.id, starting.id].map(
+            (id) => decodeProviderInstance({ ...resident, id }).id,
           ),
         },
       }),
@@ -219,7 +219,11 @@ describe("agentRunTargetAvailability", () => {
       observedState: (instanceId) => {
         if (String(instanceId) === String(starting.id)) return undefined;
         if (String(instanceId) === String(other.id))
-          return { readiness: "ready", models: [model("other-plain")], verifiedToolModelIds: [model("other-plain").id] };
+          return {
+            readiness: "ready",
+            models: [model("other-plain")],
+            verifiedToolModelIds: [model("other-plain").id],
+          };
         return {
           readiness: "ready",
           models: [model("m")],
@@ -233,9 +237,7 @@ describe("agentRunTargetAvailability", () => {
         String(instanceId) === String(codex.id),
     });
     expect(availability.targets.map((target) => target.displayName)).toEqual(["Codex"]);
-    expect(
-      availability.unavailable.map((target) => [target.displayName, target.reason]),
-    ).toEqual([
+    expect(availability.unavailable.map((target) => [target.displayName, target.reason])).toEqual([
       ["ACP agent", "tools-unsupported"],
       ["Starting", "not-ready"],
       ["Other", "project-policy"],

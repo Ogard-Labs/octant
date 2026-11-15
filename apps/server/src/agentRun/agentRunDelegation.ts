@@ -16,7 +16,6 @@ import {
   type Project,
   type ProviderInstance,
   type ProviderModel,
-  type ProviderObservedState,
 } from "@octant/contracts";
 import {
   AgentRunPolicyRejected,
@@ -185,9 +184,7 @@ async function markedDelegationRefused(
   signal: AbortSignal | undefined,
 ): Promise<boolean> {
   if (options.isTainted?.() !== true) return false;
-  return (
-    options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation(signal))
-  );
+  return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation(signal));
 }
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
