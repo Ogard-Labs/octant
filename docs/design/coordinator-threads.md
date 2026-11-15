@@ -232,9 +232,11 @@ request clears both. A restart forgets them.
   availability error before any text, reasoning or tool call, and it has done
   no other work, the host marks the provider down, moves the worker to the
   next eligible model of its role (the ordinary provider change, with its
-  disclosed hand-off), records that choice with "first request on <model>
-  failed before any work", and sends the same opening prompt again. This is
-  still the start. The host knows a turn failed before any output only when the
+  disclosed hand-off, journaled as the host), records that choice with "first
+  request on <model> failed before any work", and sends the same opening
+  prompt again. This is still the start. It moves again if that model's first
+  request fails the same way, and stops once every listed model has failed
+  once; a worker a person archived or marked Done meanwhile is left alone. The host knows a turn failed before any output only when the
   provider recorded a session for it; a turn whose provider never got that far
   is left as it is, and the coordinator hears of it as a state notice. A next
   model that would ask a person first, or none at all, leaves the worker too.
@@ -243,9 +245,10 @@ request clears both. A restart forgets them.
   proposal through the proposal path below, even under Start without asking,
   and a retry that climbs into such a role asks too; a named model asks when a
   role listing it asks. The proposal carries the role, the model and its
-  name, and the choice; its card reads "Hard problems · Opus 5.5 · <why>" and
+  name, the choice, and the request's filters (needs images, the provider a
+  review avoids); its card reads "Hard problems · Opus 5.5 · <why>" and
   offers **Use Builder instead** beside approve and decline, which runs the
-  choice again in Builder and keeps the proposal pending on that model, under
+  choice again in Builder with those filters and keeps the proposal pending on that model, under
   the proposal's version. Approving on the proposed model journals the host's
   choice on the worker; approving on another model records the person's pick.
 - **The role card.** Every coordinator turn with roles set up carries a

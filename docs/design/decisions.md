@@ -1310,7 +1310,7 @@ and [Provider runtimes: Provider cloud sessions](provider-runtimes.md#provider-c
 
 ### Provider instances and accounts
 
-Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff, now or through their per-thread usage-limit opt-in. There is no silent, unchosen or open-ended failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14).
+Providers are multi-instance, and a thread stays on its instance until the person moves it to another account through the disclosed handoff, now or through their per-thread usage-limit opt-in. There is no silent, unchosen or open-ended failover, rotation or load-balancing between accounts (maintainer decision, 2026-11-14). The one host move besides the opt-in is a coordinator worker whose first request failed for availability before any work, moved down its role's list, which the person ordered (maintainer decision, 2026-11-15; [Coordinator threads](#coordinator-threads)).
 
 - A selected model is a host, provider instance and model id, and the model picker is provider-first.
 - Extra accounts use Octant-assigned state directories. Removing an account leaves its directory in place, and deleting it is the person's step.

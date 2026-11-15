@@ -43,6 +43,12 @@ export class ProviderAvailabilityMarks {
       case "tool-progress":
       case "tool-success":
       case "tool-failure":
+      case "file-change":
+      case "diff":
+      case "approval-request":
+      case "user-input-request":
+      case "outside-content-read":
+      case "outside-content-result":
         this.#remember(this.#outputSeen, session, true);
         return;
       case "completed":

@@ -2,7 +2,9 @@ import type {
   NativeHarnessSlotCandidate,
   Project,
   ProviderInstance,
+  ProviderInstanceId,
   ProviderModel,
+  ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
 import {
@@ -19,15 +21,21 @@ export interface CoordinatorCandidateFacts extends WorkerCandidateFacts {
   readonly contextTokens?: number;
 }
 
+/** A model as a role lists it, or as a worker runs on it. */
+export type WorkerModelRef = Pick<NativeHarnessSlotCandidate, "providerInstanceId" | "modelId">;
+
 export interface CoordinatorWorkerFactSources {
-  readonly readProviderInstance: (id: string) => ProviderInstance | undefined;
-  readonly observedState: (id: string) => ProviderObservedState | undefined;
+  readonly readProviderInstance: (id: ProviderInstanceId) => ProviderInstance | undefined;
+  readonly observedState: (id: ProviderInstanceId) => ProviderObservedState | undefined;
   /** The catalog's entry for the model, which carries its data tags and context override. */
-  readonly catalogModel: (providerInstanceId: string, modelId: string) => ProviderModel | undefined;
+  readonly catalogModel: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => ProviderModel | undefined;
   readonly isTargetAllowed: (
     project: Exclude<Project, { readonly type: "chat" }>,
-    providerInstanceId: string,
-    modelId: string,
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
   ) => boolean;
   readonly availability: (providerInstanceId: string) => ProviderAvailabilityMark | undefined;
 }
@@ -42,14 +50,14 @@ export interface CoordinatorWorkerFactSources {
 export function coordinatorCandidateFacts(
   sources: CoordinatorWorkerFactSources,
   project: Project | undefined,
-  candidate: NativeHarnessSlotCandidate,
+  candidate: WorkerModelRef,
 ): CoordinatorCandidateFacts {
   const providerInstanceId = String(candidate.providerInstanceId);
   const modelId = String(candidate.modelId);
-  const instance = sources.readProviderInstance(providerInstanceId);
-  const observed = sources.observedState(providerInstanceId);
+  const instance = sources.readProviderInstance(candidate.providerInstanceId);
+  const observed = sources.observedState(candidate.providerInstanceId);
   const reported = observed?.models.find((model) => String(model.id) === modelId);
-  const catalog = sources.catalogModel(providerInstanceId, modelId);
+  const catalog = sources.catalogModel(candidate.providerInstanceId, candidate.modelId);
   const harness = instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   const mark = sources.availability(providerInstanceId);
   const contextTokens =
@@ -83,7 +91,7 @@ export function coordinatorCandidateFacts(
     allowed:
       project !== undefined &&
       project.type !== "chat" &&
-      sources.isTargetAllowed(project, providerInstanceId, modelId),
+      sources.isTargetAllowed(project, candidate.providerInstanceId, candidate.modelId),
     // An agent runtime brings its own tools; an endpoint the harness runs
     // needs Octant's tools proven on it.
     toolsVerified:

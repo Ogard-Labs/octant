@@ -105,7 +105,10 @@ export interface CodePlannerServiceOptions {
    * **Use Builder instead**: the coordinator's model choice run again in the
    * Builder role. Absent where coordinators are not wired, which refuses it.
    */
-  readonly rechooseAsBuilder?: (coordinatorThreadId: string) =>
+  readonly rechooseAsBuilder?: (
+    coordinatorThreadId: string,
+    filters: { readonly needsImages?: boolean; readonly reviewedProviderKind?: string },
+  ) =>
     | {
         readonly status: "chosen";
         readonly resolved: {
@@ -365,6 +368,8 @@ export class CodePlannerService {
       readonly executionPolicy: string;
       readonly choice?: CoordinatorWorkerChoice;
       readonly modelName?: string;
+      readonly needsImages?: true;
+      readonly reviewedProviderKind?: string;
     },
   ):
     | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
@@ -662,7 +667,13 @@ export class CodePlannerService {
         message: "This proposal's model was not chosen from the roles.",
       };
     }
-    const rechosen = this.#rechooseAsBuilder(String(proposal.plannerThreadId));
+    const kept = proposal.workerOptions;
+    const rechosen = this.#rechooseAsBuilder(String(proposal.plannerThreadId), {
+      ...(kept.needsImages === true ? { needsImages: true } : {}),
+      ...(kept.reviewedProviderKind === undefined
+        ? {}
+        : { reviewedProviderKind: kept.reviewedProviderKind }),
+    });
     if (rechosen.status === "refused") {
       return { status: "refused", reason: "builder-unavailable", message: rechosen.message };
     }
@@ -671,7 +682,11 @@ export class CodePlannerService {
       next = decodeCodePlannerWorkProposal({
         ...proposal,
         workerOptions: {
-          executionPolicy: proposal.workerOptions.executionPolicy,
+          executionPolicy: kept.executionPolicy,
+          ...(kept.needsImages === true ? { needsImages: true } : {}),
+          ...(kept.reviewedProviderKind === undefined
+            ? {}
+            : { reviewedProviderKind: kept.reviewedProviderKind }),
           providerInstanceId: rechosen.resolved.providerInstanceId,
           modelId: rechosen.resolved.modelId,
           ...(rechosen.resolved.choice === undefined ? {} : { choice: rechosen.resolved.choice }),

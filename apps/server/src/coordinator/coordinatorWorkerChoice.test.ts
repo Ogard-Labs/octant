@@ -107,6 +107,11 @@ function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
   const hostTurns: Array<{ readonly threadId: string; readonly prompt: string }> = [];
   const proposals: Array<{ readonly workerOptions: Record<string, unknown> }> = [];
   const downMarks: string[] = [];
+  const moves: Array<{
+    readonly workerId: string;
+    readonly model: { readonly providerInstanceId: unknown; readonly modelId: unknown };
+    readonly choice: unknown;
+  }> = [];
   const facts = new Map<string, Partial<CoordinatorCandidateFacts>>();
   const failedFirstTurns = new Set<string>();
   const marked = new Set<string>();
@@ -145,17 +150,6 @@ function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
         );
         return { kind: "managed-thread-created" } as never;
       }
-      if (command.kind === "change-code-thread-provider") {
-        const current = threads.get(String(command.threadId));
-        if (current === undefined) throw new Error("no worker");
-        threads.set(String(command.threadId), {
-          ...current,
-          providerInstanceId: command.providerInstanceId,
-          modelId: command.modelId,
-          version: (current.version + 1) as never,
-        });
-        return { kind: "thread-updated" } as never;
-      }
       throw new Error("unexpected command");
     },
     startHostTurn: async (threadId, prompt) => {
@@ -181,6 +175,16 @@ function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
       ...facts.get(String(model.modelId)),
     }),
     markProviderDown: (id) => downMarks.push(id),
+    moveWorkerToModel: async (worker, model, choice) => {
+      moves.push({ workerId: String(worker.id), model, choice });
+      threads.set(String(worker.id), {
+        ...worker,
+        providerInstanceId: model.providerInstanceId,
+        modelId: model.modelId,
+        coordinatorChoice: choice,
+      });
+      return "moved";
+    },
     firstTurnFailedBeforeWork: (_worker, operationId) => failedFirstTurns.has(operationId),
     counts: countStore(),
     uuid: () => NEW_WORKER,
@@ -193,6 +197,7 @@ function harness(slots: ReadonlyArray<NativeHarnessSlot>) {
     hostTurns,
     proposals,
     downMarks,
+    moves,
     facts,
     failedFirstTurns,
     marked,
@@ -365,12 +370,10 @@ describe("choosing a worker's model from the roles", () => {
     h.failedFirstTurns.add("turn-1");
     await h.service.sweep();
     expect(h.downMarks).toEqual([ANTHROPIC]);
-    const change = h.executed.find((entry) => entry.command.kind === "change-code-thread-provider");
-    expect(change?.command).toMatchObject({ providerInstanceId: OPENAI, modelId: "astra" });
-    expect(change?.context).toMatchObject({
-      coordinatorChoice: { role: "default", rank: { fallback: 1 } },
-    });
-    expect(JSON.stringify(change?.context)).toContain(
+    expect(h.moves).toHaveLength(1);
+    expect(h.moves[0]?.model).toMatchObject({ providerInstanceId: OPENAI, modelId: "astra" });
+    expect(h.moves[0]?.choice).toMatchObject({ role: "default", rank: { fallback: 1 } });
+    expect(JSON.stringify(h.moves[0]?.choice)).toContain(
       "first request on sonnet name failed before any work",
     );
     expect(h.hostTurns).toEqual([
@@ -383,9 +386,36 @@ describe("choosing a worker's model from the roles", () => {
     const h = harness(standardRoles);
     await h.service.start(start({ task: "feature", size: "normal" }));
     await h.service.sweep();
-    expect(h.executed.some((entry) => entry.command.kind === "change-code-thread-provider")).toBe(
-      false,
-    );
+    expect(h.moves).toEqual([]);
+  });
+
+  it("moves again when the next model's first request also fails, and stops when none is left", async () => {
+    const h = harness(standardRoles);
+    await h.service.start(start({ task: "feature", size: "normal" }));
+    h.failedFirstTurns.add("turn-1");
+    await h.service.sweep();
+    h.failedFirstTurns.add("turn-2");
+    await h.service.sweep();
+    // Builder's list is spent, so the worker borrows Hard problems.
+    expect(h.moves.map((move) => move.model.modelId)).toEqual(["astra", "opus"]);
+    // Every model of the roles has failed once: the worker stays for the
+    // coordinator and the person.
+    h.failedFirstTurns.add("turn-3");
+    await h.service.sweep();
+    await h.service.sweep();
+    expect(h.moves).toHaveLength(2);
+    expect(h.hostTurns.filter((turn) => turn.threadId === NEW_WORKER)).toHaveLength(3);
+  });
+
+  it("leaves a worker a person closed after its first request failed", async () => {
+    const h = harness(standardRoles);
+    await h.service.start(start({ task: "feature", size: "normal" }));
+    const worker = h.threads.get(NEW_WORKER);
+    if (worker === undefined) throw new Error("no worker");
+    h.threads.set(NEW_WORKER, { ...worker, lifecycle: "archived" });
+    h.failedFirstTurns.add("turn-1");
+    await h.service.sweep();
+    expect(h.moves).toEqual([]);
   });
 
   it("writes a role card of host facts after the roster, with no agent-written text", async () => {
@@ -418,6 +448,30 @@ describe("choosing a worker's model from the roles", () => {
         choice: { role: "default", rank: "main" },
         modelName: "sonnet name",
       },
+    });
+  });
+
+  it("keeps a review off the reviewed provider and images readable for Use Builder instead", () => {
+    const h = harness([slot("default", [sonnet, astra]), slot("slow", [opus], true)]);
+    expect(
+      h.service.rechooseAsBuilder(COORDINATOR, { reviewedProviderKind: "claude-code" }),
+    ).toMatchObject({ status: "chosen", resolved: { modelId: "astra" } });
+    h.facts.set("sonnet", { readsImages: false });
+    expect(h.service.rechooseAsBuilder(COORDINATOR, { needsImages: true })).toMatchObject({
+      status: "chosen",
+      resolved: { modelId: "astra" },
+    });
+  });
+
+  it("keeps the request's filters on an ask-first proposal", async () => {
+    const h = harness([slot("default", [sonnet]), slot("slow", [astra], true)]);
+    h.threads.set(EARLIER, codeThread(EARLIER, { coordinatorThreadId: COORDINATOR }));
+    await h.service.start(
+      start({ task: "review", size: "normal", reviews: EARLIER, needsImages: true }),
+    );
+    expect(h.proposals[0]?.workerOptions).toMatchObject({
+      needsImages: true,
+      reviewedProviderKind: "claude-code",
     });
   });
 });

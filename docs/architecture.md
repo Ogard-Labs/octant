@@ -6721,7 +6721,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   account. Without the opt-in a limited thread waits on its
   account as before, so there is no silent, unchosen or open-ended failover,
   rotation, or load-balancing between accounts (maintainer decision,
-  2026-11-14).
+  2026-11-14). One more host move exists, for a coordinator's worker that has
+  done nothing yet: when its first turn fails for availability before any
+  output or tool call, the host moves it, by the same provider change and
+  journaled as the host, to the next model of its role's list, which is the
+  person's chosen order and so their consent; it stops when every listed model
+  has failed once, and a worker that has done any work is never moved
+  (maintainer decision, 2026-11-15;
+  [Coordinator threads: Choosing the worker's model](design/coordinator-threads.md#choosing-the-workers-model)).
   Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
   Code or Codex CLI instance is created enabled; every other detected runtime

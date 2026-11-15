@@ -39,8 +39,10 @@ export function coordinatorWorkersOf(
     .map((thread): SubagentWorkerThread => {
       const activity = threadRowActivity(thread);
       const note = coordinatorChoiceNote(thread.coordinatorChoice);
+      // Only a worker whose model the roles chose names it; the rest run on
+      // the coordinator's own model, as before roles existed.
       const model =
-        thread.modelId === undefined
+        thread.modelId === undefined || thread.coordinatorChoice === undefined
           ? undefined
           : (modelName?.({
               providerInstanceId: thread.providerInstanceId ?? "",

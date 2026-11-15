@@ -43,7 +43,7 @@ import type { EventEnvelope } from "@octant/contracts";
 import type { InheritedExternalContentMark } from "../context/inheritedExternalContentMark";
 import type { CoordinatorCounts } from "./coordinatorCountStore";
 import type { CoordinatorWakes, OpenCoordinatorWake } from "./coordinatorWakeJournal";
-import type { CoordinatorCandidateFacts } from "./coordinatorWorkerFacts";
+import type { CoordinatorCandidateFacts, WorkerModelRef } from "./coordinatorWorkerFacts";
 
 /** The roster names at most this many workers, most recently changed first. */
 export const MAX_COORDINATOR_ROSTER_ROWS = 32;
@@ -90,12 +90,18 @@ export interface CoordinatorServicePorts {
    */
   readonly readRoles?: (projectId: ProjectId) => WorkerRoles;
   /** What the host knows about one role model for a worker in this Project. */
-  readonly candidateFacts?: (
-    project: Project,
-    candidate: NativeHarnessSlotCandidate,
-  ) => CoordinatorCandidateFacts;
+  readonly candidateFacts?: (project: Project, model: WorkerModelRef) => CoordinatorCandidateFacts;
   /** Records a provider as down for the next starts (its first request failed). */
   readonly markProviderDown?: (providerInstanceId: string) => void;
+  /**
+   * Moves a worker to another model as the host (never as the person), with
+   * the choice that explains it, through the ordinary provider change.
+   */
+  readonly moveWorkerToModel?: (
+    worker: CodeThread,
+    model: WorkerModelRef,
+    choice: CoordinatorWorkerChoice,
+  ) => Promise<"moved" | "refused">;
   /**
    * Whether a worker's first turn failed for availability before any output
    * or tool call, so starting it on the next model is still the start.
@@ -148,6 +154,9 @@ interface ResolvedWorkerModel {
   readonly modelId: string;
   readonly choice?: CoordinatorWorkerChoice;
   readonly modelName?: string;
+  /** The request's filters a later Use Builder instead must keep. */
+  readonly needsImages?: true;
+  readonly reviewedProviderKind?: string;
 }
 
 /**
@@ -156,7 +165,6 @@ interface ResolvedWorkerModel {
  * and is dropped when the watch ends.
  */
 interface WatchedFirstTurn {
-  readonly windowId: WindowId;
   readonly operationId: string;
   readonly prompt: string;
   readonly request: WorkerChoiceRequest;
@@ -330,6 +338,10 @@ export class CoordinatorService {
           executionPolicy: decision.level,
           ...(resolved.choice === undefined ? {} : { choice: resolved.choice }),
           ...(resolved.modelName === undefined ? {} : { modelName: resolved.modelName }),
+          ...(request?.needsImages === true ? { needsImages: true } : {}),
+          ...(request?.reviewedProviderKind === undefined
+            ? {}
+            : { reviewedProviderKind: request.reviewedProviderKind }),
         },
       );
       return proposed.status === "proposed"
@@ -363,6 +375,7 @@ export class CoordinatorService {
    */
   rechooseAsBuilder(
     coordinatorThreadId: string,
+    filters: { readonly needsImages?: boolean; readonly reviewedProviderKind?: string } = {},
   ):
     | { readonly status: "chosen"; readonly resolved: ResolvedWorkerModel }
     | { readonly status: "refused"; readonly message: string } {
@@ -372,9 +385,17 @@ export class CoordinatorService {
     if (caller === undefined || project === undefined || roles === undefined) {
       return { status: "refused", message: "This proposal's roles are unavailable." };
     }
+    // The request's own filters stay: a review stays off the reviewed
+    // provider, and work that needs images stays on a model that reads them.
     const choice = chooseWorkerModel(roles, this.#choiceFacts(project, roles), {
-      task: "feature",
+      task: filters.reviewedProviderKind === undefined ? "feature" : "review",
       size: "normal",
+      role: "builder",
+      why: "Use Builder instead",
+      ...(filters.needsImages === true ? { needsImages: true } : {}),
+      ...(filters.reviewedProviderKind === undefined
+        ? {}
+        : { reviewedProviderKind: filters.reviewedProviderKind }),
     });
     if (choice.kind === "refused") return { status: "refused", message: choice.message };
     return { status: "chosen", resolved: this.#resolvedFrom(project, choice, undefined) };
@@ -428,11 +449,7 @@ export class CoordinatorService {
     const reviewedKind =
       reviewed === undefined
         ? undefined
-        : this.#ports.candidateFacts?.(project, {
-            hostId: "" as never,
-            providerInstanceId: reviewed.providerInstanceId as never,
-            modelId: reviewed.modelId as never,
-          }).providerKind;
+        : this.#ports.candidateFacts?.(project, reviewed).providerKind;
     const request: WorkerChoiceRequest = {
       task: call.task,
       size: call.size,
@@ -556,8 +573,8 @@ export class CoordinatorService {
   #roleCard(coordinator: CodeThread, project: Project, roles: WorkerRoles): ReadonlyArray<string> {
     const handles = workerModelHandles(roles);
     const facts = this.#choiceFacts(project, roles).candidate;
-    const handleOf = (candidate: NativeHarnessSlotCandidate) =>
-      handles.find((entry) => candidateKey(entry.candidate) === candidateKey(candidate))?.handle;
+    const handleOf = (model: WorkerModelRef) =>
+      handles.find((entry) => candidateKey(entry.candidate) === candidateKey(model))?.handle;
     const describe = (candidate: NativeHarnessSlotCandidate, withHandle: boolean) => {
       const fact = facts(candidate);
       const handle = withHandle ? `${handleOf(candidate) ?? "?"} ` : "";
@@ -599,11 +616,7 @@ export class CoordinatorService {
       .slice(0, COORDINATOR_TRACK_RECORD_WORKERS);
     const record = new Map<string, { started: number; done: number; closed: number }>();
     for (const worker of recent) {
-      const handle = handleOf({
-        hostId: "" as never,
-        providerInstanceId: worker.providerInstanceId as never,
-        modelId: worker.modelId as never,
-      });
+      const handle = handleOf(worker);
       if (handle === undefined) continue;
       const entry = record.get(handle) ?? { started: 0, done: 0, closed: 0 };
       record.set(handle, {
@@ -844,7 +857,6 @@ export class CoordinatorService {
       this.#ports.counts.recordHostTurn(String(workerId), { operationId: turn.operationId, hop });
       if (request !== undefined) {
         this.#firstTurns.set(String(workerId), {
-          windowId,
           operationId: turn.operationId,
           prompt: call.prompt,
           request,
@@ -903,6 +915,8 @@ export class CoordinatorService {
         continue;
       }
       this.#firstTurns.delete(workerId);
+      // A worker a person closed or finished meanwhile stays as it is.
+      if (worker.lifecycle !== "active" || worker.completedAt !== undefined) continue;
       await this.#restartOnNextModel(worker, watch).catch((error: unknown) =>
         this.#ports.onError?.("A worker could not start on its next model.", error),
       );
@@ -934,29 +948,16 @@ export class CoordinatorService {
     });
     if (choice.kind !== "start") return;
     const failedName =
-      this.#ports.candidateFacts?.(project, {
-        hostId: "" as never,
-        providerInstanceId: worker.providerInstanceId as never,
-        modelId: worker.modelId as never,
-      }).label ?? String(worker.modelId);
+      this.#ports.candidateFacts?.(project, worker).label ?? String(worker.modelId);
     const resolved = this.#resolvedFrom(
       project,
       choice,
       worker.coordinatorChoice?.why,
       `first request on ${failedName} failed before any work`,
     );
-    const changed = await this.#ports.executeCode(
-      watch.windowId,
-      decodeCodeCommand({
-        kind: "change-code-thread-provider",
-        threadId: worker.id,
-        expectedVersion: worker.version,
-        providerInstanceId: resolved.providerInstanceId,
-        modelId: resolved.modelId,
-      }),
-      resolved.choice === undefined ? {} : { coordinatorChoice: resolved.choice },
-    );
-    if (changed.kind !== "thread-updated") return;
+    if (resolved.choice === undefined || this.#ports.moveWorkerToModel === undefined) return;
+    const moved = await this.#ports.moveWorkerToModel(worker, choice.candidate, resolved.choice);
+    if (moved !== "moved") return;
     const turn = await this.#ports.startHostTurn(worker.id, watch.prompt);
     if (turn.status !== "started") return;
     this.#ports.counts.recordHostTurn(String(worker.id), {
@@ -1198,7 +1199,7 @@ export class CoordinatorService {
   }
 }
 
-function candidateKey(candidate: NativeHarnessSlotCandidate): string {
+function candidateKey(candidate: WorkerModelRef): string {
   return `${String(candidate.providerInstanceId)}:${String(candidate.modelId)}`;
 }
 

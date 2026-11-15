@@ -91,6 +91,15 @@ const CodePlannerProposalFields = {
       choice: Schema.optional(CoordinatorWorkerChoice),
       /** The model's name as its provider reports it, for the card. */
       modelName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+      /**
+       * The request's filters, kept so **Use Builder instead** applies them
+       * again: the work needs images, and the provider family a review must
+       * avoid.
+       */
+      needsImages: Schema.optional(Schema.Literal(true)),
+      reviewedProviderKind: Schema.optional(
+        Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),
+      ),
     }).annotations(strict),
   ),
   /** Host-authored admission; a draft cannot assert that creation did not start. */

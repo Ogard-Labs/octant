@@ -1754,8 +1754,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
       // Use Builder instead re-runs the coordinator's model choice; the
       // coordinator service is wired just below.
-      rechooseAsBuilder: (coordinatorThreadId) =>
-        coordinatorService.rechooseAsBuilder(coordinatorThreadId),
+      rechooseAsBuilder: (coordinatorThreadId, filters) =>
+        coordinatorService.rechooseAsBuilder(coordinatorThreadId, filters),
     });
     // Coordinator threads and message wakes (docs/design/coordinator-threads.md):
     // a worker is created through the ordinary Code command path and started,
@@ -1806,18 +1806,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       candidateFacts: (project, candidate) =>
         coordinatorCandidateFacts(
           {
-            readProviderInstance: (id) => persistence.readProviderInstance(id as never),
-            observedState: (id) => providerRuntimeRegistry.observedState(id as never),
+            readProviderInstance: (id) => persistence.readProviderInstance(id),
+            observedState: (id) => providerRuntimeRegistry.observedState(id),
             catalogModel: (providerInstanceId, modelId) =>
               persistence
-                .readProviderCatalog?.(providerInstanceId as never)
+                .readProviderCatalog?.(providerInstanceId)
                 ?.models.find((model) => String(model.id) === modelId),
             isTargetAllowed: (target, providerInstanceId, modelId) =>
-              deps.isProjectPolicyTargetAllowed(
-                target,
-                providerInstanceId as never,
-                modelId as never,
-              ),
+              deps.isProjectPolicyTargetAllowed(target, providerInstanceId, modelId),
             availability: (providerInstanceId) =>
               deps.providerAvailabilityMarks.read(providerInstanceId),
           },
@@ -1826,14 +1822,36 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         ),
       markProviderDown: (providerInstanceId) =>
         deps.providerAvailabilityMarks.markDown(providerInstanceId),
+      // The host moves a worker whose first request failed before any work as
+      // the host, like the usage-limit hand-off, never as the person.
+      moveWorkerToModel: async (worker, model, choice) => {
+        if (!(codeService instanceof CodeService)) return "refused";
+        const moved = await codeService.execute(
+          ROUTINE_HOST_SCOPE_ID,
+          {
+            kind: "change-code-thread-provider",
+            threadId: worker.id,
+            expectedVersion: worker.version,
+            providerInstanceId: model.providerInstanceId,
+            modelId: model.modelId,
+          },
+          undefined,
+          {
+            actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+            coordinatorChoice: choice,
+          },
+        );
+        return moved.kind === "thread-updated" ? "moved" : "refused";
+      },
       firstTurnFailedBeforeWork: (workerId, operationId) => {
         const threadId = decodeCodeThreadId(workerId);
         const works = persistence.readCodeRuntimeWorks(threadId);
-        // Any other work (a file, a terminal, a test) is work done.
+        // Any other work (a file, a terminal, a test) is work done; earlier
+        // provider turns are the first requests the host already moved past.
         if (
-          works.length !== 1 ||
-          String(works[0]?.work.id) !== operationId ||
-          works[0]?.work.state !== "failed"
+          works.length === 0 ||
+          works.some(({ work }) => work.kind !== "provider-turn" || work.state !== "failed") ||
+          String(works.at(-1)?.work.id) !== operationId
         )
           return false;
         const recovered = codeBoardEventStore.providerSessionForThread(
