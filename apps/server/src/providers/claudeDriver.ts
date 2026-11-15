@@ -2080,18 +2080,6 @@ function makeConnection(
           return false;
         }
       },
-      writesOutsideCheckout: (absolutePath) =>
-        state.executionPolicy === "full-access" ||
-        [...state.worktrees].some((worktree) => {
-          try {
-            return (
-              absolutePath === worktree ||
-              options.isProjectConfinedPath(worktree, absolutePath) === true
-            );
-          } catch {
-            return false;
-          }
-        }),
       claudeSessionId,
       sequence,
       terminal: false,

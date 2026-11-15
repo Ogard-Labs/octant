@@ -142,12 +142,6 @@ export interface ClaudeEventContext {
   readonly occurredAt: UtcTimestamp;
   readonly projectRoot: string;
   readonly isProjectConfinedPath: (absolutePath: string) => boolean;
-  /**
-   * Whether a file outside the checkout is one the gate lets this session
-   * write: any at Full access, and those in a worktree the session was let
-   * into. Absent, or false, keeps an outside path a protocol failure.
-   */
-  readonly writesOutsideCheckout?: (absolutePath: string) => boolean;
   readonly claudeSessionId: string;
   sequence: number;
   terminal: boolean;
@@ -531,15 +525,6 @@ function contentShape(value: string): string {
   return `${lines} ${lines === 1 ? "line" : "lines"}, ${characters} ${characters === 1 ? "character" : "characters"}`;
 }
 
-function writesOutsideCheckout(context: ClaudeEventContext, value: string): boolean {
-  const target = isAbsolute(value) ? resolve(value) : resolve(context.projectRoot, value);
-  try {
-    return context.writesOutsideCheckout?.(target) === true;
-  } catch {
-    return false;
-  }
-}
-
 function fileChange(
   context: ClaudeEventContext,
   content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
@@ -547,8 +532,10 @@ function fileChange(
   if (content.toolName !== "Edit" && content.toolName !== "Write") return undefined;
   const pathValue = jsonString(content.input, "file_path");
   if (pathValue === undefined) return undefined;
+  // A path outside the checkout is the gate's to authorize: it asks there
+  // below Full access, so one approved reaches here. It is journaled as a tool
+  // step with no file change, since the thread's views stay on the checkout.
   const path = confinedRelativePath(context, pathValue);
-  if (path === undefined && !writesOutsideCheckout(context, pathValue)) return undefined;
   if (content.toolName === "Edit") {
     const previous = jsonString(content.input, "old_string");
     const replacement = jsonString(content.input, "new_string");

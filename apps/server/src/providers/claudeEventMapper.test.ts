@@ -1833,38 +1833,11 @@ describe("mapClaudeMessage", () => {
     },
   );
 
-  it("fails closed without exposing an outside-root file path", () => {
-    const outsidePath = "/private/outside-root-secret.ts";
-    const results = mapped(context(), {
-      kind: "assistant",
-      sessionId: claudeSessionId,
-      messageId: "sdk-message-private",
-      content: [
-        {
-          kind: "tool-use",
-          toolUseId: "sdk-write-private",
-          toolName: "Write",
-          input: { file_path: outsidePath, content: "private content" },
-        },
-      ],
-      usage,
-    });
-
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
-    ]);
-    expect(JSON.stringify(results)).not.toContain(outsidePath);
-  });
-
-  it("journals a Full access write outside the checkout as a tool step with no file change", () => {
-    const ctx = context({ writesOutsideCheckout: () => true });
-    mapped(ctx, {
+  it("journals a write outside the checkout as a tool step with no file change, leaving its authority to the gate", () => {
+    // Below Full access the gate asks before such a write; the mapper only
+    // records what ran, at every level.
+    const ctx = context();
+    const started = mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
       messageId: "sdk-message-outside",
@@ -1878,6 +1851,7 @@ describe("mapClaudeMessage", () => {
       ],
       usage,
     });
+    expect(started.some((next) => next.kind === "failure")).toBe(false);
     const completed = eventValues(
       mapped(ctx, {
         kind: "tool-results",
@@ -1929,7 +1903,7 @@ describe("mapClaudeMessage", () => {
     }
   });
 
-  it("fails closed when Project authority denies a lexically confined file path", () => {
+  it("reports no file change for a lexically confined path Project authority denies", () => {
     const checkedPaths: string[] = [];
     const ctx = context({
       isProjectConfinedPath: (absolutePath) => {
@@ -1937,10 +1911,9 @@ describe("mapClaudeMessage", () => {
         return false;
       },
     });
-    const sequenceBefore = ctx.sequence;
     const deniedPath = "src/symlink/private.ts";
 
-    const results = mapped(ctx, {
+    mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
       messageId: "sdk-message-private",
@@ -1954,20 +1927,24 @@ describe("mapClaudeMessage", () => {
       ],
       usage,
     });
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-private", isError: false }],
+      }),
+    );
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
-    ]);
     expect(checkedPaths).toEqual(["/repo/src/symlink/private.ts"]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.toolStates).toHaveLength(0);
-    expect(JSON.stringify(results)).not.toContain(deniedPath);
+    expect(completed.some((next) => next.kind === "file-change" || next.kind === "diff")).toBe(
+      false,
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
+    ]);
   });
 
   it("fails closed on contradictory tool correlation without emitting partial events", () => {

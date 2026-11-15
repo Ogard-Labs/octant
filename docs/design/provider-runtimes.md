@@ -640,7 +640,8 @@ as its tool step with no file change or diff. Below it, a file tool call
 names a path) whose target is outside the Project's folders asks through the
 gate at Guarded and Accept edits and goes to the reviewer at Reviewed, as
 Claude Code asks on its own (maintainer decision, 2026-11-14): a read there
-never runs unasked and Accept edits never waives an edit there. Every
+never runs unasked and Accept edits never waives an edit there, and an
+approved edit there is journaled as its tool step with no file change. Every
 secret-path refusal stays below Full access, so a protected file outside the
 Project is refused, not asked. Plan refuses an outside path, since Plan cannot
 approve anything; a Full access thread that kept its sandbox keeps the
