@@ -166,6 +166,9 @@ interface ResolvedWorkerModel {
  */
 interface WatchedFirstTurn {
   readonly operationId: string;
+  /** The model the watched turn runs on; a change by anyone else ends the watch. */
+  readonly providerInstanceId: string;
+  readonly modelId: string;
   readonly prompt: string;
   readonly request: WorkerChoiceRequest;
   readonly tried: ReadonlyArray<string>;
@@ -858,6 +861,8 @@ export class CoordinatorService {
       if (request !== undefined) {
         this.#firstTurns.set(String(workerId), {
           operationId: turn.operationId,
+          providerInstanceId: resolved.providerInstanceId,
+          modelId: resolved.modelId,
           prompt: call.prompt,
           request,
           tried: [`${resolved.providerInstanceId}:${resolved.modelId}`],
@@ -899,9 +904,13 @@ export class CoordinatorService {
     for (const [workerId, watch] of Array.from(this.#firstTurns)) {
       const worker = this.#ports.readThread(workerId);
       const latest = this.#ports.latestTurnId(workerId);
+      // A person who changed the worker's model since owns the next step;
+      // the old failure says nothing about the model they chose.
       if (
         worker === undefined ||
         latest !== watch.operationId ||
+        String(worker.providerInstanceId) !== watch.providerInstanceId ||
+        String(worker.modelId) !== watch.modelId ||
         this.#ports.now() - watch.startedAt > FIRST_TURN_WATCH_MS
       ) {
         this.#firstTurns.delete(workerId);
@@ -967,6 +976,8 @@ export class CoordinatorService {
     this.#firstTurns.set(String(worker.id), {
       ...watch,
       operationId: turn.operationId,
+      providerInstanceId: resolved.providerInstanceId,
+      modelId: resolved.modelId,
       tried: [...tried, `${resolved.providerInstanceId}:${resolved.modelId}`],
       startedAt: this.#ports.now(),
     });

@@ -35,7 +35,8 @@ export function providerAvailabilityFromFailure(
 /**
  * Whether the host's last plan-usage reading for an account says its limit
  * is reached: a window the provider flagged exhausted, or one at 100%, whose
- * reset has not come yet. The account counts as at its limit until the
+ * reset has not come yet; the account's quota flagged exhausted with no
+ * window; or a request or token bucket with nothing left before its reset. The account counts as at its limit until the
  * latest such reset; a reached window with no reset named holds while the
  * reading says so. A window below its limit never counts, and a window whose
  * reset has passed says nothing about the account now.
@@ -50,15 +51,28 @@ export function usageLimitFromReading(
       : entry?.status === "failed"
         ? entry.staleLimits
         : undefined;
-  const reached = (limits?.rateLimitWindows ?? []).filter(
+  if (limits === undefined) return undefined;
+  const future = (resetsAt: string | undefined) =>
+    resetsAt === undefined || Date.parse(resetsAt) > now;
+  const windows = limits.rateLimitWindows ?? [];
+  const reached: Array<{ readonly resetsAt?: string | undefined }> = windows.filter(
     (window) =>
-      (window.resetsAt === undefined || Date.parse(window.resetsAt) > now) &&
+      future(window.resetsAt) &&
       (window.status === "exhausted" ||
         (window.utilization !== undefined && window.utilization >= 1)),
   );
+  // The same signals the automatic-model account check counts: the
+  // aggregate quota flag when no window explains it, and an HTTP bucket
+  // with nothing left before its reset.
+  if (windows.length === 0 && limits.quota === "exhausted") reached.push({});
+  for (const bucket of [limits.requests, limits.tokens]) {
+    if (bucket.status === "available" && bucket.remaining === 0 && future(bucket.resetsAt)) {
+      reached.push({ resetsAt: bucket.resetsAt });
+    }
+  }
   if (reached.length === 0) return undefined;
   const resets = reached
-    .flatMap((window) => (window.resetsAt === undefined ? [] : [String(window.resetsAt)]))
+    .flatMap((entry) => (entry.resetsAt === undefined ? [] : [String(entry.resetsAt)]))
     .toSorted((a, b) => Date.parse(a) - Date.parse(b));
   const until = resets.at(-1);
   return until === undefined ? {} : { until };

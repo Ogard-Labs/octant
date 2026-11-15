@@ -38,7 +38,12 @@ function sources(
             {
               status: "available",
               providerInstanceId: PROVIDER,
-              limits: { rateLimitWindows: windows },
+              limits: {
+                rateLimitWindows: windows,
+                quota: "available",
+                requests: { status: "unavailable" },
+                tokens: { status: "unavailable" },
+              },
             } as never,
             now,
           ),
@@ -66,14 +71,19 @@ describe("a role model's facts for a worker", () => {
     expect(fact.usageLimit).toBeUndefined();
   });
 
-  it("prefers a failed request's own limit signal over the reading", () => {
-    const fact = coordinatorCandidateFacts(
-      sources([{ window: "w", status: "exhausted", resetsAt: "2026-11-15T14:00:00.000Z" }], {
-        availability: () => ({ usageLimit: { until: "2026-11-15T13:00:00.000Z" } }),
-      }),
-      project,
-      model,
-    );
-    expect(fact.usageLimit).toEqual({ until: "2026-11-15T13:00:00.000Z" });
+  it("shows the later reset when a failed request and the reading both say the limit is reached", () => {
+    const both = (markUntil: string | undefined) =>
+      coordinatorCandidateFacts(
+        sources([{ window: "w", status: "exhausted", resetsAt: "2026-11-15T14:00:00.000Z" }], {
+          availability: () => ({
+            usageLimit: markUntil === undefined ? {} : { until: markUntil },
+          }),
+        }),
+        project,
+        model,
+      ).usageLimit;
+    expect(both("2026-11-15T13:00:00.000Z")).toEqual({ until: "2026-11-15T14:00:00.000Z" });
+    expect(both(undefined)).toEqual({ until: "2026-11-15T14:00:00.000Z" });
+    expect(both("2026-11-15T15:00:00.000Z")).toEqual({ until: "2026-11-15T15:00:00.000Z" });
   });
 });

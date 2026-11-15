@@ -198,8 +198,8 @@ every `start`; the renderer and the agent decide nothing.
    Hard problems), never lower than `size` picks; else `size`: `quick` → Quick
    edit, `normal` → Builder, `hard` → Hard problems. A `review` goes to
    Reviewer, or to Hard problems with `risk: high`. A retry never goes down: a
-   `role`, or a `model` handle listed only in roles below that tier, is
-   refused. An empty role uses
+   `role`, or a `model` handle listed only in roles below the tier the retry
+   starts in (Builder when that role is empty), is refused. An empty role uses
    Builder's list and says so.
 2. **Models.** The role's list as the Project chose it, else as Settings has
    it: the main model first, then the fallbacks.
@@ -208,7 +208,9 @@ every `start`; the renderer and the agent decide nothing.
    availability error within 5 minutes), the model is not offered, the account
    is at a usage limit (a failed request's own limit signal, or the host's
    plan-usage reading of a window the provider flagged exhausted or at 100%,
-   until that window's reset; a reading below the limit never filters), the Project's
+   a quota flagged exhausted with no window, or a request or token bucket
+   with nothing left, until its reset; a reading below the limit never
+   filters), the Project's
    policy or data rules disallow it, an endpoint Octant runs has not proven its
    tools, or `needsImages` is set and it cannot read images while Sees images
    has no model. Until Sees images describes images for such a model (not
@@ -224,8 +226,9 @@ every `start`; the renderer and the agent decide nothing.
    all Hard problems models unavailable". Nothing left anywhere refuses
    `no-eligible-model`.
 6. **A named model.** `model` names a handle from the role card; it starts
-   only if it passes the same rules, else `model-not-eligible` with its
-   reasons. It never reaches a model outside the roles.
+   only if it passes the same rules, the review's independence included,
+   else `model-not-eligible` with its reasons. It never reaches a model
+   outside the roles.
 
 The availability marks are host memory, fed by the runtime-event tap every
 driver's turns pass through: a failed request whose failure is `unavailable`
@@ -241,7 +244,9 @@ request clears both. A restart forgets them.
   request on <model> failed before any work", and sends the same opening
   prompt again. This is still the start. It moves again if that model's first
   request fails the same way, and stops once every listed model has failed
-  once; a worker a person archived or marked Done meanwhile is left alone. The host knows a turn failed before any output only when the
+  once; a worker a person archived, marked Done or moved to another model
+  meanwhile is left alone, and the model they chose is not marked down for
+  the earlier failure. The host knows a turn failed before any output only when the
   provider recorded a session for it; a turn whose provider never got that far
   is left as it is, and the coordinator hears of it as a state notice. A next
   model that would ask a person first, or none at all, leaves the worker too.

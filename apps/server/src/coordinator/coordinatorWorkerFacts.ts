@@ -66,7 +66,14 @@ export function coordinatorCandidateFacts(
   const harness = instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
   const mark = sources.availability(providerInstanceId);
   // A failed request's own limit signal first, then the plan-usage reading.
-  const usageLimit = mark?.usageLimit ?? sources.usageReading(providerInstanceId);
+  const reading = sources.usageReading(providerInstanceId);
+  const limit = mark?.usageLimit ?? reading;
+  // The reset shown is the later one either signal names, since both hold.
+  const until = [mark?.usageLimit?.until, reading?.until]
+    .filter((value): value is string => value !== undefined)
+    .toSorted((a, b) => Date.parse(a) - Date.parse(b))
+    .at(-1);
+  const usageLimit = limit === undefined ? undefined : until === undefined ? {} : { until };
   const contextTokens =
     catalog?.contextWindowOverride ?? reported?.contextLimit ?? catalog?.contextLimit;
   const notReady: WorkerCandidateFacts["notReady"] =

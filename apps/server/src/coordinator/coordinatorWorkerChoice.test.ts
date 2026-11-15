@@ -407,6 +407,23 @@ describe("choosing a worker's model from the roles", () => {
     expect(h.hostTurns.filter((turn) => turn.threadId === NEW_WORKER)).toHaveLength(3);
   });
 
+  it("leaves a worker whose model a person changed after its first request failed", async () => {
+    const h = harness(standardRoles);
+    await h.service.start(start({ task: "feature", size: "normal" }));
+    const worker = h.threads.get(NEW_WORKER);
+    if (worker === undefined) throw new Error("no worker");
+    h.threads.set(NEW_WORKER, {
+      ...worker,
+      providerInstanceId: OPENAI as never,
+      modelId: "astra" as never,
+    });
+    h.failedFirstTurns.add("turn-1");
+    await h.service.sweep();
+    expect(h.moves).toEqual([]);
+    expect(h.downMarks).toEqual([]);
+    expect(h.hostTurns.filter((turn) => turn.threadId === NEW_WORKER)).toHaveLength(1);
+  });
+
   it("leaves a worker a person closed after its first request failed", async () => {
     const h = harness(standardRoles);
     await h.service.start(start({ task: "feature", size: "normal" }));

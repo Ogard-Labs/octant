@@ -347,6 +347,51 @@ describe("chooseWorkerModel", () => {
     ).toEqual(sonnet);
   });
 
+  it("lets a named model on a retry start in Builder when the floor role is empty, as an unnamed retry does", () => {
+    const noDeep = roles([slot("quick", [haiku]), slot("default", [sonnet])]);
+    const sonnetHandle = workerModelHandles(noDeep).find(
+      (entry) => entry.candidate === sonnet,
+    )?.handle;
+    expect(
+      picked(
+        chooseWorkerModel(
+          noDeep,
+          facts(),
+          request({
+            retries: { role: "default" },
+            model: sonnetHandle,
+            why: "only Builder is set",
+          }),
+        ),
+      ).candidate,
+    ).toEqual(sonnet);
+    expect(
+      picked(chooseWorkerModel(noDeep, facts(), request({ retries: { role: "default" } })))
+        .candidate,
+    ).toEqual(sonnet);
+  });
+
+  it("keeps a review independent for a named model on the reviewed provider", () => {
+    const sonnetHandle = workerModelHandles(standard).find(
+      (entry) => entry.candidate === sonnet,
+    )?.handle;
+    const review = request({
+      task: "review",
+      reviewedProviderKind: "anthropic",
+      model: sonnetHandle,
+      why: "it knows this code",
+    });
+    expect(chooseWorkerModel(standard, facts(), review)).toMatchObject({
+      kind: "refused",
+      reason: "model-not-eligible",
+      perCandidate: [{ candidate: sonnet, reasons: ["same-provider-as-reviewed"] }],
+    });
+    expect(
+      picked(chooseWorkerModel(standard, facts({ astra: { notReady: "provider-down" } }), review))
+        .candidate,
+    ).toEqual(sonnet);
+  });
+
   it("turns a start in an ask-first role into a proposal, a retry that climbs into one included", () => {
     const asking = roles([
       slot("quick", [haiku]),
@@ -402,7 +447,12 @@ describe("providerAvailabilityFromFailure", () => {
 describe("usageLimitFromReading", () => {
   const now = Date.parse("2026-11-15T12:00:00.000Z");
   function reading(windows: ReadonlyArray<Record<string, unknown>>, status = "available") {
-    const limits = { rateLimitWindows: windows };
+    const limits = {
+      rateLimitWindows: windows,
+      quota: "available",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+    };
     return (
       status === "available"
         ? { status, providerInstanceId: "p", limits }
@@ -428,6 +478,35 @@ describe("usageLimitFromReading", () => {
     expect(
       usageLimitFromReading(reading([{ window: "w", status: "exhausted" }], "failed"), now),
     ).toEqual({});
+  });
+
+  it("counts an exhausted quota with no window and an empty request or token bucket", () => {
+    const quota = {
+      status: "available",
+      providerInstanceId: "p",
+      limits: {
+        quota: "exhausted",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+      },
+    } as never;
+    expect(usageLimitFromReading(quota, now)).toEqual({});
+    const bucket = {
+      status: "available",
+      providerInstanceId: "p",
+      limits: {
+        quota: "available",
+        requests: {
+          status: "available",
+          limit: 100,
+          remaining: 0,
+          resetsAt: "2026-11-15T12:05:00.000Z",
+        },
+        tokens: { status: "available", limit: 1000, remaining: 500 },
+      },
+    } as never;
+    expect(usageLimitFromReading(bucket, now)).toEqual({ until: "2026-11-15T12:05:00.000Z" });
+    expect(usageLimitFromReading(bucket, Date.parse("2026-11-15T12:06:00.000Z"))).toBeUndefined();
   });
 
   it("never counts a reading below its limit, or one whose reset has passed", () => {

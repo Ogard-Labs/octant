@@ -272,8 +272,16 @@ export function chooseWorkerModel(
       );
     }
     // A retry's floor holds for a named model too: it must be listed in a
-    // role at or above the tier the retry climbs to.
-    if (floor !== undefined) {
+    // role at or above the tier the retry starts in. An empty floor role
+    // starts in Builder, as an unnamed retry does.
+    const floorSlot = floor === undefined ? undefined : effectiveWorkerRoleSlot(roles, floor);
+    const startsIn =
+      floor === undefined
+        ? undefined
+        : floorSlot === undefined || floorSlot.candidates.length === 0
+          ? "default"
+          : floor;
+    if (startsIn !== undefined) {
       const tiers = WORKER_ROLE_ORDER.filter((slotRole) =>
         (effectiveWorkerRoleSlot(roles, slotRole)?.candidates ?? []).some(
           (candidate) =>
@@ -281,15 +289,34 @@ export function chooseWorkerModel(
             nativeHarnessSlotCandidateKey(named.candidate),
         ),
       ).map((slotRole) => TIER[slotRole]);
-      if (Math.max(...tiers) < TIER[floor]) {
+      if (Math.max(...tiers) < TIER[startsIn]) {
         return refused(
           "policy",
-          `${request.model} is listed only below ${WORKER_ROLE_NAMES[floor]}; a retry starts at ${WORKER_ROLE_NAMES[floor]} or above and never goes down a tier.`,
+          `${request.model} is listed only below ${WORKER_ROLE_NAMES[startsIn]}; a retry starts at ${WORKER_ROLE_NAMES[startsIn]} or above and never goes down a tier.`,
           [],
         );
       }
     }
-    const reasons = hardRejections(named.candidate, facts, request);
+    const reasons = [...hardRejections(named.candidate, facts, request)];
+    // A named model keeps a review independent too: it may sit on the
+    // reviewed worker's provider only while no model of the role's lists on
+    // another provider could start.
+    const reviewed = request.reviewedProviderKind;
+    if (
+      reasons.length === 0 &&
+      request.task === "review" &&
+      reviewed !== undefined &&
+      facts.candidate(named.candidate).providerKind === reviewed &&
+      [role, ...BORROWS[role]].some((listRole) =>
+        (effectiveWorkerRoleSlot(roles, listRole)?.candidates ?? []).some(
+          (candidate) =>
+            facts.candidate(candidate).providerKind !== reviewed &&
+            hardRejections(candidate, facts, request).length === 0,
+        ),
+      )
+    ) {
+      reasons.push("same-provider-as-reviewed");
+    }
     if (reasons.length > 0) {
       return refused(
         "model-not-eligible",
