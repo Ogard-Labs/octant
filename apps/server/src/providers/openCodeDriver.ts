@@ -223,20 +223,29 @@ interface SessionState {
 export interface OwnPermissions {
   readonly rules: ReadonlyArray<PermissionV2Rule>;
   readonly toolServers: boolean;
+  /**
+   * OpenCode's own `webfetch` and `websearch`. Off, both are denied at every
+   * level, Full access included, and after the person's own rules, so a
+   * session whose setup has web tools off cannot reach them through a rule.
+   */
+  readonly webTools: boolean;
 }
 
-const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false };
+const NO_OWN_PERMISSIONS: OwnPermissions = { rules: [], toolServers: false, webTools: false };
 
 /** What a session with the setup on carries of the person's configuration. */
 interface ResolvedOwnSetup extends OpenCodeOwnSetup {
   readonly toolServers: boolean;
+  readonly webTools: boolean;
 }
 
 function ownPermissions(setup: ResolvedOwnSetup | undefined): OwnPermissions {
   return setup === undefined
     ? NO_OWN_PERMISSIONS
-    : { rules: setup.rules, toolServers: setup.toolServers };
+    : { rules: setup.rules, toolServers: setup.toolServers, webTools: setup.webTools };
 }
+
+const WEB_TOOLS = ["webfetch", "websearch"] as const;
 
 function ownSetupKey(setup: ResolvedOwnSetup | undefined): string {
   return JSON.stringify(setup ?? null);
@@ -315,8 +324,8 @@ const capabilities = {
     // each as a child run, sends its permission requests through the
     // parent's approval path, and marks the thread for its web reads.
     subagents: "supported",
-    // OpenCode's own web fetch and search were never switched off outside
-    // Plan; each call marks the thread.
+    // OpenCode's own web fetch and search are denied unless the setup has
+    // them on; each call marks the thread.
     webTools: "supported",
     skills: "supported",
     // The MCP servers in the person's own OpenCode configuration load into
@@ -1538,6 +1547,7 @@ function makeConnection(
         rules: own.rules,
         mcp: setup.toolServers ? own.mcp : {},
         toolServers: setup.toolServers,
+        webTools: setup.webTools,
       };
     };
     const childSessions = new OpenCodeChildSessions();
@@ -3045,7 +3055,7 @@ function mapAndOffer(
               // OpenCode asked, so its own evaluation of the person's rules,
               // which name resources Octant does not see, ended in `ask`; the
               // level decides what Octant does with it.
-              { rules: [], toolServers: state.own.toolServers },
+              { rules: [], toolServers: state.own.toolServers, webTools: state.own.webTools },
               state.protectedPaths,
             ),
             action,
@@ -3388,6 +3398,9 @@ export function permissionRules(
   }
   // The person's tool servers are namespaced tools, which the level decides.
   if (!own.toolServers) rules.push({ permission: "*_*", pattern: "*", action: "deny" });
+  if (!own.webTools) {
+    for (const permission of WEB_TOOLS) rules.push({ permission, pattern: "*", action: "deny" });
+  }
   // The person's own skills load once they let OpenCode run as itself; a
   // skill is text, and OpenCode asks for it under the posture's own rule.
   if (!ownSkills) rules.push({ permission: "skill", pattern: "*", action: "deny" });
@@ -3512,6 +3525,9 @@ export function betaSessionPermissionRules(
   const rules: PermissionV2Ruleset = [
     ...betaAgentPermissionRules(policy, mode, extraFolders, own.rules, protectedPaths),
     ...(own.toolServers ? [] : [{ action: "*_*", resource: "*", effect: "deny" } as const]),
+    ...(own.webTools
+      ? []
+      : WEB_TOOLS.map((action) => ({ action, resource: "*", effect: "deny" }) as const)),
     ...(ownSkills ? [] : [{ action: "skill", resource: "*", effect: "deny" } as const]),
     // The question tool asks for this permission and then publishes a form,
     // which reaches the person as the thread's questionnaire. A question

@@ -3968,6 +3968,46 @@ describe("Claude artifact delivery", () => {
     expectEveryGuard(off.environment);
   });
 
+  it("leaves Claude's own web search and fetch out and refuses them when the setup has web tools off", async () => {
+    const f = guardedHarness("subscription", () => false);
+    const acquired = await acquire(f.driver, "code");
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          nativeSetup: {
+            subagents: true,
+            webTools: false,
+            skills: true,
+            toolServers: false,
+            hooks: true,
+            projectCode: false,
+          },
+        }),
+      );
+      const open = f.opens.at(-1)!;
+      expect(open.tools).toEqual(expect.arrayContaining(["Agent", "Skill"]));
+      expect(open.tools).not.toContain("WebSearch");
+      expect(open.tools).not.toContain("WebFetch");
+      for (const toolName of ["WebSearch", "WebFetch"]) {
+        await expect(
+          open.preToolUse({
+            sessionId: "sdk-session-1",
+            projectRoot,
+            toolName,
+            input: { query: "x", url: "https://example.invalid" },
+            toolUseId: `web-${toolName}`,
+            signal: new AbortController().signal,
+          }),
+        ).resolves.toMatchObject({ behavior: "deny" });
+      }
+    } finally {
+      await acquired.close();
+    }
+  });
+
   it("runs a web read without asking at Full access and asks before a trusted Project's MCP tool below it", async () => {
     for (const executionPolicy of ["full-access", "approval-gated"] as const) {
       // A fresh account per posture, so each session is the first the runtime names.

@@ -57,7 +57,7 @@ export const WEB_SEARCH_BACKEND_OFFERS: Readonly<
     takesKey: true,
     // Refused until Staan publishes what it keeps of a query.
     zdr: { offered: false, terms: "Not published" },
-    euProcessing: { offered: true, terms: "EU company and index" },
+    euProcessing: { offered: true, terms: "Yes, an EU company and index" },
     checkedOn: "2026-11-14",
     source: "https://staan.ai",
   },
@@ -68,7 +68,7 @@ export const WEB_SEARCH_BACKEND_OFFERS: Readonly<
     address: "never",
     takesKey: true,
     zdr: { offered: true, terms: "By agreement" },
-    euProcessing: { offered: true, terms: "UK" },
+    euProcessing: { offered: true, terms: "Yes, in the UK" },
     checkedOn: "2026-11-14",
     source: "https://www.mojeek.com/services/search/web-search-api/",
   },

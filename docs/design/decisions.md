@@ -607,14 +607,14 @@ Status: Built. Since: —. Detail: [Architecture: Web search](../architecture.md
 
 ### Web search backends and data policy
 
-Octant's own `web-search` searches an ordered list of backends the person sets up, filtered by one host data policy (Any, ZDR only, EU only, EU and ZDR), and a provider's own search, in the native harness and in a vendor runtime, follows the same policy, so a person under a zero data retention agreement or an EU data boundary can search (maintainer request, 2026-11-14).
+Octant's own `web-search` searches an ordered list of backends the person sets up, filtered by one host data policy (Any, ZDR only, EU only, EU and ZDR), so a person under a zero data retention agreement or an EU data boundary can search (maintainer request, 2026-11-14). The policy governs only Octant's own backends: a provider's own search, in the native harness and in a vendor runtime, is not gated by it (maintainer decision, 2026-11-15: provider search behaves as it does on its own).
 
 - The tool's name, schema and result shape do not change, and the definition never names a backend; the answering backend is journaled, not returned to the model.
 - A backend is eligible only when the person states ZDR or EU processing for it and its vendor offers that; with no eligible backend the tool is not offered.
 - A query moves to the next backend only when one did not answer, inside a 20-second budget; an empty result does not move on.
 - The policy changes only from a local window or a device the host's own person paired, and is journaled; an organization-set policy is outside the release boundary.
 - The native harness offers a provider's own search only on Anthropic's and OpenAI's own APIs, capped at one search per request, withheld from a tainted thread below Full access, and marking the thread as outside content.
-- Outside Any, the policy turns a vendor runtime's `webTools` off and shows it locked; it adds no second switch beside Chat's research route, whose `searxng` value stays on the wire and reads as "Octant web search".
+- A vendor runtime's `webTools` follow its native setup under every policy, and a model endpoint asks for no statement about its provider's search; each key provider is launched with its own search off wherever `webTools` is off (a generic ACP agent's cannot be switched off, not built); the policy adds no second switch beside Chat's research route, whose `searxng` value stays on the wire and reads as "Octant web search".
 - A stored SearXNG address migrates to the first entry under Any; all four delivery slices, provider search in the harness included, are one delivery.
 
 Status: Partly built. Since: 2026-11-14. Detail: [Web search backends and data policy](web-search-backends.md).
