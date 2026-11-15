@@ -321,7 +321,11 @@ async function runResponsesTurn(
       : {
           tools: [...(tools ?? []), ...(input.webSearch === true ? [{ type: "web_search" }] : [])],
         }),
-    ...(input.webSearch === true ? { max_tool_calls: 1 } : {}),
+    // A search item lists every page it read only when asked to; without it
+    // the outside-content record would hold just the pages the reply cited.
+    ...(input.webSearch === true
+      ? { max_tool_calls: 1, include: ["web_search_call.action.sources"] }
+      : {}),
     ...(input.toolChoice === undefined ? {} : { tool_choice: input.toolChoice }),
   };
   // The plan profile checks the exact wire body before send: a request that

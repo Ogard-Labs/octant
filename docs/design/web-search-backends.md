@@ -276,7 +276,10 @@ response ends, so a response that fails, is cut off, or is stopped after it
 searched still marks the thread; the text the reply cited is read once the
 reply ends, or as far as it got. The stream adapters
 read Anthropic's `server_tool_use` and `web_search_tool_result` blocks and
-OpenAI's `web_search_call` items with their sources and URL citations. Anthropic
+OpenAI's `web_search_call` items with their sources and URL citations; the
+Responses request asks for every source with `include:
+["web_search_call.action.sources"]`, which OpenAI's web search guide documents
+(no OpenAI SDK is installed in this repository to check its types). Anthropic
 returns page text encrypted, so the Watcher reads only the titles, URLs, and
 cited text, and the journal entry says so.
 

@@ -584,6 +584,7 @@ describe("OpenAI's own web search in one response", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.tools).toEqual([{ type: "web_search" }]);
     expect(body.max_tool_calls).toBe(1);
+    expect(body.include).toEqual(["web_search_call.action.sources"]);
     const reported = {
       kind: "web-search",
       sequence: expect.any(Number),
