@@ -353,6 +353,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
     forceKill: () => Effect.void,
     interrupt: () => Effect.void,
     stopTask: () => Effect.succeed("unsupported" as const),
+    backgroundTask: () => Effect.succeed("unsupported" as const),
     setPermissionMode: () => Effect.void,
     supportedModels: () => Effect.succeed(initialization.models),
     accountInfo: () => Effect.succeed(initialization.account),

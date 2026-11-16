@@ -94,6 +94,8 @@ export interface ClaudePreToolRequest {
   readonly input: unknown;
   readonly toolUseId: string;
   readonly signal: AbortSignal;
+  /** The subagent that made the call, by the runtime's agent id; absent for the session's own. */
+  readonly agentId?: string;
 }
 
 export interface ClaudeSandboxSettings {
@@ -231,6 +233,12 @@ export interface ClaudeOpenQueryInput {
   readonly ownPermissions?: true;
   readonly canUseTool: (request: ClaudeToolRequest) => Promise<ClaudeToolDecision>;
   readonly preToolUse: (request: ClaudePreToolRequest) => Promise<ClaudePreToolDecision>;
+  /**
+   * The person's messages waiting for a subagent, taken once its next tool
+   * call reaches the hook, by the runtime's agent id. They reach the
+   * subagent as the hook's added context, beside whatever the hook decided.
+   */
+  readonly subagentMessages?: (agentId: string) => string | undefined;
 }
 
 export interface ClaudeModelInfo {
@@ -649,6 +657,15 @@ export interface ClaudeQueryPort {
     taskId: string,
   ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
   /**
+   * Sends the one foreground task a tool call started (a subagent or a
+   * command) to the background, by that call's tool-use id; the call returns
+   * at once and the turn goes on. `not-found` when no foreground task
+   * matches, `unsupported` when the runtime offers no background control.
+   */
+  readonly backgroundTask: (
+    toolUseId: string,
+  ) => Effect.Effect<"backgrounded" | "not-found" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -739,9 +756,12 @@ interface ClaudeAgentSdkHookOptions {
 interface ClaudeAgentSdkHookOutput {
   readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
-    readonly permissionDecision: "allow" | "deny" | "ask";
+    /** Absent decides nothing, so Claude Code's own rules decide. */
+    readonly permissionDecision?: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
     readonly updatedInput?: Readonly<Record<string, unknown>>;
+    /** Text the model reads with the call: a person's message for a subagent. */
+    readonly additionalContext?: string;
   };
 }
 
@@ -939,6 +959,7 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly interrupt: () => Promise<unknown>;
   /** Older runtimes cannot stop one task without interrupting the turn. */
   readonly stopTask?: (taskId: string) => Promise<void>;
+  readonly backgroundTasks?: (toolUseId?: string) => Promise<boolean>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -1583,6 +1604,10 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
+                const agentId =
+                  typeof hookInput.agent_id === "string" && hookInput.agent_id !== ""
+                    ? hookInput.agent_id
+                    : undefined;
                 const decision = await input.preToolUse({
                   sessionId: hookInput.session_id,
                   projectRoot: hookInput.cwd,
@@ -1590,11 +1615,19 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   input: hookInput.tool_input,
                   toolUseId,
                   signal: callback.signal,
+                  ...(agentId === undefined ? {} : { agentId }),
                 });
-                if (decision.behavior === "own-rules") return {};
+                const note = agentId === undefined ? undefined : input.subagentMessages?.(agentId);
+                const additionalContext = note === undefined ? {} : { additionalContext: note };
+                if (decision.behavior === "own-rules") {
+                  return note === undefined
+                    ? {}
+                    : { hookSpecificOutput: { hookEventName: "PreToolUse", ...additionalContext } };
+                }
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",
+                    ...additionalContext,
                     permissionDecision: decision.behavior,
                     ...(decision.behavior === "deny"
                       ? { permissionDecisionReason: decision.message }
@@ -2068,6 +2101,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   await stop.call(query, taskId);
                   return "requested" as const;
                 }, "task stop"),
+              backgroundTask: (toolUseId) =>
+                request(async () => {
+                  const background = query?.backgroundTasks;
+                  if (background === undefined) return "unsupported" as const;
+                  // Always with the one call's id: without it the runtime
+                  // backgrounds every foreground task, as Ctrl+B does.
+                  return (await background.call(query, toolUseId))
+                    ? ("backgrounded" as const)
+                    : ("not-found" as const);
+                }, "task background"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>

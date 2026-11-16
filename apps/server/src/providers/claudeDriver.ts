@@ -1449,6 +1449,11 @@ interface SessionState {
    */
   readonly artifactCalls: Map<string, ClaudeArtifactCall>;
   /**
+   * The person's messages for a running subagent, by the runtime's task id,
+   * until its next tool call takes them ({@link MAX_SUBAGENT_MESSAGES} each).
+   */
+  readonly subagentMessages: Map<string, string[]>;
+  /**
    * Worktrees outside the Project's folders this session was let into: the
    * switch was allowed, so calls in them are judged as the Project's are.
    */
@@ -4463,6 +4468,7 @@ function makeConnection(
               ...claudeAutoCompactWindow(input.compactionPoint),
               ...(sandbox === undefined ? {} : { sandbox }),
               ...(ownPermissions ? { ownPermissions: true as const } : {}),
+              subagentMessages: (agentId) => takeSubagentMessages(callbackState, agentId),
               canUseTool,
               preToolUse,
             })
@@ -4505,6 +4511,7 @@ function makeConnection(
           approvalReuse: new Set(),
           publishedSnapshots: new Map(),
           artifactCalls: new Map(),
+          subagentMessages: new Map(),
           worktrees: new Set(),
           observedToolUseIds: new Set(),
           settledToolUseIds: new Set(),
@@ -4980,6 +4987,37 @@ function makeConnection(
           });
         });
       },
+      backgroundChildAgent: ({ sessionId, childAgentId }) => {
+        const state = sessions.get(sessionId);
+        const context = state?.context;
+        if (state === undefined || state.terminal || state.released || context === undefined) {
+          return Effect.succeed("not-found" as const);
+        }
+        // The runtime backgrounds a task by the tool call that started it:
+        // the `Agent` call whose step id is the child's id.
+        const call = [...context.toolStates].find(
+          ([, tool]) => tool.toolCallId === childAgentId && tool.toolName === CLAUDE_SUBAGENT_TOOL,
+        );
+        if (call === undefined || runningSubagentTask(context, childAgentId) === undefined) {
+          return Effect.succeed("not-found" as const);
+        }
+        return state.query
+          .backgroundTask(call[0])
+          .pipe(Effect.mapError((providerFailure) => sanitizeFailure(providerFailure)));
+      },
+      messageChildAgent: ({ sessionId, childAgentId, message }) => {
+        const state = sessions.get(sessionId);
+        const context = state?.context;
+        if (state === undefined || state.terminal || state.released || context === undefined) {
+          return Effect.succeed("not-found" as const);
+        }
+        const taskId = runningSubagentTask(context, childAgentId);
+        if (taskId === undefined) return Effect.succeed("not-found" as const);
+        const waiting = state.subagentMessages.get(taskId) ?? [];
+        if (waiting.length >= MAX_SUBAGENT_MESSAGES) return Effect.succeed("unsupported" as const);
+        state.subagentMessages.set(taskId, [...waiting, message]);
+        return Effect.succeed("queued" as const);
+      },
       stopChildAgent: ({ sessionId, childAgentId }) => {
         const state = sessions.get(sessionId);
         const context = state?.context;
@@ -5283,6 +5321,45 @@ function promiseWithTimeout<A>(
 }
 
 /** Puts each approved publish's snapshot beside the page its result names. */
+/** How many of the person's messages wait for one subagent at once. */
+const MAX_SUBAGENT_MESSAGES = 8;
+
+/** The runtime's task id of a subagent still running, by Octant's child id. */
+function runningSubagentTask(
+  context: NonNullable<SessionState["context"]>,
+  childAgentId: string,
+): string | undefined {
+  const taskId = context.subagentTaskIds.get(childAgentId);
+  const task = taskId === undefined ? undefined : context.taskIds.get(taskId);
+  return task === undefined || task.lifecycle === "completed" || task.lifecycle === "failed"
+    ? undefined
+    : taskId;
+}
+
+/**
+ * Takes the person's messages waiting for the subagent making a tool call.
+ * Claude Code names a subagent's task by its agent id, so the hook's
+ * `agent_id` is the task the messages were queued under. They reach the
+ * subagent once, framed as the person's, and a subagent that finished
+ * leaves nothing waiting.
+ */
+function takeSubagentMessages(
+  state: SessionState | undefined,
+  agentId: string,
+): string | undefined {
+  if (state === undefined) return undefined;
+  const waiting = state.subagentMessages.get(agentId);
+  if (waiting === undefined || waiting.length === 0) return undefined;
+  state.subagentMessages.delete(agentId);
+  const task = state.context?.taskIds.get(agentId);
+  if (task === undefined || task.lifecycle === "completed" || task.lifecycle === "failed") {
+    return undefined;
+  }
+  return waiting
+    .map((message) => `The person sent you this message while you work:\n${message}`)
+    .join("\n\n");
+}
+
 function withPublishedSnapshots(
   state: SessionState,
   message: ClaudeDecodedMessage,

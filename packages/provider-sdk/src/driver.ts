@@ -562,6 +562,30 @@ export interface ProviderConnection {
     readonly childAgentId: string;
   }) => Effect.Effect<"stopped" | "unsupported" | "not-found", ProviderFailure>;
   /**
+   * Sends one running subagent the runtime started in this session to the
+   * background, by the `childAgentId` its `child-agent-activity` events
+   * carry: the call that started it returns at once and the turn goes on
+   * while the subagent keeps running. Present only on a connection whose
+   * runtime can background one child alone. `not-found` when the session
+   * holds no foreground child of that id.
+   */
+  readonly backgroundChildAgent?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly childAgentId: string;
+  }) => Effect.Effect<"backgrounded" | "unsupported" | "not-found", ProviderFailure>;
+  /**
+   * Queues a person's message for one running subagent, delivered with its
+   * next tool call. `queued` means it waits for that call; a subagent that
+   * makes none before it finishes never reads it. `not-found` when the
+   * session holds no running child of that id, and `unsupported` when the
+   * queue for it is full.
+   */
+  readonly messageChildAgent?: (input: {
+    readonly sessionId: ProviderSessionId;
+    readonly childAgentId: string;
+    readonly message: string;
+  }) => Effect.Effect<"queued" | "unsupported" | "not-found", ProviderFailure>;
+  /**
    * Asks the runtime to compact a session it holds, outside any turn. Present
    * only on a connection whose mode's sessions the runtime can compact; a
    * connection without it cannot compact. It resolves once the runtime

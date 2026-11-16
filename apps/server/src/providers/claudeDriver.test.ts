@@ -167,6 +167,9 @@ class FakeQuery implements ClaudeQueryPort {
   readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
   readonly stopTask = vi.fn((_taskId: string) => Effect.succeed("requested" as const));
+  readonly backgroundTask = vi.fn((_toolUseId: string) =>
+    Effect.succeed("backgrounded" as "backgrounded" | "not-found" | "unsupported"),
+  );
   readonly forceKill = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -1854,6 +1857,90 @@ describe("Claude execution policy", () => {
       expect(query.interrupt).not.toHaveBeenCalled();
       await expect(
         Effect.runPromise(stopChild({ sessionId, childAgentId: "another-child" })),
+      ).resolves.toBe("not-found");
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(subscription));
+      await acquired.close();
+    }
+  });
+
+  it("sends one running subagent to the background and carries a person's message to its next tool call", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    const children: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "child-agent-activity") children.push(event);
+        }),
+      ),
+    );
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "Delegate", attachments: [], tools: [] }),
+      );
+      const query = f.queries[0]!;
+      const open = f.opens[0]!;
+      await query.emit({
+        kind: "stream-event",
+        sessionId: "sdk-session-1",
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent-use",
+            toolName: "Agent",
+            input: { description: "Read the notes" },
+          },
+        },
+      });
+      await vi.waitFor(() => expect(children.length).toBeGreaterThan(0));
+      const child = children[0];
+      if (child?.kind !== "child-agent-activity") throw new Error("Expected a subagent");
+      const background = acquired.connection.backgroundChildAgent;
+      const message = acquired.connection.messageChildAgent;
+      if (background === undefined || message === undefined) {
+        throw new Error("Expected subagent steering");
+      }
+      // Not a runtime task yet: nothing to background or message.
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("not-found");
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("not-found");
+      await query.emit({
+        kind: "task",
+        sessionId: "sdk-session-1",
+        subtype: "task_started",
+        taskId: "sdk-runtime-task",
+        toolUseId: "sdk-agent-use",
+        description: "Read the notes",
+      });
+      await expect(
+        Effect.runPromise(background({ sessionId, childAgentId: child.childAgentId })),
+      ).resolves.toBe("backgrounded");
+      // The runtime backgrounds the one call that started the subagent.
+      expect(query.backgroundTask).toHaveBeenCalledWith("sdk-agent-use");
+      expect(query.interrupt).not.toHaveBeenCalled();
+
+      await expect(
+        Effect.runPromise(
+          message({ sessionId, childAgentId: child.childAgentId, message: "Skip the tests" }),
+        ),
+      ).resolves.toBe("queued");
+      // Another subagent's call takes nothing; this one's next call takes it once.
+      expect(open.subagentMessages?.("another-agent")).toBeUndefined();
+      expect(open.subagentMessages?.("sdk-runtime-task")).toContain("Skip the tests");
+      expect(open.subagentMessages?.("sdk-runtime-task")).toBeUndefined();
+      await expect(
+        Effect.runPromise(message({ sessionId, childAgentId: "another-child", message: "Hello" })),
       ).resolves.toBe("not-found");
     } finally {
       await Effect.runPromise(Fiber.interrupt(subscription));

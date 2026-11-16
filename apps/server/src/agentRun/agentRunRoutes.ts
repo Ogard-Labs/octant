@@ -6,6 +6,12 @@ import {
   decodeAgentRunResultsResponse,
   decodeAgentRunReviewResponse,
   decodeAgentObservedChildStopRequest,
+  decodeAgentObservedChildBackgroundRequest,
+  decodeAgentObservedChildMessageRequest,
+  type AgentObservedChildBackgroundRequest,
+  type AgentObservedChildBackgroundResponse,
+  type AgentObservedChildMessageRequest,
+  type AgentObservedChildMessageResponse,
   type AgentObservedChild,
   type AgentObservedChildStopRequest,
   type AgentObservedChildStopResponse,
@@ -284,6 +290,14 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
 
     if (request.method === "POST" && url.pathname === "/api/agent-runs/observed/stop") {
       return handleObservedStop(dependencies, authenticatedWindowId, request, origin);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/observed/background") {
+      return handleObservedBackground(dependencies, authenticatedWindowId, request, origin);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/observed/message") {
+      return handleObservedMessage(dependencies, authenticatedWindowId, request, origin);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/coordinator-graph") {
@@ -1282,12 +1296,65 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+type ObservedChildRefusal = Extract<
+  AgentObservedChildStopResponse,
+  { status: "refused" }
+>["reason"];
+
+function observedChildRefused(reason: ObservedChildRefusal, origin: string | null): Response {
+  return json(
+    { status: "refused", reason } satisfies AgentObservedChildStopResponse,
+    reason === "unauthorized" ? 403 : 409,
+    origin,
+  );
+}
+
 /**
- * Stops one subagent a provider runtime started, through the thread's running
- * turn. The child is found among the observations this window may read for
- * the thread, never from what the request claims about it, and the stop goes
- * only to the turn's own session.
+ * The running child a control names, and the thread's live turn that may act
+ * on it. The child is found among the observations this window may read for
+ * the thread, never from what the request claims about it, and a control goes
+ * only to the turn's own session; anything else is a named refusal.
  */
+async function liveObservedChild(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  parentThreadId: AgentObservedChildStopRequest["parentThreadId"],
+  observationId: string,
+): Promise<
+  | {
+      readonly kind: "live";
+      readonly live: NonNullable<
+        ReturnType<NonNullable<AgentRunRouteDependencies["liveTurnConnection"]>>
+      >;
+      readonly childAgentId: string;
+    }
+  | { readonly kind: "refused"; readonly reason: ObservedChildRefusal }
+> {
+  if (!(await dependencies.authorizeParentThread({ parentThreadId, windowId }))) {
+    return { kind: "refused", reason: "unauthorized" };
+  }
+  const child = dependencies
+    .readObservations?.({ parentThreadId, windowId })
+    .observations.find((observation) => observation.observationId === observationId);
+  if (
+    child === undefined ||
+    child.lifecycleStatus === "completed" ||
+    child.lifecycleStatus === "failed"
+  ) {
+    return { kind: "refused", reason: "not-found" };
+  }
+  const live = dependencies.liveTurnConnection?.(String(parentThreadId));
+  if (
+    live === undefined ||
+    String(live.providerInstanceId) !== String(child.providerInstanceId) ||
+    String(live.sessionId) !== String(child.sessionId)
+  ) {
+    return { kind: "refused", reason: "not-live" };
+  }
+  return { kind: "live", live, childAgentId: child.childAgentId };
+}
+
+/** Stops one subagent a provider runtime started, through the thread's running turn. */
 async function handleObservedStop(
   dependencies: AgentRunRouteDependencies,
   windowId: string,
@@ -1300,40 +1367,17 @@ async function handleObservedStop(
   } catch {
     return failure("The stop request is invalid.", 400, origin);
   }
-  const refused = (
-    reason: Extract<AgentObservedChildStopResponse, { status: "refused" }>["reason"],
-  ) =>
-    json(
-      { status: "refused", reason } satisfies AgentObservedChildStopResponse,
-      reason === "unauthorized" ? 403 : 409,
-      origin,
-    );
-  const { parentThreadId, observationId } = stopRequest;
-  if (!(await dependencies.authorizeParentThread({ parentThreadId, windowId }))) {
-    return refused("unauthorized");
-  }
-  const child = dependencies
-    .readObservations?.({ parentThreadId, windowId })
-    .observations.find((observation) => observation.observationId === observationId);
-  if (
-    child === undefined ||
-    child.lifecycleStatus === "completed" ||
-    child.lifecycleStatus === "failed"
-  ) {
-    return refused("not-found");
-  }
-  const live = dependencies.liveTurnConnection?.(String(parentThreadId));
-  if (
-    live === undefined ||
-    String(live.providerInstanceId) !== String(child.providerInstanceId) ||
-    String(live.sessionId) !== String(child.sessionId)
-  ) {
-    return refused("not-live");
-  }
-  const stopChild = live.connection.stopChildAgent;
-  if (stopChild === undefined) return refused("unsupported");
+  const found = await liveObservedChild(
+    dependencies,
+    windowId,
+    stopRequest.parentThreadId,
+    stopRequest.observationId,
+  );
+  if (found.kind === "refused") return observedChildRefused(found.reason, origin);
+  const stopChild = found.live.connection.stopChildAgent;
+  if (stopChild === undefined) return observedChildRefused("unsupported", origin);
   const outcome = await Effect.runPromise(
-    stopChild({ sessionId: live.sessionId, childAgentId: child.childAgentId }).pipe(
+    stopChild({ sessionId: found.live.sessionId, childAgentId: found.childAgentId }).pipe(
       Effect.map((value) => ({ kind: "settled" as const, value })),
       Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
     ),
@@ -1341,6 +1385,90 @@ async function handleObservedStop(
   if (outcome.kind === "failed") {
     return failure("The provider could not stop the subagent.", 502, origin);
   }
-  if (outcome.value !== "stopped") return refused(outcome.value);
+  if (outcome.value !== "stopped") return observedChildRefused(outcome.value, origin);
   return json({ status: "stop-requested" } satisfies AgentObservedChildStopResponse, 200, origin);
+}
+
+/**
+ * Sends one running subagent a provider runtime started to the background,
+ * through the thread's running turn, under the stop's authority.
+ */
+async function handleObservedBackground(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  request: Request,
+  origin: string | null,
+): Promise<Response> {
+  let backgroundRequest: AgentObservedChildBackgroundRequest;
+  try {
+    backgroundRequest = decodeAgentObservedChildBackgroundRequest(await request.json());
+  } catch {
+    return failure("The background request is invalid.", 400, origin);
+  }
+  const found = await liveObservedChild(
+    dependencies,
+    windowId,
+    backgroundRequest.parentThreadId,
+    backgroundRequest.observationId,
+  );
+  if (found.kind === "refused") return observedChildRefused(found.reason, origin);
+  const backgroundChild = found.live.connection.backgroundChildAgent;
+  if (backgroundChild === undefined) return observedChildRefused("unsupported", origin);
+  const outcome = await Effect.runPromise(
+    backgroundChild({ sessionId: found.live.sessionId, childAgentId: found.childAgentId }).pipe(
+      Effect.map((value) => ({ kind: "settled" as const, value })),
+      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+    ),
+  );
+  if (outcome.kind === "failed") {
+    return failure("The provider could not send the subagent to the background.", 502, origin);
+  }
+  if (outcome.value !== "backgrounded") return observedChildRefused(outcome.value, origin);
+  return json(
+    { status: "backgrounded" } satisfies AgentObservedChildBackgroundResponse,
+    200,
+    origin,
+  );
+}
+
+/**
+ * Queues a person's message for one running subagent a provider runtime
+ * started, through the thread's running turn, under the stop's authority.
+ */
+async function handleObservedMessage(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  request: Request,
+  origin: string | null,
+): Promise<Response> {
+  let messageRequest: AgentObservedChildMessageRequest;
+  try {
+    messageRequest = decodeAgentObservedChildMessageRequest(await request.json());
+  } catch {
+    return failure("The message request is invalid.", 400, origin);
+  }
+  const found = await liveObservedChild(
+    dependencies,
+    windowId,
+    messageRequest.parentThreadId,
+    messageRequest.observationId,
+  );
+  if (found.kind === "refused") return observedChildRefused(found.reason, origin);
+  const messageChild = found.live.connection.messageChildAgent;
+  if (messageChild === undefined) return observedChildRefused("unsupported", origin);
+  const outcome = await Effect.runPromise(
+    messageChild({
+      sessionId: found.live.sessionId,
+      childAgentId: found.childAgentId,
+      message: messageRequest.message.trim(),
+    }).pipe(
+      Effect.map((value) => ({ kind: "settled" as const, value })),
+      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+    ),
+  );
+  if (outcome.kind === "failed") {
+    return failure("The provider could not take the message for the subagent.", 502, origin);
+  }
+  if (outcome.value !== "queued") return observedChildRefused(outcome.value, origin);
+  return json({ status: "queued" } satisfies AgentObservedChildMessageResponse, 200, origin);
 }
