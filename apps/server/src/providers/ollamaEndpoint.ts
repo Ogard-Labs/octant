@@ -10,6 +10,7 @@ import {
   type ProviderReadiness,
   type ProviderToolDefinition,
 } from "@octant/contracts";
+import { normalizeOllamaBaseUrl } from "@octant/domain";
 import { unsupportedChatCapabilities } from "@octant/provider-sdk/chat-conformance";
 import type { HarnessEndpointMessage } from "@octant/provider-sdk/harness-endpoint";
 import { encodeChatCompletionsTools } from "./openAiToolEncoding";
@@ -170,34 +171,14 @@ export function makeOllamaEndpoint(options: {
 }
 
 function normalizeBaseUrl(value: string): string {
-  const normalized = value.trim();
-  if (normalized.includes("?") || normalized.includes("#")) {
-    throw failure(
-      "invalid-configuration",
-      "Ollama base URL cannot include query or fragment delimiters.",
-    );
-  }
-  let url: URL;
   try {
-    url = new URL(normalized);
-  } catch {
-    throw failure("invalid-configuration", "Ollama base URL is invalid.");
-  }
-  if (
-    url.protocol !== "http:" ||
-    !["127.0.0.1", "[::1]", "localhost"].includes(url.hostname.toLowerCase()) ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.search !== "" ||
-    url.hash !== "" ||
-    url.pathname !== "/"
-  ) {
+    return normalizeOllamaBaseUrl(value);
+  } catch (error) {
     throw failure(
       "invalid-configuration",
-      "Ollama base URL must be an HTTP origin on literal loopback with no path, credentials, query, or fragment.",
+      error instanceof Error ? error.message : "Ollama base URL is invalid.",
     );
   }
-  return url.origin;
 }
 
 export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbeResult> {
