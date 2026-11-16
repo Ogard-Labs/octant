@@ -1111,7 +1111,8 @@ under rules.
 - **Columns.** The content keeps a measure of 980px, left-aligned under the
   title's inset, and opens to 1240px in a window 1200px wide or more; a wide
   window leaves ground, it does not stretch the cards. The To-dos page keeps the
-  same measure, so both pages end on one right edge.
+  same measure, so both pages end on one right edge; it has no card, so its
+  field, toolbar and list sit on the page itself.
 - **Cards.** **Needs you** is the left card and **GitHub**, **Linear** and
   **Plan usage** stack to its right: Needs you takes a 560px column when the page's own width
   (a container query, not the window's) is 900px or more, and every card is one

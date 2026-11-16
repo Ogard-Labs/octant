@@ -244,8 +244,9 @@ A to-do may be started again; each start adds a link.
   removes its word.
 - **Filters.** One toolbar under quick add: the state switch (All, Open,
   Started, Done; Open, the default, includes started to-dos) on the left, each
-  count shown in the meta ink only when it is not zero while its accessible
-  name always says it ("Open, 3"), and one **Filter** menu on the right. The
+  button drawing only its word while its accessible name says the count
+  ("Open, 3"), so ticking a to-do off never changes the switch's width, and one
+  **Filter** menu on the right. The
   menu holds a Project group (this list's Projects and No Project), a Tag group
   once the list has a tag, and Show dropped. Filter shows how many of those
   choices are on (the state switch is not counted), and "Reset filters" clears
