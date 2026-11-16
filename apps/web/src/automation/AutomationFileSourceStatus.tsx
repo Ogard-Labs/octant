@@ -1,8 +1,14 @@
-import type { AutomationDefinition, AutomationFileSourceSummary } from "@octant/contracts";
+import {
+  DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW,
+  MAX_AUTOMATION_FILE_ACTIVITY_WINDOW,
+  type AutomationDefinition,
+  type AutomationFileSourceSummary,
+} from "@octant/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
+import { OctantInput } from "../ui/base/OctantInput";
 import type { AutomationCenterController } from "./useAutomationCenterController";
 import { AUTOMATION_RUN_LEVEL_OPTIONS, automationAuthoritySummary } from "./automationCenterModel";
 import { routineFileSourceLabel } from "./routineFileSourcePresentation";
@@ -108,10 +114,17 @@ export function AutomationFileSourceStatus(props: {
       </p>
       {source?.reason === "activity-history-limit" ? (
         <p>
-          This routine exceeded its bounded unsettled activity history. Review and finish its
-          Project tasks and cleanup, then archive it and create a new file routine; this source
-          cannot establish quiescence.
+          This routine started more runs than its activity history holds, so it cannot tell when its
+          input is quiet. Finish its Project tasks and cleanup, then clear its activity history
+          below; it watches again after one quiet check.
         </p>
+      ) : null}
+      {source !== undefined && automation.lifecycle !== "archived" ? (
+        <AutomationFileActivityWindow
+          automation={automation}
+          source={source}
+          execute={props.execute}
+        />
       ) : null}
       {source?.reason === "source-limit" ? (
         <p>
@@ -297,6 +310,103 @@ export function AutomationFileSourceStatus(props: {
           </OctantDialog>
         ) : null}
       </OctantDialogPresence>
+    </section>
+  );
+}
+
+/**
+ * The runs a file routine started since its input was last quiet, with the
+ * person's two choices about them: hold more before the history overflows, or
+ * clear it once those runs are finished.
+ */
+function AutomationFileActivityWindow(props: {
+  readonly automation: AutomationDefinition;
+  readonly source: AutomationFileSourceSummary;
+  readonly execute: AutomationCenterController["execute"];
+}) {
+  const { automation, source } = props;
+  const limit = source.activityWindowLimit ?? DEFAULT_AUTOMATION_FILE_ACTIVITY_WINDOW;
+  const [draft, setDraft] = useState(String(limit));
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | undefined>();
+  const inputId = useId();
+  const requested = Number(draft);
+  const raiseValid =
+    Number.isInteger(requested) &&
+    requested > limit &&
+    requested <= MAX_AUTOMATION_FILE_ACTIVITY_WINDOW;
+  async function change(
+    change:
+      | { readonly kind: "raise"; readonly activityWindowLimit: number }
+      | { readonly kind: "clear" },
+    notice: string,
+  ) {
+    if (busy) return;
+    setBusy(true);
+    setMessage(undefined);
+    const outcome = await props.execute(
+      {
+        kind: "change-file-automation-activity-window",
+        automationId: automation.id,
+        expectedVersion: automation.version,
+        change,
+      },
+      notice,
+    );
+    setBusy(false);
+    if (
+      outcome.kind === "automation-command-failed" ||
+      outcome.kind === "automation-transport-failed"
+    )
+      setMessage(outcome.message);
+  }
+  return (
+    <section aria-label="Activity history" className="automation-file-source__activity">
+      <h5>Activity history</h5>
+      <p>
+        {source.activityWindowRuns ?? 0} of {limit} runs held since the input was last quiet. A
+        change made while one of them may still be writing is held for review.
+      </p>
+      <div className="automation-editor__field">
+        <label htmlFor={inputId}>Runs to hold (up to {MAX_AUTOMATION_FILE_ACTIVITY_WINDOW})</label>
+        <OctantInput
+          className="input"
+          id={inputId}
+          type="number"
+          min={limit}
+          max={MAX_AUTOMATION_FILE_ACTIVITY_WINDOW}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </div>
+      <div className="automation-detail__actions">
+        <OctantButton
+          type="button"
+          variant="secondary"
+          disabled={busy || !raiseValid}
+          onClick={() =>
+            void change(
+              { kind: "raise", activityWindowLimit: requested },
+              "Activity history raised.",
+            )
+          }
+        >
+          Raise limit
+        </OctantButton>
+        <OctantButton
+          type="button"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void change({ kind: "clear" }, "Activity history cleared.")}
+        >
+          Clear history
+        </OctantButton>
+      </div>
+      <p>
+        Clear only once this routine&apos;s runs and their cleanup are finished; it then watches
+        again after one quiet check.
+      </p>
+      {message === undefined ? null : <p role="alert">{message}</p>}
     </section>
   );
 }

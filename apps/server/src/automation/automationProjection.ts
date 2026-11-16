@@ -2,6 +2,8 @@ import {
   AutomationEventSourceObserved,
   type AutomationEventSourceCheckpoint,
   AutomationFileSourceObserved,
+  AutomationFileSourceWindowChanged,
+  automationFileActivityWindowLimit,
   type AutomationFileSourceCheckpoint,
   AutomationBlocked,
   AutomationDefinitionCreated,
@@ -48,6 +50,7 @@ import type { AutomationEventStore } from "./automationEventStore";
 import {
   AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
+  AUTOMATION_FILE_SOURCE_WINDOW_CHANGED,
   AUTOMATION_BLOCKED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_EXHAUSTED,
@@ -66,6 +69,7 @@ import {
 } from "./automationEventStore";
 
 const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
+const decodeFileSourceWindowChanged = Schema.decodeUnknownSync(AutomationFileSourceWindowChanged);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -197,6 +201,9 @@ export class AutomationProjection implements Projection {
       }
       case AUTOMATION_FILE_SOURCE_OBSERVED:
         this.#applyFileSourceObserved(event);
+        return;
+      case AUTOMATION_FILE_SOURCE_WINDOW_CHANGED:
+        this.#applyFileSourceWindowChanged(event);
         return;
       case AUTOMATION_DEFINITION_UPDATED: {
         const payload = decodeDefinitionUpdated(event.payload);
@@ -456,6 +463,12 @@ export class AutomationProjection implements Projection {
                     reviewDigest: source.held?.digest ?? source.baselineDigest,
                   }),
               heldFiles: source?.held?.files ?? [],
+              ...(source === undefined
+                ? {}
+                : {
+                    activityWindowRuns: source.activityWindow.length,
+                    activityWindowLimit: automationFileActivityWindowLimit(source),
+                  }),
               ...(source?.held === undefined ? {} : { heldDigest: source.held.digest }),
             },
           }),
@@ -514,6 +527,40 @@ export class AutomationProjection implements Projection {
     });
   }
 
+  /**
+   * A raise keeps every run the window holds and only moves its limit; a
+   * clear empties it. Neither touches the baseline, the arm generation or the
+   * automatic-start budget, so the frame must extend the previous checkpoint.
+   */
+  #applyFileSourceWindowChanged(event: EventEnvelope): void {
+    const payload = decodeFileSourceWindowChanged(event.payload);
+    const definition = this.#definitions.get(payload.automationId);
+    if (definition === undefined || definition.version >= event.aggregateVersion) return;
+    const previous = this.#fileSources.get(payload.automationId);
+    validateFileSourceFrame(payload.checkpoint, event);
+    const next = payload.checkpoint;
+    if (
+      previous === undefined ||
+      definition.trigger.kind !== "file-arrival" ||
+      definition.definitionRevision !== payload.definitionRevision ||
+      next.observationRevision !== previous.observationRevision + 1 ||
+      next.armGeneration !== previous.armGeneration ||
+      next.sourceIdentity !== previous.sourceIdentity ||
+      next.automaticStarts !== previous.automaticStarts ||
+      next.baselineDigest !== previous.baselineDigest ||
+      (payload.change === "raised" &&
+        (automationFileActivityWindowLimit(next) < automationFileActivityWindowLimit(previous) ||
+          next.activityWindow.join() !== previous.activityWindow.join()))
+    )
+      throw invalidFileSourceFrame(event);
+    this.#fileSources.set(payload.automationId, next);
+    this.#definitions.set(payload.automationId, {
+      ...definition,
+      version: event.aggregateVersion,
+      updatedAt: payload.recordedAt,
+    });
+  }
+
   #applyDefinitionExhausted(event: EventEnvelope): void {
     const payload = decodeDefinitionExhausted(event.payload);
     const existing = this.#definitions.get(payload.automationId);
@@ -541,7 +588,7 @@ export class AutomationProjection implements Projection {
       if (source !== undefined && !source.activityWindow.includes(payload.runId))
         this.#fileSources.set(
           payload.automationId,
-          source.activityWindow.length >= 64
+          source.activityWindow.length >= automationFileActivityWindowLimit(source)
             ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
             : { ...source, activityWindow: [...source.activityWindow, payload.runId] },
         );
@@ -626,7 +673,7 @@ export class AutomationProjection implements Projection {
     ) {
       this.#fileSources.set(
         run.automationId,
-        source.activityWindow.length >= 64
+        source.activityWindow.length >= automationFileActivityWindowLimit(source)
           ? { ...source, phase: "needs-rearm", reason: "activity-history-limit" }
           : { ...source, activityWindow: [...source.activityWindow, run.id] },
       );
