@@ -243,30 +243,87 @@ describe("a provider's own memory", () => {
   });
 
   it("launches in Work and Code unless the person turned the account's setting off", () => {
-    for (const mode of ["work", "code"] as const) {
-      for (const executionPolicy of [
-        "approval-gated",
-        "auto-accept-edits",
-        "full-access",
-      ] as const) {
-        expect(providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy })).toBe(
-          true,
-        );
-        // Full access turns the provider's own setup on, never its memory.
-        expect(providerOwnMemoryLaunches({ accountAllows: false, mode, executionPolicy })).toBe(
-          false,
-        );
+    for (const memoryWrites of ["session-tools", "background"] as const) {
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of [
+          "approval-gated",
+          "auto-accept-edits",
+          "full-access",
+        ] as const) {
+          expect(
+            providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy, memoryWrites }),
+          ).toBe(true);
+          // Full access turns the provider's own setup on, never its memory.
+          expect(
+            providerOwnMemoryLaunches({
+              accountAllows: false,
+              mode,
+              executionPolicy,
+              memoryWrites,
+            }),
+          ).toBe(false);
+        }
       }
     }
   });
 
-  it("stays off in Plan, in Chat, and for a session that names no mode, with the setting on", () => {
-    expect(
-      providerOwnMemoryLaunches({ accountAllows: true, mode: "code", executionPolicy: "plan" }),
-    ).toBe(false);
-    for (const mode of ["chat", undefined] as const) {
+  it("loads a memory only its session tools write in Plan and Chat, read-only", () => {
+    const memoryWrites = "session-tools";
+    for (const mode of ["chat", "work", "code"] as const) {
       expect(
-        providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy: "approval-gated" }),
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode,
+          executionPolicy: "plan",
+          memoryWrites,
+        }),
+      ).toBe(true);
+    }
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(true);
+    // The person's own switch still decides there.
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: false,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a memory the runtime writes in the background off in Plan and Chat, and for a session that names no mode", () => {
+    const memoryWrites = "background";
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "code",
+        executionPolicy: "plan",
+        memoryWrites,
+      }),
+    ).toBe(false);
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(false);
+    for (const writes of ["session-tools", "background"] as const) {
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode: undefined,
+          executionPolicy: "approval-gated",
+          memoryWrites: writes,
+        }),
       ).toBe(false);
     }
   });
