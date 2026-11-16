@@ -11,6 +11,41 @@ export interface MacosSandboxScope {
   readonly epoch: string;
 }
 
+export function macosSandboxScopeLaunchArguments(
+  scope: MacosSandboxScope,
+  selection: SandboxPolicySelection,
+  command: string,
+  args: ReadonlyArray<string>,
+  native = false,
+): ReadonlyArray<string> {
+  const identities =
+    selection.context.rootIdentities ??
+    [
+      ...new Set([
+        selection.context.root,
+        ...(selection.context.extraRoots ?? []),
+        ...selection.policy.filesystem.readOnlyRoots,
+        ...selection.policy.filesystem.readWriteRoots,
+      ]),
+    ].map((path) => {
+      const identity = statSync(path, { bigint: true });
+      return { path: realpathSync(path), identity: `${identity.dev}:${identity.ino}` };
+    });
+  return [
+    native ? "--run-native" : "--run",
+    scope.directory,
+    scope.epoch,
+    ...identities.flatMap((entry) => {
+      const identity = /^(\d+):(\d+)$/.exec(entry.identity);
+      if (identity === null) throw new Error("A native sandbox folder identity is invalid.");
+      return ["--bind", entry.path, identity[1] ?? "", identity[2] ?? ""];
+    }),
+    "--",
+    command,
+    ...args,
+  ];
+}
+
 export function macosSandboxScopeExecutable(): string | undefined {
   const configured = process.env.OCTANT_SANDBOX_SCOPE_PATH;
   const candidates =

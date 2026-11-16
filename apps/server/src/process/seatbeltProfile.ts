@@ -1,3 +1,4 @@
+import { macosSandboxScopeLaunchArguments } from "./macosSandboxScope";
 import { pinLinuxLaunch } from "./linuxPinnedLaunch";
 import { prepareMacosSandboxScope } from "./macosSandboxScope";
 import {
@@ -1167,7 +1168,12 @@ export function makeProcessConfinementLive(
           return withReceipt({
             ...launch,
             command: scope.executable,
-            args: ["--run", scope.directory, scope.epoch, "--", launch.command, ...launch.args],
+            args: macosSandboxScopeLaunchArguments(
+              scope,
+              selectedPolicy,
+              launch.command,
+              launch.args,
+            ),
           });
         }
         return withReceipt(launch);

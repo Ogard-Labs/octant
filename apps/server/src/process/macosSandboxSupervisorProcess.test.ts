@@ -7,6 +7,8 @@ import {
   readFileSync,
   realpathSync,
   readdirSync,
+  renameSync,
+  symlinkSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -407,6 +409,64 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
         expect(readFileSync(join(project, "allowed"), "utf8")).toBe("allowed");
         expect(existsSync(join(root, "outside-project"))).toBe(false);
         expect(readdirSync(join(authority, "sandbox-scopes"))).toEqual([]);
+        const heldProject = join(root, "held-project");
+        renameSync(project, heldProject);
+        try {
+          mkdirSync(project);
+          const replaced = spawnSync(launch.command, [...launch.args], {
+            cwd: project,
+            encoding: "utf8",
+            timeout: 15000,
+          });
+          expect(replaced.status, replaced.stderr).toBe(125);
+          expect(existsSync(join(project, "allowed"))).toBe(false);
+          rmSync(project, { recursive: true });
+          symlinkSync(heldProject, project);
+          const linked = spawnSync(launch.command, [...launch.args], {
+            cwd: heldProject,
+            encoding: "utf8",
+            timeout: 15000,
+          });
+          expect(linked.status, linked.stderr).toBe(125);
+        } finally {
+          rmSync(project, { recursive: true, force: true });
+          renameSync(heldProject, project);
+        }
+
+        const live = makeProcessConfinementLive().prepare({
+          executable: "/usr/bin/python3",
+          args: [
+            "-c",
+            "import signal,time; signal.alarm(12); f=open('live-heartbeat','w'); exec(\"for i in range(600):\\n f.seek(0); f.write(str(i)); f.flush(); time.sleep(.02)\")",
+          ],
+          boundRoot: project,
+          temporaryDirectory: scratch,
+          networkEgress: "none",
+          sandboxPolicy: selection,
+          allowFileReadStar: true,
+        });
+        const running = spawn(live.command, [...live.args], { cwd: project, stdio: "ignore" });
+        child = running;
+        const ended = new Promise<void>((resolve) => running.once("exit", () => resolve()));
+        await expect
+          .poll(() => heartbeat(join(project, "live-heartbeat")), { timeout: 10000 })
+          .not.toBe("");
+        renameSync(project, heldProject);
+        try {
+          await Promise.race([
+            ended,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("Changed folder scope remained active")), 6000),
+            ),
+          ]);
+          expect(running.exitCode).toBe(125);
+          const stopped = heartbeat(join(heldProject, "live-heartbeat"));
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          expect(heartbeat(join(heldProject, "live-heartbeat"))).toBe(stopped);
+          expect(readdirSync(join(authority, "sandbox-scopes"))).toEqual([]);
+        } finally {
+          renameSync(heldProject, project);
+        }
       } finally {
         configureSandboxRestrictionsAuthority(undefined);
         if (previousScopePath === undefined) delete process.env.OCTANT_SANDBOX_SCOPE_PATH;

@@ -49,6 +49,38 @@ struct receipt {
   uint64_t client_unique;
   char boot[64], epoch[128], label[160];
 };
+struct binding { int fd; const char *path; dev_t device; ino_t inode; };
+static struct binding bindings[256];
+static unsigned binding_count;
+static int bindings_current(void) {
+  for (unsigned i = 0; i < binding_count; ++i) {
+    struct stat current;
+    char canonical[PATH_MAX];
+    if (!realpath(bindings[i].path, canonical) || strcmp(canonical, bindings[i].path) ||
+        lstat(bindings[i].path, &current) || current.st_dev != bindings[i].device ||
+        current.st_ino != bindings[i].inode) return 0;
+  }
+  return 1;
+}
+static char **read_bindings(int argc, char **argv) {
+  int at = 4;
+  while (at < argc && !strcmp(argv[at], "--bind")) {
+    if (at + 4 >= argc || binding_count == 256) return NULL;
+    const char *path = argv[at + 1];
+    char *end_device, *end_inode;
+    errno = 0;
+    uintmax_t device = strtoumax(argv[at + 2], &end_device, 10);
+    uintmax_t inode = strtoumax(argv[at + 3], &end_inode, 10);
+    if (errno || !*argv[at + 2] || !*argv[at + 3] || *end_device || *end_inode) return NULL;
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    struct stat identity;
+    if (fd < 0 || fstat(fd, &identity) || (uintmax_t)identity.st_dev != device ||
+        (uintmax_t)identity.st_ino != inode) return NULL;
+    bindings[binding_count++] = (struct binding){fd, path, identity.st_dev, identity.st_ino};
+    at += 4;
+  }
+  return at + 1 < argc && !strcmp(argv[at], "--") && bindings_current() ? argv + at + 1 : NULL;
+}
 static int full_write(int fd, const void *bytes, size_t size) {
   const char *p = bytes;
   while (size) {
@@ -349,7 +381,7 @@ static int terminal_bridge(int control, int master, pid_t owner, int *result) {
   double drain_deadline = 0;
   struct winsize previous = {0};
   for (;;) {
-    if (getppid() != owner) break;
+    if (getppid() != owner || !bindings_current()) break;
     if (finished && ((!master_open && !out_size) || now() > drain_deadline)) { error = 0; break; }
     struct winsize size;
     if (!ioctl(0, TIOCGWINSZ, &size) && memcmp(&size, &previous, sizeof(size))) {
@@ -397,7 +429,7 @@ done:
   return error;
 }
 static int run(const char *root, const char *epoch, char **args, uint32_t native_program) {
-  if (!token(epoch) || args[0][0] != '/' || (!native_program && strcmp(args[0], "/usr/bin/sandbox-exec"))) return 125;
+  if (!bindings_current() || !token(epoch) || args[0][0] != '/' || (!native_program && strcmp(args[0], "/usr/bin/sandbox-exec"))) return 125;
   int directory = private_directory(root);
   if (directory < 0) return 125;
   char control[] = "/tmp/octant-sandbox-control-XXXXXXXX";
@@ -460,6 +492,7 @@ static int run(const char *root, const char *epoch, char **args, uint32_t native
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) goto cleanup;
   char *cwd_vector[] = {cwd, NULL};
+  if (!bindings_current()) goto cleanup;
   if (transfer_fds(control_fd, 0, stdio, 3) || full_write(control_fd, &native_program, sizeof(native_program)) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
   uint32_t terminal;
   if (full_read(control_fd, &terminal, sizeof(terminal)) || terminal > 1) goto cleanup;
@@ -470,7 +503,7 @@ static int run(const char *root, const char *epoch, char **args, uint32_t native
   }
   TRACE("workload released");
   for (;;) {
-    if (getppid() != record.owner) goto cleanup;
+    if (getppid() != record.owner || !bindings_current()) goto cleanup;
     struct pollfd wait = {control_fd, POLLIN | POLLHUP, 0};
     int n = poll(&wait, 1, 50);
     if (n < 0 && errno == EINTR) continue;
@@ -570,7 +603,10 @@ int main(int argc, char **argv) {
     if (*end || pid <= 1 || pid > INT_MAX) return 125;
     return reap(argv[2], argv[3], (pid_t)pid);
   }
-  if (argc >= 6 && !strcmp(argv[1], "--run") && !strcmp(argv[4], "--")) return run(argv[2], argv[3], argv+5, 0);
-  if (argc >= 6 && !strcmp(argv[1], "--run-native") && !strcmp(argv[4], "--")) return run(argv[2], argv[3], argv+5, 1);
+  if (argc >= 6 && (!strcmp(argv[1], "--run") || !strcmp(argv[1], "--run-native"))) {
+    char **program = read_bindings(argc, argv);
+    if (!program) { fputs("Strict launch refused: a prepared folder binding changed.\n", stderr); return 125; }
+    return run(argv[2], argv[3], program, !strcmp(argv[1], "--run-native"));
+  }
   return 125;
 }
