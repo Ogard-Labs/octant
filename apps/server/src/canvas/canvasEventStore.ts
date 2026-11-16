@@ -103,6 +103,12 @@ export interface AppendCanvasCreateInput {
    * where it came from. Its record of that commits with the version.
    */
   readonly movedWithOutsideContent?: true;
+  /**
+   * Who the journal names for the create, when not the store's own actor: a
+   * device the host's own person paired, which acts as that person while the
+   * version keeps the person as its author.
+   */
+  readonly actor?: typeof EventActor.Type;
 }
 
 export interface AppendCanvasVersionInput {
@@ -205,7 +211,7 @@ export class CanvasEventStore {
                 eventName: CANVAS_CREATED,
                 eventVersion: 1,
                 correlationId,
-                actor: this.#actor,
+                actor: input.actor ?? this.#actor,
                 occurredAt: input.occurredAt,
                 payload,
               },
