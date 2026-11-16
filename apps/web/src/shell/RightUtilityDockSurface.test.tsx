@@ -1524,6 +1524,34 @@ describe("tool tiles in the right sidebar", () => {
       expect(within(menu).getByRole("menuitem", { name: "Show alone" })).toBeVisible();
     });
 
+    it("makes a pane's bar a Tab stop that opens Arrange with Enter or Space, for a tool with no button of its own", async () => {
+      const user = userEvent.setup();
+      render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
+      const bar = within(screen.getByRole("region", { name: "Files" })).getByRole("group", {
+        name: "Files bar",
+      });
+      expect(bar).toHaveAttribute("tabindex", "0");
+      expect(bar).toHaveAttribute("aria-haspopup", "menu");
+      bar.focus();
+      await user.keyboard("{Enter}");
+      const menu = await screen.findByRole("menu", { name: "Arrange Files" });
+      expect(within(menu).getByRole("menuitem", { name: "Show alone" })).toBeVisible();
+      await user.keyboard("{Escape}");
+      bar.focus();
+      await user.keyboard(" ");
+      expect(await screen.findByRole("menu", { name: "Arrange Files" })).toBeVisible();
+    });
+
+    it("leaves Enter on a control of the bar to that control", async () => {
+      const user = userEvent.setup();
+      render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
+      within(screen.getByRole("region", { name: "Files" }))
+        .getByRole("button", { name: "Close Files" })
+        .focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByRole("menu", { name: "Arrange Files" })).not.toBeInTheDocument();
+    });
+
     it("opens the button's context menu with Minimise to card from the keyboard with Shift+F10", async () => {
       const user = userEvent.setup();
       render(<TiledDock initial={opened("files", "terminal")} />);

@@ -1418,7 +1418,8 @@ ends before the window's toggles. Controls are 24px with 16px glyphs; a view
 choice is a 28px word tray of 24px segments; an action everyone knows is an icon
 button with a tooltip. A bar carries no Arrange button: a pane is arranged by
 dragging its bar, and the same moves are the bar's context menu (right click,
-the menu key, or Shift+F10 on any control of the bar). At most one 32px secondary row
+the menu key, or Shift+F10 on any control of the bar). The bar is a Tab stop
+where there is something to arrange, and Enter or Space on it opens that menu. At most one 32px secondary row
 holds content (a filter, a status line) on the bar's insets, and a pane's
 content starts on the same 12px. When the controls do not fit, word switches
 fold to a named control, then actions into one More menu; status text and

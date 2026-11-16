@@ -1125,7 +1125,7 @@ local storage: it grants nothing, starts nothing, and the bottom panel never
 has one. Each tile has one bar, 32px: the tool's name (the Browser's and the Terminal's bar is their row of pages or sessions, one tab each even for a single page, then "+"; a tool alone has no bar, so the same row stands at the top of its body, and the row is never dropped in any layout),
 then the tool's own controls (navigation as words, actions as icons, status as
 text; they fold into a named view menu and then a More menu before the name is
-cut), with an Arrange menu on the bar's context menu (right click, the menu key, or Shift+F10 on a control of the bar; never a button on the bar: Move left, right, up and down where the caps allow, Move
+cut), with an Arrange menu on the bar's context menu (right click, the menu key, Shift+F10 on a control of the bar, or Enter or Space on the bar itself, which is a Tab stop; never a button on the bar: Move left, right, up and down where the caps allow, Move
 left of, right of, above or below each other tile where the caps allow it and it changes
 something, Show alone, Hide from view, and for the Browser and Terminal Minimise to card) and Close at its
 trailing edge; a tool that is open but not shown is marked on its button in the thread header's
@@ -2969,7 +2969,12 @@ holds the tile's controls: **Minimise <tool>** on a Browser or Terminal and a **
 <tool>** button that closes the tool as pressing its button again does (every
 page for the Browser). The bar has no Arrange button: a pane is arranged by
 dragging its bar, and **Arrange <tool>** is the bar's context menu (right
-click, the menu key, or Shift+F10 on any control of the bar). Stacked, a page showed four bars (a strip, a "Browser"
+click, the menu key, or Shift+F10 on any control of the bar). Where there is
+something to arrange the bar is a Tab stop of its own, a group named
+"<tool> bar" that says it has a menu, and Enter or Space on it opens Arrange:
+a tool opened from More tools has no button in the thread's header to arrange
+it from, and Shift+F10 on a control is nothing a person finds. Enter on a
+control of the bar stays that control's. Stacked, a page showed four bars (a strip, a "Browser"
 caption, the Browser's own page row and its toolbar) and named the tool three
 times, so the dock has no strip and a tile has no caption over its bar. Alone, a tool's Arrange menu holds only **Minimise to card** (Browser and Terminal) and otherwise does not open. The Arrange menu holds **Move
 left**, **Move right**, **Move up** and **Move down**, each present only when

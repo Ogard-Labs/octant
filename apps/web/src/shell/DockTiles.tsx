@@ -737,7 +737,8 @@ function Tile(props: {
           tool's own controls follow, Minimise (a Browser, a Terminal) and
           Close trail. A pane is arranged by dragging its bar; the same moves
           are the bar's context menu, and the keyboard's route to them is the
-          tool's button in the thread's header. */}
+          bar itself (a Tab stop; Enter, Space, the menu key or Shift+F10) and
+          the tool's button in the thread's header where it has one. */}
       <OctantContextMenuRoot>
         <OctantContextMenuTrigger
           className="dock-tile__bar"
@@ -763,9 +764,16 @@ function Tile(props: {
           }}
           // The menu key is the only keyboard route the browser turns into a
           // context menu, and a Mac has none: Shift+F10 on any control of the
-          // bar asks for the pane's menu too.
+          // bar asks for the pane's menu too. The bar is a Tab stop of its own
+          // where there is something to arrange, and Enter or Space on it
+          // opens the menu: a tool opened from More tools has no button in the
+          // thread's header to arrange it from.
           onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-            if (event.key !== "F10" || !event.shiftKey || !arrangeable) return;
+            const onBar = event.target === event.currentTarget;
+            const asks =
+              (event.key === "F10" && event.shiftKey) ||
+              (onBar && (event.key === "Enter" || event.key === " "));
+            if (!asks || !arrangeable) return;
             event.preventDefault();
             const from = event.target instanceof Element ? event.target : event.currentTarget;
             const bounds = from.getBoundingClientRect();
@@ -780,6 +788,15 @@ function Tile(props: {
           }}
           ref={bar}
           render={<div />}
+          {...(arrangeable
+            ? {
+                "aria-description": "Enter opens the Arrange menu",
+                "aria-haspopup": "menu" as const,
+                "aria-label": `${content.label} bar`,
+                role: "group",
+                tabIndex: 0,
+              }
+            : {})}
         >
           <div className="dock-tile__lead">
             <div className="dock-tile__title">{content.barLeading}</div>
