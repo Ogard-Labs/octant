@@ -1466,6 +1466,45 @@ describe("ProjectService", () => {
     });
   });
 
+  it("refuses the confirmed resend of the home folder when Strict turned on after the warning", async () => {
+    let seed = 40;
+    let strict = false;
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32, seed++));
+    const picked = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/Users/example" },
+      now: 0,
+    });
+    const fixture = fixtureService({
+      projects: [workProject()],
+      receipts,
+      nowMs: 1,
+      homeDirectory: "/Users/example",
+      strict: () => strict,
+    });
+    const held = await fixture.service.executeProject(windowId, {
+      kind: "add-project-extra-folder",
+      projectId: workId,
+      expectedVersion: 1,
+      receiptId: picked.receiptId,
+    });
+    if (held.kind !== "project-extra-folder-needs-confirmation") throw new Error("not held");
+    strict = true;
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 1,
+        receiptId: held.receiptId,
+        confirmHomeFolder: true,
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
   it("refuses an extra folder that overlaps the main folder or names a secret folder", async () => {
     for (const canonicalRoot of ["/canonical/work/docs", "/canonical", "/Users/example/.ssh"]) {
       const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 4));
@@ -2202,7 +2241,8 @@ function fixtureService(
     ) => Promise<void>;
     offeredDesktopProviders?: () => ReadonlyArray<LeasableDesktopProvider>;
     homeDirectory?: string;
-    strict?: boolean;
+    /** The Project's Strict, read at each add; a function reads it as it changes. */
+    strict?: boolean | (() => boolean);
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -2298,7 +2338,8 @@ function fixtureService(
       ...(options.homeDirectory === undefined
         ? {}
         : { homeDirectory: () => options.homeDirectory ?? "" }),
-      resolveProjectStrict: () => options.strict ?? false,
+      resolveProjectStrict: () =>
+        typeof options.strict === "function" ? options.strict() : (options.strict ?? false),
     }),
   };
 }

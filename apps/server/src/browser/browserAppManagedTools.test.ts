@@ -2334,7 +2334,8 @@ describe("a Work thread's bounded page script", () => {
       readonly approvals?: Record<string, unknown>;
       readonly profileCaller?: "terminal-grant";
       readonly mode?: "work" | "chat";
-      readonly strict?: boolean;
+      /** The thread's Strict, read at each call; a function reads it as it changes. */
+      readonly strict?: boolean | (() => boolean);
       readonly approvedPage?: boolean;
     } = {},
   ) {
@@ -2377,7 +2378,10 @@ describe("a Work thread's bounded page script", () => {
         : {
             pageScript: {
               level: overrides.level ?? (() => "full-access" as const),
-              strict: () => overrides.strict ?? false,
+              strict: () =>
+                typeof overrides.strict === "function"
+                  ? overrides.strict()
+                  : (overrides.strict ?? false),
               run,
             },
           }),
@@ -2428,6 +2432,25 @@ describe("a Work thread's bounded page script", () => {
       expect.objectContaining({ turnExecutionPolicy: "approval-gated" }),
     );
     expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent?.()).toBe(true);
+  });
+
+  it("runs nothing below Full access when Strict turns on while the person's approval is pending", async () => {
+    let strict = false;
+    const { tools, run, request } = scriptTools({
+      level: () => "approval-gated" as const,
+      approvedPage: true,
+      strict: () => strict,
+    });
+    request.mockImplementation(async () => {
+      strict = true;
+      return "approved" as const;
+    });
+    expect(await tools.execute(call)).toEqual({
+      isError: true,
+      result: { error: "script-needs-full-access" },
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(run).not.toHaveBeenCalled();
   });
 
   it("runs nothing below Full access when the person declines the script", async () => {

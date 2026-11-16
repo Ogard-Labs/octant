@@ -353,7 +353,12 @@ export function createBrowserAppManagedTools(
           signal,
         });
         if (permission.status === "refused") return failure(permission.reason);
+        // Strict can turn on for the thread, its Project or Settings while the
+        // card waits, and none of that changes the level or authority the
+        // checks above compare, so it is read again before anything runs.
+        if (script.strict()) return failure("script-needs-full-access");
       }
+      const scriptPermissionIsCurrent = () => callerIsCurrent() && !script.strict();
       const receipt = await script.run({
         windowId: options.windowId,
         threadId: options.threadId,
@@ -364,7 +369,7 @@ export function createBrowserAppManagedTools(
         callerIsCurrent,
         // The service checks the exact observation before dispatch, then
         // invalidates it after an effect; publication still checks authority.
-        ...(scoped ? { scriptPermissionIsCurrent: callerIsCurrent } : {}),
+        ...(scoped ? { scriptPermissionIsCurrent } : {}),
         ...(signal === undefined ? {} : { signal }),
       });
       return browserPageScriptToolResult(
