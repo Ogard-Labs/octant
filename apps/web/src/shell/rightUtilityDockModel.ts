@@ -1,5 +1,9 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  MAX_CONTEXT_SIDEBAR_WIDTH,
+  MIN_CONTEXT_SIDEBAR_WIDTH,
+  type WorkspaceLayoutNode,
+} from "@octant/contracts/shell";
 
 export type RightUtilityDockSurfaceId =
   | "environment"
@@ -255,6 +259,8 @@ export function dockWidthCeiling(
     /** What stands beside the tool columns and is not theirs to take: the Environment strip. */
     readonly reservedWidth?: number;
     readonly viewportWidth?: number | undefined;
+    /** What the panes of a split keep between them: `splitPrimaryMinimum`. */
+    readonly primaryMinimum?: number | undefined;
   } = {},
 ): number {
   if (workspaceWidth === undefined) return MAX_CONTEXT_SIDEBAR_WIDTH;
@@ -269,9 +275,12 @@ export function dockWidthCeiling(
     Math.max(
       threadBoxMinimum(workspaceWidth, options.viewportWidth),
       (options.reservedWidth ?? 0) +
-        ((options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
-          ? WIDE_PRIMARY_MIN
-          : NARROW_PRIMARY_MIN),
+        Math.max(
+          options.primaryMinimum ?? 0,
+          (options.viewportWidth ?? Number.POSITIVE_INFINITY) >= WIDE_VIEWPORT
+            ? WIDE_PRIMARY_MIN
+            : NARROW_PRIMARY_MIN,
+        ),
     );
   const room = (options.tileColumns ?? 1) >= 2 ? left : Math.min(left, workspaceWidth / 2);
   return Math.min(MAX_CONTEXT_SIDEBAR_WIDTH, Math.max(MIN_CONTEXT_SIDEBAR_WIDTH, Math.floor(room)));
@@ -318,6 +327,39 @@ export function threadBoxMinimum(
     primaryMinimum + ENVIRONMENT_STRIP_WIDTH,
     Math.max(workspaceWidth - WORKBENCH_DOCK_WIDTH, threadMinimum),
   );
+}
+
+/**
+ * The header width under which a pane's title and a button per tool do not
+ * both fit, so the row folds into one Tools menu. It is also the least each
+ * pane of a split keeps beside the dock.
+ */
+export const PANE_TOOLS_COLLAPSE_WIDTH = 440;
+
+/** The divider between two panes of a split (`.workspace-split__resize`). */
+const SPLIT_DIVIDER_WIDTH = 7;
+
+/** How many panes stand side by side across the workspace at its widest row. */
+export function sideBySidePanes(layout: WorkspaceLayoutNode): number {
+  if (layout.kind === "pane") return 1;
+  const first = sideBySidePanes(layout.first);
+  const second = sideBySidePanes(layout.second);
+  return layout.orientation === "horizontal" ? first + second : Math.max(first, second);
+}
+
+/**
+ * What the panes of a split keep between them beside the dock: 440px each and
+ * their dividers, so every pane's header still holds its title and its tool
+ * buttons. The tool region gives first, down to its own minimum. A split used
+ * to share the one thread minimum: at 1800px two threads with a tool open
+ * stood 409px wide each and both rows folded to Tools. Absent for one pane.
+ */
+export function splitPrimaryMinimum(layout: WorkspaceLayoutNode | undefined): number | undefined {
+  if (layout === undefined) return undefined;
+  const panes = sideBySidePanes(layout);
+  return panes < 2
+    ? undefined
+    : panes * PANE_TOOLS_COLLAPSE_WIDTH + (panes - 1) * SPLIT_DIVIDER_WIDTH;
 }
 
 export const RIGHT_UTILITY_DOCK_SURFACES = [

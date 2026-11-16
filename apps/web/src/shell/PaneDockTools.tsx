@@ -1,20 +1,35 @@
+import type { OctantMode } from "@octant/contracts/modes";
 import type { PaneId } from "@octant/contracts/shell";
 import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { DockToolButtons } from "./DockToolButtons";
 import type { DockUtilityLauncherReference } from "./DockUtilityLauncher";
-import type { DockToolButtonsModel } from "./dockToolButtonsModel";
-import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
+import { isDockToolLaunchable, type DockToolCapabilities } from "./dockToolAvailability";
+import { DOCK_TOOL_BUTTON_ORDER, type DockToolButtonsModel } from "./dockToolButtonsModel";
+import {
+  PANE_TOOLS_COLLAPSE_WIDTH,
+  RIGHT_UTILITY_DOCK_SURFACES,
+  type RightUtilityDockSurfaceId,
+} from "./rightUtilityDockModel";
 
 /**
  * What a thread pane's header needs to draw its tool buttons. The dock shows
- * the focused thread's tools, so the model describes that thread; the other
- * panes of a split draw the same tools at rest.
+ * the focused thread's tools, so the model describes that thread. Another pane
+ * of a split draws its own thread's row at rest.
  */
 export interface PaneDockTools {
   /** The focused pane's tools, as the dock shows them. */
   readonly model: DockToolButtonsModel;
   /** The pull requests the focused thread is about, listed after the tools. */
   readonly references?: ReadonlyArray<DockUtilityLauncherReference>;
+  /**
+   * The tools a thread has open in its own dock, wherever the focus is: each
+   * thread keeps its tabs while another pane has the dock. Absent, a resting
+   * row marks nothing open.
+   */
+  readonly openTools?: (
+    mode: OctantMode,
+    threadId: string,
+  ) => ReadonlyArray<RightUtilityDockSurfaceId>;
   /**
    * A press on a pane's button. `fromRest` says the press began while the pane
    * was not the focused one: it then focuses the pane and shows the tool there,
@@ -32,58 +47,103 @@ export interface PaneDockTools {
 export const PaneDockToolsContext = createContext<PaneDockTools | undefined>(undefined);
 
 /**
- * The tools of a pane that is not the focused one. None of them is on screen
- * (the dock holds the focused thread's), so no button is pressed, marked open,
- * or draggable, and a press only ever opens.
+ * What is known of a thread whose pane is not the focused one. Its plan, its
+ * delivery target, its Canvas and its written document are read only for the
+ * focused thread, so at rest they count as absent and their tools are left
+ * out unless the thread has one open.
  */
-export function restingDockToolButtons(model: DockToolButtonsModel): DockToolButtonsModel {
-  const rest = (button: DockToolButtonsModel["buttons"][number]) => ({
-    id: button.id,
-    label: button.label,
+const RESTING_CAPABILITIES: DockToolCapabilities = {
+  hasPlanArtifact: false,
+  hasDelivery: false,
+  hasCanvasDocument: false,
+  hasWrittenDocument: false,
+  hasAppleSimulator: false,
+  hasChildRuns: "unknown",
+  addAgentInvoked: false,
+  hasExistingThread: true,
+};
+
+/**
+ * The tool row of a pane that is not the focused one, for its own thread: the
+ * tools its mode has, and a quiet open mark on each one the thread has open
+ * in its dock. None of them is on screen (the dock holds the focused
+ * thread's), so no button is pressed or draggable and a press only ever
+ * opens. The row used to copy the focused thread's tools, so a Chat pane
+ * beside a Code thread offered a Terminal, and a thread's open tools were
+ * never marked.
+ */
+export function restingDockToolButtons(
+  mode: OctantMode,
+  open: ReadonlyArray<RightUtilityDockSurfaceId>,
+): DockToolButtonsModel {
+  const tools = RIGHT_UTILITY_DOCK_SURFACES.filter(
+    (surface) =>
+      (surface.modes as ReadonlyArray<OctantMode>).includes(mode) &&
+      (open.includes(surface.id) || isDockToolLaunchable(surface.id, RESTING_CAPABILITIES)),
+  ).map((surface) => ({
+    id: surface.id,
+    label: surface.label,
     pressed: false,
-    open: false,
+    open: open.includes(surface.id),
     press: { kind: "open" } as const,
     tabIds: [],
     menu: [],
-    ...(button.disabledReason === undefined ? {} : { disabledReason: button.disabledReason }),
-  });
-  return { buttons: model.buttons.map(rest), more: model.more.map(rest) };
+  }));
+  return {
+    buttons: DOCK_TOOL_BUTTON_ORDER.flatMap((id) => tools.filter((tool) => tool.id === id)),
+    more: tools.filter((tool) => !DOCK_TOOL_BUTTON_ORDER.includes(tool.id)),
+  };
 }
 
-/** The header width under which the title and a button per tool do not both fit. */
-export const PANE_TOOLS_COLLAPSE_WIDTH = 440;
+/** The gap between the items of a pane's header (`.workspace-pane__header`). */
+const PANE_HEADER_GAP = 4;
 
 /**
- * A thread pane's tool buttons, at the right end of its header. In the focused
+ * A thread pane's tool buttons, at the end of its header's lead. In the focused
  * pane they are the dock's own row. In another pane of a split they stand at
  * rest, and a press focuses that pane and opens the tool for its thread.
  */
-export function PaneDockToolGroup(props: { readonly active: boolean; readonly paneId: PaneId }) {
+export function PaneDockToolGroup(props: {
+  readonly active: boolean;
+  readonly paneId: PaneId;
+  /** The thread the pane holds; a pane at rest draws a row only for one. */
+  readonly thread?: { readonly mode: OctantMode; readonly threadId: string } | undefined;
+}) {
   const tools = useContext(PaneDockToolsContext);
   const group = useRef<HTMLDivElement>(null);
   const fromRest = useRef(false);
   const [collapsed, setCollapsed] = useState(false);
+  const restMode = props.thread?.mode;
+  const restThreadId = props.thread?.threadId;
   const model = useMemo(
     () =>
       tools === undefined
         ? undefined
         : props.active
           ? tools.model
-          : restingDockToolButtons(tools.model),
-    [props.active, tools],
+          : restMode === undefined || restThreadId === undefined
+            ? undefined
+            : restingDockToolButtons(restMode, tools.openTools?.(restMode, restThreadId) ?? []),
+    [props.active, restMode, restThreadId, tools],
   );
   const present = model !== undefined && model.buttons.length + model.more.length > 0;
   // The header decides: under the width that holds a title and the row, the
   // row folds into one menu button. Measured, not a container query, so one
   // set of buttons exists at a time.
-  // The room is the header's as far as its lead runs: from the pane's edge to
-  // the line the row ends on, or to the header's own end in a narrower pane.
+  // The room is the header's own width, or less where the lead stops short of
+  // the header's end: there it is the run from the pane's edge to the line the
+  // row ends on. A lead that runs to the header's end, or to a split's Close
+  // after it, is a pane narrower than that line, and the header's width counts
+  // as it always has.
   useLayoutEffect(() => {
     const lead = group.current?.parentElement;
     if (lead === null || lead === undefined) return;
     const header = lead.closest<HTMLElement>(".workspace-pane__header") ?? lead;
     const measure = () => {
-      const width = lead.getBoundingClientRect().right - header.getBoundingClientRect().left;
+      const box = header.getBoundingClientRect();
+      const end = lead.nextElementSibling?.getBoundingClientRect().left ?? box.right;
+      const run = lead.getBoundingClientRect().right;
+      const width = run >= end - PANE_HEADER_GAP - 1 ? box.width : run - box.left;
       if (width > 0) setCollapsed(width < PANE_TOOLS_COLLAPSE_WIDTH);
     };
     measure();

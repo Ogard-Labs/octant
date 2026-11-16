@@ -1,5 +1,10 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  decodeWorkspaceLayoutNode,
+  MAX_CONTEXT_SIDEBAR_WIDTH,
+  MIN_CONTEXT_SIDEBAR_WIDTH,
+  type WorkspaceLayoutNode,
+} from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -15,6 +20,8 @@ import {
   TILED_DOCK_WIDTH,
   WIDE_PRIMARY_MIN,
   resolveTwoColumnDockWidth,
+  sideBySidePanes,
+  splitPrimaryMinimum,
   threadBoxMinimum,
   WORKBENCH_DOCK_WIDTH,
   type RightUtilityDockResolutionInput,
@@ -543,5 +550,64 @@ describe("the narrowest the thread box gets", () => {
         expect(workspace - open).toBeGreaterThanOrEqual(threadBoxMinimum(workspace, viewport));
       }
     }
+  });
+});
+
+describe("what the panes of a split keep beside the dock", () => {
+  const pane = (id: number) =>
+    decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: `00000000-0000-4000-8000-00000000070${String(id)}`,
+      paneId: `00000000-0000-4000-8000-00000000071${String(id)}`,
+      surface: {
+        kind: "chat-thread",
+        id: `00000000-0000-4000-8000-00000000072${String(id)}`,
+        threadId: `00000000-0000-4000-8000-00000000073${String(id)}`,
+        mode: "chat",
+        title: `Chat ${String(id)}`,
+      },
+    });
+  const split = (
+    orientation: "horizontal" | "vertical",
+    first: WorkspaceLayoutNode,
+    second: WorkspaceLayoutNode,
+    id: number,
+  ): WorkspaceLayoutNode =>
+    decodeWorkspaceLayoutNode({
+      kind: "split",
+      nodeId: `00000000-0000-4000-8000-00000000074${String(id)}`,
+      orientation,
+      ratio: 0.5,
+      first,
+      second,
+    });
+
+  it("counts the panes standing side by side, not the ones stacked", () => {
+    expect(sideBySidePanes(pane(1))).toBe(1);
+    expect(sideBySidePanes(split("horizontal", pane(1), pane(2), 1))).toBe(2);
+    expect(sideBySidePanes(split("vertical", pane(1), pane(2), 1))).toBe(1);
+    expect(
+      sideBySidePanes(split("horizontal", pane(1), split("vertical", pane(2), pane(3), 2), 1)),
+    ).toBe(2);
+  });
+
+  it("keeps 440px for each pane and their dividers, and nothing extra for one pane", () => {
+    expect(splitPrimaryMinimum(pane(1))).toBeUndefined();
+    expect(splitPrimaryMinimum(undefined)).toBeUndefined();
+    expect(splitPrimaryMinimum(split("horizontal", pane(1), pane(2), 1))).toBe(887);
+  });
+
+  it("makes the tool columns give first, so two threads keep their tool buttons at 1800px", () => {
+    // 1464px of workspace: one pane leaves the tools 640px, two leave 577px.
+    expect(dockWidthCeiling(1464, { viewportWidth: 1800 })).toBe(640);
+    expect(dockWidthCeiling(1464, { viewportWidth: 1800, primaryMinimum: 887 })).toBe(577);
+    // Never under the tool column's own minimum: then the panes give.
+    expect(
+      dockWidthCeiling(1464, {
+        viewportWidth: 1800,
+        primaryMinimum: 887,
+        reservedWidth: ENVIRONMENT_STRIP_WIDTH,
+      }),
+    ).toBe(MIN_CONTEXT_SIDEBAR_WIDTH);
   });
 });

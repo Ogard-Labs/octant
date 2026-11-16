@@ -38,6 +38,8 @@ export interface RightUtilityDockProps {
   readonly vitals?: ReactNode;
   readonly artifacts?: ReactNode;
   readonly isNarrow: boolean;
+  /** What the panes of a split keep between them, which the tool columns leave alone. */
+  readonly primaryMinimum?: number | undefined;
   readonly onClose: () => void;
   readonly onCloseTab: (tabId: string) => void;
   readonly onCommitWidth: (width: number) => void;
@@ -104,6 +106,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
         ? (split.toolLayout?.columns.length ?? 1)
         : (props.tiles?.layout?.columns.length ?? 1),
     viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+    primaryMinimum: props.primaryMinimum,
   });
 
   useLayoutEffect(() => {
@@ -134,6 +137,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       reservedWidth: reserved,
       tileColumns: 2,
       viewportWidth: typeof window === "undefined" ? undefined : window.innerWidth,
+      primaryMinimum: props.primaryMinimum,
     }) >= TILED_DOCK_WIDTH;
 
   if (!props.open && !props.isNarrow) return null;

@@ -54,6 +54,38 @@ function paneTools() {
   } satisfies PaneDockTools;
 }
 
+function codeThreadTab() {
+  return {
+    kind: "code-overview" as const,
+    id: "00000000-0000-4000-8000-000000000961",
+    mode: "code" as const,
+    threadId: "00000000-0000-4000-8000-000000000962",
+    title: "Code task",
+  };
+}
+
+/** Chat 0 focused on the left, and the given thread at rest on the right. */
+function restingSplit(second: ReturnType<typeof chatTab> | ReturnType<typeof codeThreadTab>) {
+  return decodeWorkspaceLayoutNode({
+    kind: "split",
+    nodeId: splitNodeId,
+    orientation: "horizontal",
+    ratio: 0.5,
+    first: {
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: chatTab(0),
+    },
+    second: {
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000621",
+      paneId: String(secondPaneId),
+      surface: second,
+    },
+  });
+}
+
 function threeChatTabs() {
   const layout = decodeWorkspaceLayoutNode({
     kind: "pane",
@@ -817,30 +849,16 @@ describe("SplitWorkspace", () => {
 
   it("gives each thread of a split its own tool buttons: the focused one's show what is open, the other's rest and address their own pane", async () => {
     const user = userEvent.setup();
-    const tools = paneTools();
+    const openTools = vi.fn<NonNullable<PaneDockTools["openTools"]>>((mode) =>
+      mode === "code" ? ["review"] : [],
+    );
+    const tools = { ...paneTools(), openTools };
     render(
       <PaneDockToolsContext.Provider value={tools}>
         <SplitWorkspace
           {...splitCallbacks()}
           activePaneId={firstPaneId}
-          layout={decodeWorkspaceLayoutNode({
-            kind: "split",
-            nodeId: splitNodeId,
-            orientation: "horizontal",
-            ratio: 0.5,
-            first: {
-              kind: "pane",
-              nodeId: "00000000-0000-4000-8000-000000000611",
-              paneId: String(firstPaneId),
-              surface: chatTab(0),
-            },
-            second: {
-              kind: "pane",
-              nodeId: "00000000-0000-4000-8000-000000000621",
-              paneId: String(secondPaneId),
-              surface: chatTab(1),
-            },
-          })}
+          layout={restingSplit(codeThreadTab())}
           mode="chat"
           renderSurface={(surface) => surface.title}
         />
@@ -856,12 +874,51 @@ describe("SplitWorkspace", () => {
       "aria-pressed",
       "true",
     );
-    // Nothing of the other thread's is on screen: the dock holds the focused one's.
-    const resting = within(rowOf("Chat 1")).getByRole("button", { name: "Files" });
-    expect(resting).toHaveAttribute("aria-pressed", "false");
+    // The resting row is its own thread's: a Code thread's tools, asked for by
+    // that thread, whatever the focused Chat thread offers.
+    expect(openTools).toHaveBeenCalledWith("code", codeThreadTab().threadId);
+    const rest = rowOf("Code task");
+    expect(
+      within(rest)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Environment", "Terminal", "Review", "Browser", "Files", "More tools"]);
+    // Nothing of it is on screen (the dock holds the focused thread's), so
+    // nothing is pressed; what the thread has open carries the open mark.
+    const files = within(rest).getByRole("button", { name: "Files" });
+    expect(files).toHaveAttribute("aria-pressed", "false");
+    expect(files).not.toHaveAttribute("data-dock-open");
+    const review = within(rest).getByRole("button", { name: "Review" });
+    expect(review).toHaveAttribute("aria-pressed", "false");
+    expect(review).toHaveAttribute("data-dock-open", "true");
+    expect(review).toHaveAccessibleDescription("Open");
 
-    await user.click(resting);
-    expect(tools.onPress).toHaveBeenCalledWith(secondPaneId, "files", resting, true);
+    await user.click(files);
+    expect(tools.onPress).toHaveBeenCalledWith(secondPaneId, "files", files, true);
+  });
+
+  it("offers a resting Chat thread none of the focused Code thread's tools", () => {
+    render(
+      <PaneDockToolsContext.Provider value={paneTools()}>
+        <SplitWorkspace
+          {...splitCallbacks()}
+          activePaneId={firstPaneId}
+          layout={restingSplit(chatTab(1))}
+          mode="chat"
+          renderSurface={(surface) => surface.title}
+        />
+      </PaneDockToolsContext.Provider>,
+    );
+    const rest = within(screen.getByRole("region", { name: "Workspace pane: Chat 1" })).getByRole(
+      "toolbar",
+      { name: "Tools" },
+    );
+    // Chat has Agents alone, in More tools: no Terminal, Files or Vitals.
+    expect(
+      within(rest)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["More tools"]);
   });
 
   it("draws tool buttons in the focused pane only when the other pane shows no thread", () => {

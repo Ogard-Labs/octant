@@ -184,6 +184,8 @@ export interface DockContainerProps {
   readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
+  /** What the panes of a split keep between them beside the dock. */
+  readonly splitPrimaryMinimum?: number | undefined;
   readonly navigation: ShellNavigationModel;
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
@@ -256,6 +258,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThreadOnThisComputer,
     dockToolsAwaitingThread,
     isNarrow,
+    splitPrimaryMinimum,
     navigation,
     overviewThread,
     projectNames,
@@ -690,6 +693,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             : threadUtility("delivery")
         }
         isNarrow={isNarrow}
+        primaryMinimum={splitPrimaryMinimum}
         files={
           bottomPanelOpen && activeBottomSurface?.id === "files"
             ? undefined

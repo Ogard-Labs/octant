@@ -1110,12 +1110,15 @@ strong {
       )
     )
   );
-  /* What the thread column keeps beside the dock: its minimum, and whatever
-     more the thread box's minimum asks of it once the open section's width is
-     taken off. */
+  /* What the thread column keeps beside the dock: its minimum, whatever more
+     the thread box's minimum asks of it once the open section's width is
+     taken off, and in a split 440px for each pane side by side
+     (splitPrimaryMinimum), so the tool region gives before a pane's header
+     loses its tool buttons. */
   --octant-dock-thread-keep: max(
     var(--octant-wide-primary-min),
-    calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px))
+    calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)),
+    var(--octant-split-primary-min, 0px)
   );
 }
 

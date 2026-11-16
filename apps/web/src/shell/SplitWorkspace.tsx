@@ -39,6 +39,7 @@ import { workspaceSurfaceTitle } from "./workspaceTabLifecycle";
 import { PullRequestChip } from "../code/PullRequestChip";
 import type { ThreadProviderIdentity } from "./navigationModel";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { OctantMode } from "@octant/contracts/modes";
 import { EnvironmentMark, type EnvironmentMarkProps } from "./EnvironmentMark";
 import { PaneDockToolGroup, PaneDockToolsContext } from "./PaneDockTools";
 
@@ -48,6 +49,21 @@ const TOOL_OWNER_SURFACE_KINDS: ReadonlySet<string> = new Set([
   "work-thread",
   "code-overview",
 ]);
+
+const TOOL_OWNER_MODES: Readonly<Record<string, OctantMode>> = {
+  "chat-thread": "chat",
+  "work-thread": "work",
+  "code-overview": "code",
+};
+
+/** The thread a pane's tools open for, and the mode that decides which it has. */
+function toolOwnerThread(
+  surface: WorkspaceTab,
+): { readonly mode: OctantMode; readonly threadId: string } | undefined {
+  const mode = TOOL_OWNER_MODES[surface.kind];
+  if (mode === undefined || !("threadId" in surface) || surface.threadId == null) return undefined;
+  return { mode, threadId: String(surface.threadId) };
+}
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
@@ -894,7 +910,13 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 ) : null}
                 {props.threadHeader?.(surface)}
                 <span aria-hidden="true" className="workspace-pane__window-drag-space" />
-                {showTools ? <PaneDockToolGroup active={active} paneId={pane.paneId} /> : null}
+                {showTools ? (
+                  <PaneDockToolGroup
+                    active={active}
+                    paneId={pane.paneId}
+                    thread={toolOwnerThread(surface)}
+                  />
+                ) : null}
               </div>
               {/* Alone in the window there is nothing to close into; the × is a
                 split's control, for giving one pane's room back to the other. */}

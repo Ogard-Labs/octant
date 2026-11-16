@@ -31,6 +31,8 @@ export interface ShellFrameProps {
    * only the answer, since this runs on every frame of a window resize.
    */
   readonly onWorkspaceWidth?: (width: number) => void;
+  /** What the panes of a split keep between them beside the dock; absent for one pane. */
+  readonly splitPrimaryMinimum?: number | undefined;
   readonly sidebar: ReactNode;
   readonly sidebarCollapsed?: boolean;
   /** A collapsed sidebar stays as its icon rail rather than leaving nothing. */
@@ -291,6 +293,9 @@ export function ShellFrame(props: ShellFrameProps) {
                     : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
                   "--octant-context-sidebar-width": `${Math.round(props.contextSidebarWidth)}px`,
                   "--octant-env-strip-width": `${ENVIRONMENT_STRIP_WIDTH}px`,
+                  ...(props.splitPrimaryMinimum === undefined
+                    ? {}
+                    : { "--octant-split-primary-min": `${props.splitPrimaryMinimum}px` }),
                   ...(props.contextSidebarTwoColumnWidth === undefined
                     ? {}
                     : {

@@ -445,6 +445,7 @@ import {
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
   resolveTwoColumnDockWidth,
+  splitPrimaryMinimum,
   dockTotalWidth,
   ENVIRONMENT_STRIP_WIDTH,
   resolveRightUtilityDockSurface,
@@ -6127,10 +6128,20 @@ function LaunchedShell(
         : {
             model: dockToolButtons,
             references: dockReferences,
+            // A thread keeps its dock's tabs while another pane has the dock,
+            // so a resting row can mark what its own thread has open.
+            openTools: (mode, threadId) => [
+              ...new Set(
+                threadUtilityDockState(
+                  dockStatesByThread,
+                  threadUtilityDockKey(mode, threadId),
+                ).tabs.map((tab) => tab.surface),
+              ),
+            ],
             onPress: actions.pressPaneDockTool,
             onMenuAction: actions.runDockToolMenu,
           },
-    [actions, dockReferences, dockToolButtons, isNarrow],
+    [actions, dockReferences, dockStatesByThread, dockToolButtons, isNarrow],
   );
   const homeActive =
     !readerOpen &&
@@ -6746,6 +6757,11 @@ function LaunchedShell(
           toolsShown: true,
         })
       : undefined;
+  // The panes of a split keep 440px each beside the dock; the tool columns
+  // give first.
+  const dockSplitPrimaryMinimum = isNarrow
+    ? undefined
+    : splitPrimaryMinimum(controller.presentedLayout);
   const dockPresentationWidth = dockTotalWidth({
     toolsWidth: dockToolsWidth,
     environmentOpen: dockEnvironmentOpen,
@@ -8630,6 +8646,7 @@ function LaunchedShell(
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
         onWorkspaceWidth={noteWorkspaceWidth}
+        splitPrimaryMinimum={dockSplitPrimaryMinimum}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         dockTileColumns={dockPresentedOpen ? dockToolColumns : 1}
         {...(dockPresentedOpen && dockTwoColumnWidth !== undefined
@@ -8845,6 +8862,7 @@ function LaunchedShell(
                   <TabActivationProvider registry={dockTabActivation}>
                     <DockContainer
                       actions={actions}
+                      splitPrimaryMinimum={dockSplitPrimaryMinimum}
                       {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
                       activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
                       activeMode={activeMode}

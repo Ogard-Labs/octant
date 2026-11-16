@@ -82,7 +82,7 @@ describe("the line the thread header's tool row stands on", () => {
   it("keeps the tool region out of the thread box's minimum, with Environment open or closed", () => {
     expect(rootRule(".workspace-layer")).toContain(
       squash(
-        "--octant-dock-thread-keep: max( var(--octant-wide-primary-min), calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)) );",
+        "--octant-dock-thread-keep: max( var(--octant-wide-primary-min), calc(var(--octant-thread-box-min) - var(--octant-dock-env-width, 0px)), var(--octant-split-primary-min, 0px) );",
       ),
     );
     const one = rootRule(".workspace-layer--wide-context-open");
@@ -106,6 +106,27 @@ describe("the line the thread header's tool row stands on", () => {
     expect(shellStyles.replace(/\s+/g, " ")).toContain(
       "@media (min-width: 1100px) { .shell.shell-frame { --octant-wide-primary-min: 560px; } }",
     );
+  });
+
+  it("tells the stylesheet what the panes of a split keep, and nothing for one pane", () => {
+    const frame = (splitPrimaryMinimum: number | undefined) =>
+      render(
+        <ShellFrame
+          chrome={<header>Chrome</header>}
+          contextSidebarWidth={420}
+          material="opaque"
+          onCommitSidebarWidth={vi.fn()}
+          onPreviewSidebarWidth={vi.fn()}
+          sidebar={<aside>Sidebar</aside>}
+          sidebarResizable={false}
+          sidebarWidth={232}
+          splitPrimaryMinimum={splitPrimaryMinimum}
+          wideContextOpen
+          workspace={<main>Workspace</main>}
+        />,
+      ).container.firstElementChild?.getAttribute("style");
+    expect(frame(887)).toContain("--octant-split-primary-min: 887px");
+    expect(frame(undefined)).not.toContain("--octant-split-primary-min");
   });
 
   it("publishes the Environment section's width to the stylesheet whether or not it is open", () => {

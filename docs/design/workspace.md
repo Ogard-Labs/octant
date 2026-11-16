@@ -1349,18 +1349,30 @@ hidden, the Open in and Project action slots, the Code start screen's
 uncommitted-changes count, and the bottom-panel and dock toggles. At 961px and
 wider the focused pane has the row, and so does every other pane of a split that
 shows a thread. A single pane and its Environment section are one box under one
-header: the header runs on over the section, so the row stands above the section
-and does not move when the section opens or closes. Where the box ends at the
-window's edge the header stops before the window's toggles; where tool panes
-follow, it ends at their edge. In a split each row stays inside its own pane.
+header: the header runs on over the section, and the row ends on the box's
+narrowest line (see "The thread box and the tool row"), so it does not move
+when the section or a tool opens or closes. In a split each row stays inside
+its own pane and ends at the pane's edge where the pane is narrower than that
+line.
 The dock shows the focused thread's tools, so only the focused pane's row shows
-what is pressed or open; the rows of the other panes stand at rest, and a press
-there focuses that pane and shows the tool for its thread, never closing one.
-Under a header 440px wide the row folds into one **Tools** menu button that
-lists every tool. A start screen has no title, so its header is the row alone,
+what is pressed. The row of another pane is **its own thread's row at rest**:
+the tools that thread's mode has (a Chat thread beside a Code thread offers no
+Terminal), each with the quiet open dot when that thread has it open in its own
+dock, none pressed, none draggable. Tools that depend on what only the focused
+thread reads (Plan, Delivery, Canvas, Document) are listed at rest only while
+that thread has one open. A press there focuses that pane and shows the tool
+for its thread, never closing one.
+Under 440px of header (the pane's width, or the run to the row's line where
+that is shorter) the row folds into one **Tools** menu button that
+lists every tool. The panes of a split keep 440px each beside the dock
+(`splitPrimaryMinimum`), so the tool region gives before a row folds; once the
+tool region is at its 280px the panes give and their rows fold. Measured
+(1800px window, two threads, Files open, 2026-11-16): the panes stood 409px
+each with both rows folded, and are 440px each with full rows beside a 577px
+tool region. A start screen has no title, so its header is the row alone,
 laid over the band. Closing the last open tool closes the dock, so the thread
-takes the window back and the row returns to where it stood before anything
-opened; the dock toggle still opens the empty dock. The row is one
+takes the window back, and the row stays where it is; the dock toggle still
+opens the empty dock. The row is one
 icon button for each of Environment, Terminal, Review, Browser, and Files, in that order,
 then **More tools**, a menu of every other tool the thread can use, grouped as the
 launcher groups them, each a checked item while that tool is shown, and after the
