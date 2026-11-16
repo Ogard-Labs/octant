@@ -507,11 +507,20 @@ html[data-octant-native-host="true"]:not(
    the apps behind it through, and no blur in the page can reach them: at 80%
    over a 28px backdrop blur, and again at 96%, another app's text stayed
    readable through Settings' rows. The doubled class wins over the modal rules
-   above whatever their order. */
+   above whatever their order, and the second form repeats the ground rule's
+   own `:has()`: that rule carries two classes more than the plain one, so
+   with a ground drawn it won and the sheet was 96% again. Seen in the desktop
+   app over the pixel ground: the thread's text read faintly through every
+   Settings row. */
 html[data-octant-native-host="true"]:not(
     [data-octant-reduced-transparency="true"],
     [data-octant-increased-contrast="true"]
   )
+  .octant-sheet__popup.octant-sheet__popup,
+html[data-octant-native-host="true"]:not(
+    [data-octant-reduced-transparency="true"],
+    [data-octant-increased-contrast="true"]
+  ):has(.shell-frame > .app-backdrop)
   .octant-sheet__popup.octant-sheet__popup {
   background: var(--octant-float);
   backdrop-filter: none;

@@ -89,6 +89,12 @@ describe("window glass", () => {
     const sheet = /\.octant-sheet__popup\.octant-sheet__popup \{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(sheet).toContain("background: var(--octant-float);");
     expect(sheet).toContain("backdrop-filter: none;");
+    // The rule that thins a modal where a ground is drawn names the sheet too
+    // and carries a `:has()` more: the solid rule repeats that form, or the
+    // sheet is 96% over a ground and the page's text reads through it.
+    expect(css).toMatch(
+      /:has\(\.shell-frame > \.app-backdrop\)\s*\.octant-sheet__popup\.octant-sheet__popup \{/,
+    );
   });
 
   it("keeps the ground under every content layer, the sheet and its scrim, and out of a modal's text", () => {
