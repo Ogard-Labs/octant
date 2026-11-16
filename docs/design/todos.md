@@ -143,8 +143,9 @@ Every person has one **list host**.
   private listener forwards both, and every other caller is refused, a read
   included. A window on another
   computer reaches the list as such a paired device, through the paired
-  computer channel, or as an owner device after a fresh unlock
-  ([Owner devices](hub-and-spokes.md#owner-devices); not built yet). Agents, routines,
+  computer channel. A hub membership or owner mark alone grants no access;
+  the window still needs its own pairing (the product-route distinction in
+  [Owner devices](hub-and-spokes.md#owner-devices)). Agents, routines,
   delegated runs and peer hosts are refused: a peer grant has no to-do item.
 
 ## Sync, conflicts and offline
