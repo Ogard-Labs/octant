@@ -366,24 +366,7 @@ button.environment-link:hover .environment-row__trailing {
   line-height: var(--oct-leading-body);
 }
 
-/* Subagents: every one the agent delegated, working first, then finished
-   newest first. A thread that delegates a lot scrolls inside the row rather
-   than pushing the rest of Environment out of reach. */
-.environment-subagents__section {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-  gap: 2px;
-}
-
-.environment-subagents__label {
-  margin: 0;
-  padding-top: var(--oct-space-1);
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
-}
-
+/* Subagents: the running runs, at most five, then one line for the rest. */
 .environment-subagents__list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -416,6 +399,19 @@ button.environment-link:hover .environment-row__trailing {
   text-decoration: none;
 }
 
+.environment-subagents__mark {
+  flex: none;
+}
+
+/* "N finished" and "+N more" start where the titles do: an empty slot as wide
+   as the row's 14px mark stands in the icon column. */
+.environment-subagents__slot {
+  flex: none;
+  width: 14px;
+}
+
+/* The title takes the room, so the time or state word ends on the row's right
+   edge whatever the title's length, and a ticking time never rides beside it. */
 .environment-subagents__task {
   flex: 1 1 auto;
   min-width: 0;

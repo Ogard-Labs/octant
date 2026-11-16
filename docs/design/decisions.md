@@ -2958,6 +2958,7 @@ Agents may propose routines and delegate work, but a routine exists only through
 - A provider-started subagent offers Stop only while the thread's running turn can stop that one subagent alone: built for Claude and OpenCode; Codex and ACP report it unsupported. A stop request leaves the reported state until the provider reports it finished (maintainer request, 2026-11-15).
 - A provider-started subagent shows its model, a final summary and token usage only where its runtime reports them; a missing value reads as unknown, never zero, and the summary reaches the person, never the parent's context (maintainer request, 2026-11-15).
 - The Agents dock draws a thread's subagents as a list or as a graph of which runs each one waits for; a graph card opens the page a list row opens, and the host names a dependency only when the window may read that run.
+- Each subagent row in every list leads with its provider's logo (following the thread-list provider icons setting) and names the model as the picker does; a run that reports none shows neither, never its parent's. The thread's Environment Subagents row opens by itself while a subagent is working into one compact row per running run (at most five, "+N more"; logo, title, how long it has run) and an "N finished" line, with no Stop and the model in the tooltip and name (maintainer request, 2026-11-16).
 
 Status: Partly built. Since: —. Detail: [Workspace: Routines](workspace.md#routines) and [Subagents](workspace.md#subagents).
 

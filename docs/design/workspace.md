@@ -1895,8 +1895,13 @@ keeps completed history reachable. Chat admits Agents as its only dock tool;
 opening it does not expose Work or Code tools or the bottom panel. Every
 subagent of the thread is one row in the same list, whether Octant started it
 through `octant_agents` or the thread's provider runtime started it itself, and
-every row names its provider and its model ("Model unknown" when the runtime
-does not report one). A provider-started row reads "Started by <provider>",
+every row in the Agents tool names its provider and its model ("Model unknown"
+when the runtime does not report one); the Environment strip's narrower rows
+carry them in the tooltip and accessible name. Each list row also leads with the provider's logo beside
+its status mark, when the "Provider icons in thread list" setting is on, and
+names the model as the picker does; a run that reports no provider or model
+draws no logo and no model, never its parent's (maintainer request,
+2026-11-16). A provider-started row reads "Started by <provider>",
 sits under the run or subagent that started it, and has no managed controls;
 it offers Stop only when the thread's running turn can stop that one subagent
 on its own (built for Claude and OpenCode), and keeps its reported state until
@@ -3170,9 +3175,7 @@ changes with its added and removed counts under it, and a chevron, opening
 Review; No uncommitted changes when clean), a detached HEAD or separate
 worktree when true, and Commit or push and Create pull request sit under it as
 two equal buttons. The rows follow in two cards, Running (Local servers, open by
-default only when this checkout is serving something; Subagents, one row with
-its working / to review / done counts that opens the Agents tool — reading and
-steering a subagent belongs there; Computer use) and Delivery (Pull requests,
+default only when this checkout is serving something; Subagents; Computer use) and Delivery (Pull requests,
 Sources, Delivers, Working folder, and Usage, closed by default; totals, the
 spend ceiling form for tokens, turns, hours, and US dollars, whose fields wrap
 two by two in a narrow rail, and Open Usage dashboard inside). A card with no
@@ -3191,6 +3194,19 @@ control (see [Minimised tools](#minimised-tools) and
 Environment, and hiding one never stops its session. Computer-use approval and
 stop controls stay with its card. It does not duplicate the Agents dock. Missing checkout context
 is neutral explanatory text rather than a warning callout.
+
+**Subagents in Environment.** The Subagents row carries the working, to
+review and done counts. It opens by itself when a subagent starts working and
+then stays as the person left it; it never closes by itself, so the rows and
+the result lines do not vanish when the last run ends. Open, it holds one 28px
+row per running subagent, at most five and then "+N more": the provider's logo
+(the status mark when the host reported no provider), the title on one line,
+and at the right edge how long it has run, or its state word when the host
+does not say when it began. The model is in the row's tooltip and name, not
+its text, because the strip is 300px wide. Under the rows stand "N to review"
+and "N finished", each on a line of its own. A row opens that subagent in the
+Agents tool and the lines open the tool; the strip has no Stop, and reading and
+steering a subagent belong in Agents (maintainer request, 2026-11-16).
 
 On the phone, a thread's header button (Views and panes) is the one way to
 reach anything beside the conversation. Its sheet lists the full-screen views

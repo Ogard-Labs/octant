@@ -185,6 +185,58 @@ describe("AgentHierarchyPanel", () => {
     expect(onOpen).toHaveBeenCalledWith("verify");
   });
 
+  it("marks each list row with its own provider's logo and names the model the picker shows", () => {
+    const [live] = entries;
+    const route = (provider: string, model: string) => ({
+      requestedProviderInstanceId: provider,
+      requestedModelId: model,
+      executionProviderInstanceId: provider,
+      executionModelId: model,
+      poolDerived: false,
+    });
+    render(
+      <AgentHierarchyPanel
+        entries={
+          [
+            { ...live, runId: "a", task: "Check A", route: route("provider-a", "gpt-astra") },
+            { ...live, runId: "b", task: "Check B", route: route("provider-b", "opus-sonata") },
+            { ...live, runId: "c", task: "Check C", route: undefined },
+          ] as ReadonlyArray<AgentHierarchyInputEntry>
+        }
+        providers={
+          new Map([
+            [
+              "provider-a",
+              {
+                driverKind: "codex",
+                displayName: "Codex",
+                models: new Map([["gpt-astra", "GPT Astra"]]),
+              },
+            ],
+            [
+              "provider-b",
+              {
+                driverKind: "claude",
+                displayName: "Claude",
+                models: new Map([["opus-sonata", "Opus Sonata"]]),
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    const working = screen.getByRole("region", { name: "Working" });
+    const [a, b, c] = within(working).getAllByRole("button");
+    expect(a?.querySelector('[data-driver-kind="codex"]')).not.toBeNull();
+    expect(a).toHaveTextContent("Codex · GPT Astra");
+    expect(b?.querySelector('[data-driver-kind="claude"]')).not.toBeNull();
+    expect(b).toHaveTextContent("Claude · Opus Sonata");
+    // A run that reported no route shows neither a mark nor a borrowed model.
+    expect(c?.querySelector("[data-driver-kind]")).toBeNull();
+    expect(c).toHaveTextContent("Model unknown");
+  });
+
   it("nests a provider-started subagent under the run that started it, with no separate section", () => {
     const parent = "22222222-2222-4222-8222-222222222222";
     render(

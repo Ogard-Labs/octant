@@ -1184,9 +1184,6 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
           ? {}
           : { interactionsClient: props.nativeHarnessClient })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
-        {...(props.providerController.instances === undefined
-          ? {}
-          : { providerInstances: props.providerController.instances })}
         threadId={threadId}
       />
     );

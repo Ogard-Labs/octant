@@ -1,7 +1,7 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentObservedChild } from "@octant/contracts";
 import { ArrowLeft } from "../ui/icons";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SubagentProviderMark } from "./subagentProviders";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCollapsible } from "../ui/base/OctantCollapsible";
@@ -83,6 +83,8 @@ export function ObservedChildRow(props: {
   readonly providerName: string;
   /** Present when the surface knows the instance, so its mark is drawn. */
   readonly driverKind?: string;
+  /** The model as the surface names it; the reported id when it is omitted. */
+  readonly model?: string;
   readonly onOpen?: (selectionId: string) => void;
   readonly client?: Pick<AgentRunClient, "stopObserved">;
 }) {
@@ -92,7 +94,7 @@ export function ObservedChildRow(props: {
   const meta = [
     subagentStatusWord(child.lifecycleStatus),
     `Started by ${props.providerName}`,
-    child.modelId ?? "Model unknown",
+    props.model ?? child.modelId ?? "Model unknown",
     observedChildUsageLine(child.usage),
     age === "" ? undefined : `First seen ${age} ago`,
   ]
@@ -109,9 +111,11 @@ export function ObservedChildRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={child.lifecycleStatus} />
-        {props.driverKind === undefined ? null : (
-          <ProviderGlyph displayName={props.providerName} driverKind={props.driverKind} size={12} />
-        )}
+        <SubagentProviderMark
+          driverKind={props.driverKind}
+          providerName={props.providerName}
+          size={12}
+        />
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{task}</span>
           <span className="composer-subagents__meta">{meta}</span>

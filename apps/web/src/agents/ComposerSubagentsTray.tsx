@@ -14,7 +14,7 @@ import { SubagentStatusIcon, subagentElapsedLabel, subagentStatusWord } from "./
 import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
 import { ObservedChildRow } from "./ObservedChildActivity";
 import type { SubagentProviderIdentity } from "./AgentRunDependencyGraph";
-import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import {
   buildSubagentRows,
   groupSubagentRows,
@@ -41,12 +41,6 @@ export function ThreadSubagentsTray(props: {
   readonly interactionsClient?: ChildRunInteractionsClient;
   /** Opens the Agents tool; with a run id, on that subagent's conversation. */
   readonly onOpenSubagent?: (runId?: string) => void;
-  /** The configured provider instances, so each row names what ran it. */
-  readonly providerInstances?: ReadonlyArray<{
-    readonly id: string;
-    readonly driverKind: string;
-    readonly displayName: string;
-  }>;
 }) {
   // The thread already says its host connection is lost; the tray dims and
   // disables its controls rather than saying so a second time.
@@ -55,19 +49,6 @@ export function ThreadSubagentsTray(props: {
     client: props.client,
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
-  const instances = props.providerInstances;
-  const providers = useMemo(
-    () =>
-      instances === undefined
-        ? undefined
-        : new Map(
-            instances.map((instance) => [
-              String(instance.id),
-              { driverKind: instance.driverKind, displayName: instance.displayName },
-            ]),
-          ),
-    [instances],
-  );
   if (subagents.status !== "ready") return null;
   return (
     <>
@@ -88,7 +69,6 @@ export function ThreadSubagentsTray(props: {
         entries={subagents.entries}
         observations={subagents.observations}
         observationsTruncated={subagents.observationsTruncated}
-        {...(providers === undefined ? {} : { providers })}
         {...(subagents.errorMessage === undefined ? {} : { errorMessage: subagents.errorMessage })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
         onStop={(runId) => void subagents.cancelRun(runId)}
@@ -145,14 +125,15 @@ export function SubagentsTray(props: SubagentsTrayProps) {
       isActiveAgentHierarchyStatus(entry.lifecycleStatus),
   );
   const observations = props.observations ?? NO_OBSERVATIONS;
+  const providers = useSubagentProviders(props.providers);
   const rows = useMemo(
     () =>
       buildSubagentRows({
         entries: props.entries,
         observations,
-        ...(props.providers === undefined ? {} : { providers: props.providers }),
+        ...(providers === undefined ? {} : { providers }),
       }),
-    [props.entries, observations, props.providers],
+    [props.entries, observations, providers],
   );
   const candidates = trayCandidates(rows);
   const preview = candidates.slice(0, 3);
@@ -286,6 +267,7 @@ export function SubagentsTray(props: SubagentsTrayProps) {
                       {...(props.stopClient === undefined ? {} : { client: props.stopClient })}
                       now={now}
                       providerName={item.row.providerName}
+                      model={item.row.model}
                       {...(item.row.driverKind === undefined
                         ? {}
                         : { driverKind: item.row.driverKind })}
@@ -358,9 +340,11 @@ function SubagentTrayRow(props: {
         variant="ghost"
       >
         <SubagentStatusIcon lifecycleStatus={entry.lifecycleStatus} />
-        {row.driverKind === undefined ? null : (
-          <ProviderGlyph displayName={row.providerName} driverKind={row.driverKind} size={12} />
-        )}
+        <SubagentProviderMark
+          driverKind={row.driverKind}
+          providerName={row.providerName}
+          size={12}
+        />
         <span className="composer-subagents__content">
           <span className="composer-subagents__task">{entry.task}</span>
           <span className="composer-subagents__meta">{meta}</span>
@@ -513,7 +497,7 @@ function writeOpen(storage: Pick<Storage, "setItem"> | undefined, open: boolean)
  * Refresh the update age while preview rows are visible, including finished
  * results awaiting review, without polling the clock for a folded tray.
  */
-function useNow(ticking: boolean): number {
+export function useNow(ticking: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!ticking) return;

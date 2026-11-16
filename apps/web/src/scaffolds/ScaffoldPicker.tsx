@@ -45,7 +45,12 @@ export interface ScaffoldPickerProps {
 export function ScaffoldPicker(props: ScaffoldPickerProps) {
   const [selected, setSelected] = useState<string>();
   const [directoryName, setDirectoryName] = useState("");
-  const entry = props.entries.find((candidate) => String(candidate.id) === selected);
+  // A template this machine can no longer run is not a choice any more: its
+  // form goes with it, so "Start it" never stands over a start the host refuses.
+  const entry = props.entries.find(
+    (candidate) =>
+      String(candidate.id) === selected && props.runnable.get(String(candidate.id)) === true,
+  );
   const named = directoryName.trim();
   // The same composition the host runs, shown before it is approved. The host
   // decides; this is only so the person deciding reads the actual command.
@@ -61,6 +66,9 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
         });
 
   const kinds = props.entries.map((candidate) => candidate.displayName);
+  const anyRunnable = props.entries.some(
+    (candidate) => props.runnable.get(String(candidate.id)) === true,
+  );
   const EntryIcon = entry === undefined ? Blocks : KIND_ICONS[entry.target];
 
   return (
@@ -93,7 +101,11 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
             <span className="empty-start__text">
               <span className="empty-start__name">Start from a template</span>
               <span className="empty-start__summary">
-                {entry === undefined ? listOfKinds(kinds) : entry.displayName}
+                {entry !== undefined
+                  ? entry.displayName
+                  : anyRunnable
+                    ? listOfKinds(kinds)
+                    : "None can run on this machine yet. Open to see what each needs."}
               </span>
             </span>
             {/* Down, because the templates open under the row; a chevron to the

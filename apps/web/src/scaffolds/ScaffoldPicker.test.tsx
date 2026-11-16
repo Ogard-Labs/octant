@@ -82,6 +82,35 @@ describe("choosing a scaffold to start a project from", () => {
     expect(screen.queryByLabelText("New directory")).toBeNull();
   });
 
+  it("says on the row when no template can run here, and still opens to say what each needs", async () => {
+    const user = userEvent.setup();
+    picker({ runnable: new Map() });
+
+    expect(screen.getByRole("button", { name: "Start from a template" })).toHaveTextContent(
+      "None can run on this machine yet. Open to see what each needs.",
+    );
+    const menu = await openTemplates(user);
+    expect(within(menu).getByRole("menuitem", { name: "Web app" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("takes the form away when the chosen template can no longer run", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    const props = { busy: false, entries: [webApp, nativeApp], onStart };
+    const { rerender } = render(
+      <ScaffoldPicker {...props} runnable={new Map([["web-app", true]])} />,
+    );
+    await user.click(within(await openTemplates(user)).getByRole("menuitem", { name: "Web app" }));
+    expect(screen.getByLabelText("New directory")).toBeVisible();
+
+    rerender(<ScaffoldPicker {...props} runnable={new Map()} />);
+    expect(screen.queryByLabelText("New directory")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start it" })).toBeNull();
+  });
+
   it("says in the menu which template this machine cannot run, and why", async () => {
     const user = userEvent.setup();
     picker();

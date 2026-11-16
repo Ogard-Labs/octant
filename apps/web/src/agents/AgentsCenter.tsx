@@ -14,6 +14,7 @@ import {
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { Bot, Search } from "../ui/icons";
 import { useCallback, useMemo, useState } from "react";
+import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
@@ -423,8 +424,7 @@ function AgentsCenterListBody(props: {
                 : (props.projectNames.get(String(summary.projectId)) ?? "Project")}
             </span>
             <span className="agents-center-row__provider">
-              {props.providerLabels.get(String(summary.route.requestedProviderInstanceId)) ??
-                summary.route.requestedModelId}
+              <RanOn providerLabels={props.providerLabels} route={summary.route} />
             </span>
             <span className="agents-center-row__state" data-lifecycle={summary.lifecycleStatus}>
               {agentRunLifecycleLabel(summary.lifecycleStatus)}
@@ -726,4 +726,48 @@ function resolveSnapshotParentThreadId(
   const forest = buildAgentRunForest(items);
   if (forest.threads.length !== 1) return undefined;
   return forest.threads[0]?.roots[0]?.summary.parentThreadId;
+}
+
+/**
+ * What a run ran on: the provider's mark and name and the model, from the
+ * route the host executed. A run the host sent somewhere other than where it
+ * was asked says so, since the row is where a person looks to see what a run
+ * cost them and a silent change of provider reads as the request honoured.
+ * An unknown provider names no provider: only the model.
+ */
+function RanOn(props: {
+  readonly providerLabels: ReadonlyMap<string, string>;
+  readonly route: {
+    readonly executionProviderInstanceId: unknown;
+    readonly executionModelId: unknown;
+    readonly requestedProviderInstanceId: unknown;
+    readonly requestedModelId: unknown;
+  };
+}) {
+  const providers = useSubagentProviders();
+  const ranInstance = String(props.route.executionProviderInstanceId);
+  const ranModel = String(props.route.executionModelId);
+  const askedInstance = String(props.route.requestedProviderInstanceId);
+  const askedModel = String(props.route.requestedModelId);
+  const modelName = (instance: string, model: string) =>
+    providers?.get(instance)?.models?.get(model) ?? model;
+  const label = props.providerLabels.get(ranInstance);
+  const ranOn = [label, modelName(ranInstance, ranModel)].filter(
+    (part): part is string => part !== undefined,
+  );
+  const rerouted = askedInstance !== ranInstance || askedModel !== ranModel;
+  const asked = [props.providerLabels.get(askedInstance), modelName(askedInstance, askedModel)]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
+  return (
+    <>
+      <SubagentProviderMark
+        driverKind={providers?.get(ranInstance)?.driverKind}
+        providerName={label ?? ranInstance}
+        size={12}
+      />
+      {ranOn.join(" · ")}
+      {rerouted ? ` (asked for ${asked})` : null}
+    </>
+  );
 }
