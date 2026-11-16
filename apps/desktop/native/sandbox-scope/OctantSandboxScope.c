@@ -18,6 +18,7 @@
 #include <sys/event.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#include <util.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
@@ -169,22 +170,23 @@ static char **read_vector(int fd) {
   }
   return values;
 }
-static int transfer_fds(int fd, int receive, int fds[3]) {
+static int transfer_fds(int fd, int receive, int *fds, unsigned count) {
+  if (!count || count > 3) return -1;
   char byte = 1, control[CMSG_SPACE(sizeof(int) * 3)] = {0};
   struct iovec io = { &byte, 1 };
   struct msghdr msg = {0};
   msg.msg_iov = &io; msg.msg_iovlen = 1;
-  msg.msg_control = control; msg.msg_controllen = sizeof(control);
+  msg.msg_control = control; msg.msg_controllen = CMSG_SPACE(sizeof(int) * count);
   if (receive) {
     if (recvmsg(fd, &msg, 0) != 1 || (msg.msg_flags & (MSG_CTRUNC | MSG_TRUNC))) return -1;
     struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
-    if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS || c->cmsg_len != CMSG_LEN(sizeof(int)*3)) return -1;
-    memcpy(fds, CMSG_DATA(c), sizeof(int)*3);
+    if (!c || c->cmsg_level != SOL_SOCKET || c->cmsg_type != SCM_RIGHTS || c->cmsg_len != CMSG_LEN(sizeof(int)*count)) return -1;
+    memcpy(fds, CMSG_DATA(c), sizeof(int)*count);
   } else {
     struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
     c->cmsg_level = SOL_SOCKET; c->cmsg_type = SCM_RIGHTS;
-    c->cmsg_len = CMSG_LEN(sizeof(int)*3);
-    memcpy(CMSG_DATA(c), fds, sizeof(int)*3);
+    c->cmsg_len = CMSG_LEN(sizeof(int)*count);
+    memcpy(CMSG_DATA(c), fds, sizeof(int)*count);
     if (sendmsg(fd, &msg, 0) != 1) return -1;
   }
   return 0;
@@ -210,14 +212,22 @@ static int serve(const char *path) {
   pid_t client;
   if (peer_pid(fd, &client)) return 125;
   int stdio[3];
-  if (transfer_fds(fd, 1, stdio)) return 125;
+  if (transfer_fds(fd, 1, stdio, 3)) return 125;
   char **cwd = read_vector(fd), **args = read_vector(fd), **environment = read_vector(fd);
   if (!cwd || !cwd[0] || cwd[1] || cwd[0][0] != '/' || chdir(cwd[0]) || !args || !args[0] || strcmp(args[0], "/usr/bin/sandbox-exec") || !environment) return 125;
+  uint32_t terminal = isatty(stdio[0]) ? 1 : 0;
+  int master = -1, slave = -1;
+  if (terminal) {
+    struct winsize size = {0};
+    if (ioctl(stdio[0], TIOCGWINSZ, &size) || openpty(&master, &slave, NULL, NULL, &size)) return 125;
+  }
+  if (full_write(fd, &terminal, sizeof(terminal)) ||
+      (terminal && transfer_fds(fd, 0, &master, 1))) return 125;
   /* The owner has already fsynced its receipt before sending the vectors. */
   pid_t child = fork();
   if (child < 0) return 125;
   if (!child) {
-    for (int i = 0; i < 3; ++i) if (dup2(stdio[i], i) < 0) _exit(125);
+    for (int i = 0; i < 3; ++i) if (dup2(terminal ? slave : stdio[i], i) < 0) _exit(125);
     TRACE("payload descriptors");
     if (isatty(0)) {
       TRACE("payload terminal");
@@ -234,6 +244,8 @@ static int serve(const char *path) {
     _exit(125);
   }
   for (int i = 0; i < 3; ++i) close(stdio[i]);
+  if (master >= 0) close(master);
+  if (slave >= 0) close(slave);
   int status = 125 << 8;
   for (;;) {
     if (waitpid(child, &status, WNOHANG) == child) break;
@@ -295,6 +307,71 @@ static void xml(FILE *file, const char *s) {
     }
   }
 }
+/* Keep the caller's terminal session intact. The payload owns a separate
+ * PTY inside the kernel scope; bytes, window size and terminal-generated
+ * signals cross this bridge without exposing the private control descriptor. */
+static int terminal_bridge(int control, int master, pid_t owner, int *result) {
+  struct termios saved, raw;
+  if (tcgetattr(0, &saved)) return -1;
+  raw = saved; cfmakeraw(&raw);
+  int in_flags = fcntl(0, F_GETFL), out_flags = fcntl(1, F_GETFL), master_flags = fcntl(master, F_GETFL);
+  if (in_flags < 0 || out_flags < 0 || master_flags < 0) return -1;
+  int error = -1;
+  if (fcntl(0, F_SETFL, in_flags|O_NONBLOCK) || fcntl(1, F_SETFL, out_flags|O_NONBLOCK) ||
+      fcntl(master, F_SETFL, master_flags|O_NONBLOCK) || tcsetattr(0, TCSANOW, &raw)) goto done;
+  unsigned char input[65536], output[65536];
+  size_t in_size = 0, out_size = 0;
+  int input_open = 1, master_open = 1, finished = 0;
+  double drain_deadline = 0;
+  struct winsize previous = {0};
+  for (;;) {
+    if (getppid() != owner) break;
+    if (finished && ((!master_open && !out_size) || now() > drain_deadline)) { error = 0; break; }
+    struct winsize size;
+    if (!ioctl(0, TIOCGWINSZ, &size) && memcmp(&size, &previous, sizeof(size))) {
+      if (ioctl(master, TIOCSWINSZ, &size)) break;
+      previous = size;
+    }
+    struct pollfd fds[] = {
+      {finished ? -1 : control, POLLIN|POLLHUP, 0},
+      {input_open && in_size < sizeof(input) ? 0 : -1, POLLIN, 0},
+      {master, (short)((master_open && out_size < sizeof(output) ? POLLIN : 0) | (in_size ? POLLOUT : 0)), 0},
+      {out_size ? 1 : -1, POLLOUT, 0},
+    };
+    if (poll(fds, 4, 50) < 0) { if (errno == EINTR) continue; break; }
+    if (fds[0].revents) {
+      if (full_read(control, result, sizeof(*result))) break;
+      finished = 1; drain_deadline = now() + 2;
+    }
+    if (fds[1].revents & (POLLIN|POLLHUP)) {
+      ssize_t n = read(0, input+in_size, sizeof(input)-in_size);
+      if (n > 0) in_size += (size_t)n;
+      else if (!n) input_open = 0;
+      else if (errno != EAGAIN && errno != EINTR) break;
+    }
+    if (fds[2].revents & (POLLIN|POLLHUP)) {
+      ssize_t n = read(master, output+out_size, sizeof(output)-out_size);
+      if (n > 0) out_size += (size_t)n;
+      else if (!n || errno == EIO) master_open = 0;
+      else if (errno != EAGAIN && errno != EINTR) break;
+    }
+    if (in_size && (fds[2].revents & POLLOUT)) {
+      ssize_t n = write(master, input, in_size);
+      if (n > 0) { in_size -= (size_t)n; memmove(input, input+n, in_size); }
+      else if (n < 0 && errno != EAGAIN && errno != EINTR) break;
+    }
+    if (out_size && (fds[3].revents & POLLOUT)) {
+      ssize_t n = write(1, output, out_size);
+      if (n > 0) { out_size -= (size_t)n; memmove(output, output+n, out_size); }
+      else if (n < 0 && errno != EAGAIN && errno != EINTR) break;
+    }
+  }
+done:
+  (void)tcsetattr(0, TCSANOW, &saved);
+  (void)fcntl(0, F_SETFL, in_flags); (void)fcntl(1, F_SETFL, out_flags);
+  close(master);
+  return error;
+}
 static int run(const char *root, const char *epoch, char **args) {
   if (!token(epoch) || strcmp(args[0], "/usr/bin/sandbox-exec")) return 125;
   int directory = private_directory(root);
@@ -353,16 +430,18 @@ static int run(const char *root, const char *epoch, char **args) {
   }
   receipt_written = 1;
   TRACE("receipt ready");
-  if (isatty(0) && tcgetsid(0) == getsid(0)) {
-    signal(SIGHUP, SIG_IGN);
-    if (ioctl(0, TIOCNOTTY, 0) < 0) goto cleanup;
-  }
-  TRACE("terminal detached");
   int stdio[] = {0,1,2};
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) goto cleanup;
   char *cwd_vector[] = {cwd, NULL};
-  if (transfer_fds(control_fd, 0, stdio) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
+  if (transfer_fds(control_fd, 0, stdio, 3) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
+  uint32_t terminal;
+  if (full_read(control_fd, &terminal, sizeof(terminal)) || terminal > 1) goto cleanup;
+  if (terminal) {
+    int master;
+    if (transfer_fds(control_fd, 1, &master, 1) || terminal_bridge(control_fd, master, record.owner, &result)) result = 125;
+    goto cleanup;
+  }
   TRACE("workload released");
   for (;;) {
     if (getppid() != record.owner) goto cleanup;
