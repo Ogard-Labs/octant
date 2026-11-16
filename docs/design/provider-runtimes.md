@@ -1544,12 +1544,13 @@ reports through the same events as a prompt. A command route that fails
 after the context was admitted leaves that context queued in the session,
 where the next run would read it stale beside the next turn's own; the turn
 fails as `stale-resume` and the driver never resumes that session again (in
-this host process), so the thread starts on a new session. The host refuses such a turn in
-Plan and in Chat, and the driver refuses it again. A command may run a shell
-before the model sees it: a configured command's template expands
-`` !`…` `` through OpenCode's shell, which asks no approval, inside the
-launch's own confinement; only Work and Code outside Plan run one, as
-OpenCode's own client does. 1.x lists none: its `POST /session/{id}/command`
+this host process), so the thread starts on a new session. Such a turn runs
+in every mode, Chat and Plan included (maintainer decision, 2026-11-16;
+built). A command may run a shell before the model sees it: a configured
+command's template expands `` !`…` `` through OpenCode's shell, which asks no
+approval, inside the launch's own confinement, so in Chat and Plan, whose
+launch allows no process and binds the root read-only, that expansion fails
+and the command cannot write, as the level's tool rules require. 1.x lists none: its `POST /session/{id}/command`
 answers only once the whole run has ended (1.18.21), so no turn can start
 from it, and it has no asynchronous form.
 
@@ -1726,14 +1727,17 @@ the subagent may have done so unseen (maintainer decision, 2026-11-14). A
 later request naming the same call adds only its card. The run stays shown
 as running, because nothing reports its end.
 
-Kimi Code's own slash commands run in Work and Code outside Plan, as in its
-own app (maintainer decision, 2026-11-14); the probe still pins the reviewed
-command inventory, so a release with a new command fails closed (decided: at
-Full access such a release is offered as "unverified" instead, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built). Plan and
-Chat refuse a prompt starting with `/`, since a command such as
-`update-config` writes. The earlier refusal everywhere was Octant's default,
-not a protocol limit: ACP carries the command as prompt text.
+Kimi Code's own slash commands run in every mode, Chat and Plan included, as
+in its own app (maintainer decisions, 2026-11-14 and 2026-11-16; built); the
+probe still pins the reviewed command inventory, so a release with a new
+command fails closed (decided: at Full access such a release is offered as
+"unverified" instead, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); designed, not built), and a
+prompt opening with `/` runs only a reviewed command the session listed. In
+Plan and Chat the session's own mode, set for the level, decides what a
+command such as `update-config` may do. The earlier refusal everywhere was
+Octant's default, not a protocol limit: ACP carries the command as prompt
+text.
 
 ### What an ACP agent cannot do
 

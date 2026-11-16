@@ -9946,13 +9946,9 @@ describe("provider switch handoff", () => {
     }
   });
 
-  it("refuses a provider's own slash command in Plan before it reaches the runtime, listed or not", async () => {
+  it("sends a provider's own slash command in Plan to the runtime, whose Plan rules decide what it does", async () => {
     const drivers = twoHarnesses();
-    const fixture = runtimeFixture({
-      resolveProviderDriver: drivers.resolveProviderDriver,
-      // The list another Project's session last wrote, without this command.
-      providerCommands: () => [{ name: "review" }],
-    });
+    const fixture = runtimeFixture({ resolveProviderDriver: drivers.resolveProviderDriver });
     fixture.setThread(
       decodeCodeThread({ ...onProvider(providerInstance, "model-a"), executionPolicy: "plan" }),
     );
@@ -9967,8 +9963,13 @@ describe("provider switch handoff", () => {
         sessionId,
         prompt,
       });
-      expect(JSON.stringify(started)).toContain("Plan runs none: Plan stays read-only");
-      expect(drivers.connection(providerInstance).send).not.toHaveBeenCalled();
+      expect(started).not.toMatchObject({ kind: "operation-failed" });
+      await vi.waitFor(() =>
+        expect(drivers.connection(providerInstance).send).toHaveBeenCalledTimes(1),
+      );
+      expect(vi.mocked(drivers.connection(providerInstance).send).mock.calls[0]?.[0]).toMatchObject(
+        { prompt: "/deploy src" },
+      );
     } finally {
       await fixture.runtime.close();
       fixture.close();
@@ -11815,7 +11816,6 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["recordExternalContentIngestion"];
   forkProviderSession?: Parameters<typeof createCodeOperationRuntime>[0]["forkProviderSession"];
-  providerCommands?: Parameters<typeof createCodeOperationRuntime>[0]["providerCommands"];
   supportsSessionRollback?: Parameters<
     typeof createCodeOperationRuntime
   >[0]["supportsSessionRollback"];
@@ -12168,9 +12168,6 @@ function runtimeFixture(options: {
     ...(options.forkProviderSession === undefined
       ? {}
       : { forkProviderSession: options.forkProviderSession }),
-    ...(options.providerCommands === undefined
-      ? {}
-      : { providerCommands: options.providerCommands }),
     ...(options.supportsSessionRollback === undefined
       ? {}
       : { supportsSessionRollback: options.supportsSessionRollback }),
