@@ -775,7 +775,9 @@ Under [Providers run in their own sandbox](../architecture.md#security-and-autho
 sandbox no settings: it runs as the person's own Claude Code settings
 configure it, Claude's own escape request reaches the person as an Octant
 approval, and Plan keeps its read-only confinement. Strict (set per thread,
-per Project and in Settings, as the opt-in sandbox at Full access is) keeps
+per Project and in Settings, as the opt-in sandbox at Full access is; the
+setting is built, and today every launch keeps this configuration whether
+Strict is on or off) keeps
 today's configuration of Claude's own sandbox, since Octant cannot nest its
 profile around it on macOS: reads and writes held to the Project's folders,
 network per Network limits, `autoAllowBashIfSandboxed: false`, and no escape

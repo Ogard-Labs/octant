@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 9         | 0       | 1            | 8                   |
+| [Key providers](#key-providers)                                                       | 9         | 0       | 2            | 7                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 4            | 2                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -48,7 +48,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Native harness](#native-harness)                                                     | 7         | 5       | 2            | 0                   |
 | [Extensions](#extensions)                                                             | 9         | 5       | 4            | 0                   |
 | [Authority and approvals](#authority-and-approvals)                                   | 8         | 6       | 1            | 1                   |
-| [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 5            | 2                   |
+| [Sandbox and confinement](#sandbox-and-confinement)                                   | 16        | 9       | 6            | 1                   |
 | [Terminals, browsers and side surfaces](#terminals-browsers-and-side-surfaces)        | 9         | 6       | 3            | 0                   |
 | [Remote access and pairing](#remote-access-and-pairing)                               | 12        | 5       | 6            | 1                   |
 | [Credentials and sign-in](#credentials-and-sign-in)                                   | 5         | 2       | 3            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **279**   | **158** | **103**      | **18**              |
+| **All areas**                                                                         | **279**   | **158** | **105**      | **16**              |
 
 ## Principles and hard lines
 
@@ -427,8 +427,10 @@ A person who moves from a provider's own CLI to Octant keeps every workflow that
 - The stalled-turn limit defaults to Off at Full access and stays 30 minutes below it.
 - Opt-in extras: a per-person list of provider tools to block, and in Strict a notice saying what was withheld.
 - Kept: read-only Plan, Chat with no folder or shell, outside folders asking below Full access, refused secret questions and unjournaled secrets, Run as itself off keeping web tools off, and never handing one provider another's credentials.
+- Built: the Strict setting (per thread, as a Project's default, and as the Code and Work defaults in Settings, resolved by the host at each launch and call); the environment and provider channels for Claude Code, Pi and the ACP agents; outside content as a mark only for the reviewer, the Octant Harness provider search and the four re-asks; protected files for Claude Code's own file tools and for Pi's and the ACP agents' confinement; denials; Shield's forge hard lines for a provider's own commands; the Project terminal; and the stalled-turn limit at Full access.
+- Not built yet: Codex's environment and protected files, and OpenCode's protected files (their processes are shared per posture and do not yet key on Strict), Codex sign-ins, slash commands, provider Project trust, the Full access default, Plan in Work, image generation's default profile, the resource queue, Work page scripts, the CLI's Full access flag, the home folder as an extra folder, and the opt-in extras.
 
-Status: Designed, not built. Since: 2026-11-16. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ### Claude artifacts and Claude Design work as in Claude Code
 
@@ -2090,7 +2092,7 @@ Below Full access, a provider that has a sandbox of its own runs in it, as it do
 - Unchanged: server-side approval authority and journaling, read-only Plan and no shell in Chat, the paired-device and routine rules, never handing one provider another's credentials, and marking outside content; the rest of what Octant adds moves into Strict under [Octant adds no restrictions of its own unless Strict is on](#octant-adds-no-restrictions-of-its-own-unless-strict-is-on).
 - Not part of this rule: a host-side command executor, and restarting a session at wider authority.
 
-Status: Designed, not built. Since: 2026-11-15. Detail: [Architecture: Security and authority, Providers run in their own sandbox](../architecture.md#security-and-authority).
+Status: Partly built. Since: 2026-11-15. Detail: [Architecture: Security and authority, Providers run in their own sandbox](../architecture.md#security-and-authority).
 
 ### Work shell at the shared access level
 

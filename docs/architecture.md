@@ -251,7 +251,8 @@ The design rests on a small set of invariants that every package obeys:
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
   [Security and authority](#security-and-authority). A provider with a
   sandbox of its own is to run in it below Full access, with Octant's sandbox
-  as the opt-in Strict setting and the fallback (designed, not built;
+  as the opt-in Strict setting and the fallback (the Strict setting is
+  built; the provider's own sandbox outside Strict is designed, not built;
   [Providers run in their own sandbox](#security-and-authority)). Every driver starts a
   Work session with its shell and Git at the thread's level, as in Code, and
   Work threads reach Full access
@@ -13762,7 +13763,7 @@ mechanisms are:
        pull-request merge rules and the Project's "Agents may merge"
        switch. A provider's own commands are not on the list outside
        Strict ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
-       designed, not built).
+       built for Octant Shield's forge hard lines).
     3. Computer use: the first action in each application asks, once per
        thread, because it drives the person's real desktop.
     4. The Browser on a signed-in profile: a site approval per origin and
