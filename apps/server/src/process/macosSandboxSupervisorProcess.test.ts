@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   writeFileSync,
@@ -23,7 +24,7 @@ function heartbeat(path: string): string {
 
 describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor", () => {
   it("preserves stdio and cwd, revokes detached descendants after client death and recovers its receipt", async () => {
-    const root = mkdtempSync(join(tmpdir(), "octant-supervisor-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-supervisor-")));
     chmodSync(root, 0o700);
     const executable = join(root, "scope");
     const beat = join(root, "heartbeat");
