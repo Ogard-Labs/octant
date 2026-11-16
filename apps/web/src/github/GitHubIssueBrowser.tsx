@@ -632,6 +632,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       aria-label="GitHub issues"
       className="pr-page github-issue-browser"
       data-detail={selected === undefined ? "none" : "open"}
+      data-empty={scope !== undefined && !browsing ? "true" : undefined}
     >
       <div className="pr-page__frame">
         <div className="pr-page__list">

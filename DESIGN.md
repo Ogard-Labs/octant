@@ -1547,7 +1547,10 @@ Surface (measure 880px, or wide)
 - Back is a 28px ghost icon control at the leading edge.
 - A destination's cards are the card fill with no hairline, in two columns
   where the pane allows;
-  Settings groups keep their hairline because their rows have dividers.
+  Settings groups keep their hairline because their rows have dividers. A card
+  that is itself the button (a prompt suggestion, a creation path) is the
+  suggestion card and keeps one hairline: in light the card fill is the page's
+  own colour, and without the line the control read as loose text.
 - A page with nothing on it is the empty state alone, centred; search and
   filters appear only once there is something to filter.
 - **Page edges.** A page is laid out on one grid, and its header sits on the

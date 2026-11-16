@@ -24,6 +24,24 @@
   grid-template-columns: minmax(0, 720px);
 }
 
+/* A page with nothing to list is its one empty state, centred in the whole
+   page: left in the 320px list column it stood squeezed at the page's left
+   edge beside a blank reading pane. */
+.pr-page[data-empty="true"] .pr-page__frame {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pr-page[data-empty="true"] .pr-page__detail {
+  display: none;
+}
+
+.pr-page[data-empty="true"]
+  .pr-page__list
+  > :is(.code-project-pull-requests, .github-issue-browser__empty) {
+  flex: 1 0 auto;
+  align-content: center;
+}
+
 /* ── List column ───────────────────────────────────────────────────── */
 
 .pr-page__list {

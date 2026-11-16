@@ -244,6 +244,13 @@ describe("AgentsCenter", () => {
     expect(screen.getByText(/Helpers a thread starts for part of its work/)).toBeVisible();
   });
 
+  it("offers search and filters only once there are runs to filter", async () => {
+    render(<AgentsCenter client={createClient({ center: vi.fn(async () => ({ items: [] })) })} />);
+    await screen.findByText("No agent runs yet");
+    expect(screen.queryByRole("group", { name: "Agents Center controls" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search tasks, roles, threads")).not.toBeInTheDocument();
+  });
+
   it("opens a parent thread without creating another hierarchy", async () => {
     const onOpenThread = vi.fn();
     render(

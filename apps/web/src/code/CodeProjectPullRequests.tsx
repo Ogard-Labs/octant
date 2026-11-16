@@ -514,7 +514,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
           <OctantEmpty
             layout="line"
             detail="Only a Code Project with a github.com origin lists pull requests."
-            icon={<GitPullRequest size={20} />}
+            icon={<GitPullRequest size={16} />}
             title="No pull-request source for this Project"
           />
         ) : (
@@ -546,7 +546,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
             </OctantButton>
           }
           detail="Pull requests show up here once a Project's Git remote points at github.com. Add one, then check again."
-          icon={<GitPullRequest size={20} />}
+          icon={<GitPullRequest size={dock ? 16 : 20} />}
           title={dock ? "This Project isn't on GitHub" : "None of your Code Projects is on GitHub"}
         />
       ) : null}
@@ -787,6 +787,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       aria-label="Pull requests"
       className="pr-page"
       data-detail={withDetail ? (selectedRow === undefined ? "none" : "open") : "off"}
+      data-empty={view !== undefined && !ready ? "true" : undefined}
     >
       <div className="pr-page__frame">
         <div className="pr-page__list">

@@ -76,10 +76,6 @@
   padding: 0 var(--oct-space-4);
 }
 
-.inbox-card__head > .oct-section-label {
-  color: var(--oct-meta);
-}
-
 .inbox-card__body {
   display: grid;
   min-width: 0;

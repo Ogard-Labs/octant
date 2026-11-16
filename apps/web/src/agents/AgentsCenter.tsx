@@ -151,14 +151,20 @@ export function AgentsCenter(props: AgentsCenterProps) {
       >
         {hideListForNarrow ? null : (
           <div className="agents-center__list-pane">
-            <AgentsCenterToolbar
-              controller={controller}
-              savingCanvas={savingCanvas}
-              {...(props.narrow === true ? {} : { onViewChange: setView, view })}
-              {...(showGraph && controller.visibleItems.length > 0
-                ? { onSaveCanvas: () => void saveGraphAsCanvas() }
-                : {})}
-            />
+            {/* Search and filters appear once there is something to filter; a
+                filter that is already on keeps its bar so it can be cleared. */}
+            {controller.list.status === "ready" &&
+            controller.list.items.length === 0 &&
+            !filtersAreActive(controller) ? null : (
+              <AgentsCenterToolbar
+                controller={controller}
+                savingCanvas={savingCanvas}
+                {...(props.narrow === true ? {} : { onViewChange: setView, view })}
+                {...(showGraph && controller.visibleItems.length > 0
+                  ? { onSaveCanvas: () => void saveGraphAsCanvas() }
+                  : {})}
+              />
+            )}
             {showGraph &&
             controller.list.status !== "loading" &&
             controller.list.status !== "unavailable" &&
@@ -303,6 +309,17 @@ function AgentsCenterViewToggle(props: {
   );
 }
 
+function filtersAreActive(controller: AgentsCenterController): boolean {
+  return (
+    controller.statusFilter !== "all" ||
+    controller.modeFilter !== "all" ||
+    controller.search.trim() !== "" ||
+    controller.projectId !== undefined ||
+    controller.providerInstanceId !== undefined ||
+    controller.parentThreadId !== undefined
+  );
+}
+
 function AgentsCenterListBody(props: {
   readonly controller: AgentsCenterController;
   readonly controls: ReturnType<typeof useAgentRunControlCommands>;
@@ -331,13 +348,7 @@ function AgentsCenterListBody(props: {
     );
   }
   if (controller.visibleItems.length === 0) {
-    const hasActiveFilters =
-      controller.statusFilter !== "all" ||
-      controller.modeFilter !== "all" ||
-      controller.search.trim() !== "" ||
-      controller.projectId !== undefined ||
-      controller.providerInstanceId !== undefined ||
-      controller.parentThreadId !== undefined;
+    const hasActiveFilters = filtersAreActive(controller);
     return (
       <OctantEmpty
         layout="line"

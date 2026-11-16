@@ -59,7 +59,10 @@
 }
 
 /* The creation paths and suggestions are independently actionable objects,
-   so they keep their lift; the sections around them are open. */
+   so they keep their lift: each is a button drawn as a card, the suggestion
+   card with its one hairline. Without it, in light, the card fill is the
+   page's own white and the card read as loose text. The sections around them
+   are open. */
 .automation-center__creation-paths {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

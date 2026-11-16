@@ -180,13 +180,19 @@
 
 /* A page with nothing on it centres its one line in the room under the
    header, the way an empty window does. */
-.surface__inner:has(> .surface-empty) {
+.surface__inner:has(
+  > .surface-empty,
+  > .review-page__body > .surface-empty,
+  > .agents-center__body > .agents-center__list-pane > .surface-empty
+) {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
 }
 
-.surface__inner > .surface-empty {
+.surface__inner > .surface-empty,
+.surface__inner > .review-page__body:has(> .surface-empty),
+.surface__inner > .agents-center__body:has(> .agents-center__list-pane > .surface-empty) {
   flex: 1 1 auto;
   align-content: center;
 }
