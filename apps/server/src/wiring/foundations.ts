@@ -42,7 +42,11 @@ import {
   WorkTurnProjection,
 } from "../work/workTurnProjection";
 import type { ServerStart } from "./serverShape";
-import { createStrictResolver } from "../strictResolution";
+import {
+  createProjectStrictResolver,
+  createStrictResolver,
+  type StrictReads,
+} from "../strictResolution";
 import type { ProjectId, WorkThreadId } from "@octant/contracts";
 import type { ThreadWakeupHolder } from "../wakeups/threadWakeupService";
 
@@ -257,7 +261,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
   // Set by the continuation layer once both modes' turn paths exist.
   const threadWakeups: ThreadWakeupHolder = { service: undefined };
   // The one reading of Strict every gate uses, decided per launch and call.
-  const resolveThreadStrict = createStrictResolver({
+  const strictReads = {
     codeThread: (threadId) => persistence.readCodeThread(threadId as CodeThreadId),
     workThread: (threadId) => workThreadProjection.read(threadId as WorkThreadId),
     project: (projectId) => {
@@ -266,10 +270,13 @@ export function wireFoundations(deps: FoundationsDependencies) {
     },
     codeSettings: () => persistence.readCodeSettings()?.settings,
     workSettings: () => workThreadProjection.settings(),
-  });
+  } satisfies StrictReads;
+  const resolveThreadStrict = createStrictResolver(strictReads);
+  const resolveProjectStrict = createProjectStrictResolver(strictReads);
 
   return {
     resolveThreadStrict,
+    resolveProjectStrict,
     threadWakeups,
     codeSessionConversation,
     conversationInputTransfer,

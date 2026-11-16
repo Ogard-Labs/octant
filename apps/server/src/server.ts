@@ -250,6 +250,7 @@ export function startOctantServer(
       workTurnsCutOffByRestart,
       threadWakeups,
       resolveThreadStrict,
+      resolveProjectStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -1022,6 +1023,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      resolveThreadStrict,
+      resolveProjectStrict,
       onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,

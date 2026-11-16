@@ -14,7 +14,7 @@ export interface StrictReads {
   ) => { readonly strict?: boolean | undefined; readonly projectId: string } | undefined;
   readonly project: (
     projectId: string,
-  ) => { readonly defaultStrict?: boolean | undefined } | undefined;
+  ) => { readonly type: "code" | "work"; readonly defaultStrict?: boolean | undefined } | undefined;
   readonly codeSettings: () => { readonly defaultStrict?: boolean | undefined } | undefined;
   readonly workSettings: () => { readonly defaultStrict?: boolean | undefined } | undefined;
 }
@@ -55,5 +55,23 @@ export function createStrictResolver(reads: StrictReads): StrictResolver {
       resolveStrict({ settings: reads.codeSettings() }) ||
       resolveStrict({ settings: reads.workSettings() })
     );
+  };
+}
+
+/**
+ * Strict for something a Project owns with no thread of its own, such as the
+ * person's Project terminal: the Project's choice, else its mode's Settings
+ * default, else off. A Project that is gone reads as Strict.
+ */
+export type ProjectStrictResolver = (projectId: string) => boolean;
+
+export function createProjectStrictResolver(reads: StrictReads): ProjectStrictResolver {
+  return (projectId) => {
+    const project = reads.project(projectId);
+    if (project === undefined) return true;
+    return resolveStrict({
+      project,
+      settings: project.type === "code" ? reads.codeSettings() : reads.workSettings(),
+    });
   };
 }

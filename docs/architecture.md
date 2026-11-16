@@ -14311,9 +14311,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Project terminal.** The person's own Project terminal runs unconfined
     by default, as the person's shell does outside Octant, and a Work
     Project's terminal no longer runs at the approval-gated posture. Octant's
-    sandbox applies to it only under Strict. Today it runs under a Code
-    thread terminal's confinement
-    ([Project terminals](#security-and-authority)).
+    sandbox applies to it only under Strict, where it runs under a Code
+    thread terminal's confinement as before (built;
+    [Project terminals](#security-and-authority)).
   - **After outside content.** Below Full access a thread that has read
     outside content is still marked, but the mark no longer makes a network
     MCP server ask again, every Computer action ask again, delegation ask
@@ -15941,7 +15941,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   device is refused outright: a remote Code terminal is gated as an agent,
   and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
-  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Decided: the terminal is to run unconfined outside Strict, a Work Project's included ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built). The owning
+  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Built: outside Strict the terminal runs unconfined, a Work Project's included, read at each start from the task's Strict value for a terminal opened for a Work task, else the Project's (its own default, else its mode's Settings default); a terminal on a Plan checkout stays read-only ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority)). The owning
   window, Project, and binding revision are checked before every command, and
   another window cannot attach. Its lifecycle is journaled on its own
   `project-terminal` aggregate (`code.project-terminal-started@1`,

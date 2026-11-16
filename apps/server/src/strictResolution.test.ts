@@ -16,7 +16,7 @@ describe("Strict resolution", () => {
           ? { projectId: "project", strict: state.codeThreadStrict }
           : undefined,
       workThread: (threadId) => (threadId === "work-thread" ? { projectId: "project" } : undefined),
-      project: () => ({ defaultStrict: state.projectStrict }),
+      project: () => ({ type: "code", defaultStrict: state.projectStrict }),
       codeSettings: () => ({ defaultStrict: state.codeDefault }),
       workSettings: () => ({ defaultStrict: state.workDefault }),
     });
