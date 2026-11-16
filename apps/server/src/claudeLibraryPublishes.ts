@@ -47,6 +47,7 @@ export function makeClaudeLibraryPublishes(
       toolCallId: string,
       page: ThreadPublishedPage,
       publishedAt: UtcTimestamp,
+      sequence: number,
       seen: Set<string>,
     ) => {
       if (seen.has(toolCallId)) return;
@@ -62,15 +63,34 @@ export function makeClaudeLibraryPublishes(
         threadTitle: thread.title,
         toolCallId,
         publishedAt,
+        sequence,
         ...(page.snapshot === undefined ? {} : { snapshot: page.snapshot.format }),
       });
     };
     for (const thread of sources.workThreads()) {
       const seen = new Set<string>();
-      for (const turn of sources.workTurns(thread.id)) {
+      // A Work step carries no time of its own, so a publish is placed by its
+      // turn's acceptance and its step's place in the turn: a publish and the
+      // update after it in one turn share the turn's time.
+      const turns = sources
+        .workTurns(thread.id)
+        .toSorted((left, right) =>
+          left.acceptedAt === right.acceptedAt ? 0 : left.acceptedAt < right.acceptedAt ? -1 : 1,
+        );
+      let sequence = 0;
+      for (const turn of turns) {
         for (const step of turn.toolSteps ?? []) {
+          sequence += 1;
           if (step.published === undefined) continue;
-          record(thread, "work", String(step.toolCallId), step.published, turn.updatedAt, seen);
+          record(
+            thread,
+            "work",
+            String(step.toolCallId),
+            step.published,
+            turn.updatedAt,
+            sequence,
+            seen,
+          );
         }
       }
     }
@@ -79,7 +99,15 @@ export function makeClaudeLibraryPublishes(
       for (const frame of sources.codeSummary(thread.id) ?? []) {
         const event = frame.event;
         if (event.kind !== "tool-activity" || event.published === undefined) continue;
-        record(thread, "code", String(event.toolCallId), event.published, frame.occurredAt, seen);
+        record(
+          thread,
+          "code",
+          String(event.toolCallId),
+          event.published,
+          frame.occurredAt,
+          frame.cursor,
+          seen,
+        );
       }
     }
     return records;

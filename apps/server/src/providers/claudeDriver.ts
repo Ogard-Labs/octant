@@ -60,6 +60,7 @@ import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
 import {
   claudeNativeQueryOptions,
+  claudeReadsPersonSettings,
   isClaudeEffortLevel,
   CLAUDE_IMAGE_MEDIA_TYPES,
   type ClaudeAgentSdkPort,
@@ -427,13 +428,14 @@ export function claudeExecutionOptions(
   mode?: ProviderAcquireInput["mode"],
   platform: NodeJS.Platform = process.platform,
   strict = true,
+  setup?: ProviderNativeSetup,
 ): ClaudeExecutionOptions {
   // Work and Code share one capability set at the thread's level, so a Work
   // session starts with Bash exactly as a Code session at that level does.
   const policyOptions = claudePolicyOptions(
     policy,
     autoApprove,
-    claudeOwnPermissions({ strict, mode, executionPolicy: policy }),
+    claudeOwnPermissions({ strict, mode, executionPolicy: policy, setup }),
   );
   // Only Work and Code hold Claude Code's whole built-in set. Chat withholds
   // the filesystem and shell at every level, so it keeps the earlier list of
@@ -750,14 +752,24 @@ function isPlanShellCommand(
  * `bypassPermissions`; Octant answers only the calls Claude asks about and
  * sends no sandbox settings. Plan stays read-only and Chat keeps its list
  * with no shell, so both keep Octant's gate, as Strict does everywhere.
+ *
+ * Only a session that reads the person's own Claude settings (the `user`
+ * setting source) hands them the decision: that file is where their sandbox
+ * and their `permissions.allow`, `ask` and `deny` rules live. The source
+ * cannot be read for those alone, because it also brings the plugins,
+ * agents and commands the person's Octant switches keep out, so a session
+ * that reads no home settings keeps Octant's gate and sandbox instead of
+ * running with neither protection.
  */
 export function claudeOwnPermissions(input: {
   readonly strict: boolean;
   readonly mode: ProviderAcquireInput["mode"] | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly setup: ProviderNativeSetup | undefined;
 }): boolean {
   return (
     !input.strict &&
+    claudeReadsPersonSettings(input.setup) &&
     (input.mode === "work" || input.mode === "code") &&
     input.executionPolicy !== "plan"
   );
@@ -3586,6 +3598,7 @@ function makeConnection(
           strict,
           mode,
           executionPolicy: input.executionPolicy,
+          setup: input.nativeSetup,
         });
         const octantSandbox = claudeOctantConfiguresSandbox({
           executionPolicy: input.executionPolicy,
@@ -3661,6 +3674,7 @@ function makeConnection(
           mode,
           process.platform,
           strict,
+          nativeSetup,
         );
         const baseExecutionOptions: ClaudeExecutionOptions = {
           ...policyExecutionOptions,

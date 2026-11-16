@@ -201,7 +201,23 @@ export interface ClaudePublishRecord {
   readonly threadTitle?: string | undefined;
   readonly toolCallId: string;
   readonly publishedAt: ArtifactLibraryClaudeEntry["publishedAt"];
+  /**
+   * Where the publish sits in its thread's journal: a Work turn's place and
+   * its step's place in it, or a Code frame's cursor. Several publishes in one
+   * Work turn share the turn's time, so within a thread this, not the time,
+   * says which came last.
+   */
+  readonly sequence: number;
   readonly snapshot?: "html" | "markdown" | undefined;
+}
+
+/** Which of two publishes came first: by journal order within a thread, else by time. */
+function comparePublishes(left: ClaudePublishRecord, right: ClaudePublishRecord): number {
+  if (left.threadId === right.threadId && left.sequence !== right.sequence) {
+    return left.sequence - right.sequence;
+  }
+  if (left.publishedAt !== right.publishedAt) return left.publishedAt < right.publishedAt ? -1 : 1;
+  return left.sequence - right.sequence;
 }
 
 /**
@@ -221,13 +237,7 @@ export function foldClaudePublishes(
     else versions.push(record);
   }
   return [...byUrl.values()].flatMap((versions) => {
-    const ordered = versions.toSorted((left, right) =>
-      left.publishedAt === right.publishedAt
-        ? left.toolCallId.localeCompare(right.toolCallId)
-        : left.publishedAt < right.publishedAt
-          ? -1
-          : 1,
-    );
+    const ordered = versions.toSorted(comparePublishes);
     const newest = ordered.at(-1);
     if (newest === undefined) return [];
     const title = ordered.findLast((version) => version.title !== undefined)?.title;

@@ -262,12 +262,14 @@ describe("Claude pages in the library", () => {
         account: "claude-work",
         toolCallId: "first",
         publishedAt: "2026-08-18T08:00:00.000Z" as never,
+        sequence: 1,
       },
       {
         ...base,
         account: "claude-personal",
         toolCallId: "update",
         publishedAt: "2026-08-18T09:00:00.000Z" as never,
+        sequence: 2,
       },
     ]);
     expect(deck).toMatchObject({
@@ -279,9 +281,23 @@ describe("Claude pages in the library", () => {
     });
   });
 
+  it("shows the update that came last in its thread when a publish and its update share one time", () => {
+    const sameTurn = "2026-08-18T08:00:00.000Z" as never;
+    const [deck] = foldClaudePublishes([
+      { ...base, title: "Draft", toolCallId: "z-publish", publishedAt: sameTurn, sequence: 1 },
+      { ...base, title: "Final", toolCallId: "a-update", publishedAt: sameTurn, sequence: 2 },
+    ]);
+    expect(deck).toMatchObject({ title: "Final", toolCallId: "a-update", versionCount: 2 });
+  });
+
   it("reads a publish that named no type as a plain page", () => {
     const [page] = foldClaudePublishes([
-      { ...base, toolCallId: "only", publishedAt: "2026-08-18T08:00:00.000Z" as never },
+      {
+        ...base,
+        toolCallId: "only",
+        publishedAt: "2026-08-18T08:00:00.000Z" as never,
+        sequence: 1,
+      },
     ]);
     expect(page).toMatchObject({ title: "Published page", artifactType: "Page" });
     const pages = page === undefined ? [] : [page];

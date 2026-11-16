@@ -15197,8 +15197,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     `autoAllowBashIfSandboxed: false`, and Claude's own request to run one
     command outside it still asks every time, as today (maintainer decision,
     2026-11-16). Built for Claude Code (`claudeOctantConfiguresSandbox`):
-    outside Strict a Work or Code launch outside Plan carries no `sandbox`
-    option, so Claude's own settings decide, and a Full access thread that
+    outside Strict a Work or Code launch outside Plan that reads the person's
+    own Claude settings carries no `sandbox` option, so those settings decide
+    (one that reads none keeps Octant's configuration and gate, failing
+    closed), and a Full access thread that
     kept its sandbox keeps Octant's configuration. Gemini CLI and Qwen Code use their
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is

@@ -661,6 +661,19 @@ own ask only for a command leaving Claude's sandbox and a path outside the
 session's folders; Octant sends Claude no sandbox settings, so Claude's own
 sandbox runs as the person's settings configure it.
 
+That hand-over needs the person's settings loaded. Their sandbox and their
+`permissions.allow`, `ask` and `deny` rules live in the account's home
+settings, which Claude Code reads only with the `user` setting source, and
+that source cannot be read for those alone: it also brings the plugins,
+agents and commands the person's own Octant switches keep out. So a launch
+outside Strict whose setup reads no home settings (none of skills, hooks,
+tool servers or the Project's code on; subagents and web tools alone read
+none) keeps Octant's gate and Octant's configured sandbox, as under Strict,
+rather than running with neither protection (`claudeOwnPermissions`, which
+`claudeReadsPersonSettings` gates). The SDK port refuses a launch asking for
+Claude's own permissions that would read no person's settings, so the rule
+fails closed at both ends.
+
 A Work or Code session outside Plan launches with Claude Code's own tool
 preset (`tools: { type: "preset", preset: "claude_code" }`) rather than a
 fixed list, so it holds what Claude Code holds in its own app (maintainer

@@ -382,7 +382,7 @@ Octant maps its levels onto Claude Code's native permission modes, and Claude Co
 - When Claude Code asks, the ask reaches the person as an Octant approval, decided and journaled on the server as today.
 - Plan stays read-only and Chat has no shell.
 
-- Built outside Strict, in Work and Code outside Plan (`claudeOwnPermissions`): the native modes, Claude's own rules deciding every call Octant does not keep (the `PreToolUse` hook answers no decision), and `canUseTool` seeing only Claude's asks. Octant keeps its own ask for a command leaving Claude's sandbox and a path outside the session's folders, and answers questions, wake-ups and level changes itself. Strict, Plan and Chat keep Octant's gate.
+- Built outside Strict, in Work and Code outside Plan, for a session that reads the person's own Claude settings (`claudeOwnPermissions`; a session that reads none keeps Octant's gate and sandbox, since that file holds the person's sandbox and permission rules): the native modes, Claude's own rules deciding every call Octant does not keep (the `PreToolUse` hook answers no decision), and `canUseTool` seeing only Claude's asks. Octant keeps its own ask for a command leaving Claude's sandbox and a path outside the session's folders, and answers questions, wake-ups and level changes itself. Strict, Plan and Chat keep Octant's gate.
 
 Status: Built. Since: 2026-11-15. Detail: [Architecture: Security and authority, The provider's own permission system decides](../architecture.md#security-and-authority) and [Provider runtimes: Full built-in tool set](provider-runtimes.md#full-built-in-tool-set).
 

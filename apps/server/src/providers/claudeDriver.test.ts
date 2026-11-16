@@ -9054,11 +9054,25 @@ describe("Claude wake-ups", () => {
 });
 
 describe("Claude Code's own permission modes and sandbox outside Strict", () => {
+  /** A setup that reads the person's own Claude settings, where their sandbox and rules live. */
+  const readsHome = {
+    subagents: false,
+    webTools: false,
+    skills: true,
+    toolServers: false,
+    hooks: false,
+    projectCode: false,
+  } as ProviderNativeSetup;
+
   async function opened(
     mode: "chat" | "work" | "code",
     executionPolicy: ProviderExecutionPolicy,
     strict: boolean,
-    extra: { readonly autoApprove?: boolean; readonly fullAccessSandbox?: boolean } = {},
+    extra: {
+      readonly autoApprove?: boolean;
+      readonly fullAccessSandbox?: boolean;
+      readonly nativeSetup?: ProviderNativeSetup;
+    } = { nativeSetup: readsHome },
   ) {
     const f = harness();
     const acquired = await acquire(f.driver, mode);
@@ -9074,7 +9088,9 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
       strict: boolean,
       octantMode: "chat" | "work" | "code" = "code",
       autoApprove = false,
-    ) => claudeExecutionOptions(policy, autoApprove, octantMode, "darwin", strict).permissionMode;
+    ) =>
+      claudeExecutionOptions(policy, autoApprove, octantMode, "darwin", strict, readsHome)
+        .permissionMode;
     expect(mode("approval-gated", false)).toBe("default");
     expect(mode("auto-accept-edits", false)).toBe("acceptEdits");
     expect(mode("approval-gated", false, "work", true)).toBe("auto");
@@ -9084,9 +9100,14 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
     expect(mode("auto-accept-edits", true)).toBe("default");
     // Chat keeps its list and Octant's gate at every Strict setting.
     expect(mode("auto-accept-edits", false, "chat")).toBe("default");
-    expect(claudeOwnPermissions({ strict: false, mode: "work", executionPolicy: "plan" })).toBe(
-      false,
-    );
+    expect(
+      claudeOwnPermissions({
+        strict: false,
+        mode: "work",
+        executionPolicy: "plan",
+        setup: readsHome,
+      }),
+    ).toBe(false);
   });
 
   it("passes Claude no sandbox settings outside Strict and today's configured sandbox under Strict", async () => {
@@ -9105,7 +9126,10 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
       await inside.acquired.close();
     }
     // A Full access thread that kept its sandbox keeps Octant's outside Strict too.
-    const kept = await opened("code", "full-access", false, { fullAccessSandbox: true });
+    const kept = await opened("code", "full-access", false, {
+      fullAccessSandbox: true,
+      nativeSetup: readsHome,
+    });
     expect(kept.open.sandbox).toMatchObject({ enabled: true, allowUnsandboxedCommands: false });
     await kept.acquired.close();
     expect(
@@ -9117,15 +9141,48 @@ describe("Claude Code's own permission modes and sandbox outside Strict", () => 
     ).toBe(false);
   });
 
+  it("keeps Octant's sandbox and gate outside Strict when the session reads none of the person's Claude settings", async () => {
+    // With no setup, or only subagents and web tools on, the launch reads no
+    // home settings, so the person's own sandbox and deny rules would not load.
+    for (const nativeSetup of [
+      undefined,
+      { ...readsHome, skills: false, subagents: true, webTools: true },
+    ]) {
+      const session = await opened(
+        "work",
+        "auto-accept-edits",
+        false,
+        nativeSetup === undefined ? {} : { nativeSetup },
+      );
+      expect(session.open.ownPermissions).toBeUndefined();
+      expect(session.open.sandbox).toMatchObject({
+        enabled: true,
+        autoAllowBashIfSandboxed: false,
+      });
+      await Effect.runPromise(
+        session.acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+      );
+      await expect(
+        session.open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Edit",
+          input: { file_path: `${projectRoot}/a.ts`, old_string: "a", new_string: "b" },
+          toolUseId: "edit",
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+      await session.acquired.close();
+    }
+    expect(
+      claudeExecutionOptions("auto-accept-edits", false, "work", "darwin", false).permissionMode,
+    ).toBe("default");
+  });
+
   it("offers the full tool preset outside Plan and Chat with only the person's own switched-off features withheld", async () => {
     const outside = await opened("code", "approval-gated", false);
-    expect(outside.open.withheldTools).toEqual([
-      "Agent",
-      "Workflow",
-      "WebSearch",
-      "WebFetch",
-      "Skill",
-    ]);
+    // Skills are on in this setup; the switched-off subagents and web tools stay out.
+    expect(outside.open.withheldTools).toEqual(["Agent", "Workflow", "WebSearch", "WebFetch"]);
     await outside.acquired.close();
     const inside = await opened("code", "approval-gated", true);
     expect(inside.open.withheldTools).toEqual(

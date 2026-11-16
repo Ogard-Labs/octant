@@ -857,6 +857,15 @@ export interface ClaudeNativeQueryOptions {
  * is on. Claude's own memory stays off by flag as well as by its environment
  * switch, unless the account keeps its own memory.
  */
+/**
+ * Whether a session reads the person's own Claude settings file, where their
+ * sandbox and permission rules live. Claude's own permission modes decide
+ * only in such a session (`claudeOwnPermissions`).
+ */
+export function claudeReadsPersonSettings(setup: ProviderNativeSetup | undefined): boolean {
+  return claudeNativeQueryOptions(setup).settingSources.includes("user");
+}
+
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
   ownMemory = false,
@@ -1383,6 +1392,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       if (!Number.isInteger(inputCapacity) || inputCapacity < 1) {
         return Effect.fail(
           failure("invalid-configuration", "Claude input capacity must be a positive integer."),
+        );
+      }
+      // Octant leaves its sandbox and gate only to the person's own settings,
+      // so a launch that would read none of them fails closed.
+      if (input.ownPermissions === true && !claudeReadsPersonSettings(input.nativeSetup)) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            "Claude's own permissions need the person's Claude settings.",
+          ),
         );
       }
       if (!hasValidSandbox(input)) {

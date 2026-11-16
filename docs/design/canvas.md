@@ -1530,7 +1530,10 @@ entries, filtered by `source`, `claudeType` and `account`, and a Claude page
 matches no tag, Shared or Canvas kind filter. The snapshot is read on request
 through `/api/artifacts/claude-snapshot`, under the publishing thread's own read
 check, by a window on this host only; a paired device sees the card and opens
-the page on claude.ai. Not built yet: Copy into Canvas, because the library
+the page on claude.ai. Which publish to a page is newest is read from its
+thread's journal order, not a time: a Work step has no time of its own, so a
+publish and the update after it in one turn are ordered by the turn's place
+and the step's place in it, and a Code publish by its frame's cursor. Not built yet: Copy into Canvas, because the library
 holds no thread context for the HTML importer's create.
 
 ## Design block

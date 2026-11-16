@@ -171,6 +171,7 @@ function publish(overrides: Record<string, unknown>) {
     threadTitle: "Landing page",
     toolCallId: "call-1",
     publishedAt: "2026-08-18T08:00:00.000Z",
+    sequence: 1,
     ...overrides,
   };
 }
@@ -179,7 +180,12 @@ describe("Claude pages in the artifact library", () => {
   const publishes = [
     publish({}),
     // An update to the same page is a version of it, not a second entry.
-    publish({ toolCallId: "call-2", publishedAt: "2026-08-18T09:30:00.000Z", snapshot: "html" }),
+    publish({
+      toolCallId: "call-2",
+      publishedAt: "2026-08-18T09:30:00.000Z",
+      sequence: 2,
+      snapshot: "html",
+    }),
     publish({
       url: "https://claude.ai/artifact/notes",
       title: "Notes",

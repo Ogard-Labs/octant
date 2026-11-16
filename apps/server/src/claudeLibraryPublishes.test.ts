@@ -1,5 +1,6 @@
 import type { CodeOperationEventFrame, WorkTurnState } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { foldClaudePublishes } from "@octant/domain";
 import { makeClaudeLibraryPublishes } from "./claudeLibraryPublishes";
 import { summarizeThreadHistory } from "./code/codeOperationEventStore";
 
@@ -67,6 +68,41 @@ describe("Claude pages read from each thread's journal", () => {
       }),
       expect.objectContaining({ mode: "code", threadId: "code-thread", toolCallId: "code-call" }),
     ]);
+  });
+
+  it("places a publish and its update in one Work turn by step order, so the update is the newest version", () => {
+    const records = makeClaudeLibraryPublishes({
+      workThreads: () => [{ id: "work-thread", projectId: project, title: "Landing page" }],
+      workTurns: () =>
+        [
+          {
+            acceptedAt: "2026-08-18T09:00:00.000Z",
+            updatedAt: "2026-08-18T09:05:00.000Z",
+            toolSteps: [{ toolCallId: "late-turn", published: { ...page, title: "Later" } }],
+          },
+          {
+            acceptedAt: "2026-08-18T08:00:00.000Z",
+            updatedAt: "2026-08-18T08:05:00.000Z",
+            toolSteps: [
+              { toolCallId: "z-publish", published: { ...page, title: "Draft" } },
+              { toolCallId: "a-update", published: { ...page, title: "Final" } },
+            ],
+          },
+        ] as unknown as ReadonlyArray<WorkTurnState>,
+      codeThreads: () => [],
+      codeSummary: () => undefined,
+    })();
+    expect(records.map((record) => [record.toolCallId, record.sequence])).toEqual([
+      ["z-publish", 1],
+      ["a-update", 2],
+      ["late-turn", 3],
+    ]);
+    const sameTurn = foldClaudePublishes(
+      records
+        .filter((record) => record.toolCallId !== "late-turn")
+        .map((record) => ({ ...record, projectName: "Storefront" })),
+    );
+    expect(sameTurn[0]).toMatchObject({ title: "Final", toolCallId: "a-update" });
   });
 
   it("lists nothing for a Code thread whose summary must be rebuilt first", () => {
