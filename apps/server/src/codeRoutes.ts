@@ -892,10 +892,13 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             command !== undefined &&
             callerAuthority === "remote-device" &&
             !agentGrantSession &&
-            raisesToFullAccess(command)
+            (raisesToFullAccess(command) || loosensStrict(command))
           ) {
             return failureResponse(
-              { category: "unauthorized", message: FULL_ACCESS_LOCAL_ONLY },
+              {
+                category: "unauthorized",
+                message: raisesToFullAccess(command) ? FULL_ACCESS_LOCAL_ONLY : STRICT_LOCAL_ONLY,
+              },
               403,
               origin,
             );
@@ -3379,6 +3382,28 @@ function raisesToFullAccess(command: CodeCommand): boolean {
       return command.thread.executionPolicy === "full-access";
     case "update-code-settings":
       return command.defaultExecutionPolicy === "full-access";
+    default:
+      return false;
+  }
+}
+
+const STRICT_LOCAL_ONLY =
+  "Strict is turned off in the Octant window on this host or on a device you paired.";
+
+/**
+ * Whether a command could turn Strict off for a thread or as the default:
+ * an explicit off, or a thread returned to defaults that may be off. A
+ * hub-introduced device may turn Strict on, never off, as it may lower a
+ * thread's level but never raise it.
+ */
+function loosensStrict(command: CodeCommand): boolean {
+  switch (command.kind) {
+    case "change-code-thread-access":
+      return command.strict === false || command.strict === null;
+    case "create-code-thread":
+      return command.thread.strict === false;
+    case "update-code-settings":
+      return command.defaultStrict === false;
     default:
       return false;
   }

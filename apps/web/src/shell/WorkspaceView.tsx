@@ -107,7 +107,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { buildModelPickerGroups } from "@octant/domain";
+import { buildModelPickerGroups, resolveStrict } from "@octant/domain";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/chat";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -500,7 +500,10 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     permissionMode: import("@octant/contracts/providers").PermissionMode | undefined,
     fullAccessSandbox?: boolean | "settings" | "keep",
+    strict?: boolean | "settings" | "keep",
   ) => Promise<boolean>;
+  /** Work's Strict default in Settings, for Work threads and Projects that did not choose. */
+  readonly workDefaultStrict?: boolean;
   readonly onProjectAutoReviewerChange?: (
     projectId: ProjectId,
     autoReviewer: import("@octant/contracts/shield").AutoReviewer | undefined,
@@ -1494,6 +1497,10 @@ function renderCodeTab(
     shieldModel: codeController.bootstrap?.settings.shieldModel,
   });
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
+  const strictDefault = resolveStrict({
+    project: project?.type === "code" ? project : undefined,
+    settings: codeController.bootstrap?.settings,
+  });
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
   const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
   const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
@@ -1572,6 +1579,7 @@ function renderCodeTab(
           ? {}
           : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
         {...(harnessAutoReviewSupported === undefined ? {} : { harnessAutoReviewSupported })}
+        strictDefault={strictDefault}
         {...(autoReview === undefined ? {} : { autoReview })}
         {...(project?.type === "code" && (project.extraFolders ?? []).length > 0
           ? { projectExtraFolders: project.extraFolders?.map((folder) => folder.canonicalRoot) }
@@ -2192,6 +2200,7 @@ function renderNonCodeTab(
             >
               <WorkThreadWorkspace
                 projects={props.projects}
+                {...(props.workDefaultStrict === true ? { workDefaultStrict: true } : {})}
                 {...(props.revealTurn?.mode === "work" &&
                 String(props.revealTurn.threadId) === String(tab.threadId)
                   ? {

@@ -73,6 +73,28 @@ describe("shared Seatbelt profile builder", () => {
     );
   });
 
+  it("refuses a provider outside Strict only other providers' sign-ins inside its folders, and every protected file under Strict", () => {
+    const base = temporaryRoot();
+    const home = join(base, "home");
+    mkdirSync(home);
+    const profileFor = (protectedFiles?: "provider-sign-ins") =>
+      buildDenyDefaultSeatbeltProfile({
+        boundRoot: home,
+        temporaryDirectory: home,
+        networkEgress: "none",
+        homeDirectory: home,
+        usersDirectory: base,
+        ownAccountAccess: "none",
+        ...(protectedFiles === undefined ? {} : { protectedFiles }),
+      });
+    const awsDenial = `"${escapeSeatbeltPath(join(home, ".aws/credentials"))}"`;
+    const codexDenial = `(subpath "${escapeSeatbeltPath(join(home, ".codex/auth.json"))}")`;
+    expect(profileFor()).toContain(awsDenial);
+    expect(profileFor()).toContain(codexDenial);
+    expect(profileFor("provider-sign-ins")).not.toContain(awsDenial);
+    expect(profileFor("provider-sign-ins")).toContain(codexDenial);
+  });
+
   it.skipIf(process.platform !== "darwin")(
     "starts the system shell without a shell-selection warning",
     () => {

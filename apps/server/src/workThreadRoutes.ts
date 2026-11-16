@@ -272,6 +272,15 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // Turning Strict off widens what a provider may do, so it follows the
+      // same rule: the person, at a window or on a device they paired.
+      if (loosensWorkStrict(command) && refusesFullAccessRaise(request)) {
+        return failureResponse(
+          { category: "unauthorized", message: WORK_STRICT_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
       // Whether the host may continue a turn by itself after a restart is the
       // person's choice about this computer's unattended work, at a window on
       // it or on a device they paired, as for Code.
@@ -474,6 +483,23 @@ function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
       return command.access === "full-access";
     case "update-work-settings":
       return command.defaultAccess === "full-access";
+    default:
+      return false;
+  }
+}
+
+const WORK_STRICT_LOCAL_ONLY =
+  "Strict is turned off in the Octant window on this host or on a device you paired.";
+
+/** Whether a command could turn Strict off for a Work thread or as Work's default. */
+function loosensWorkStrict(command: WorkThreadCommand): boolean {
+  switch (command.kind) {
+    case "create-work-thread":
+      return command.strict === false;
+    case "change-work-thread-access":
+      return command.strict === false || command.strict === null;
+    case "update-work-settings":
+      return command.defaultStrict === false;
     default:
       return false;
   }

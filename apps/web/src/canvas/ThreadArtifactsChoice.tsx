@@ -6,7 +6,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 
 /** What choosing Claude artifacts for one thread changes, said the same way everywhere. */
 export const THREAD_ARTIFACTS_WARNING =
-  "Claude artifacts turn on Claude Code’s usage telemetry to Anthropic for this thread’s turns. Error reports and conversation uploads stay off.";
+  "Claude artifacts need Claude Code’s usage telemetry to Anthropic. Outside Strict it follows your own Claude Code settings; under Strict, this thread’s turns run with it on, and error reports and conversation uploads stay off.";
 
 /**
  * Whether a thread on this provider account may choose the runtime's own

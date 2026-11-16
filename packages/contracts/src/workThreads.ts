@@ -115,6 +115,8 @@ export const WorkThread = Schema.Struct({
    * older journal replays as off.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict, the thread's own choice; same meaning as `CodeThread.strict`. */
+  strict: Schema.optional(Schema.Boolean),
   /**
    * This thread runs at Full access because the person passed the per-run
    * Full access flag to `octant agent` on this host; same meaning as
@@ -197,6 +199,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
    * clamps it off at every other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for this thread; absent follows its Project and Settings. */
+  strict: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
@@ -384,6 +388,11 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
    * `access: "full-access"`, and only from a window on this host.
    */
   fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
+   * Strict, chosen with the level at any level. Absent keeps the thread's
+   * current choice; null returns it to its Project's and Settings' default.
+   */
+  strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
 }).annotations(strict);
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 
@@ -422,6 +431,8 @@ export const WorkSettings = Schema.Struct({
   defaultAccess: WorkAccess,
   /** New Work threads at Full access keep the sandbox. Absent is off. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for Work threads whose thread and Project did not choose. Absent is off. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Settings › Work › Continue after restart: whether the host continues, by
    * itself, a Work turn a restart cut off. Absent is on, which is also what a
@@ -449,6 +460,8 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   defaultAccess: WorkAccess,
   /** Absent keeps the stored choice. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Absent keeps the stored choice. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /** Absent keeps the stored choice. */
   restartContinuation: Schema.optional(Schema.Boolean),
 })

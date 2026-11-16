@@ -20,7 +20,13 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
-import { acpSubagentsRun, type AcpProviderProfile, type AcpSessionMode } from "./acpProfiles";
+import {
+  HOST_PASSTHROUGH_VARIABLES,
+  acpSubagentsRun,
+  type AcpProviderProfile,
+  type AcpSessionMode,
+} from "./acpProfiles";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -77,6 +83,8 @@ export interface AcpConfinementInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /** Whether the launch is Strict; absent is Strict. */
+  readonly strict?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -129,6 +137,12 @@ export interface AcpProcessStartInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /**
+   * Whether the launch is Strict; absent is Strict. Off, the agent gets the
+   * host's environment less Octant's variables and other providers' keys, and
+   * its channel guards follow the person's own settings.
+   */
+  readonly strict?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -580,6 +594,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
+              // Outside Strict the agent's own tools may use the protected
+              // files inside its folders, other providers' sign-ins excepted.
+              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
               // On Linux the capsule reaches the tool bridges through the
               // forwarder's loopback relay; Seatbelt opens them above.
               ...(platform === "linux" &&
@@ -1036,21 +1053,35 @@ export function sanitizeAcpEnvironment(
     readonly mode?: AcpSessionMode;
     readonly apiKey?: string;
     readonly nativeSetup?: ProviderNativeSetup;
+    /** Absent is Strict: the profile's fixed passthrough list and every guard. */
+    readonly strict?: boolean;
   },
 ): NodeJS.ProcessEnv {
+  const strict = input.strict !== false;
   const released = releasedByNativeSetup(profile, input.nativeSetup, {
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.mode === undefined ? {} : { mode: input.mode }),
   }).guards;
+  const channels = new Set(strict ? [] : (profile.process.channelGuards ?? []));
   const guards = Object.fromEntries(
-    Object.entries(profile.process.guards).filter(([name]) => !released.has(name)),
-  );
-  const passthrough = new Set(profile.process.passthroughVariables);
-  const environment = Object.fromEntries(
-    Object.entries(inherited).filter(
-      ([key, value]) => value !== undefined && (passthrough.has(key) || key.startsWith("LC_")),
+    Object.entries(profile.process.guards).filter(
+      ([name]) => !released.has(name) && !channels.has(name),
     ),
   );
+  const passthrough = new Set(profile.process.passthroughVariables);
+  // Outside Strict the agent gets the host's environment as in the person's
+  // own shell, less Octant's variables and other providers' keys; a standard
+  // host variable the profile deliberately leaves out (Kimi's HOME) stays out.
+  const withheld = new Set(HOST_PASSTHROUGH_VARIABLES.filter((name) => !passthrough.has(name)));
+  const environment = strict
+    ? Object.fromEntries(
+        Object.entries(inherited).filter(
+          ([key, value]) => value !== undefined && (passthrough.has(key) || key.startsWith("LC_")),
+        ),
+      )
+    : Object.fromEntries(
+        Object.entries(providerHostEnvironment(inherited)).filter(([key]) => !withheld.has(key)),
+      );
   return {
     ...environment,
     ...profile.process.environment({
@@ -1286,6 +1317,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+          ...(input.strict === false ? { strict: false } : {}),
         });
         const wall = acpWallPolicy(input);
         const network =
@@ -1315,6 +1347,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),

@@ -438,6 +438,7 @@ describe("authorizeAgentRunCreation", () => {
         authorizeCreation: ({ threadId }) =>
           authorize({ workspace, work: thread, project: workProject(), parentThreadId: threadId }),
         externalContentIngested: () => true,
+        strict: () => true,
         runsAtFullAccess: (threadId) =>
           parentRunsAtFullAccess(
             {

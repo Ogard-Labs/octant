@@ -106,13 +106,14 @@ describe("a provider's own search under an EU only policy", () => {
     });
   });
 
-  it("still offers the harness its provider's own search, and still withholds it from a tainted thread below Full access", async () => {
+  it("still offers the harness its provider's own search, and under Strict still withholds it from a tainted thread below Full access", async () => {
     const service = await euOnly();
     const turn = {
       research: true,
       routing: "automatic" as const,
       origin: "anthropic-api" as const,
       webSearchReady: service.eligible().length > 0,
+      strict: true,
     };
     expect(decideHarnessProviderSearch({ ...turn, tainted: false, fullAccess: false })).toEqual({
       withdrawAfterFirstStep: true,

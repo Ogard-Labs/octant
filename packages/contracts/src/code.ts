@@ -483,6 +483,13 @@ export const CodeThread = Schema.Struct({
    * replays without it; the host drops it once the thread leaves Full access.
    */
   fullAccessRunFlag: Schema.optional(Schema.Literal(true)),
+  /**
+   * Strict, the thread's own choice. Absent follows its Project, else
+   * Settings, else off (`resolveStrict`); the host reads it at each launch
+   * and call, so a thread that never chose follows those as they are now.
+   * Strict restores the protections Octant adds beside the provider's own.
+   */
+  strict: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -576,6 +583,11 @@ export const CodeSettings = Schema.Struct({
    * unless the thread says otherwise. Absent is off: Full access stays open.
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Strict for Code threads whose thread and Project did not choose. Absent
+   * is off: the provider's own settings decide.
+   */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Whether an Android emulator Octant boots may load and save a quickboot
    * snapshot. Absent is off: every boot is cold, which is what a store
@@ -851,6 +863,8 @@ export const CodeCommand = Schema.Union(
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
+    defaultStrict: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
     androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
@@ -1002,6 +1016,11 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    /**
+     * Strict, chosen with the mode at any level. Absent keeps the thread's
+     * current choice; null returns it to its Project's and Settings' default.
+     */
+    strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
   }).annotations(strict),
   /**
    * The person moves the thread to another account (provider instance) of the

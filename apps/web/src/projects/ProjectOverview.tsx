@@ -96,6 +96,8 @@ export interface ProjectOverviewProps {
     permissionMode: PermissionMode | undefined,
     /** "keep" (the default) leaves the Project's sandbox choice as it is. */
     fullAccessSandbox?: boolean | "settings" | "keep",
+    /** "keep" (the default) leaves the Project's Strict choice as it is. */
+    strict?: boolean | "settings" | "keep",
   ) => Promise<boolean>;
   /** Sets who answers this Code Project's prompts at Auto; absent follows Settings. */
   readonly onAutoReviewerChange?: (
@@ -622,11 +624,12 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               >
                 <ProjectPermissionModeSection
                   disabled={archived || connectionStale}
-                  onChange={async (mode, fullAccessSandbox) =>
+                  onChange={async (mode, fullAccessSandbox, strict) =>
                     (await props.onPermissionModeChange?.(
                       props.project.id,
                       mode,
                       fullAccessSandbox ?? "keep",
+                      strict ?? "keep",
                     )) ?? false
                   }
                   project={props.project}

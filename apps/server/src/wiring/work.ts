@@ -269,6 +269,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "resolveThreadStrict"
     | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
@@ -278,6 +279,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
+    resolveThreadStrict,
     conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
@@ -583,8 +585,11 @@ export function wireWork(deps: WorkDependencies) {
       stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
         outlivingSessions: outlivingWorkSessions,
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -616,6 +621,7 @@ export function wireWork(deps: WorkDependencies) {
       },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: resolveThreadStrict,
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,

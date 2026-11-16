@@ -85,6 +85,16 @@ export type ProjectActionPlacementRequest = Extract<
 >;
 
 export interface ProjectTerminalServiceOptions {
+  /**
+   * Whether Strict is on for the terminal: the task's, for a terminal opened
+   * for a Work task, else the Project's. Outside Strict the person's own
+   * terminal runs unconfined, as their shell does outside Octant; under
+   * Strict Octant's sandbox holds it. Absent reads as Strict.
+   */
+  readonly strict?: (input: {
+    readonly projectId: ProjectId;
+    readonly workThreadId?: string | undefined;
+  }) => boolean;
   readonly placeServerAction?: (
     windowId: WindowId,
     command: ProjectActionPlacementRequest,
@@ -719,10 +729,19 @@ export class ProjectTerminalService {
     if (folder === undefined) {
       return refused("unavailable", "That folder is not one of this Project's folders.");
     }
-    // A Work Project's terminal is confined as a Code Project's is when the
-    // Project remembers no Full access; Work Projects remember none.
-    const posture: ProjectTerminalPosture =
-      workThread !== undefined
+    // Outside Strict the person's own terminal runs unconfined, a Work
+    // Project's included, as their shell does outside Octant (Architecture:
+    // "Octant adds no restrictions of its own unless Strict is on"). Under
+    // Strict a Work Project's terminal is confined as a Code Project's is when
+    // the Project remembers no Full access; Work Projects remember none.
+    const strict =
+      this.#options.strict?.({
+        projectId: command.projectId,
+        ...(command.workThreadId === undefined ? {} : { workThreadId: command.workThreadId }),
+      }) ?? true;
+    const posture: ProjectTerminalPosture = !strict
+      ? "full-access"
+      : workThread !== undefined
         ? workThread.executionPolicy === "full-access"
           ? "full-access"
           : "approval-gated"
@@ -730,6 +749,14 @@ export class ProjectTerminalService {
             authority.project.codeAccessPersistence === "project-default"
           ? "full-access"
           : "approval-gated";
+    // Plan stays read-only whatever Strict says: nothing plans in a terminal,
+    // but one opened on a Plan checkout must not write it.
+    const launchPolicy =
+      workThread?.executionPolicy === "plan"
+        ? "plan"
+        : strict
+          ? (workThread?.executionPolicy ?? posture)
+          : "full-access";
     // A Project action is written for a POSIX shell (`cd '…' && { … }`), which
     // a Windows terminal never opens; refused before it is journaled.
     if (action !== undefined && process.platform === "win32")
@@ -794,7 +821,7 @@ export class ProjectTerminalService {
         columns: command.columns,
         rows: command.rows,
         credentialReferences: [],
-        executionPolicy: workThread?.executionPolicy ?? posture,
+        executionPolicy: launchPolicy,
       });
     } catch (error) {
       if (action !== undefined)

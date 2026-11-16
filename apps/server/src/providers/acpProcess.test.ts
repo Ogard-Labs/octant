@@ -215,6 +215,38 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      {
+        PATH: "/usr/bin",
+        HOME: "/Users/test",
+        HTTPS_PROXY: "http://proxy.invalid",
+        GH_TOKEN: "gh-token",
+        MISTRAL_API_KEY: "must-not-cross",
+        ANTHROPIC_API_KEY: "must-not-cross",
+        OCTANT_SECRET: "must-not-cross",
+      },
+      { managedHome: "/private/tmp/octant-acp-home", strict: false },
+    );
+    const channels = new Set(profile.process.channelGuards ?? []);
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin",
+      HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      ...Object.fromEntries(
+        Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
+      ),
+    });
+    for (const name of channels) {
+      expect(environment[name]).toBeUndefined();
+    }
+    if (!profile.process.passthroughVariables.includes("HOME")) {
+      expect(environment.HOME).not.toBe("/Users/test");
+    }
+    expect(JSON.stringify(environment)).not.toContain("must-not-cross");
+  });
+
   it("forces feature denial and strips inherited credentials and executable authority", () => {
     const environment = sanitizeAcpEnvironment(
       profile,

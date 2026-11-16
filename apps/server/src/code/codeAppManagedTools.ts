@@ -490,9 +490,10 @@ export interface CodeAppManagedToolsOptions {
    */
   readonly projectAllowsComments?: () => boolean;
   /**
-   * Whether this thread has read outside content. A marked thread asks before
-   * each post below Full access whatever the Project chose. Absent reads as
-   * marked, so a host that cannot tell asks.
+   * Whether this thread has read outside content under Strict. Such a thread
+   * asks before each post below Full access whatever the Project chose;
+   * outside Strict the mark adds no ask. Absent reads as marked, so a host
+   * that cannot tell asks.
    */
   readonly threadReadOutsideContent?: () => boolean;
   /**
