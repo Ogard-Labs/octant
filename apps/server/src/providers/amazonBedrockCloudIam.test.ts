@@ -530,6 +530,49 @@ describe("Amazon Bedrock with cloud single sign-on, end to end", () => {
     await expect(scene.credentials.resolve(String(instanceId))).resolves.toBeDefined();
   });
 
+  it("connects long-lived keys at a window on this host, keeping them in the broker alone, and refuses any other principal before the broker", async () => {
+    const scene = await host();
+    const keys = {
+      accessKeyId: "AKIAEXAMPLEKEY000001",
+      secretAccessKey: "wJalrXUtnFEMIexampleSECRETkey0000000000",
+    };
+    const connect = (principal: "local-window" | "remote-device" | "person-paired-device") =>
+      answerCloudIamSettingsCommand({
+        dependencies: scene.cloudIam,
+        instanceId,
+        kind: "connect-access-keys",
+        principal,
+        actorId: String(windowId),
+        accessKeys: keys,
+      });
+    for (const principal of ["remote-device", "person-paired-device"] as const) {
+      expect(await connect(principal)).toEqual({ kind: "refused", reason: "local-host-required" });
+    }
+    expect(scene.answers).toHaveLength(0);
+
+    scene.terms.acknowledgeTerms({
+      principalKind: "local-window",
+      actorId: String(windowId),
+      descriptor: {
+        descriptorId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.descriptorId,
+        termsId: AMAZON_BEDROCK_CLOUD_IAM_SIGN_IN.termsId,
+      } as never,
+    });
+    expect(await connect("local-window")).toMatchObject({ kind: "signed-in" });
+    const pointer = await scene.credentials.resolve(String(instanceId));
+    expect(pointer).not.toContain(keys.secretAccessKey);
+    expect(JSON.stringify(scene.journal)).not.toContain(keys.secretAccessKey);
+    expect(scene.journal.at(-1)).toMatchObject({ name: "host-oauth.sign-in-completed" });
+    expect(
+      await answerCloudIamSettingsCommand({
+        dependencies: scene.cloudIam,
+        instanceId,
+        kind: "status",
+        principal: "local-window",
+      }),
+    ).toMatchObject({ kind: "signed-in" });
+  });
+
   it("never begins a cloud sign-in from Settings' route", async () => {
     const scene = await host();
     for (const descriptorId of ["amazon-bedrock-cloud-iam", "azure-foundry-directory"]) {
