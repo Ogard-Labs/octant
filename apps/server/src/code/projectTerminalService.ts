@@ -270,7 +270,7 @@ export class ProjectTerminalService {
   async #sweepDeviceTerminals(): Promise<void> {
     const now = this.#options.nowMs?.() ?? Date.now();
     const quiet = this.#options.deviceQuietMs ?? DEVICE_QUIET_MS;
-    for (const owner of [...this.#owners.values()]) {
+    for (const owner of this.#owners.values()) {
       if (owner.device === undefined || owner.ended) continue;
       if (this.#options.personPairedDevice?.(owner.windowId) !== true)
         await this.#end(owner.terminalId, owner, "authority-revoked").catch(() => undefined);
