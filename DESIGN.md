@@ -197,7 +197,12 @@ pattern or border style.
 **Mono and custom themes.** Settings › Appearance › Style chooses Colour (the
 default) or Mono; the root carries `data-octant-style`. Mono swaps in the ink
 accent (`#f5f5f7` / `#141414`), the text on it, the neutral warning trio
-(`MONO_STYLE_TOKENS`), grey tiles and marks. Increased contrast always draws
+(`MONO_STYLE_TOKENS`), grey tiles and marks. A provider's logo follows the
+style: under Colour it draws in its provider's own colour wherever it stands
+(a thread row, the model picker, a subagent row, Settings), from one table in
+the theme package (`PROVIDER_GLYPH_COLOR_FALLBACKS`); a provider whose own mark
+is black or white has no entry and draws in the text ink, and under Mono every
+logo is an ink mark (maintainer request, 2026-11-16). Increased contrast always draws
 Mono. Bundled presets lean every role toward one hue and carry their accent; a
 custom theme overrides only validated roles, and an incomplete or low-contrast
 import falls back. Every derived surface and wash above is computed from the

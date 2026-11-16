@@ -5342,6 +5342,13 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   vertical-align: middle;
 }
 
+/* Under the Mono style a provider's logo is an ink mark like every other
+   glyph: it takes the colour of the text beside it. Increased contrast draws
+   the Mono style too, so it loses the colours with it. */
+:root[data-octant-style="mono"] .provider-glyph:not(.provider-glyph--monogram) {
+  color: inherit;
+}
+
 .provider-glyph--brand {
   background-color: currentColor;
   mask-position: center;
