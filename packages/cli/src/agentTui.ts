@@ -706,6 +706,7 @@ class AgentScreen {
       if (child !== this.#panel) child.destroyRecursively();
     }
     await this.refresh();
+    if (!this.#destroyed) this.#transcript.scrollTo(this.#transcript.scrollHeight);
   }
 
   /**
@@ -1287,13 +1288,22 @@ class AgentScreen {
   ): void {
     const { TextRenderable, t, fg, dim } = this.#tui;
     const p = this.#palette;
+    if (!this.#verbose && total > 0) {
+      const failed = tools.filter((tool) => tool.status !== "ok").length;
+      into.add(
+        new TextRenderable(this.#renderer, {
+          content: t`${fg(failed > 0 ? p.warning : p.textSecondary)(`${spinner ?? "+"} ${total} actions${failed === 0 ? "" : ` · ${failed} failed/refused`} · Ctrl+E expands`)}`,
+        }),
+      );
+      return;
+    }
     const shown = this.#verbose ? tools : tools.slice(-SHOWN_TOOL_LINES);
     const folded = total - shown.length;
     const width = Math.max(4, ...shown.map((tool) => tool.name.length));
     if (folded > 0) {
       into.add(
         new TextRenderable(this.#renderer, {
-          content: t`${dim(fg(p.muted)("├"))} ${fg(p.success)("✓")} ${dim(fg(p.muted)(`+${folded} completed`))}`,
+          content: t`${dim(fg(p.muted)("├"))} ${fg(p.success)("✓")} ${dim(fg(p.muted)(`+${folded} earlier actions`))}`,
         }),
       );
     }
