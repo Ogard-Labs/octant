@@ -32,6 +32,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { McpPlanReadOnlySection } from "./McpPlanReadOnlySection";
 
 export interface ProviderToolingAccount {
   readonly id: string;
@@ -42,7 +43,10 @@ export interface ProviderToolingAccount {
 }
 
 export interface ProviderToolingPanelProps {
-  readonly client: Pick<ProviderToolingClient, "list" | "plan" | "apply" | "cancel">;
+  readonly client: Pick<
+    ProviderToolingClient,
+    "list" | "plan" | "apply" | "cancel" | "planReadOnly" | "setPlanReadOnly"
+  >;
   /** The Claude Code and Codex accounts on this host. */
   readonly accounts: ReadonlyArray<ProviderToolingAccount>;
   /** Whether this is the Octant window on the host; a paired device can only read this page. */
@@ -196,14 +200,17 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
 
   if (!props.localHost) {
     return (
-      <SettingsSection
-        description="Adding tools to Claude Code and Codex changes the files those programs keep on this computer, so it is done from the Octant window on this computer."
-        title="Claude and Codex"
-      >
-        <SettingsState kind="empty">
-          Open Octant on this computer to add or remove tools for Claude Code and Codex.
-        </SettingsState>
-      </SettingsSection>
+      <>
+        <SettingsSection
+          description="Adding tools to Claude Code and Codex changes the files those programs keep on this computer, so it is done from the Octant window on this computer."
+          title="Claude and Codex"
+        >
+          <SettingsState kind="empty">
+            Open Octant on this computer to add or remove tools for Claude Code and Codex.
+          </SettingsState>
+        </SettingsSection>
+        <McpPlanReadOnlySection client={client} />
+      </>
     );
   }
   if (props.accounts.length === 0 || account === undefined) {
@@ -284,6 +291,14 @@ export function ProviderToolingPanel(props: ProviderToolingPanelProps) {
         onRefresh={() => void refresh()}
         onRemove={(request) => void plan(request)}
         product={product}
+      />
+
+      <McpPlanReadOnlySection
+        client={client}
+        listed={{
+          provider: account.driverKind,
+          names: (sectionOf("mcp-servers")?.entries ?? []).map((entry) => entry.name),
+        }}
       />
 
       <SettingsSection

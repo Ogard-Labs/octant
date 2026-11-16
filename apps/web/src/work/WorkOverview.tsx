@@ -1,4 +1,5 @@
 import { OctantEmpty } from "../ui/base/OctantEmpty";
+import { attachAllowingFiles } from "../composer/attachmentMediaType";
 import {
   NewTaskDraftsContext,
   NewTaskDraftScopeContext,
@@ -294,15 +295,17 @@ export function WorkOverview(props: WorkOverviewProps) {
             value={draft}
           />
           <ComposerAttachButton
-            accept="image/png,image/jpeg,image/webp,image/gif"
             busy={!createAvailable || submitting}
-            refusedReason={
-              imageSupport === false
-                ? "The selected model does not accept images. Choose an image-capable model."
-                : undefined
-            }
             onRefused={images.refuse}
-            onFileSelected={(file) => images.attach([file])}
+            onFileSelected={(file) =>
+              attachAllowingFiles(
+                [file],
+                imageSupport,
+                images.attach,
+                images.refuse,
+                "The selected model does not accept images. Choose an image-capable model.",
+              )
+            }
           />
           <OctantButton
             className="project-button"

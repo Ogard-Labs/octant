@@ -1,4 +1,5 @@
 import {
+  ATTACHMENT_MEDIA_TYPE_PATTERN,
   CHAT_ATTACHMENT_MEDIA_TYPES,
   ChatAttachment,
   CODE_ATTACHMENT_MEDIA_TYPES,
@@ -59,12 +60,15 @@ export function mobileAttachmentOffer(
     modalities.includes(attachmentModality(mediaType)),
   );
   const images = mediaTypes.some((mediaType) => mediaType.startsWith("image/"));
+  // Work and Code take a file of any type: the agent opens one its model
+  // cannot read natively by path, so the file picker offers every file.
+  const anyFile = mode !== "chat" && model !== undefined;
   return {
     sources: [
       ...(images ? (["camera", "library"] as const) : []),
-      ...(mediaTypes.length > 0 ? (["file"] as const) : []),
+      ...(mediaTypes.length > 0 || anyFile ? (["file"] as const) : []),
     ],
-    mediaTypes,
+    mediaTypes: anyFile ? ["*/*"] : mediaTypes,
   };
 }
 
@@ -85,7 +89,11 @@ export function refuseUnsendableAttachment(
   mode: MobileAttachmentMode,
   upload: Pick<MobileAttachmentUpload, "mediaType" | "bytes">,
 ): void {
-  if (!MODE_MEDIA_TYPES[mode].includes(upload.mediaType)) {
+  const taken =
+    mode === "chat"
+      ? MODE_MEDIA_TYPES[mode].includes(upload.mediaType)
+      : ATTACHMENT_MEDIA_TYPE_PATTERN.test(upload.mediaType);
+  if (!taken) {
     throw new MobileInboxFailure("rejected", "This thread cannot take that kind of file.");
   }
   if (upload.bytes.byteLength === 0) {

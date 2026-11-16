@@ -37,7 +37,9 @@ import {
   type ProviderRuntimeEvent,
   type UtcTimestamp,
   decodeProjectId,
+  decodeUtcTimestamp,
 } from "@octant/contracts";
+import type { McpPlanServerProvider } from "@octant/contracts/mcp-plan-read-only";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type {
   HarnessEndpointDriver,
@@ -165,6 +167,8 @@ import {
 } from "../providers/providerUsageHistorySources";
 import { createExtensionRouteHandler } from "../extensionRoutes";
 import { createProviderToolingRouteHandler } from "../providerToolingRoutes";
+import { createMcpPlanReadOnlyRouteHandler } from "../mcpPlanReadOnlyRoutes";
+import { McpPlanReadOnlyService } from "../providers/mcpPlanReadOnlyService";
 import { ProviderToolingService } from "../providers/providerToolingService";
 import { runProviderToolingProcess } from "../providers/providerToolingRunner";
 import { makeProviderToolingJournalRecorder } from "../providers/providerToolingJournal";
@@ -273,6 +277,8 @@ export interface ConfiguredProviderDriverOptions {
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   /** The host's protected files and folders in force, as absolute paths at each level. */
   readonly protectedPaths?: () => OpenCodeProtectedPaths;
+  /** The provider's own MCP servers the person let into Plan, read at each launch. */
+  readonly planMcpServers?: (provider: McpPlanServerProvider) => ReadonlyArray<string>;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -437,6 +443,7 @@ export function makeConfiguredProviderDriver(
         ? {}
         : { isProjectConfinedPath: options.isProjectConfinedPath }),
       ...(options.protectedPaths === undefined ? {} : { protectedPaths: options.protectedPaths }),
+      ...(options.planMcpServers === undefined ? {} : { planMcpServers: options.planMcpServers }),
       ...(options.claudeInstances === undefined
         ? {}
         : { claudeInstances: options.claudeInstances }),
@@ -697,6 +704,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       { readonly instanceId: string; readonly version: number; readonly driver: ProviderDriver }
     >();
     const providerDataDirectory = persistence.dataDirectory;
+    // The provider MCP servers the person let into Plan. Hydrated before any
+    // driver is built, so the first Plan launch already carries the marks.
+    const mcpPlanReadOnly = new McpPlanReadOnlyService({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => decodeUtcTimestamp(new Date().toISOString()),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const planMcpServers = (provider: McpPlanServerProvider) =>
+      mcpPlanReadOnly.serversFor(provider);
     // What each provider-owned session already holds outlives this process, as
     // the runtime's own history does, so a resumed session's first turn after
     // a restart is sent only what is new.
@@ -1287,7 +1304,14 @@ export function wireProviders(deps: ProvidersDependencies) {
     // client needs waits in the broker's namespace for MCP servers until the
     // person confirms the command, then goes to the command through its
     // environment.
-    const providerToolingRoutes = createProviderToolingRouteHandler({
+    // Marking a provider's MCP server for Plan is answered beside the tooling
+    // that adds and removes those servers, under its own authority rule: a
+    // paired device may mark one, where only a window may run a command.
+    const mcpPlanReadOnlyRoutes = createMcpPlanReadOnlyRouteHandler({
+      service: mcpPlanReadOnly,
+      windowAuthorityStore,
+    });
+    const providerToolingCommandRoutes = createProviderToolingRouteHandler({
       windowAuthorityStore,
       service: new ProviderToolingService({
         readInstance: (instanceId) => persistence.readProviderInstance(instanceId),
@@ -1311,6 +1335,8 @@ export function wireProviders(deps: ProvidersDependencies) {
         }),
       }),
     });
+    const providerToolingRoutes = async (request: Request): Promise<Response | undefined> =>
+      (await mcpPlanReadOnlyRoutes(request)) ?? (await providerToolingCommandRoutes(request));
     const extensionRoutes = createExtensionRouteHandler({
       service: extensionApiService,
       windowAuthorityStore,
@@ -1892,6 +1918,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             claudeAuthorityNow: processAuthorityTime,
             isProjectConfinedPath,
             protectedPaths: hostProtectedPaths,
+            planMcpServers,
             get claudeInstances() {
               return persistence.readProviderInstances();
             },
@@ -2156,6 +2183,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       claudeAuthorityNow: processAuthorityTime,
       isProjectConfinedPath,
       protectedPaths: hostProtectedPaths,
+      planMcpServers,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       onRuntimeEvent: recordProviderRuntimeUsage,

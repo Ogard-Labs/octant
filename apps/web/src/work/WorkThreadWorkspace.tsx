@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -2037,7 +2038,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             threadId: props.threadId,
             attachmentId,
             displayName: file.name.trim() === "" ? "Pasted image" : file.name,
-            mediaType: decodeWorkAttachmentMediaType(file.type),
+            mediaType: decodeWorkAttachmentMediaType(attachmentMediaType(file)),
             bytes: new Uint8Array(await file.arrayBuffer()),
           });
           attachmentIds.push(attachmentId);
@@ -2283,10 +2284,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     hostId: props.hostId,
     refused: serverWorkProject !== undefined || creating || completionLocked,
-    onFiles: (files) => {
-      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
-      else images.attach(files);
-    },
+    onFiles: (files) =>
+      void attachAllowingFiles(
+        files,
+        imageSupport,
+        images.attach,
+        images.refuse,
+        "Choose an image-capable model to attach images.",
+      ),
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
@@ -3289,17 +3294,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             attach:
               props.turnClient === undefined && taskActions.length === 0 ? undefined : (
                 <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={creating || completionLocked}
                   refusedReason={
                     props.turnClient === undefined
                       ? "Attachments need a connected host."
-                      : imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
+                      : undefined
                   }
                   onRefused={images.refuse}
-                  onFileSelected={(file) => images.attach([file])}
+                  onFileSelected={(file) =>
+                    attachAllowingFiles(
+                      [file],
+                      imageSupport,
+                      images.attach,
+                      images.refuse,
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    )
+                  }
                   threadActions={taskActions}
                 />
               ),

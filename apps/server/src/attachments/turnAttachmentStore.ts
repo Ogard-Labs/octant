@@ -241,6 +241,26 @@ export class TurnAttachmentStore<
     });
   }
 
+  /**
+   * The thread's attachments folder, which a provider session may read, made
+   * if missing; undefined when it cannot be made.
+   */
+  threadFolder(threadId: ThreadId): string | undefined {
+    return this.#store.scopeFolder(String(threadId));
+  }
+
+  /** A path that opens one sent attachment under its own name, after its bytes are verified. */
+  readablePath(threadId: ThreadId, reference: Reference): Promise<string> {
+    return this.#store.readablePath({
+      scopeId: String(threadId),
+      attachmentId: String(reference.attachmentId),
+      displayName: reference.displayName,
+      size: reference.byteLength,
+      hash: reference.digest,
+      finalizedAt: new Date(0).toISOString(),
+    });
+  }
+
   async discard(threadId: ThreadId, attachmentId: AttachmentId): Promise<void> {
     if (this.isQueued(threadId, attachmentId)) {
       throw this.#invalid("Attachment belongs to a queued message.");
