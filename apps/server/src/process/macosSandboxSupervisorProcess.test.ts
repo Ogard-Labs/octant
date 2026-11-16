@@ -36,6 +36,7 @@ describe.skipIf(process.platform !== "darwin")("native sandbox scope supervisor"
         "/usr/bin/xcrun",
         [
           "clang",
+          "-DOCTANT_SCOPE_TRACE",
           "-O2",
           "-Wall",
           "-Wextra",
@@ -228,15 +229,25 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
         ],
         { encoding: "utf8", timeout: 15000 },
       );
-      expect(terminal.status, terminal.stderr).toBe(0);
+      expect(
+        terminal.status,
+        JSON.stringify({
+          stdout: terminal.stdout,
+          stderr: terminal.stderr,
+          signal: terminal.signal,
+          error: terminal.error?.message,
+        }),
+      ).toBe(0);
       expect(terminal.stdout).toContain("terminal-ready");
     } finally {
       child?.kill("SIGKILL");
       if (existsSync(executable)) {
-        try {
-          execFileSync(executable, ["--reap", root, epoch], { timeout: 10000 });
-        } catch {
-          /* Preserve test failure; native payload has a finite lifetime. */
+        for (const ownedEpoch of [epoch, "host-death:epoch", "terminal:epoch", "loader:epoch"]) {
+          try {
+            execFileSync(executable, ["--reap", root, ownedEpoch], { timeout: 10000 });
+          } catch {
+            /* Preserve test failure; native payload has a finite lifetime. */
+          }
         }
       }
       rmSync(root, { recursive: true, force: true });

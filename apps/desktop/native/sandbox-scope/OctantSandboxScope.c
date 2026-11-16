@@ -27,6 +27,11 @@
 #include <unistd.h>
 
 extern char **environ;
+#ifdef OCTANT_SCOPE_TRACE
+#define TRACE(message) dprintf(2, "octant-sandbox-scope: %s\n", message)
+#else
+#define TRACE(message) ((void)0)
+#endif
 #define MAX_VECTOR 16384u
 #define MAX_WIRE (8u * 1024u * 1024u)
 #define RECEIPT_MAGIC UINT64_C(0x4f435453434f5031)
@@ -213,12 +218,15 @@ static int serve(const char *path) {
   if (child < 0) return 125;
   if (!child) {
     for (int i = 0; i < 3; ++i) if (dup2(stdio[i], i) < 0) _exit(125);
+    TRACE("payload descriptors");
     if (isatty(0)) {
+      TRACE("payload terminal");
       if (setsid() < 0 || ioctl(0, TIOCSCTTY, 0) < 0) _exit(125);
       signal(SIGTTOU, SIG_IGN);
       if (tcsetpgrp(0, getpgrp())) _exit(125);
       signal(SIGTTOU, SIG_DFL);
     }
+    TRACE("payload execute");
     int maximum_fd = getdtablesize();
     if (maximum_fd < 3) _exit(125);
     for (int fd = 3; fd < maximum_fd; ++fd) close(fd);
@@ -315,11 +323,13 @@ static int run(const char *root, const char *epoch, char **args) {
   fputs("</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><false/></dict></plist>", file);
   fclose(file);
   char *bootstrap[] = {"launchctl", "bootstrap", domain, plist, NULL};
+  TRACE("bootstrap");
   int registered = launchctl(bootstrap) == 0, result = 125, control_fd = -1, receipt_written = 0;
   struct receipt record = {0};
   if (!registered) goto cleanup;
   struct pollfd wait = {listener, POLLIN, 0};
   if (poll(&wait, 1, 10000) <= 0) goto cleanup;
+  TRACE("accept");
   control_fd = accept(listener, NULL, NULL);
   pid_t service_pid;
   if (control_fd < 0 || peer_pid(control_fd, &service_pid)) goto cleanup;
@@ -342,15 +352,18 @@ static int run(const char *root, const char *epoch, char **args) {
     goto cleanup;
   }
   receipt_written = 1;
+  TRACE("receipt ready");
   if (isatty(0) && tcgetsid(0) == getsid(0)) {
     signal(SIGHUP, SIG_IGN);
     if (ioctl(0, TIOCNOTTY, 0) < 0) goto cleanup;
   }
+  TRACE("terminal detached");
   int stdio[] = {0,1,2};
   char cwd[PATH_MAX];
   if (!getcwd(cwd, sizeof(cwd))) goto cleanup;
   char *cwd_vector[] = {cwd, NULL};
   if (transfer_fds(control_fd, 0, stdio) || send_vector(control_fd, cwd_vector) || send_vector(control_fd, args) || send_vector(control_fd, environ)) goto cleanup;
+  TRACE("workload released");
   for (;;) {
     if (getppid() != record.owner) goto cleanup;
     struct pollfd wait = {control_fd, POLLIN | POLLHUP, 0};
@@ -363,6 +376,7 @@ static int run(const char *root, const char *epoch, char **args) {
     }
   }
 cleanup:
+  TRACE("cleanup");
   if (control_fd >= 0) close(control_fd);
   int revoked = !record.coalition || !revoke_scope(record.coalition, 0);
   if (!revoked) result = 125;
