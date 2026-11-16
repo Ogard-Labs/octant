@@ -5878,16 +5878,89 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .browser-workspace--feedback > .browser-workspace__native,
 .browser-workspace--feedback > .browser-workspace__remote,
+.browser-workspace--feedback > .browser-workspace__markup-page,
 .browser-workspace--feedback > .browser-workspace__start {
   flex: 1 1 0;
   min-height: 0;
 }
 
-.product-feedback__header {
-  display: flex;
+/* The page's tools: one band under the page with the toolbar centred in it.
+   The band has one height whatever is armed, said or counted, so a live page
+   (a window-level view placed by its rectangle) never resizes for a tool. What
+   the armed tool waits for reads at its left and the notes' count at its
+   right; both give way to the toolbar in a narrow pane. */
+.browser-annotate {
+  display: grid;
+  height: 44px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--oct-space-2);
+  padding: 0 var(--oct-space-3);
+  box-sizing: border-box;
+  border-top: 1px solid var(--octant-pane-line, var(--octant-border-subtle));
+}
+
+.browser-annotate__status {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-annotate__notes {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+/* One toolbar, a pill a step off the pane with round tools in it, the way the
+   composer's box holds its round buttons. Flat: a wash of the ink, no edge and
+   no shadow, since it stands in the band and not over the page. */
+.browser-annotate__pill {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--oct-space-1);
+  background: var(--oct-fill-4);
+  border-radius: var(--oct-radius-pill);
+}
+
+.browser-annotate__tool {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  padding: 0;
+  place-items: center;
+  color: var(--oct-fg-2);
+  border-radius: 50%;
+}
+
+.browser-annotate__tool:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: var(--octant-control-hover);
+}
+
+.browser-annotate__tool[aria-pressed="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fill-2);
+}
+
+.browser-annotate__tool:disabled {
+  opacity: 0.4;
+}
+
+.browser-annotate__rule {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  margin: 0 var(--oct-space-1);
+  background: var(--octant-pane-line, var(--octant-border-subtle));
 }
 
 .product-feedback__composer {

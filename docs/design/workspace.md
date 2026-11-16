@@ -3110,6 +3110,30 @@ stands on the bar's 12px lead inset and its last button ends 8px from the edge,
 as the bar's does, with 4px between controls. With no page open the row is the history buttons, the
 empty field and the profile icon.
 
+**Page tools.** Under a page the Browser pane ends in one band, 44px high, with
+one toolbar centred in it ("Page tools"): a pill, a wash of the ink with no
+edge and no shadow, holding round 28px icon buttons with a 16px glyph and the
+platform's own tooltip. In order: **Pick element** and **Point at something**
+(the two ways of pointing at an element: for the message, or to leave a note),
+a hairline, **Draw on page**, **Box on page** and **Text on page** (each opens
+the drawing on that tool), a hairline, **Refresh notes**, a hairline, and
+**Cancel**, which ends whatever is armed (pointing, picking, or the open
+drawing, where it reads **Discard the drawing**) and is disabled while nothing
+is. Each stands for something the Browser could already do, and a tool the
+page, the thread or this build cannot offer is not drawn; with none the band is
+absent. An armed tool is pressed (`aria-pressed`) and a tool that must wait
+says why in its tooltip. The band has one height whatever is armed, said or
+counted: what the armed tool waits for, or what the host last said about a
+note, reads as one muted line at its left, and the count of notes ("2 notes",
+whose tooltip says they go with the next message) at its right opens and closes
+their list. A live page is a window-level view placed by its rectangle, and
+nothing can be drawn over it, so the toolbar stands under the page and never
+floats on it, and arming a tool resizes nothing. The note being written, and
+the list of notes when it is open, stand between the page and the band at
+their own height (at most 45% of the pane, 420px, scrolling past it) and keep
+the height they had for as long as pointing is armed. Pick element and Draw on
+page stay in More Browser actions as well.
+
 ### Board
 
 The Board is an operational reading surface with four fixed,

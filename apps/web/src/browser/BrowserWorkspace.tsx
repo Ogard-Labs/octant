@@ -53,9 +53,13 @@ import {
   LoaderCircle,
   LockKeyhole,
   LogOut,
+  MessageSquarePlus,
   MousePointerClick,
   PanelRight,
   PenLine,
+  RefreshCcw,
+  Square,
+  Type,
   RotateCw,
   ShieldCheck,
   Undo2,
@@ -69,6 +73,8 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantInput } from "../ui/base/OctantInput";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
+import { BrowserAnnotateBar, type AnnotateTool } from "./BrowserAnnotateBar";
+import type { MarkupTool } from "./BrowserMarkupBar";
 import { useProductFeedback, type ProductFeedback } from "./useProductFeedback";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import type { BrowserElementSnapshot } from "@octant/contracts/product-feedback";
@@ -220,6 +226,10 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   // The person's own kept capture while it is being drawn on; its marks live in
   // the stage and are dropped with it.
   const [markupPicture, setMarkupPicture] = useState<string>();
+  // The drawing tool the person chose in the page's toolbar, and whether the
+  // list of notes is open above it.
+  const [markupTool, setMarkupTool] = useState<MarkupTool>("pen");
+  const [notesOpen, setNotesOpen] = useState(false);
   // Each Draw on page press holds a number; leaving the page, changing context,
   // or unmounting moves it on, so a still that arrives late is not opened over a
   // page the person has already left.
@@ -900,7 +910,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
    * credential-field refusal, the journal record and the origin's taint all
    * apply as they do for any capture.
    */
-  async function startMarkup(): Promise<void> {
+  async function startMarkup(tool: MarkupTool = "pen"): Promise<void> {
+    setMarkupTool(tool);
     const readCapture = props.client.readCapture;
     const threadId = props.tab.threadId;
     if (readCapture === undefined || threadId === undefined) return;
@@ -1269,6 +1280,123 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       feedback.preview !== undefined ||
       feedback.pending.length > 0);
   const feedbackNotice = feedbackPointing.message ?? feedback.message;
+  // The page's annotation tools, in one toolbar under the page. Each stands
+  // for something the Browser could already do; a tool the page, the thread or
+  // this build cannot offer is not drawn.
+  const canAnnotate =
+    activeContext && props.canDrawOnPage === true && props.tab.threadId !== undefined;
+  const canDraw =
+    canAnnotate && props.client.takeCapture !== undefined && props.client.readCapture !== undefined;
+  const drawing = markupPicture !== undefined;
+  const drawHint = pointingAny
+    ? "Finish or cancel pointing at an element first"
+    : drawing
+      ? "A drawing is already open"
+      : "On a screenshot kept with this thread";
+  const drawTool = (id: MarkupTool, label: string, icon: AnnotateTool["icon"]): AnnotateTool => ({
+    id: `draw-${id}`,
+    label,
+    hint: drawHint,
+    icon,
+    disabled: capturing || drawing || pointingAny,
+    onPress: () => void startMarkup(id),
+    group: "draw",
+  });
+  const annotateTools: ReadonlyArray<AnnotateTool> = [
+    ...(canAnnotate && feedback.available
+      ? [
+          {
+            id: "pick",
+            label: elementPicking.pointing ? "Stop picking" : "Pick element",
+            hint: elementPicking.pointing
+              ? "Click an element on the page, or press Escape to stop"
+              : (feedbackSelectionUnavailable ??
+                (feedbackPointing.pointing
+                  ? "Finish or cancel pointing at an element first"
+                  : "Adds the element's selector, markup and style to the message")),
+            icon: <MousePointerClick aria-hidden="true" size={16} />,
+            pressed: elementPicking.pointing,
+            disabled:
+              !elementPicking.pointing &&
+              (feedbackSelectionUnavailable !== undefined || feedbackPointing.pointing),
+            onPress: () => {
+              setCaptureNotice(undefined);
+              elementPicking.toggle();
+            },
+            group: "point",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+    ...(showFeedback
+      ? [
+          {
+            id: "note",
+            label: feedbackPointing.pointing
+              ? "Cancel pointing"
+              : feedback.preview === undefined
+                ? "Point at something"
+                : "Choose another element",
+            hint: feedbackPointing.pointing
+              ? "Click the thing you mean. Pointing will not click it or send a message"
+              : elementPicking.pointing
+                ? "Finish or stop picking an element first"
+                : (feedbackSelectionUnavailable ?? "Leaves a note on it for your next message"),
+            icon: <MessageSquarePlus aria-hidden="true" size={16} />,
+            pressed: feedbackPointing.pointing,
+            disabled:
+              feedback.busy ||
+              (!feedbackPointing.pointing &&
+                (feedbackSelectionUnavailable !== undefined || elementPicking.pointing)),
+            onPress: feedbackPointing.toggle,
+            group: "point",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+    ...(canDraw
+      ? [
+          drawTool("pen", "Draw on page", <PenLine aria-hidden="true" size={16} />),
+          drawTool("box", "Box on page", <Square aria-hidden="true" size={16} />),
+          drawTool("text", "Text on page", <Type aria-hidden="true" size={16} />),
+        ]
+      : []),
+    ...(showFeedback
+      ? [
+          {
+            id: "refresh",
+            label: "Refresh notes",
+            icon: <RefreshCcw aria-hidden="true" size={16} />,
+            disabled: feedback.busy || feedbackPointing.pointing,
+            onPress: () => void feedback.refresh(),
+            group: "notes",
+          } satisfies AnnotateTool,
+        ]
+      : []),
+  ];
+  const armed = feedbackPointing.pointing || elementPicking.pointing || drawing;
+  const annotateBar: ReadonlyArray<AnnotateTool> =
+    annotateTools.length === 0
+      ? annotateTools
+      : [
+          ...annotateTools,
+          {
+            id: "end",
+            label: drawing ? "Discard the drawing" : "Cancel",
+            hint: armed ? undefined : "Nothing is armed",
+            icon: <X aria-hidden="true" size={16} />,
+            disabled: !armed,
+            onPress: () => {
+              if (feedbackPointing.pointing) feedbackPointing.toggle();
+              else if (elementPicking.pointing) elementPicking.toggle();
+              else if (drawing) closeMarkup();
+            },
+            group: "end",
+          },
+        ];
+  const annotateStatus = feedbackPointing.pointing
+    ? "Click the thing you mean"
+    : elementPicking.pointing
+      ? "Click an element, or Esc to stop"
+      : feedbackNotice;
 
   const agentDriving = nativeState?.control === "agent";
   const agentNote = agentAvailabilityNote(agentAvailability);
@@ -1588,7 +1716,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   return (
     <section
       aria-label="Browser automation"
-      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback ? " browser-workspace--feedback" : ""}`}
+      className={`browser-workspace${notice === undefined ? "" : " browser-workspace--message"}${showFeedback || annotateTools.length > 0 ? " browser-workspace--feedback" : ""}`}
     >
       <OctantDialogPresence>
         {pendingTaskProfile === undefined ? null : (
@@ -1962,6 +2090,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {markupPicture === undefined ? null : (
             <BrowserMarkupStage
               dataUrl={markupPicture}
+              initialTool={markupTool}
               notice={markupNotice}
               onAddToChat={addMarkupToMessage}
               onClose={closeMarkup}
@@ -1982,6 +2111,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         <div className="browser-workspace__markup-page">
           <BrowserMarkupStage
             dataUrl={markupPicture}
+            initialTool={markupTool}
             notice={markupNotice}
             onAddToChat={addMarkupToMessage}
             onClose={closeMarkup}
@@ -2058,15 +2188,8 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           crops={feedback.crops}
           preview={feedback.preview}
           previewExpired={feedback.previewExpired}
-          {...(feedbackNotice === undefined ? {} : { message: feedbackNotice })}
-          {...(feedbackSelectionUnavailable === undefined
-            ? {}
-            : { selectionUnavailable: feedbackSelectionUnavailable })}
+          listOpen={notesOpen}
           pointing={feedbackPointing.pointing}
-          {...(elementPicking.pointing
-            ? { selectionUnavailable: "Finish or stop picking an element first." }
-            : {})}
-          onTogglePointing={feedbackPointing.toggle}
           onCancel={() => {
             feedbackPointing.cancel();
             void feedback.cancel();
@@ -2074,7 +2197,22 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           onSubmit={feedback.commit}
           onUpdate={feedback.update}
           onDiscard={(note) => void feedback.discard(note)}
-          onRefresh={() => void feedback.refresh()}
+        />
+      )}
+      {annotateTools.length === 0 ? null : (
+        <BrowserAnnotateBar
+          notes={
+            showFeedback
+              ? {
+                  count: feedback.pending.length,
+                  included: feedback.pending.filter((note) => note.included !== false).length,
+                  open: notesOpen,
+                  onToggle: () => setNotesOpen((open) => !open),
+                }
+              : undefined
+          }
+          status={annotateStatus}
+          tools={annotateBar}
         />
       )}
     </section>

@@ -73,6 +73,10 @@ const ROUND_SELECTORS: ReadonlyArray<string> = [
   '.composer-field__attach :is(button, [role="button"]), .composer-field__actions :is(button, [role="button"])',
   // The composer's box while it holds one row.
   '.thread-composer__surface[data-shape="pill"]',
+  // The page's annotation toolbar under a Browser page: one pill, and the
+  // tools in it are circles for the same reason the composer's are.
+  ".browser-annotate__pill",
+  ".browser-annotate__tool",
   ".chat-composer__model-options-dot",
   ".board-status-mark__dot",
   ".code-file-explorer__mark",

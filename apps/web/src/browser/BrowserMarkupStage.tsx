@@ -36,6 +36,8 @@ export interface BrowserMarkupStageProps {
   /** Resolves once the composer has answered; the bar stays busy until then. */
   readonly onAddToChat: (file: File) => void | Promise<void>;
   readonly onClose: () => void;
+  /** The tool the person asked for when they opened the drawing; the pen otherwise. */
+  readonly initialTool?: MarkupTool | undefined;
   /** A notice about adding the picture, drawn above the bar so it never moves the picture. */
   readonly notice?: MarkupNotice | undefined;
 }
@@ -85,7 +87,7 @@ type Gesture =
 export function BrowserMarkupStage(props: BrowserMarkupStageProps) {
   const [picture, setPicture] = useState<PictureState>({ status: "loading" });
   const [state, dispatch] = useReducer(markupReducer, emptyMarkup);
-  const [tool, setTool] = useState<MarkupTool>("pen");
+  const [tool, setTool] = useState<MarkupTool>(props.initialTool ?? "pen");
   const [ink, setInk] = useState<MarkupInkId>(DEFAULT_MARKUP_INK);
   const [stroke, setStroke] = useState<MarkupStroke>("thin");
   const [draft, setDraft] = useState<Mark | undefined>(undefined);

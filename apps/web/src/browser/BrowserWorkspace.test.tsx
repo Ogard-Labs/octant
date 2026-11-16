@@ -274,11 +274,15 @@ describe("BrowserWorkspace", () => {
     );
   });
 
-  it("lays the notes row under the page at its own height, outranking the workspace's grid", () => {
+  it("lays the notes and the tool band under the page at their own heights, outranking the workspace's grid", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     // The workspace's grid is declared at one class's weight in a later sheet,
     // so the notes layout needs two: while the grid won, the row's 45% cap
-    // measured its own row and cut "Point at something" in half.
+    // measured its own row and cut its text in half.
+    const band = styles.match(/\n\.browser-annotate \{([^}]*)\}/)?.[1] ?? "";
+    // One height whatever is armed or said, so a live page never resizes for a tool.
+    expect(band).toMatch(/height:\s*44px/);
+    expect(band).toMatch(/flex:\s*0 0 auto/);
     expect(styles).toMatch(
       /\.browser-workspace\.browser-workspace--feedback \{\s*display: flex;\s*flex-direction: column;/,
     );
@@ -994,6 +998,34 @@ describe("BrowserWorkspace", () => {
         );
       }
 
+      it("opens the drawing on the tool chosen in the page's toolbar, and ends it from there", async () => {
+        render(<BrowserWorkspace canDrawOnPage client={drawable()} tab={tab} />);
+        const tools = await screen.findByRole(
+          "toolbar",
+          { name: "Page tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        // Nothing is armed, so there is nothing to cancel.
+        expect(within(tools).getByRole("button", { name: "Cancel" })).toBeDisabled();
+        await act(async () => {});
+        fireEvent.click(within(tools).getByRole("button", { name: "Box on page" }));
+        const drawing = await screen.findByRole(
+          "toolbar",
+          { name: "Drawing tools" },
+          { timeout: DRAWING_OPENS_WITHIN_MS },
+        );
+        expect(within(drawing).getByRole("button", { name: "Box" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+        // One drawing at a time: the band's drawing tools wait for this one.
+        expect(within(tools).getByRole("button", { name: "Draw on page" })).toBeDisabled();
+        fireEvent.click(within(tools).getByRole("button", { name: "Discard the drawing" }));
+        await waitFor(() =>
+          expect(screen.queryByRole("toolbar", { name: "Drawing tools" })).toBeNull(),
+        );
+      });
+
       function drag(layer: Element, from: [number, number], to: [number, number]) {
         vi.spyOn(layer, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 400, 200));
         const event = (type: string, [x, y]: [number, number]) =>
@@ -1624,12 +1656,14 @@ describe("BrowserWorkspace", () => {
           }}
         />,
       );
-      expect(
-        await screen.findByText(
-          "Element selection is not available in this embedded Browser presentation yet.",
-        ),
-      ).toBeVisible();
-      expect(screen.getByRole("button", { name: "Point at something" })).toBeDisabled();
+      // The reason is the tool's own tooltip: a line of its own under the page
+      // would resize the page.
+      const point = await screen.findByRole("button", { name: "Point at something" });
+      await waitFor(() => expect(point).toBeDisabled());
+      expect(point).toHaveAttribute(
+        "title",
+        "Point at something. Element selection is not available in this embedded Browser presentation yet.",
+      );
     } finally {
       restoreDom();
     }

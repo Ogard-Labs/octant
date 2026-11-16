@@ -2,8 +2,8 @@ import type {
   ProductFeedbackNote,
   ProductFeedbackPreview,
 } from "@octant/contracts/product-feedback";
-import { MessageSquare, X } from "../ui/icons";
-import { useEffect, useRef, useState } from "react";
+import { X } from "../ui/icons";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -17,9 +17,8 @@ export interface ProductFeedbackPanelProps {
   readonly previewExpired: boolean;
   readonly pointing: boolean;
   readonly busy: boolean;
-  readonly message?: string;
-  readonly selectionUnavailable?: string;
-  readonly onTogglePointing: () => void;
+  /** The list of notes is open; the note being written shows either way. */
+  readonly listOpen: boolean;
   readonly onSubmit: (comment: string) => Promise<boolean>;
   readonly onCancel: () => void;
   readonly onDiscard: (note: ProductFeedbackNote) => void;
@@ -27,20 +26,34 @@ export interface ProductFeedbackPanelProps {
     note: ProductFeedbackNote,
     change: { readonly comment?: string; readonly included?: boolean },
   ) => Promise<boolean>;
-  readonly onRefresh: () => void;
 }
 
+/**
+ * The note being written and the notes already left, above the page's tool
+ * band. It is drawn only while it has one of them to show: the tools, the
+ * count and what the host says are the band's, at one height, so arming a tool
+ * resizes nothing.
+ */
 export function ProductFeedbackPanel(props: ProductFeedbackPanelProps) {
   const [comment, setComment] = useState("");
   const panel = useRef<HTMLElement | null>(null);
   const [pointingHeight, setPointingHeight] = useState<number>();
-  useEffect(() => {
-    if (!props.pointing) setPointingHeight(undefined);
+  // Nothing here may move a separate native view between the gesture that
+  // arms pointing and the point the person then picks: the sheet keeps the
+  // height it had when pointing began for as long as pointing lasts.
+  useLayoutEffect(() => {
+    if (!props.pointing) {
+      setPointingHeight(undefined);
+      return;
+    }
+    const height = panel.current?.getBoundingClientRect().height;
+    if (height !== undefined && height > 0) setPointingHeight(height);
   }, [props.pointing]);
-  const included = props.pending.filter((note) => note.included !== false).length;
   const expired =
     props.previewExpired ||
     (props.preview !== undefined && Date.now() >= Date.parse(props.preview.expiresAt));
+  const list = props.listOpen && props.pending.length > 0;
+  if (props.preview === undefined && !list) return null;
   return (
     <section
       aria-label="Notes on this page"
@@ -50,49 +63,6 @@ export function ProductFeedbackPanel(props: ProductFeedbackPanelProps) {
         props.pointing && pointingHeight !== undefined ? { height: pointingHeight } : undefined
       }
     >
-      <header className="product-feedback__header">
-        <OctantButton
-          aria-pressed={props.pointing}
-          disabled={props.busy || (props.selectionUnavailable !== undefined && !props.pointing)}
-          onClick={() => {
-            // Selection labels/controls must not move a separate native view
-            // between its arming gesture and the person's selected point.
-            const height = panel.current?.getBoundingClientRect().height;
-            if (!props.pointing && height !== undefined && height > 0) setPointingHeight(height);
-            props.onTogglePointing();
-          }}
-          size="sm"
-          type="button"
-          variant={props.pointing ? "secondary" : "ghost"}
-        >
-          <MessageSquare aria-hidden="true" size={12} />
-          {props.pointing
-            ? "Cancel pointing"
-            : props.preview === undefined
-              ? "Point at something"
-              : "Choose another element"}
-        </OctantButton>
-        <OctantButton
-          disabled={props.busy || props.pointing}
-          onClick={props.onRefresh}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          Refresh notes
-        </OctantButton>
-        {props.pending.length === 0 ? null : (
-          <span className="product-feedback__count">
-            {included === 1 && props.pending.length === 1
-              ? "1 note goes with your next message"
-              : `${included} of ${props.pending.length} notes included with your next message`}
-          </span>
-        )}
-      </header>
-      {props.pointing ? (
-        <p role="status">Tap the thing you mean. Pointing will not click it or send a message.</p>
-      ) : null}
-      {props.selectionUnavailable === undefined ? null : <p>{props.selectionUnavailable}</p>}
       {props.preview === undefined ? null : (
         <section aria-label="Element preview" className="product-feedback__composer">
           <ProductFeedbackEvidence
@@ -144,12 +114,7 @@ export function ProductFeedbackPanel(props: ProductFeedbackPanelProps) {
           </div>
         </section>
       )}
-      {props.message === undefined ? null : (
-        <p className="product-feedback__message" role="status">
-          {props.message}
-        </p>
-      )}
-      {props.pending.length === 0 ? null : (
+      {!list ? null : (
         <ul className="product-feedback__list">
           {props.pending.map((note) => (
             <PendingNote
