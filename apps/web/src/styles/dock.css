@@ -1130,9 +1130,11 @@
 }
 
 /* The window's own toggles stand over the end of the band: the last column's
-   top bar ends before them, by the width the chrome measures. */
+   top bar ends before them, by the width the chrome measures and one step
+   more. Measured flush, the pane's Close stood 4px from the window's toggles,
+   the gap between two of the toggles themselves, and read as one of them. */
 [data-dock-lead="tiles"] .dock-tile[data-dock-tile-corner="trailing"] > .dock-tile__bar {
-  padding-right: var(--octant-window-chrome-reserved-width, 76px);
+  padding-right: calc(var(--octant-window-chrome-reserved-width, 76px) + var(--oct-space-3));
 }
 
 .dock-tile__lead {
@@ -2232,6 +2234,28 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   place-items: center;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* A page with no picture: its icon and its name on one line, centred on each
+   other. As inline content the 16px icon sat on the text's baseline, a few
+   pixels above the name's middle. */
+.dock-mini-card__note-page {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.dock-mini-card__note-page > :first-child {
+  flex: none;
+}
+
+.dock-mini-card__note-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The whole preview is the expand control; it sits over the inert picture. */

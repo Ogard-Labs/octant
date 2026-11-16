@@ -102,6 +102,20 @@ describe("hostMemoryNotices", () => {
     expect(notice?.detail).toContain("nothing was sent");
   });
 
+  it("lets a relief notice leave by itself and keeps an unexpected stop until dismissed", () => {
+    const notices = hostMemoryNotices({
+      pressure: "elevated",
+      processMegabytes: 2300,
+      lastRelief: relief,
+      previousStop: {
+        lastSeenAt: "2026-10-31T09:00:00.000Z",
+        pressure: "normal",
+        processMegabytes: 500,
+      },
+    });
+    expect(notices.map((notice) => notice.transient)).toEqual([false, true]);
+  });
+
   it("lists the unexpected stop before the relief", () => {
     const ids = hostMemoryNotices({
       pressure: "elevated",

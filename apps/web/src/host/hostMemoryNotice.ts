@@ -5,6 +5,8 @@ export interface HostMemoryNotice {
   readonly id: string;
   readonly title: string;
   readonly detail: string;
+  /** Reports something Octant did and asks nothing: it may leave by itself. */
+  readonly transient: boolean;
 }
 
 const PRESSURE_LABEL: Readonly<Record<HostMemoryPressureLevel, string>> = {
@@ -84,6 +86,7 @@ export function hostMemoryNotices(
       id: `stop:${memory.previousStop.lastSeenAt}`,
       title: "Octant stopped unexpectedly",
       detail: stopDetail(memory.previousStop),
+      transient: false,
     });
   }
   const relief = memory.lastRelief;
@@ -96,6 +99,7 @@ export function hostMemoryNotices(
       id: `relief:${relief.at}`,
       title: "Octant freed memory",
       detail: reliefDetail(relief),
+      transient: true,
     });
   }
   return notices;

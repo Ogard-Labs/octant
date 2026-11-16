@@ -145,8 +145,9 @@ export function DockBrowserCard(props: {
         // No picture to show: the page's icon and name, muted, rather than an
         // empty box. The head and the preview's label already name the page.
         <p aria-hidden="true" className="dock-mini-card__note">
-          <span>
-            <PageFavicon src={observation?.faviconDataUrl} /> {title}
+          <span className="dock-mini-card__note-page">
+            <PageFavicon src={observation?.faviconDataUrl} />
+            <span className="dock-mini-card__note-name">{title}</span>
           </span>
         </p>
       )}
@@ -162,7 +163,9 @@ export function browserPageHost(url: string | undefined): string | undefined {
 function hostOf(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
   try {
-    return new URL(url).host;
+    // A blank page has an address and no host: it has no name to show.
+    const host = new URL(url).host;
+    return host === "" ? undefined : host;
   } catch {
     return undefined;
   }

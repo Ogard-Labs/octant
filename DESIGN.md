@@ -1254,7 +1254,10 @@ is costly to render mounts only while open.
   Dismiss a 24px icon button with a 14px glyph. The stack (`.toast-stack`) is
   fixed 12px under the title rail and 16px from the trailing edge, at most 380px
   wide, at `--oct-z-toast`.
-- **States.** Long text wraps. Glass: dense float.
+- **States.** Long text wraps. Glass: dense float. A notice that only reports
+  something done (`leavesAfterMs`) leaves by itself, ten seconds after the
+  pointer and the keyboard are off it; one the person must read or act on
+  stays until dismissed.
 - **Accessibility.** `role="alert"` for danger, `status` otherwise; Dismiss is
   "Dismiss notification"; the stack takes no press outside its notices.
 

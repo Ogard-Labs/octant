@@ -65,8 +65,11 @@ describe("choosing a scaffold to start a project from", () => {
     picker();
 
     const native = screen.getByRole("button", { name: /Native Swift package/ });
+    // The reason is the row's quiet second line, not a warning: the row is
+    // already disabled, and nothing here is the person's to fix.
     const reason = within(native).getByText(/Needs swift, which is not on this machine/);
-    expect(reason).toHaveClass("empty-start__summary--blocked");
+    expect(reason).toHaveClass("empty-start__summary");
+    expect(native).toBeDisabled();
     expect(native).not.toHaveTextContent("A Swift package the Apple toolchain builds directly");
   });
 

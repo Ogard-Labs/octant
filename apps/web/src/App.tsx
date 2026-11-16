@@ -690,6 +690,8 @@ const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
 
 // Matches the desktop's double-press window for ⌘Q.
 const QUIT_HINT_VISIBLE_MS = 1500;
+/** How long a notice that only reports something done stays before it leaves. */
+const TRANSIENT_NOTICE_MS = 10_000;
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -9214,6 +9216,7 @@ function LaunchedShell(
                 onSelect: () => void controller.openSettings({ section: "host" }),
               }}
               detail={hostMemoryNotice.detail}
+              {...(hostMemoryNotice.transient ? { leavesAfterMs: TRANSIENT_NOTICE_MS } : {})}
               onDismiss={dismissHostMemoryNotice}
               title={hostMemoryNotice.title}
             />

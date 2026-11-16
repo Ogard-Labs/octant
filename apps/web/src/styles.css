@@ -5875,10 +5875,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   white-space: nowrap;
 }
 
-.empty-start__summary--blocked {
-  color: var(--oct-warn-fg);
-}
-
 .empty-start__row--action:disabled .empty-start__name,
 .empty-start__row--action:disabled .empty-start__icon,
 .empty-start__row--action:disabled .empty-start__chevron {

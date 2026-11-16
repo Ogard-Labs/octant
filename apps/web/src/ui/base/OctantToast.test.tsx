@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantToast } from "./OctantToast";
@@ -53,5 +53,44 @@ describe("OctantToast", () => {
     expect(onAction).toHaveBeenCalledOnce();
     expect(onDismiss).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("Update downloaded");
+  });
+
+  it("leaves by itself after its time, and stays while the pointer is on it", () => {
+    vi.useFakeTimers();
+    try {
+      const onDismiss = vi.fn();
+      render(
+        <OctantToast
+          detail="Octant stopped 1 idle provider process."
+          leavesAfterMs={10_000}
+          onDismiss={onDismiss}
+          title="Octant freed memory"
+        />,
+      );
+      const notice = screen.getByRole("status");
+      vi.advanceTimersByTime(9_000);
+      fireEvent.pointerEnter(notice);
+      vi.advanceTimersByTime(60_000);
+      expect(onDismiss).not.toHaveBeenCalled();
+      fireEvent.pointerLeave(notice);
+      vi.advanceTimersByTime(9_999);
+      expect(onDismiss).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(onDismiss).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays until dismissed when it is given no time to leave", () => {
+    vi.useFakeTimers();
+    try {
+      const onDismiss = vi.fn();
+      render(<OctantToast detail="Read this." onDismiss={onDismiss} title="Octant stopped" />);
+      vi.advanceTimersByTime(600_000);
+      expect(onDismiss).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

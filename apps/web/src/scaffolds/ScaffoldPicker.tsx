@@ -70,7 +70,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
                   {runnable ? (
                     <span className="empty-start__summary">{candidate.summary}</span>
                   ) : (
-                    <span className="empty-start__summary empty-start__summary--blocked">
+                    <span className="empty-start__summary">
                       Needs {candidate.requiresTool}, which is not on this machine.
                     </span>
                   )}
