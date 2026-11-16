@@ -1356,6 +1356,7 @@ function makeConnection(
     const startProcess = async (
       executionPolicy: ProviderExecutionPolicy,
       fullAccessSandbox: boolean,
+      strict: boolean,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
       nativeSetup?: ProviderNativeSetup,
@@ -1387,6 +1388,7 @@ function makeConnection(
               mode,
               executionPolicy,
               ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
+              ...(strict ? {} : { strict: false }),
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
@@ -1432,6 +1434,7 @@ function makeConnection(
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly modelOptionValues?: ProviderModelOptionValues;
       readonly autoApprove?: boolean;
       readonly nativeSetup?: ProviderNativeSetup;
@@ -1522,6 +1525,10 @@ function makeConnection(
             // A process launched open never serves a sandboxed session, nor
             // the reverse: the wall is fixed when the process starts.
             input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+            // The launch environment and channel guards are fixed when the
+            // process starts, so a Strict process never serves a session that
+            // is not, nor the reverse.
+            input.strict !== false,
             // The agent's own reviewer is the session's mode and the person's
             // setup is its launch's guards and filesystem denies; a retained
             // process opened under either other value is never taken up.
@@ -1596,6 +1603,7 @@ function makeConnection(
             const started = await startProcess(
               input.executionPolicy,
               input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+              input.strict !== false,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
               input.nativeSetup,
@@ -2050,6 +2058,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           sourceSessionId: input.resumeCursor.value,
           ...(input.current === undefined ? {} : { current: input.current }),
           ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),

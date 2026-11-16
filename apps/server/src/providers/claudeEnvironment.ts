@@ -2,8 +2,10 @@ import type { ClaudeAuthentication, ProviderFailure } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
 
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import {
   ISOLATED_CLAUDE_LAUNCH_GUARDS,
+  OPEN_CLAUDE_LAUNCH_GUARDS,
   ensureClaudeAccountConfigDirectory,
   hostDisableOnlySwitches,
   isolatedClaudeAccountEnvironment,
@@ -19,11 +21,14 @@ export interface ClaudeEnvironmentScopeOptions {
   readonly hostEnvironment?: NodeJS.ProcessEnv;
   /** Claude-owned directory for this account. Isolated launches never inherit host Claude dirs. */
   readonly configDirectory?: string;
+  /** Whether the launch is Strict; absent is Strict (`isolatedClaudeAccountEnvironment`). */
+  readonly strict?: boolean;
 }
 
 interface ClaudeEnvironmentOverrides {
   readonly apiKey?: string;
   readonly configDirectory?: string;
+  readonly strict?: boolean;
 }
 
 const PASSTHROUGH_VARIABLES = new Set([
@@ -101,9 +106,22 @@ export function sanitizeClaudeEnvironment(
       configDirectory: overrides.configDirectory,
       authentication,
       ...(overrides.apiKey === undefined ? {} : { apiKey: overrides.apiKey }),
+      ...(overrides.strict === false ? { strict: false } : {}),
     });
     Object.assign(environment, packagedSmokeObserverEnvironment(hostEnvironment));
     return environment;
+  }
+
+  if (overrides.strict === false && authentication === "subscription") {
+    // The host's own Claude sign-in, outside Strict: the host's environment
+    // less Octant's variables and other providers' keys, which keeps the
+    // host's Claude account directories, with only the switches that are not
+    // channels set.
+    return {
+      ...providerHostEnvironment(hostEnvironment),
+      ...packagedSmokeObserverEnvironment(hostEnvironment),
+      ...OPEN_CLAUDE_LAUNCH_GUARDS,
+    };
   }
 
   const environment = passthroughHostEnvironment(hostEnvironment);
@@ -162,6 +180,7 @@ export function makeClaudeEnvironmentScope(
               environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
                 apiKey,
                 configDirectory,
+                ...(options.strict === false ? { strict: false } : {}),
               }),
             } satisfies ClaudeEnvironmentScope;
           },
@@ -182,6 +201,7 @@ export function makeClaudeEnvironmentScope(
             configDirectory,
             environment: sanitizeClaudeEnvironment(authentication, hostEnvironment, {
               configDirectory,
+              ...(options.strict === false ? { strict: false } : {}),
             }),
           } satisfies ClaudeEnvironmentScope;
         },
@@ -194,7 +214,11 @@ export function makeClaudeEnvironmentScope(
 
   if (authentication === "subscription") {
     return Effect.succeed({
-      environment: sanitizeClaudeEnvironment(authentication, hostEnvironment),
+      environment: sanitizeClaudeEnvironment(
+        authentication,
+        hostEnvironment,
+        options.strict === false ? { strict: false } : {},
+      ),
     });
   }
 

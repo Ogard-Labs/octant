@@ -3276,6 +3276,7 @@ function makeConnection(
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly fullAccessSandbox?: boolean;
+        readonly strict?: boolean;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
         readonly singleUse?: boolean;
@@ -3358,12 +3359,16 @@ function makeConnection(
         // first turn, and a rejected initialization fails that turn instead.
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
+        // Read at each launch, like every other choice here: outside Strict the
+        // runtime gets the host's environment and its own channel settings.
+        const strict = input.strict !== false;
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
+            ...(strict ? {} : { strict: false }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
@@ -3449,7 +3454,7 @@ function makeConnection(
           authentication: options.authentication,
           artifactDelivery: options.artifactDelivery?.() === true,
           threadChoseArtifacts: input.nativeArtifacts === true,
-          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment),
+          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
           mode,
           executionPolicy: input.executionPolicy,
         });
@@ -4090,7 +4095,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -4417,6 +4422,7 @@ function makeConnection(
               ...(input.fullAccessSandbox === undefined
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
+              ...(input.strict === false ? { strict: false } : {}),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}

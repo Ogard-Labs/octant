@@ -14240,8 +14240,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Environment.** A provider receives the host's environment (proxies,
     custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
     routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
-    providers' keys. Today Claude Code receives a fixed list of variables;
-    Strict keeps that list.
+    providers' keys. Strict keeps each runtime's fixed list. Built for
+    Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
+    received the host's environment. Not built yet for Codex: its
+    environment is fixed per account and shared by every lease, and opening
+    it would hand Codex the host's AWS credentials, which the Codex sign-ins
+    item below decides.
   - **Outside content.** Reading outside content still marks the thread
     and shows it, but no longer withdraws the provider's own web search or
     turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
@@ -14266,7 +14270,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     and marketplace installs follow the person's own provider settings.
     Self-update stays off, because Octant installs and updates provider
     CLIs itself. Strict turns every channel off, as today. Octant itself
-    still sends nothing.
+    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build
+    and Kimi Code; Codex and OpenCode set no channel guard of Octant's.
   - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
     or exported credentials. Strict refuses them, as today.
   - **Slash commands.** A provider's own slash commands run in every mode
@@ -15224,7 +15229,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   the umbrella on every launch, and one that exports a truthy
   `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps `DO_NOT_TRACK=1` on every
   launch; only those disabling values cross (the runtime then withholds
-  `Artifact` as well).
+  `Artifact` as well). Everything in this paragraph is the launch under
+  Strict. Outside Strict (built, under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority))
+  a Claude launch gets the host's environment less Octant's own variables
+  (`OCTANT_*`) and every other model provider's credential
+  (`providerHostEnvironment`); the account's own sign-in still decides
+  which account a turn runs as, so no host Anthropic key or token crosses,
+  Octant's account directory is applied, and an API-key account gets its
+  broker key. It sets only the self-update, auto-memory and built-in-agents
+  switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
+  `/feedback`, the survey and marketplace auto-install follow the person's
+  own Claude Code settings, and the Claude artifacts switch below lifts
+  nothing, because nothing of Octant's sits on telemetry there. Pi's
+  telemetry and the ACP agents' channel guards (Mistral Vibe, Grok Build,
+  Kimi Code; `channelGuards`) follow the person's own settings the same way,
+  and those launches get the host's environment on the same terms. OpenCode
+  already launches with the host's environment and sets no channel guard.
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the
