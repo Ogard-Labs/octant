@@ -1501,10 +1501,20 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   font-size: var(--oct-text-xs);
 }
 
+/* A row's trailing control is one size on every page. Measured 1440x900: the
+   select, input and text area classes drew 12.92px on Appearance, Chat, Code
+   and Octant Harness while the same controls on Memory and Host drew 14px, and
+   plain recipe fields drew 15.08px. Every Settings field and select reads at
+   the detail size, the one buttons already use. */
 .settings-view__select,
 .settings-view__text-input,
-.settings-view__textarea {
-  font-size: var(--oct-text-xs);
+.settings-view__textarea,
+.settings-view input[data-slot="input"],
+.settings-view input[role="combobox"],
+.settings-view textarea[data-slot="textarea"],
+.settings-view .octant-number-field__input,
+.settings-view .octant-number-stepper__input {
+  font-size: var(--oct-text-detail);
 }
 
 /* A picker chooses from a known list, so it takes the column. Free text does
@@ -2896,6 +2906,9 @@ html[data-octant-increased-contrast="true"]
 .settings-view .composer-model-picker__trigger {
   width: 100%;
   justify-content: space-between;
+  /* The composer draws it at the small step; in a row it is the row's control
+     and reads at the same size as the select beside it (12.92 against 14). */
+  font-size: var(--oct-text-detail);
 }
 
 /* Provider card details moved from styles.css. */

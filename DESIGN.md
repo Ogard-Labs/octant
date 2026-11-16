@@ -1600,7 +1600,8 @@ The kit is `settings/primitives.tsx`; contents are in
   outline inside the box, `overflow: visible` (the first and last rows round
   themselves). Rows are divided by a hairline inset 16px.
 - **Row**: at least 52px, 12 by 16px inset, label 14px, detail 13px, control at
-  the trailing edge at 28px (`--oct-settings-control-height`). A compact row is
+  the trailing edge at 28px (`--oct-settings-control-height`), its text 13px
+  (`--oct-text-detail`) on every page, a field, a select and a button alike. A compact row is
   36px, one line.
 - **Rhythm**: a 32px gutter, 24px between sections, 48px under the last, 12px
   under a label and under a note.

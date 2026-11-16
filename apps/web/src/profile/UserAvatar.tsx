@@ -15,6 +15,18 @@ export interface UserAvatarProps {
 }
 
 /**
+ * The glyph is about half the avatar, on the icon scale: half of the
+ * 56px profile avatar drew a 28px glyph and half of the 20px sidebar avatar a
+ * 10px one, neither a size the icon scale has.
+ */
+function glyphSize(avatar: number): 12 | 16 | 20 | 24 {
+  if (avatar >= 48) return 24;
+  if (avatar >= 36) return 20;
+  if (avatar >= 28) return 16;
+  return 12;
+}
+
+/**
  * The person using this host, drawn.
  *
  * Three honest states, in order: the picture they imported, the initials of
@@ -57,7 +69,7 @@ export function UserAvatar(props: UserAvatarProps) {
       }}
       {...accessibility}
     >
-      {initials === "" ? <UserRound size={Math.round(size * 0.5)} /> : initials}
+      {initials === "" ? <UserRound size={glyphSize(size)} /> : initials}
     </span>
   );
 }
