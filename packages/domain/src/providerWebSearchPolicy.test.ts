@@ -78,7 +78,17 @@ describe("a native harness turn's provider search", () => {
     webSearchReady: false,
     tainted: false,
     fullAccess: false,
+    strict: true,
   };
+
+  it("outside Strict keeps offering it to a thread that read outside content, for the whole turn", () => {
+    expect(decideHarnessProviderSearch({ ...base, strict: false })).toEqual({
+      withdrawAfterFirstStep: false,
+    });
+    expect(decideHarnessProviderSearch({ ...base, strict: false, tainted: true })).toEqual({
+      withdrawAfterFirstStep: false,
+    });
+  });
 
   it("offers it when the route picks the provider's search, ending at the turn's first step below Full access", () => {
     expect(decideHarnessProviderSearch(base)).toEqual({ withdrawAfterFirstStep: true });
@@ -87,7 +97,7 @@ describe("a native harness turn's provider search", () => {
     });
   });
 
-  it("withholds it from a tainted thread below Full access, which searches through web-search when a backend is eligible", () => {
+  it("under Strict withholds it from a tainted thread below Full access, which searches through web-search when a backend is eligible", () => {
     expect(decideHarnessProviderSearch({ ...base, tainted: true })).toBeUndefined();
     expect(decideHarnessProviderSearch({ ...base, tainted: true, fullAccess: true })).toBeDefined();
     expect(

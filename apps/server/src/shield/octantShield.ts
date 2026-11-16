@@ -89,6 +89,12 @@ export interface ShieldThreadFacts {
       }
     | undefined;
   readonly tainted: (threadId: string) => boolean;
+  /**
+   * Whether Strict is on for the thread now. Outside Strict a provider
+   * runtime's forge commands go without the forge hard lines. Absent reads as
+   * Strict.
+   */
+  readonly strict?: (threadId: string) => boolean;
   /** What the Watcher found in what the thread read: kinds only, never text. */
   readonly watcherLabels: (threadId: string) => ReadonlyArray<ShieldWatcherLabel>;
   /** The person's own messages in the thread, oldest first. Nothing the agent read. */
@@ -256,6 +262,8 @@ export class OctantShield {
       level: reviewing.level,
       personMessages: facts.personMessages(request.threadId),
       watcherLabels,
+      forgeHardLines:
+        request.call.fromProviderRuntime !== true || (facts.strict?.(request.threadId) ?? true),
     };
     const ruled = judgeShieldCallByRules(input);
     if (ruled.kind === "decided") {

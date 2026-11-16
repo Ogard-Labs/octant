@@ -290,6 +290,7 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: true,
         posture: "approval-gated",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(true);
@@ -298,6 +299,7 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: true,
         posture: "auto-accept-edits",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(true);
@@ -309,6 +311,7 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: false,
         posture: "approval-gated",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(false);
@@ -317,6 +320,7 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: true,
         posture: "approval-gated",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: false,
       }),
     ).toBe(false);
@@ -325,6 +329,7 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: true,
         posture: "plan",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(false);
@@ -333,20 +338,34 @@ describe("harnessAutoReviewEffective", () => {
         autoApprove: true,
         posture: "full-access",
         externalContentIngested: false,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(false);
   });
 
-  it("clamps delegation back to user-answered prompts when the thread has ingested untrusted content", () => {
+  it("under Strict clamps delegation back to user-answered prompts once the thread has read outside content", () => {
     expect(
       harnessAutoReviewEffective({
         autoApprove: true,
         posture: "approval-gated",
         externalContentIngested: true,
+        strict: true,
         capabilitySupported: true,
       }),
     ).toBe(false);
+  });
+
+  it("outside Strict keeps the provider's own reviewer answering after the thread read outside content", () => {
+    expect(
+      harnessAutoReviewEffective({
+        autoApprove: true,
+        posture: "approval-gated",
+        externalContentIngested: true,
+        strict: false,
+        capabilitySupported: true,
+      }),
+    ).toBe(true);
   });
 });
 

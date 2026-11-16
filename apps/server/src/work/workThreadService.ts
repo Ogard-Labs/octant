@@ -754,6 +754,9 @@ export class WorkThreadService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           // Absent reads as on, so only a stored off needs a value.
           ...((command.restartContinuation ?? current.restartContinuation) === false
             ? { restartContinuation: false }
@@ -927,6 +930,9 @@ export class WorkThreadService {
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
+          // Strict is stored only when the request chose; otherwise the
+          // thread follows its Project and Settings at each launch.
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -1350,9 +1356,14 @@ export class WorkThreadService {
         const sandboxed =
           command.access === "full-access" &&
           (command.fullAccessSandbox ?? currentSandbox) === true;
+        // Strict holds at every level: kept from the command, else from the
+        // thread; null returns the thread to its Project's and Settings' default.
+        const { strict: currentStrict, ...unchosen } = unsandboxed;
+        const strict = command.strict === undefined ? currentStrict : command.strict;
         const updated = decodeWorkThread({
-          ...threadAtAccess(unsandboxed, command.access, command.planReturnAccess),
+          ...threadAtAccess(unchosen, command.access, command.planReturnAccess),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
+          ...(strict === null || strict === undefined ? {} : { strict }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1767,6 +1778,7 @@ export class WorkThreadService {
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),

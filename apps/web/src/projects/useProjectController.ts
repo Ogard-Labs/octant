@@ -270,9 +270,17 @@ export function useProjectController(options: ProjectControllerOptions) {
      * choice to Settings.
      */
     fullAccessSandbox: boolean | "settings" | "keep" = "keep",
+    /** Strict for this Project's threads that did not choose, read the same way. */
+    strictChoice: boolean | "settings" | "keep" = "keep",
   ): Promise<boolean> {
     const project = projectById.get(projectId);
     if (project?.type !== "work" && project?.type !== "code") return false;
+    const strict =
+      strictChoice === "keep"
+        ? project.defaultStrict
+        : strictChoice === "settings"
+          ? undefined
+          : strictChoice;
     const sandbox =
       fullAccessSandbox === "keep"
         ? project.defaultFullAccessSandbox
@@ -281,11 +289,15 @@ export function useProjectController(options: ProjectControllerOptions) {
           : fullAccessSandbox;
     if (
       project.defaultPermissionMode === permissionMode &&
-      project.defaultFullAccessSandbox === sandbox
+      project.defaultFullAccessSandbox === sandbox &&
+      project.defaultStrict === strict
     ) {
       return true;
     }
-    const sandboxField = sandbox === undefined ? {} : { fullAccessSandbox: sandbox };
+    const sandboxField = {
+      ...(sandbox === undefined ? {} : { fullAccessSandbox: sandbox }),
+      ...(strict === undefined ? {} : { strict }),
+    };
     if (project.type === "work") {
       if (permissionMode === "plan") return false;
       return execute(
