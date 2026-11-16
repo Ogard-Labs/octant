@@ -1177,6 +1177,12 @@ alternatives considered and the reason for the choice follow it.
    Deferred: a curated driver catalog.
 5. **Platforms.** macOS only. Linux follows a Linux extension-process
    confinement design; until then Linux reports `host-prohibited`.
+   Revised (maintainer decision, 2026-11-16; designed, not built; see
+   [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
+   an outside driver is to be admitted on Linux under the same installation,
+   trust and enablement steps as on macOS. Until a Linux extension-process
+   confinement exists its process runs without one, and its Settings row says
+   so; Strict keeps it `host-prohibited` on Linux.
 6. **Driver runtime.** One `.mjs` ES module entry on the runtime that runs the
    server, with no executables: Bun in development, and in the packaged app
    the separately identified, same-version bundled Electron worker executable,
