@@ -17,7 +17,13 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TILE = 824;
 const CANVAS = 1024;
-const MARK_SHARE = 0.54;
+/**
+ * How much of the tile's width the aperture mark spans. At 0.54 the tile
+ * matched its neighbours in the Dock but the mark sat in a wide black margin,
+ * so the icon read as smaller than the apps beside it (maintainer request,
+ * 2026-11-16).
+ */
+const MARK_SHARE = 0.64;
 
 /** Apple's continuous corner is closer to a superellipse than to a circular arc. */
 function squirclePath(): string {
