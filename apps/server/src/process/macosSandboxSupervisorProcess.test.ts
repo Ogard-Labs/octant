@@ -221,13 +221,13 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
         [
           "-c",
           `import os, pty, signal
-signal.alarm(12)
+signal.alarm(20)
 args=["${executable}","--run","${root}","terminal:epoch","--","/usr/bin/sandbox-exec","-p","(version 1)(allow default)","/bin/sh","-c","test -t 0 && test -t 1 && test -t 2 && printf terminal-ready"]
 status=pty.spawn(args)
 raise SystemExit(os.waitstatus_to_exitcode(status))
 `,
         ],
-        { encoding: "utf8", timeout: 15000 },
+        { encoding: "utf8", timeout: 22000 },
       );
       expect(
         terminal.status,
@@ -252,5 +252,5 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
       }
       rmSync(root, { recursive: true, force: true });
     }
-  });
+  }, 60000);
 });

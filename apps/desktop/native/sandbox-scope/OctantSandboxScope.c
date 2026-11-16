@@ -458,15 +458,18 @@ cleanup:
   TRACE("cleanup");
   if (control_fd >= 0) close(control_fd);
   int revoked = !record.coalition || !revoke_scope(record.coalition, 0);
+  TRACE(revoked ? "scope revoked" : "scope revocation failed");
   if (!revoked) result = 125;
   if (registered) {
     char *bootout[] = {"launchctl", "bootout", service, NULL};
     if (launchctl(bootout)) result = 125;
+    TRACE("job unload finished");
   }
   close(listener);
   if (remove_control(label)) { result = 125; revoked = 0; }
   if (receipt_written && revoked) { unlinkat(directory, receipt_name, 0); fsync(directory); }
   close(directory);
+  TRACE("client complete");
   return result;
 }
 static int reap(const char *root, const char *epoch, pid_t client) {
