@@ -8,6 +8,7 @@ import {
 import { ComputerUseRuntimeError, type ComputerUseRuntime } from "./computerUse/computerUseRuntime";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
+import { eventActorForPrincipal } from "./principalEventActor";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -79,7 +80,7 @@ export function createComputerUseRouteHandler(options: {
           );
         }
         pairedPerson = true;
-        pairedDeviceId = String(context.principal.deviceId);
+        pairedDeviceId = eventActorForPrincipal(context.principal).actorId;
       }
     } catch (error) {
       return failure(
