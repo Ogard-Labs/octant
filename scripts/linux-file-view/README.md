@@ -162,8 +162,13 @@ changed. If the independent default controls do not reproduce the abort, its
 underlying runtime/kernel interaction remains unknown; mitigation is not proof
 of a corrected cause or production eligibility.
 
-The guest-only crash collector retains its fixed controller/probe targets,
-pidfd identity checks, three-second and 128-KiB bounds. After confirming the
+The guest-only crash collector retains fixed policy-controller, session-controller
+and probe images, pidfd identity checks, three-second and 128-KiB bounds. A
+session worker is accepted only as a direct child of its still-retained registered
+controller, with both executable objects and the initial PID namespace checked.
+The kernel-provided pidfd pins the crashing worker itself. Other images,
+reparented workers and unrelated same-image processes remain unconfirmed.
+The session executable is included in the public module/build-identity inventory. After confirming the
 signal notes it may read only the numeric `NT_FILE` entries, stopping before
 all filenames and memory segments. Optional pipe reads have at most 250 ms
 and require a further 250-ms publication reserve within the same total bound.

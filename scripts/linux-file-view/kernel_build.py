@@ -179,6 +179,7 @@ def main():
     run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_session.ts"),
         "--outfile", str(session_cases), timeout=120, cwd=repository)
     controller_image(policy)
+    controller_image(session_cases)
     # Same compiled classifier, default JIT, no device/enrollment on the stock
     # runner. Keep this independent control before any guest mitigation.
     run(str(policy), "--metadata-control", timeout=15, cwd=root)
@@ -205,7 +206,7 @@ def main():
                    "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
-    module_names = {"policy-broker", "core-probe"}
+    module_names = {"policy-broker", "session-cases", "core-probe"}
     for path in re.findall(r"(?:=>\s+)?(/[^\s]+)", library_log.read_text()):
         library = Path(path)
         if not library.is_file():

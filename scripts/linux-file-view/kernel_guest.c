@@ -1192,7 +1192,7 @@ static int session_measure(void)
 {
   pid_t child = fork();
   if (!child) {
-    if (!bind_core_target("/session-cases", 1)) _exit(63);
+    if (!bind_core_target("/session-cases", 3)) _exit(63);
     char *arguments[] = {"/session-cases", NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", "BUN_JSC_useFTLJIT=0", NULL};
     execve(arguments[0], arguments, environment);
