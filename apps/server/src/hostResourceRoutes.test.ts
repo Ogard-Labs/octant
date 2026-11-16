@@ -87,6 +87,7 @@ describe("host resource route", () => {
     const response = requireResponse(await handler(localRequest()));
     expect(response.status).toBe(200);
     const text = await response.text();
+    expect(new TextEncoder().encode(text).byteLength).toBeLessThanOrEqual(4_096);
     expect(text).not.toContain(dataDirectory);
     expect(text).not.toContain("process");
     const body: unknown = JSON.parse(text);
@@ -111,7 +112,9 @@ describe("host resource route", () => {
     const detailed = requireResponse(
       await handler(localRequest("/api/host/resources?detail=vitals")),
     );
-    expect(JSON.parse(await detailed.text())).toMatchObject({ gpu: { percent: 42 } });
+    const detailedText = await detailed.text();
+    expect(new TextEncoder().encode(detailedText).byteLength).toBeLessThanOrEqual(4_096);
+    expect(JSON.parse(detailedText)).toMatchObject({ gpu: { percent: 42 } });
     const other = requireResponse(await handler(localRequest("/api/host/resources?detail=all")));
     expect(other.status).toBe(400);
   });

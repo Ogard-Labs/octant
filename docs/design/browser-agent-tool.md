@@ -219,7 +219,11 @@ the page, the workspace, or the person is reached.
 - At Full access a Private page needs no site approval and may navigate
   across origins, so this refusal is left there to profile pages, which keep
   their site approval ([the Full access rule](../architecture.md#security-and-authority);
-  maintainer request, 2026-11-12). Built, in Work and Code:
+  maintainer request, 2026-11-12). Stated plainly (maintainer decision,
+  2026-11-16): at Full access a Private page asks nothing per origin and
+  nothing about it expires into a refusal. Not built yet, as
+  [Decisions and requirements](decisions.md#browser-for-agents) records: an
+  unanswered site approval still expires. Built, in Work and Code:
   - The agent tool opens the page with one allowlist entry, `*`, which stands
     for every http and https site. The browser service admits that entry only
     from the agent tool of a thread at Full access, alone, and never beside a
@@ -1421,12 +1425,14 @@ takes `source` and the
 profile and takes no additional script approval at Full access. Existing site,
 profile, model, window, Project and thread authority still apply. Work below
 Full access, headless, paired, routine, managed-subagent and terminal-grant callers are
-currently refused. A Work turn runs a script only while the thread still holds
+currently refused (decided: Work below Full access is to get Code's one-use
+script permission below, under
+[Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority); designed, not built). A Work turn runs a script only while the thread still holds
 the Full access its turn began with: a level changed mid-turn, either way,
 refuses the script and withholds a result already on its way. Scripts cannot enter `steps` or saved/replayed flows.
 
-Below Full access, a local Code task may request a separate one-use script
-permission. The prompt shows the exact source and HTTPS origin, names the task
+Below Full access, a local Code task (and, once built, a Work task) may
+request a separate one-use script permission. The prompt shows the exact source and HTTPS origin, names the task
 and selected profile, and explains that it grants the page's account authority,
 even in Private or when sign-in state is unknown. It is never remembered as a
 site grant and cannot change host filesystem, process or network confinement.

@@ -244,7 +244,10 @@ opt-in "Use my AWS profile", off by default, which reads the person's existing
 cloud profile in place of the portal sign-in (maintainer request, 2026-11-12).
 Built: a local desktop window's card shows "Sign in with a code" beside the
 terminal command, and a paired or remote client keeps the command alone. Not
-built yet: "Use my AWS profile"; no cloud profile is read. Add endpoint's Amazon Bedrock card opens its
+built yet: "Use my AWS profile"; no cloud profile is read. Decided
+(maintainer decision, 2026-11-16; designed, not built): the profile read is to
+be built and long-lived access keys allowed with a warning, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority). Add endpoint's Amazon Bedrock card opens its
 own Connect: Name, Region (where the models run), Access portal, Portal
 region, Account ID, Role (the permission set), and Model IDs (1 to 64, since
 Bedrock lists none a role may use), each with a one-line hint, and no key or
@@ -388,6 +391,10 @@ Model roles is the page under Model endpoints on Octant Harness that says which 
 ## Endpoint address and stored key
 
 A remote model endpoint must use HTTPS. Plain HTTP is accepted only for a loopback address.
+Decided for Ollama (maintainer decision, 2026-11-16; designed, not built): a
+local-network or hosted Ollama address is allowed, and plain HTTP to a
+private-network address is allowed with a warning, under
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority).
 
 A model endpoint's API key belongs to the address it was entered for, so the
 host deletes it when the saved address changes. The address field says so

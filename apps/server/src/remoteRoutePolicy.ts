@@ -962,7 +962,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
-    maxResponseBytes: 96 * 1_024,
+    maxResponseBytes: 512 * 1_024,
   },
   {
     // A paired device lists and answers the MCP tool prompts its own turns
@@ -1277,6 +1277,9 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes:
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
+    ...(match.kind === "exact" && "maxResponseBytes" in match
+      ? { maxResponseBytes: match.maxResponseBytes }
+      : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
     // An exact route takes a query only when it says so: one naming a Project
     // there, or one that declares `allowQuery` because its own handler reads
