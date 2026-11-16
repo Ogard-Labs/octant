@@ -1,4 +1,5 @@
 import { useDroppedFolderMentions } from "../../composer/useDroppedFolderMentions";
+import { attachAllowingFiles } from "../../composer/attachmentMediaType";
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
 import {
   mentionChipsFromDraft,
@@ -287,10 +288,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     windowCapability: props.windowCapability,
     hostId: props.fixedHostId ?? props.selectedHostId,
     refused: props.creating === true,
-    onFiles: (files) => {
-      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
-      else images.attach(files);
-    },
+    onFiles: (files) =>
+      void attachAllowingFiles(
+        files,
+        imageSupport,
+        images.attach,
+        images.refuse,
+        "Choose an image-capable model to attach images.",
+      ),
   });
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -545,15 +550,17 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               className: "work-composer-adapter__composer-bar",
               attach: (
                 <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={props.creating === true}
-                  refusedReason={
-                    imageSupport === false
-                      ? "The selected model does not accept images. Choose an image-capable model."
-                      : undefined
-                  }
                   onRefused={images.refuse}
-                  onFileSelected={(file) => images.attach([file])}
+                  onFileSelected={(file) =>
+                    attachAllowingFiles(
+                      [file],
+                      imageSupport,
+                      images.attach,
+                      images.refuse,
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    )
+                  }
                 />
               ),
               leading: <></>,

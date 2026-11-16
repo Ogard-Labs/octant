@@ -89,6 +89,8 @@ export type CodexLaunchAuthority =
       readonly root: string;
       /** The Project's extra folders, granted what the root is granted. */
       readonly extraFolders?: ReadonlyArray<string>;
+      /** Folders read and never written: the thread's attachments folder. */
+      readonly readOnlyFolders?: ReadonlyArray<string>;
       readonly mode: "chat" | "work" | "code";
       readonly executionPolicy: ProviderExecutionPolicy;
       /**
@@ -832,6 +834,8 @@ export function prepareCodexLaunch(input: {
     // failing the launch; the main folder above must still exist.
     const extraFolders =
       authority.kind === "thread" ? existingRealPaths(authority.extraFolders ?? []) : [];
+    const readOnlyFolders =
+      authority.kind === "thread" ? existingRealPaths(authority.readOnlyFolders ?? []) : [];
     const mode = authority.kind === "thread" ? authority.mode : "chat";
     const executionPolicy = authority.kind === "thread" ? authority.executionPolicy : "plan";
     const home = input.environment.HOME ?? homedir();
@@ -871,7 +875,7 @@ export function prepareCodexLaunch(input: {
       networkEgress,
       writeBoundRoot: !(executionPolicy === "plan" || mode === "chat"),
       additionalWriteRoots: accountRoots,
-      readRoots: [...accountRoots, ...programPaths, ...serverFolder],
+      readRoots: [...accountRoots, ...programPaths, ...serverFolder, ...readOnlyFolders],
       privateHomeAllowPaths: [
         root,
         ...extraFolders,
@@ -879,6 +883,7 @@ export function prepareCodexLaunch(input: {
         ...accountRoots,
         ...programPaths,
         ...serverFolder,
+        ...readOnlyFolders,
       ],
       allowFileReadStar: true,
       ...(input.environment.PATH === undefined

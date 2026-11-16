@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { providerOwnMemoryLaunches } from "@octant/domain";
+import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
@@ -272,6 +272,35 @@ function codexChatThreadConfig(
 }
 
 /**
+ * A Plan thread's overrides: every MCP server in the effective config at
+ * `cwd` switched off by name, except the ones the person marked "Read-only —
+ * allowed in Plan" (`planReadOnlyToolServers`). Plan leaves the account's
+ * tool servers off because their tools can write, and Codex has no setting
+ * that switches every server off at once (see `CODEX_CHAT_CONFIG`). A Plan
+ * thread whose servers cannot be listed does not start.
+ */
+function codexPlanThreadConfig(
+  client: CodexClientPort,
+  cwd: string,
+  allowed: ReadonlyArray<string>,
+): Effect.Effect<CodexThreadConfig, ProviderFailure> {
+  return request(() => client.configRead({ cwd })).pipe(
+    Effect.map((result) => {
+      const withheld = Object.keys(result.config.mcp_servers ?? {}).filter(
+        (name) => !allowed.includes(name),
+      );
+      return withheld.length === 0
+        ? {}
+        : {
+            mcp_servers: Object.fromEntries(
+              withheld.map((name) => [name, { enabled: false } as const]),
+            ),
+          };
+    }),
+  );
+}
+
+/**
  * The `skills/list` scopes whose skills do not come from the Project: the
  * user's own (`$CODEX_HOME/skills`, `~/.agents/skills`), Codex's bundled ones,
  * and the administrator's. Any other scope, including one a later release
@@ -486,6 +515,11 @@ export interface CodexDriverOptions {
    * process is leased. Absent is off.
    */
   readonly ownMemory?: () => boolean;
+  /**
+   * The account's own MCP servers the person marked "Read-only — allowed in
+   * Plan" on this host, read at each Plan start and resume. Absent starts none.
+   */
+  readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly idleLeaseMs?: number;
   readonly clock?: () => string;
   /**
@@ -1192,14 +1226,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             options.runtimeRegistry.setObservedState(result);
             return result;
           }),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
+    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], attachmentsFolder }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
+      const readOnlyFolders = attachmentsFolder === undefined ? [] : [attachmentsFolder];
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [projectRoot, ...extraFolders, ...readOnlyFolders].some(
+          (root) => !isAbsolute(root) || resolve(root) !== root,
+        )
       ) {
         return Effect.fail(
           failure(
@@ -1234,7 +1271,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       ) =>
         JSON.stringify([
           projectRoot,
-          extraFolders,
+          // The read-only folders ride with the extra folders, so a lease's
+          // shape (root, folders, mode, posture) stays what idle-lease
+          // matching reads.
+          [...extraFolders, ...readOnlyFolders.map((folder) => `read-only:${folder}`)],
           threadMode,
           `${executionPolicy}${ownSubagents ? "+own-subagents" : ""}${
             keepsOwnMemory(executionPolicy) ? "+own-memory" : ""
@@ -1254,6 +1294,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               kind: "thread",
               root: projectRoot,
               ...(extraFolders.length === 0 ? {} : { extraFolders }),
+              ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
               mode: threadMode,
               executionPolicy,
               ...(ownSubagents ? { ownSubagents: true as const } : {}),
@@ -1697,6 +1738,7 @@ function makeConnection(
     let pendingLifecycleRegistrations = 0;
     const modeThreadConfig = (
       nativeSetup: ProviderNativeSetup | undefined,
+      executionPolicy: ProviderExecutionPolicy,
     ): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
         // The person's own Project skills load as Codex loads them, so none
@@ -1710,7 +1752,17 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : {};
+            : executionPolicy === "plan"
+              ? yield* codexPlanThreadConfig(
+                  client,
+                  projectRoot,
+                  planReadOnlyToolServers({
+                    executionPolicy,
+                    setup: nativeSetup,
+                    marked: options.planMcpServers?.() ?? [],
+                  }),
+                )
+              : {};
         const webConfig =
           nativeSetup?.webTools === true
             ? modeConfig
@@ -2310,7 +2362,7 @@ function makeConnection(
               optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
             }
             const dynamicTools = codexDynamicTools(input.tools);
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
             const config = {
               ...optionSettings.config,
               ...modeConfig,
@@ -2403,7 +2455,7 @@ function makeConnection(
               input.fullAccessSandbox === true,
             );
             ensureSubscribed();
-            const modeConfig = yield* modeThreadConfig(input.nativeSetup);
+            const modeConfig = yield* modeThreadConfig(input.nativeSetup, input.executionPolicy);
             const resumeRequest = () =>
               Effect.tryPromise({
                 try: () =>

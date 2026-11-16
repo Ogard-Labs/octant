@@ -942,12 +942,16 @@ export function permissionMode(
 // every built-in tool but the withheld ones, also not named in advance, and
 // each call to one passes the gate too.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools" | "planMcpServers">,
   toolName: string,
 ): boolean {
   if (input.tools.includes(toolName)) return true;
   if (toolName.startsWith("mcp__")) {
-    return claudeStartsOwnServers(input.nativeSetup) && !toolName.startsWith("mcp__octant__");
+    if (toolName.startsWith("mcp__octant__")) return false;
+    return (
+      claudeStartsOwnServers(input.nativeSetup) ||
+      (input.planMcpServers ?? []).some((server) => toolName.startsWith(`mcp__${server}__`))
+    );
   }
   return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
 }
@@ -968,7 +972,11 @@ function claudeOffersMcpServer(input: ClaudeOpenQueryInput, server: unknown): bo
     return input.managedToolServer === true && record.status === "connected";
   // The person's and the trusted Project's own servers; one that failed or
   // waits for sign-in simply offers no tools.
-  return claudeStartsOwnServers(input.nativeSetup) && typeof record.name === "string";
+  if (typeof record.name !== "string") return false;
+  // A Plan session holds only the account's servers the person marked.
+  return (
+    claudeStartsOwnServers(input.nativeSetup) || (input.planMcpServers ?? []).includes(record.name)
+  );
 }
 
 function decodeInitializedMessage(

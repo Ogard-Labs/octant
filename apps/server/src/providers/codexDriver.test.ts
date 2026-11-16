@@ -4030,6 +4030,65 @@ describe("Codex running as itself", () => {
     await lockedDown.close();
   });
 
+  it("starts in Plan only the account's servers the person marked, switching every other one off by name", async () => {
+    const f = fixture({
+      configRead: async () => ({
+        config: { mcp_servers: { "docs-search": { url: "https://docs" }, writer: {} } },
+      }),
+    });
+    const planSetup = { ...ownSetup, toolServers: false } as const;
+    const plan = await acquireConnection(
+      makeCodexDriver({ ...f.options(), planMcpServers: () => ["docs-search"] }),
+      "code",
+    );
+    await Effect.runPromise(
+      plan.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        nativeSetup: planSetup,
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      config: { mcp_servers: { writer: { enabled: false } } },
+    });
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
+      "config",
+      "mcp_servers",
+      "docs-search",
+    ]);
+    await plan.close();
+
+    // An unmarked server stays withheld, and so does every server of an
+    // account that runs nothing of its own.
+    for (const [marked, nativeSetup] of [
+      [[], planSetup],
+      [["docs-search"], undefined],
+    ] as const) {
+      const withheld = fixture({
+        configRead: async () => ({
+          config: { mcp_servers: { "docs-search": { url: "https://docs" } } },
+        }),
+      });
+      const session = await acquireConnection(
+        makeCodexDriver({ ...withheld.options(), planMcpServers: () => marked }),
+        "code",
+      );
+      await Effect.runPromise(
+        session.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      expect(withheld.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+        config: { mcp_servers: { "docs-search": { enabled: false } } },
+      });
+      await session.close();
+    }
+  });
+
   it("switches Codex's own web search off on start and every resume unless the setup has web tools on", async () => {
     for (const [nativeSetup, searches] of [
       [undefined, false],
