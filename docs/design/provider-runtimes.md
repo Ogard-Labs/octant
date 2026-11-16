@@ -1251,14 +1251,41 @@ rules (see [Native plan capture](#native-plan-capture)).
 
 ## Codex
 
-Below Full access every Codex app-server runs under Octant's profile, and the
-[confinement matrix](../architecture.md#security-and-authority) owns what that
-profile allows and why. That changes under
+Under
 [Providers run in their own sandbox](../architecture.md#security-and-authority)
-(maintainer decision, 2026-11-15; designed, not built): Codex is to run its
-native workspace-write sandbox and escalation in place of Octant's profile,
-keeping the mapping below only under Strict. The wire mapping that follows
-from today's profile:
+(maintainer decision, 2026-11-15; built for Codex), a Work or Code thread at
+Guarded or Reviewed outside Strict runs Codex's native workspace-write sandbox
+and escalation in place of Octant's profile:
+
+- The app-server runs unwrapped, as Codex runs on its own; macOS refuses a
+  Seatbelt profile inside another, so the native sandbox replaces Octant's.
+  `thread/start` sends `sandbox: "workspace-write"` and every `turn/start`
+  sends `sandboxPolicy: { type: "workspaceWrite", writableRoots, networkAccess }`
+  with the Project's folders as the writable roots. `networkAccess` is true
+  unless the launch took the egress proxy (Network limits on), which then
+  carries the runtime's own traffic while a command reaches no network
+  unless it is approved to leave the sandbox. The approval policies are those
+  below: Auto `on-request` with Codex's reviewer, so a command runs unasked
+  inside Codex's sandbox as in Codex's own Auto; Ask first and Accept edits
+  `untrusted`.
+- Codex's ask to run one command outside its sandbox arrives as an ordinary
+  command approval and reaches the person, or Reviewed's reviewer, as an
+  Octant approval. An approval is answered `accept`, never `acceptForSession`,
+  so it runs that one command, and denied or unanswered stays refused.
+- The lease key carries Strict, so a Strict and a non-Strict session never
+  share a process, and the launch takes the account's open environment: the
+  host's less Octant's variables and other providers' keys. A Plan or Chat
+  lease outside Strict keeps Octant's read-only profile, with only other
+  providers' sign-ins refused among the protected files.
+- The workspace-write policy takes no deny rules, so Octant's protected paths
+  are not Codex deny rules (not built yet: a named Codex permissions profile
+  could carry them). The runtime's own `ssh` uses the person's own setup, so
+  such a launch gets no server folder.
+
+Under Strict, in Plan and in Chat, every Codex app-server below Full access
+runs under Octant's profile, and the
+[confinement matrix](../architecture.md#security-and-authority) owns what that
+profile allows and why. The wire mapping that follows from that profile:
 
 - A process carries one lease: a thread's root, mode, and posture, or a catalog
   lease for account and model reads. The driver leases it when a connection's
@@ -1280,16 +1307,14 @@ from today's profile:
   reviewer. So a command runs unasked inside Octant's wall, as it runs
   unasked inside Codex's own sandbox in Codex's own Auto. When delegation is
   withdrawn (outside content, capability), the turn runs as Ask first.
-- Not built yet: a command that needs to leave Octant's wall asking for it,
-  as Claude's sandbox escape does. Codex cannot raise that ask under an
-  external sandbox: `exec_policy.rs` prompts for a `require_escalated`
+- Under Strict a command that needs to leave Octant's wall still fails there.
+  Codex cannot raise that ask under an external sandbox: `exec_policy.rs` prompts for a `require_escalated`
   command only under a restricted sandbox and allows it unasked under an
   external one, its sandbox bypass removes only Codex's own sandbox, which is
   not running, and `orchestrator.rs` never retries a denied command without
   the sandbox under `on-request` (rust-v0.169.0, unchanged on the main
-  branch read 2026-11-15). Such a command fails at the wall. Carrying the ask
-  needs Codex to escalate under an external sandbox, or a launch where Codex
-  sees a restricted sandbox without starting its own Seatbelt.
+  branch read 2026-11-15). Such a command fails at the wall; outside Strict
+  Codex's own sandbox carries the ask instead (above).
 - Ask first (approval-gated without the reviewer) and Accept edits
   (auto-accept-edits) send `approvalPolicy: "untrusted"`, the strictest mode
   Codex has, matching the strictest mode elsewhere. Under an external sandbox
@@ -1331,12 +1356,41 @@ from today's profile:
   (Codex offers the form to the root thread only) is answered empty. The
   capability is reported `supported`.
 
-**Codex's own review** (maintainer decision, 2026-11-16; designed, not
-built). Codex's built-in `/review` works in Octant: in Work and Code, at the
+**Codex's own review** (maintainer decision, 2026-11-16; partly built).
+Codex's built-in `/review` works in Octant: in Work and Code, at the
 thread's level, Octant starts Codex's review run (`review/start` on the
 app-server) on the thread's checkout. The run is read-only whatever the
 level, as Codex's own review is, and its findings show in the thread as a
 review result, not as edits or a plan. Plan and Chat do not start one.
+Built: the probe lists `/review` among Codex's commands, and a turn whose
+prompt opens with it starts the review instead of a turn; text after the
+name becomes the review's instructions (`custom`), and none reviews the
+uncommitted changes, as Codex's own default. The review runs inline on an
+`ephemeral` thread of its own, started `read-only` with `approvalPolicy:
+"never"` and the session's config overrides, because the inline review takes
+the permission profile of the thread it runs on (codex-rs
+`session/review.rs`, rust-v0.169.0) and the session's thread may write. Its
+`exitedReviewMode` item becomes the reply's own paragraph under a **Codex
+review** heading, and the completed turn names the session's own thread in
+its resume cursor, with no native anchor. The review takes only a target,
+so what the turn carries reaches the session's own thread instead:
+Octant's context, pending Work agent messages and a provider-switch handoff
+are appended there with `thread/inject_items` (raw Responses messages that
+start no turn, codex-rs `ThreadInjectItemsParams`, rust-v0.169.0) before the
+review starts, Octant's rules as a developer message and the rest as a user
+message, so a send reports delivered only what Codex has. A `/review` with an
+attachment is refused before anything is sent, which leaves the turn's
+pending messages pending, and a runtime without `thread/inject_items` refuses
+the review the same way. When the review reports its findings, the request
+and the findings are appended to the session's thread as the user and
+assistant messages Codex records after an inline review (`exit_review_mode`
+in `core/src/tasks/review.rs`) before the turn reports completed, so a
+follow-up such as "fix those findings" sees them; if they cannot be appended
+the turn fails with a sentence saying so. Rationale for the refusals: Codex's
+read-only sandbox is real only where Codex's own Seatbelt can start, outside
+Octant's profile, so under Strict and at Full access that keeps the sandbox a
+review is refused with a sentence rather than run where its commands could
+write; a release without `review/start` is refused too.
 
 **Codex's own Project configuration** (maintainer decision, 2026-11-16;
 designed, not built). In a Project the person trusted for Codex, outside Plan
