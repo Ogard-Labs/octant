@@ -813,11 +813,14 @@
      survives there. Zero and all of it where the sidebar is left whole. */
   --oct-ground-under: 0px;
   --oct-ground-under-share: 100%;
+  /* The page the ground paints under itself: the theme's page colour. Under
+     Glass it paints none (see "The stage under Glass" below). */
+  --oct-ground-page: var(--octant-app-background);
   display: none;
   z-index: -1;
   left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
-  background: linear-gradient(var(--octant-app-background), var(--octant-app-background)) right top
-    / calc(100% - var(--oct-ground-under)) 100% no-repeat;
+  background: linear-gradient(var(--oct-ground-page), var(--oct-ground-page)) right top /
+    calc(100% - var(--oct-ground-under)) 100% no-repeat;
 }
 
 .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden]))
@@ -829,6 +832,49 @@
    goes clear while only start screens are open. */
 .shell-frame:has(main.workspace[data-octant-start-only]:not([hidden])) > .workspace-layer::before {
   background: transparent;
+}
+
+/* The stage under Glass. A start screen keeps the window's glass under its
+   ground, whichever setting put the ground there. Shown only behind start
+   screens, the ground painted the theme's opaque page under itself, so the one
+   screen with a picture was also the one black slab in a window of glass; shown
+   behind everything it lay on the bare glass, where a field of light cells
+   over a bright desktop is barely there. The same start screen looked like two
+   different apps (maintainer report, 2026-11-16). Now both lay one veil under
+   the ground, half a second coat of the window's own tint, in the pane's fill
+   layer: dark enough for the cells to read, clear enough to stay glass, and
+   the same in either setting. A person or a system that asked for less
+   transparency keeps the opaque page. */
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame {
+  --oct-stage-veil: color-mix(in srgb, var(--octant-veil-surface) 50%, transparent);
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame
+  > .app-backdrop[data-placement="welcome"] {
+  --oct-ground-page: transparent;
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame:has(> .app-backdrop):has(
+    main.workspace[data-octant-start-only]:not([hidden])
+  )
+  > .workspace-layer::before {
+  background: var(--oct-stage-veil);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell--material-translucent.shell-frame > .app-backdrop[data-placement="welcome"] {
+    --oct-ground-page: var(--octant-app-background);
+  }
+
+  .shell--material-translucent.shell-frame:has(> .app-backdrop):has(
+      main.workspace[data-octant-start-only]:not([hidden])
+    )
+    > .workspace-layer::before {
+    background: transparent;
+  }
 }
 
 /* Only the stage shows the ground. A pane that holds a tool (a tile or the
