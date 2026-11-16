@@ -58,6 +58,7 @@ import {
 import {
   DEFAULT_BROWSER_WAIT_MS,
   MAX_BROWSER_HELD_DOWNLOADS,
+  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_WAIT_MS,
   ANY_BROWSER_ORIGIN,
   MAX_BROWSER_TABS_PER_CONTEXT,
@@ -212,6 +213,8 @@ export interface BrowserAutomationServiceOptions {
    * time. Absent, the defaults.
    */
   readonly transferLimits?: () => BrowserTransferLimits;
+  /** The longest one wait may last, in milliseconds, from Settings; absent is ten minutes. */
+  readonly waitLimitMs?: () => number;
   /** Where a saved, refused, or denied download is journaled. */
   readonly downloads?: BrowserDownloadRecorder;
   readonly uuid: () => string;
@@ -439,6 +442,7 @@ export class BrowserAutomationService {
   readonly #isUnattendedScope: (windowId: WindowId) => boolean;
   readonly #agentDownloadsEnabled: () => boolean;
   readonly #transferLimits: () => BrowserTransferLimits;
+  readonly #waitLimitMs: () => number;
   readonly #downloads: BrowserDownloadRecorder | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -493,6 +497,7 @@ export class BrowserAutomationService {
         maxFileBytes: MAX_BROWSER_DOWNLOAD_FILE_BYTES,
         maxHeldDownloads: MAX_BROWSER_HELD_DOWNLOADS,
       }));
+    this.#waitLimitMs = options.waitLimitMs ?? (() => MAX_BROWSER_WAIT_MS);
     this.#downloads = options.downloads;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
@@ -1467,6 +1472,20 @@ export class BrowserAutomationService {
       return this.#failure(owned, personUsedPageFailure, owned.status);
     }
     const inputsAtStart = owned.personInputs;
+    const waitLimitMs = this.#waitLimitMs();
+    if (
+      input.request.kind === "wait" &&
+      (input.request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS) > waitLimitMs
+    ) {
+      return this.#failure(
+        owned,
+        {
+          category: "policy-denied",
+          message: `A wait may last at most ${String(waitLimitMs / 60_000)} minutes, the limit set in Settings.`,
+        },
+        "failed",
+      );
+    }
     const resolved = this.#resolveRef(owned, input.request);
     if (resolved.kind === "refused") return this.#failure(owned, resolved.failure, "failed");
     // An upload reads files off this computer, so only the agent tool, which
@@ -3322,7 +3341,7 @@ export class BrowserAutomationService {
     if (request.kind !== "wait" || owned.waitingForPerson !== undefined) return;
     const waitMs = Math.min(
       request.waitFor?.timeoutMs ?? DEFAULT_BROWSER_WAIT_MS,
-      MAX_BROWSER_WAIT_MS,
+      MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000,
     );
     const until = this.#now() + waitMs + WAIT_KEEP_MARGIN_MS;
     if ((owned.keptUntil ?? 0) >= until) return;

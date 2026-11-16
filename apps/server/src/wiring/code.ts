@@ -35,7 +35,7 @@ import {
   type ProviderModel,
   type WindowId,
 } from "@octant/contracts";
-import { projectExtraFolderRoots } from "@octant/domain";
+import { defaultShellSettings, projectExtraFolderRoots } from "@octant/domain";
 import { withProjectExtraFolders } from "../code/codeProjectFolderRoot";
 import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
@@ -908,6 +908,9 @@ export function wireCode(deps: CodeDependencies) {
       const codeService =
         options.codeService ??
         new CodeService({
+          coordinatorsPerProject: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .coordinatorsPerProject,
           moveHold: (threadId) => deps.threadMoveHolds.isHeld({ mode: "code", threadId }),
           liveTurns,
           awaitsHarnessApproval: threadAwaitsHarnessApproval,

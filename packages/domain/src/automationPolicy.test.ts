@@ -849,6 +849,32 @@ describe("a routine a thread's agent sets up", () => {
     }
   });
 
+  it("starts enabled at Full access only when the person turned that on in Settings", () => {
+    expect(
+      decideRoutineFromAgent({
+        ...suggestion,
+        posture: "full-access",
+        startActiveAtFullAccess: true,
+      }),
+    ).toBe("create-active");
+    expect(
+      decideRoutineFromAgent({
+        ...suggestion,
+        requestedByPerson: true,
+        posture: "auto-accept-edits",
+        startActiveAtFullAccess: true,
+      }),
+    ).toBe("create-paused");
+    expect(
+      decideRoutineFromAgent({
+        ...suggestion,
+        followUp: true,
+        posture: "full-access",
+        startActiveAtFullAccess: true,
+      }),
+    ).toBe("ask-on-card");
+  });
+
   it("waits for the card in Plan, and for a follow-up at every level", () => {
     expect(
       decideRoutineFromAgent({ ...suggestion, requestedByPerson: true, posture: "plan" }),

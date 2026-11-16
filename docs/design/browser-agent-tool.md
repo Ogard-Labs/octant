@@ -221,9 +221,8 @@ the page, the workspace, or the person is reached.
   their site approval ([the Full access rule](../architecture.md#security-and-authority);
   maintainer request, 2026-11-12). Stated plainly (maintainer decision,
   2026-11-16): at Full access a Private page asks nothing per origin and
-  nothing about it expires into a refusal. Not built yet, as
-  [Decisions and requirements](decisions.md#browser-for-agents) records: an
-  unanswered site approval still expires. Built, in Work and Code:
+  nothing about it expires into a refusal. Built, in Work and Code, and a
+  site approval that waits for an answer runs on no clock:
   - The agent tool opens the page with one allowlist entry, `*`, which stands
     for every http and https site. The browser service admits that entry only
     from the agent tool of a thread at Full access, alone, and never beside a
@@ -740,15 +739,18 @@ runs, not when it was recorded.
   field's value), an address that contains a string, the page's
   `domcontentloaded` or `load`, or an element attached, detached, visible,
   hidden, enabled, or disabled. `match` is `all` (the default) or `any`.
-- Every wait has a limit: `timeoutMs` up to 10 minutes, 10 seconds when
-  it names none, on both Browsers. The 10-minute ceiling is a Settings default
-  the person can change (maintainer request, 2026-11-12). Built: the ceiling
-  is 10 minutes (`MAX_BROWSER_WAIT_MS`). Not built yet: it is a fixed limit,
-  not a setting. The waits of one `steps` call share it: a batch whose waits
-  together would last longer (a wait that names no limit counts as 10
-  seconds) is refused as malformed, because one call has to answer inside the
-  time a runtime allows an app-managed call (eleven minutes under the Claude
-  runtime), which is also why the ceiling is not higher. A page's idle
+- Every wait has a limit: `timeoutMs` up to the ceiling in Settings ›
+  Permissions › Longest Browser wait (10 minutes by default, 1 to 60), 10
+  seconds when it names none, on both Browsers (maintainer request,
+  2026-11-12; built, under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)).
+  The tool reads any wait up to an hour; the browser service refuses one past
+  the person's ceiling as `policy-denied` before it reaches the page, naming
+  the ceiling. The waits of one `steps` call together may last at most an
+  hour (a wait that names no limit counts as 10 seconds), and a longer batch
+  is refused as malformed. The default stays 10 minutes because one call has
+  to answer inside the time a runtime allows an app-managed call (eleven
+  minutes under the Claude runtime), which the setting's description says. A page's idle
   interval is 10 minutes too, so an admitted wait keeps its page for the
   wait's own limit and 30 seconds more: the hold is fixed when the wait is
   dispatched, so a call that hangs past it still cannot extend the page's
