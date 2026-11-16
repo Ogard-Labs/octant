@@ -42,7 +42,7 @@ jobs:
           OCTANT_REQUIRE_LINUX_ISOLATION: "1"
         run: >-
           bun run --cwd apps/server test --
-          src/process/macosSandboxScopeProcess.test.ts
+          src/process/macosSandboxScopeProcess.test.ts src/process/macosSandboxSupervisorProcess.test.ts
           src/process/sandboxLaunchPolicyProcess.test.ts
 
   # One machine ran every step below in a row and took about 28 minutes, 25 of
