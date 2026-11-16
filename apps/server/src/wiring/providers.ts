@@ -760,7 +760,8 @@ export function wireProviders(deps: ProvidersDependencies) {
         work: workThreadProjection.settings(),
       });
     const openCodeProcess =
-      options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
+      options.openCodeProcess ??
+      makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
     const codexProcessPort =
       options.codexProcess ??
       makeCodexProcessLive({

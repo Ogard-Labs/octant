@@ -2110,14 +2110,17 @@ its status are in
   OpenCode's permission rules, Pi's approval bridge and an ACP agent's own
   mode. Each ask reaches Octant's server, which answers and journals it.
   Whatever the provider's own sandbox does on Windows is what its own CLI
-  does there; Claude Code has none on Windows.
+  does there. Claude Code has no command sandbox on Windows, so a Windows
+  launch carries no sandbox settings at all (the SDK port refuses one that
+  does): one asking for that sandbox with `failIfUnavailable` would leave
+  every command unable to run.
 - **Refused by name:** Strict below Full access ("Strict needs a sandbox
   Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
   launch, whose no-folder, no-shell rule only Octant's sandbox holds. A
   launch that does not carry its Strict value is Strict.
 - **Version and catalog reads.** An admitted launch reads its version
-  unconfined. A read that serves no one thread (Codex's catalog lease, an
-  ACP agent's readiness check) runs unconfined only while the host's new
+  unconfined. A read that serves no one thread (Codex's catalog lease,
+  OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new
   threads run with no Octant sandbox (`hostReadsProviderCatalogUnconfined`).
 - **Reuse.** A Codex lease or OpenCode server started outside Strict below
   Full access is its own process: a Strict session at the same level never

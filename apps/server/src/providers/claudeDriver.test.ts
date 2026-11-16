@@ -1596,6 +1596,9 @@ describe("Claude execution policy", () => {
       }),
     );
     expect(started.opens[0]?.executionPolicy).toBe("approval-gated");
+    // Claude Code has no command sandbox on Windows; requiring one would leave
+    // every command unable to run.
+    expect(started.opens[0]?.sandbox).toBeUndefined();
     await acquired.close();
 
     for (const [level, message] of [

@@ -19437,7 +19437,8 @@ deliverable and keeps every gate above:
      result admits another launch; Strict below Full access, a kept sandbox
      and a Chat launch are refused by name, and the server gate above refuses
      those turns first. A read that serves no one thread (Codex's model
-     catalog lease, an ACP agent's readiness check) runs unconfined only while
+     catalog lease, OpenCode's and an ACP agent's readiness check) runs
+     unconfined only while
      the host's new threads run with no Octant sandbox: neither Settings ›
      Code's nor Settings › Work's default is Strict, or either default is
      Full access with the sandbox off (`hostReadsProviderCatalogUnconfined`),

@@ -33,7 +33,11 @@ import {
   resolveWindowsProviderProgram,
   windowsUnconfinedLaunch,
 } from "../process/windowsProviderProgram";
-import { windowsProviderLaunch, type WindowsProviderLaunch } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_SANDBOX_MISSING_REASON,
+  windowsProviderLaunch,
+  type WindowsProviderLaunch,
+} from "@octant/domain/guardrail-policy";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
@@ -106,6 +110,12 @@ export interface OpenCodeProcessStartInput {
    * and no Octant sandbox.
    */
   readonly strict?: boolean;
+  /**
+   * `probe` for the readiness check Settings runs, which serves no one thread
+   * and carries no Strict value of its own. On Windows it runs only for a host
+   * whose new threads run with no Octant sandbox (`windowsCatalogUnconfined`).
+   */
+  readonly purpose?: "probe";
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /**
@@ -183,6 +193,12 @@ export interface OpenCodeProcessOptions {
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
   readonly serverAccess?: ProviderServerAccessPort;
+  /**
+   * Whether a readiness check on a Windows host runs unconfined, because the
+   * host's new threads run with no Octant sandbox; read as each check starts.
+   * Absent, a Windows readiness check refuses.
+   */
+  readonly windowsCatalogUnconfined?: () => boolean;
 }
 
 export interface OpenCodeProbeOptions {
@@ -1268,8 +1284,20 @@ function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecution
     : executionPolicy;
 }
 
-/** How one OpenCode launch runs on Windows, from that launch's own authority. */
-function openCodeWindowsLaunch(input: OpenCodeProcessStartInput): WindowsProviderLaunch {
+/**
+ * How one OpenCode launch runs on Windows, from that launch's own authority. A
+ * readiness check serves no one thread, so it runs only for a host whose new
+ * threads run with no Octant sandbox.
+ */
+function openCodeWindowsLaunch(
+  input: OpenCodeProcessStartInput,
+  catalogUnconfined: boolean,
+): WindowsProviderLaunch {
+  if (input.purpose === "probe") {
+    return catalogUnconfined
+      ? { status: "unconfined", approvals: "none" }
+      : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
+  }
   return windowsProviderLaunch({
     mode: input.mode ?? "code",
     executionPolicy: input.executionPolicy ?? "approval-gated",
@@ -1289,7 +1317,8 @@ function prepareWindowsOpenCodeLaunch(
   profile: PrivateOpenCodeProfile,
   args: ReadonlyArray<string>,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
-  const form = openCodeWindowsLaunch(input);
+  // The process port admitted a readiness check already.
+  const form = openCodeWindowsLaunch(input, true);
   if (form.status === "refused") return Effect.fail(failure("incompatible", form.reason));
   const program = resolveWindowsProviderProgram({
     displayName: "OpenCode",
@@ -1995,7 +2024,9 @@ export function makeOpenCodeProcessLive(
         // anything runs, and an admitted one reads its version unconfined, as
         // it then runs; the confined read has no Windows form.
         const windows =
-          resolvedOptions.platform === "win32" ? openCodeWindowsLaunch(input) : undefined;
+          resolvedOptions.platform === "win32"
+            ? openCodeWindowsLaunch(input, options.windowsCatalogUnconfined?.() === true)
+            : undefined;
         if (windows?.status === "refused") {
           return yield* Effect.fail(failure("incompatible", windows.reason));
         }

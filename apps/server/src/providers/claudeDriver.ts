@@ -3589,33 +3589,42 @@ function makeConnection(
             projectRoot,
             isProjectConfinedPath: options.isProjectConfinedPath,
           });
-        const sandboxNetwork = claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess)
-          ? await runSetupEffect(
-              acquireProviderRuntimeNetwork(options.runtimeNetwork, {
-                runtime: "claude-sandbox",
-                root: projectRoot,
-                executionPolicy: networkPolicy,
-                autoReview: input.autoApprove === true,
-                sessionId: String(input.sessionId),
-                ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
-                // The sandbox points its commands at a bare port on the
-                // host's loopback and sends no proxy credentials.
-                authentication: "none",
-                listener: "loopback",
-              }).pipe(Effect.provideService(Scope.Scope, scope)),
-              signal,
-            )
-          : undefined;
+        const sandboxNetwork =
+          claudeRunsSandbox(input.executionPolicy, sandboxedFullAccess) &&
+          (options.platform ?? process.platform) !== "win32"
+            ? await runSetupEffect(
+                acquireProviderRuntimeNetwork(options.runtimeNetwork, {
+                  runtime: "claude-sandbox",
+                  root: projectRoot,
+                  executionPolicy: networkPolicy,
+                  autoReview: input.autoApprove === true,
+                  sessionId: String(input.sessionId),
+                  ...(workThreadId === undefined ? {} : { threadId: workThreadId }),
+                  // The sandbox points its commands at a bare port on the
+                  // host's loopback and sends no proxy credentials.
+                  authentication: "none",
+                  listener: "loopback",
+                }).pipe(Effect.provideService(Scope.Scope, scope)),
+                signal,
+              )
+            : undefined;
         if (sandboxNetwork !== undefined && sandboxNetwork.endpoint.kind !== "loopback") {
           throw failure("incompatible", "Claude's sandbox needs its egress proxy on loopback.");
         }
-        const sandbox = claudeSandboxSettings(
-          input.executionPolicy,
-          projectRoot,
-          extraFolders,
-          sandboxNetwork?.endpoint.kind === "loopback" ? sandboxNetwork.endpoint.port : undefined,
-          sandboxedFullAccess,
-        );
+        // Claude Code has no command sandbox on Windows; an admitted turn
+        // there runs on Claude's own permission modes alone.
+        const sandbox =
+          (options.platform ?? process.platform) === "win32"
+            ? undefined
+            : claudeSandboxSettings(
+                input.executionPolicy,
+                projectRoot,
+                extraFolders,
+                sandboxNetwork?.endpoint.kind === "loopback"
+                  ? sandboxNetwork.endpoint.port
+                  : undefined,
+                sandboxedFullAccess,
+              );
         let callbackState: SessionState | undefined;
         const insideFolder = (root: string, candidate: string): boolean => {
           try {
