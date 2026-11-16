@@ -104,7 +104,7 @@ export function createRoutineTools(input: {
     readonly mode: OctantMode;
     readonly projectId: string;
   };
-  /** Code only: the turn's posture when a call runs. Plan asks for nothing. */
+  /** Work and Code: the turn's posture when a call runs. Plan asks for nothing. */
   readonly readPosture?: () => ProviderExecutionPolicy | undefined;
   /**
    * Whether this turn runs as the host rather than for a person: a routine's

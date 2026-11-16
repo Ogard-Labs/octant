@@ -92,6 +92,7 @@ function tools(
     ) => ImageGenerationOfferOutcome;
     readonly remembered?: ImageGenerationChoice;
     readonly fullAccess?: boolean;
+    readonly defaultProfileInstanceId?: string;
     /** A turn the host runs as itself, with nobody at a window to answer a card. */
     readonly unattended?: boolean;
     readonly refusal?: () => string | undefined;
@@ -139,6 +140,9 @@ function tools(
       ...(options.fullAccess === undefined
         ? {}
         : { fullAccess: () => options.fullAccess === true }),
+      ...(options.defaultProfileInstanceId === undefined
+        ? {}
+        : { defaultProfileInstanceId: () => options.defaultProfileInstanceId }),
       ...(options.unattended === undefined ? {} : { unattended: options.unattended }),
       ...(options.refusal === undefined ? {} : { refusal: options.refusal }),
       ...(options.save === undefined
@@ -287,12 +291,26 @@ describe("createImageAgentTools", () => {
     );
   });
 
-  it("asks at Full access when two image profiles are ready and nothing is kept", async () => {
+  it("generates at Full access on the profile Settings names when several are ready and nothing is kept", async () => {
+    const { ask, enqueue, set } = tools(
+      [imageProfile(), compatibleInstance()],
+      [],
+      [{ providerInstanceId: compatibleId, modelId: "recraftv3" as never, label: "Recraft" }],
+      { fullAccess: true, defaultProfileInstanceId: String(compatibleId) },
+    );
+    await call(set, { prompt: "a red cube" });
+    expect(ask).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ profileInstanceId: compatibleId, modelId: "recraftv3" }),
+    );
+  });
+
+  it("still asks below Full access when several image profiles are ready and nothing is kept", async () => {
     const { ask, set } = tools(
       [imageProfile(), compatibleInstance()],
       [],
       [{ providerInstanceId: compatibleId, modelId: "recraftv3" as never, label: "Recraft" }],
-      { fullAccess: true },
+      { fullAccess: false, defaultProfileInstanceId: String(compatibleId) },
     );
     await call(set, { prompt: "a red cube" });
     expect(ask).toHaveBeenCalledOnce();

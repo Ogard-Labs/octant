@@ -80,6 +80,8 @@ function fixture(overrides?: {
   readonly leasableOnly?: boolean;
   /** Whether the owner's thread stands at Full access. */
   readonly fullAccess?: boolean;
+  /** Whether Strict is on for the owner's thread; absent reads as Strict. */
+  readonly strict?: boolean;
   /** Reads the thread's real outside-content mark in place of the fixture's flag. */
   readonly marks?: {
     readonly ingested: () => boolean;
@@ -130,6 +132,7 @@ function fixture(overrides?: {
     ownerIsCurrent: () => current,
     toolConstraints: () => toolConstraints,
     fullAccess: () => overrides?.fullAccess === true,
+    ...(overrides?.strict === undefined ? {} : { strict: () => overrides.strict === true }),
     externalContentIngested: overrides?.marks?.ingested ?? (() => tainted),
     outsideContent:
       overrides?.marks?.outsideContent ??
@@ -449,7 +452,7 @@ describe("Computer use through a provider tool", () => {
     }
   });
 
-  it("asks again below Full access once the thread read outside content, instead of honouring the app grant", async () => {
+  it("under Strict asks again below Full access once the thread read outside content, instead of honouring the app grant", async () => {
     const f = fixture();
     try {
       const first = f.tools.execute({
@@ -696,6 +699,24 @@ describe("Computer offered on every eligible turn", () => {
       const askedAgain = await approvePending(f, fullAccess);
       expect(askedAgain.summary).toContain("com.example.Other");
       await other;
+      expect(f.execute).toHaveBeenCalledTimes(2);
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("outside Strict lets an app grant carry later actions below Full access after the thread read outside content", async () => {
+    const f = fixture({ strict: false });
+    const windows = {
+      name: "octant_computer",
+      inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+    };
+    try {
+      const first = f.tools.execute(windows);
+      await approvePending(f);
+      await first;
+      f.taint();
+      expect(await f.tools.execute(windows)).toMatchObject({ result: { kind: "windows" } });
       expect(f.execute).toHaveBeenCalledTimes(2);
     } finally {
       await f.service.close();

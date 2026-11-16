@@ -253,7 +253,7 @@ export function changeCodeProjectAccess(
 
 /**
  * Set the mode a Work Project's new threads start in, or return it to Work's
- * default in Settings. Work shares Code's levels and has no Plan overlay.
+ * default in Settings. Work shares Code's levels; no Work thread starts in Plan.
  */
 export function changeWorkProjectPermissionMode(
   project: Project,
@@ -261,6 +261,8 @@ export function changeWorkProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
+  /** Strict for threads here that did not choose; absent returns it to Settings. */
+  strict?: boolean,
 ): WorkProject {
   if (project.type !== "work") {
     reject("binding-not-allowed", "Only Work Projects take a Work default mode");
@@ -270,19 +272,22 @@ export function changeWorkProjectPermissionMode(
   }
   if (
     project.defaultPermissionMode === permissionMode &&
-    project.defaultFullAccessSandbox === fullAccessSandbox
+    project.defaultFullAccessSandbox === fullAccessSandbox &&
+    project.defaultStrict === strict
   ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
   const {
     defaultPermissionMode: _previousMode,
     defaultFullAccessSandbox: _previousSandbox,
+    defaultStrict: _previousStrict,
     ...rest
   } = project;
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
     ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
+    ...(strict === undefined ? {} : { defaultStrict: strict }),
     version: nextVersion(project),
     updatedAt,
   };
@@ -320,6 +325,8 @@ export function changeCodeProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
+  /** Strict for threads here that did not choose; absent returns it to Settings. */
+  strict?: boolean,
 ): CodeProject {
   if (project.type !== "code") {
     reject("binding-not-allowed", "Only Code Projects have a default mode");
@@ -332,19 +339,22 @@ export function changeCodeProjectPermissionMode(
   if (
     project.defaultPermissionMode === permissionMode &&
     project.codeAccessPersistence === codeAccessPersistence &&
-    project.defaultFullAccessSandbox === fullAccessSandbox
+    project.defaultFullAccessSandbox === fullAccessSandbox &&
+    project.defaultStrict === strict
   ) {
     reject("invalid-lifecycle", "This Project already starts threads in that mode");
   }
   const {
     defaultPermissionMode: _previousMode,
     defaultFullAccessSandbox: _previousSandbox,
+    defaultStrict: _previousStrict,
     ...rest
   } = project;
   return {
     ...rest,
     ...(permissionMode === undefined ? {} : { defaultPermissionMode: permissionMode }),
     ...(fullAccessSandbox === undefined ? {} : { defaultFullAccessSandbox: fullAccessSandbox }),
+    ...(strict === undefined ? {} : { defaultStrict: strict }),
     codeAccessPersistence,
     version: nextVersion(project),
     updatedAt,
@@ -661,10 +671,14 @@ export function changeProjectImageGenerationChoice(
   if (unchanged) {
     reject("invalid-lifecycle", "Project image generation choice is already selected");
   }
-  const { imageGenerationChoice: _dropped, ...rest } = project;
+  const { imageGenerationChoice: _dropped, imageGenerationAskAgain: _asked, ...rest } = project;
   return {
     ...rest,
-    ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+    // Dropping the choice is the person's Ask again: the next call asks, at
+    // Full access too, until a choice is kept again.
+    ...(choice === undefined
+      ? { imageGenerationAskAgain: true as const }
+      : { imageGenerationChoice: choice }),
     version: nextVersion(project),
     updatedAt,
   };

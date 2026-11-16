@@ -152,6 +152,8 @@ import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import { workTurnToolLevel } from "../work/workTurnToolLevel";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -191,7 +193,10 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "serverConnection"
     | "serverProjectStore"
   > &
-  Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
+  Pick<
+    WorkRequestStateWiring,
+    "runningWorkTurns" | "workLevelChangeHolder" | "workRequestRuntime" | "workRequestService"
+  > &
   Pick<
     IntegrationsWiring,
     | "agentMessageService"
@@ -268,6 +273,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "resolveThreadStrict"
     | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
@@ -277,6 +283,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
+    resolveThreadStrict,
     conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
@@ -360,6 +367,7 @@ export function wireWork(deps: WorkDependencies) {
     workAttachments,
     workProjectStatusFiles,
     workProjectStatusReader,
+    workLevelChangeHolder,
     workRequestRuntime,
     workRequestService,
     workThreadProjection,
@@ -533,17 +541,23 @@ export function wireWork(deps: WorkDependencies) {
         isAutomationOrigin: isRoutineHostScope(input.windowId),
         now: Date.now,
       };
+      // The running turn's level; with no turn running, none.
+      const readRoutinePosture = () => {
+        const access = runningWorkTurns.get(String(input.thread.id))?.access;
+        return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
+      };
       return combineAppManagedToolSets(
         createRoutineProposalTools({
           ...routineTurn,
           proposals: routineProposalService,
-          readPosture: () => {
-            const access = runningWorkTurns.get(String(input.thread.id))?.access;
-            return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
-          },
+          startsActiveAtFullAccess: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .agentRoutinesStartActiveAtFullAccess,
+          readPosture: readRoutinePosture,
         }),
         createRoutineTools({
           ...routineTurn,
+          readPosture: readRoutinePosture,
           ...(input.routineRun === undefined ? {} : { routineRun: input.routineRun }),
           routines: {
             hostId: LOCAL_HOST_ID,
@@ -579,8 +593,11 @@ export function wireWork(deps: WorkDependencies) {
       stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
         outlivingSessions: outlivingWorkSessions,
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -612,6 +629,7 @@ export function wireWork(deps: WorkDependencies) {
       },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: resolveThreadStrict,
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
@@ -624,6 +642,7 @@ export function wireWork(deps: WorkDependencies) {
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
+        readProviderCliTrust: hostProviderCliProjectTrust(),
         readProviderModel: (providerInstanceId, modelId) =>
           persistence
             .readProviderCatalog?.(providerInstanceId)
@@ -659,6 +678,12 @@ export function wireWork(deps: WorkDependencies) {
         },
       },
       resolveAppManagedTools: (input) => {
+        // Plan in Work is Code's Plan (see `workTurnToolLevel`): the families
+        // composed once take the level the turn starts at, and the rest read
+        // the running turn's level at each call.
+        const runningLevel = () =>
+          workTurnToolLevel(runningWorkTurns.get(String(input.thread.id))?.access);
+        const composedPolicy = workTurnToolLevel(input.thread.access).composed;
         const observed = providerRuntimeRegistry.observedState(input.thread.providerInstanceId);
         const browserSupported =
           browserToolTransport(
@@ -697,7 +722,8 @@ export function wireWork(deps: WorkDependencies) {
               modelBindings: browserModelBindings,
               resolveTaskProfile: () =>
                 workThreadProjection.read(input.thread.id)?.browserTaskProfile,
-              executionPolicy: "approval-gated",
+              // Plan admits only reads of the page already open, as in Code.
+              executionPolicy: composedPolicy,
               // The level the running turn has; with no turn running, none.
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
@@ -786,6 +812,8 @@ export function wireWork(deps: WorkDependencies) {
               callerThreadId: String(input.thread.id),
               toolConstraints: [],
               profileDisplayName: "the bound profile",
+              // Plan reads its siblings and sends them nothing.
+              readPosture: () => runningLevel().posture,
             });
         const routineTools = !browserSupported ? undefined : routineToolsForWorkTurn(input);
         const agentsTools = !browserSupported
@@ -795,8 +823,9 @@ export function wireWork(deps: WorkDependencies) {
               parentThreadId: String(input.thread.id),
               mode: "work",
               projectId: input.thread.projectId,
-              // A routine run has nobody to answer.
-              ...(input.routineRun !== undefined
+              // A routine run has nobody to answer, and Plan asks for nothing:
+              // its helpers run read-only, as its own grant does.
+              ...(input.routineRun !== undefined || input.thread.access === "plan"
                 ? {}
                 : {
                     askThroughHost: {
@@ -840,6 +869,9 @@ export function wireWork(deps: WorkDependencies) {
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                   .imageGeneration.customSources,
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.defaultProfileInstanceId,
               readsImages: () =>
                 providerRuntimeRegistry
                   .observedState(input.thread.providerInstanceId)
@@ -847,20 +879,16 @@ export function wireWork(deps: WorkDependencies) {
                     (candidate) => String(candidate.id) === String(input.thread.modelId),
                   )
                   ?.inputModalities.includes("image") === true,
-              // A file edit at the turn's level: Ask first and Auto ask the
-              // person, Accept edits and Full access write at once.
+              // A file edit at the turn's level: Plan refuses, Ask first and
+              // Auto ask the person, Accept edits and Full access write at once.
               save: {
-                posture: () => {
-                  const access = runningWorkTurns.get(String(input.thread.id))?.access;
-                  const level =
-                    access === undefined
-                      ? "approval-gated"
-                      : workThreadAccessOf(access).executionPolicy;
-                  return level === "approval-gated" ? "ask" : "allow";
-                },
+                posture: () => runningLevel().imageSave,
                 write: (relativePath, bytes) =>
                   saveGeneratedImageUnder({ root: input.projectRoot, relativePath, bytes }),
               },
+              // Plan changes nothing on the host or outside it, and a
+              // generation calls a paid provider and stores the image.
+              refusal: () => runningLevel().imageRefusal,
             });
         // Sees images: a thread whose model cannot read images may ask for one
         // to be described, from its own attachments or its own folder.
@@ -903,7 +931,8 @@ export function wireWork(deps: WorkDependencies) {
           mode: "work",
           providerInstanceId: input.thread.providerInstanceId,
           modelId: input.thread.modelId,
-          executionPolicy: "approval-gated",
+          // Plan refuses every Computer action, as in Code.
+          executionPolicy: composedPolicy,
         });
         const computer = computerToolsFor(
           computerOwner,
@@ -919,8 +948,8 @@ export function wireWork(deps: WorkDependencies) {
               createdAt: input.thread.createdAt,
               windowId: input.windowId,
             });
-        // Work has no Plan posture, so nothing refuses its writes; the turn's
-        // level and the Project's setting decide whether one asks first.
+        // Plan reads Project memory and refuses every write to it; elsewhere
+        // the turn's level and the Project's setting decide whether one asks.
         const projectMemoryTools = !browserSupported
           ? undefined
           : projectMemoryAccess.toolsFor({
@@ -928,6 +957,7 @@ export function wireWork(deps: WorkDependencies) {
               mode: "work",
               threadId: String(input.thread.id),
               projectId: String(input.thread.projectId),
+              writeRefusal: () => runningLevel().memoryRefusal,
               fullAccess: () =>
                 runningWorkTurns.get(String(input.thread.id))?.access === "full-access",
             });
@@ -1055,6 +1085,12 @@ export function wireWork(deps: WorkDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    // An approved ask to plan first or to leave Plan moves the thread as the
+    // person who answered, then ends the turn that asked.
+    workLevelChangeHolder.port = {
+      change: (input) => workThreadService.changeLevelAtAgentRequest(input),
+      endTurn: (threadId) => workTurnService.endTurnForLevelChange(threadId),
+    };
     const fileMentionService = new FileMentionService({
       authority: {
         resolveDraftRoot: async (windowId, mode, projectId) => {
@@ -1929,6 +1965,10 @@ export function wireWork(deps: WorkDependencies) {
     // thread, counted in the store Code's wakes use so a restart keeps the
     // hourly and round bounds.
     const workMessageWake = new WorkMessageWake({
+      messageWakeDefaults: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
+      },
       readThread: (threadId) => {
         let thread: ReturnType<typeof workThreadProjection.read>;
         try {

@@ -869,6 +869,7 @@ export class ProjectService implements ProjectServiceApi {
             command.permissionMode,
             timestamp,
             command.fullAccessSandbox,
+            command.strict,
           );
           kind = "code-project-access-changed";
           eventName = "project.code-permission-mode-changed@1";
@@ -989,6 +990,7 @@ export class ProjectService implements ProjectServiceApi {
             command.permissionMode,
             timestamp,
             command.fullAccessSandbox,
+            command.strict,
           );
           kind = "work-project-permission-mode-changed";
           eventName = "project.work-permission-mode-changed@1";

@@ -129,6 +129,7 @@ import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 import type { CanvasWiring } from "./canvas";
 import { sessionNativeSetup } from "../providers/providerNativeSetup";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import {
   backgroundSessionIdleLimitMs,
   providerToolCallPauseLimitMs,
@@ -440,6 +441,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "selectCodeConversation"
     | "codeSessionConversation"
     | "threadWakeups"
+    | "resolveThreadStrict"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -450,6 +452,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
     threadWakeups,
+    resolveThreadStrict,
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
     agentMessageService,
@@ -544,6 +547,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     personMemoryAccess,
     octantInstructions,
   } = deps;
+  // The trust a person already gave a Project's folder in Claude Code or Codex.
+  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     // The coordinator service is wired after the Code runtime that reports
     // stopped turns to it; a stop before then has no worker to move.
@@ -648,6 +653,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         readImageGenerationCustomSources: () =>
           (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
             .customSources,
+        defaultProfileInstanceId: () =>
+          (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+            .defaultProfileInstanceId,
         readsImages: () =>
           providerRuntimeRegistry
             .observedState(thread.providerInstanceId)
@@ -850,8 +858,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         }),
       );
       codeOperationRuntime = createCodeOperationRuntime({
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         toolStepLimit: (fullAccess) =>
           threadToolStepLimit({
             fullAccess,
@@ -1701,6 +1712,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         forgeChanges: runtimeForgeChanges,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        resolveStrict: (threadId) => resolveThreadStrict(String(threadId)),
         resolveProviderCapabilities: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
         // A Code session hands its runtime's wake-ups to the host's schedule.
@@ -1709,13 +1721,16 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         outlivingSessions: outlivingCodeSessions,
         isRuntimeStartedTurn: (operationId) => runtimeStartedCodeTurns.delete(operationId),
         resolveProviderNativeSetup: (thread) =>
-          sessionNativeSetup(persistence, {
-            providerInstanceId: thread.providerInstanceId,
-            projectId: thread.projectId,
-            threadId: String(thread.id),
-            mode: "code",
-            executionPolicy: thread.executionPolicy,
-          }),
+          sessionNativeSetup(
+            { ...persistence, readProviderCliTrust: providerCliProjectTrust },
+            {
+              providerInstanceId: thread.providerInstanceId,
+              projectId: thread.projectId,
+              threadId: String(thread.id),
+              mode: "code",
+              executionPolicy: thread.executionPolicy,
+            },
+          ),
         // The planner's board read and board offers resolve their designation
         // on every call through the services declared after this runtime; the closures run only once a
         // turn is live, well after startup finishes wiring them.
@@ -1904,6 +1919,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     // than creating the thread unmarked.
     const codePlannerService = new CodePlannerService({
       persistence,
+      coordinatorsPerProject: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .coordinatorsPerProject,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       canAccessProject: canAccessCodeProject,
@@ -1955,6 +1973,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       clock: () => new Date().toISOString(),
     });
     const coordinatorService = new CoordinatorService({
+      messageWakeDefaults: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
+      },
       readThread: (threadId) => persistence.readCodeThread(decodeCodeThreadId(threadId)),
       readThreads: () => persistence.readCodeThreads(),
       readProject: (projectId) => persistence.readProject(projectId),
@@ -2329,6 +2351,14 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       }
     })();
     const pullRequestSwitchService = new CodeProjectPullRequestSwitchService({
+      limits: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return {
+          watchWakes: settings.pullRequestWatchWakeLimit,
+          watchDays: settings.pullRequestWatchDays,
+          autoFixAttempts: settings.autoFixAttemptsPerFailure,
+        };
+      },
       authority: projectPullRequestService,
       forge: pullRequestSwitchForge ?? {
         readAutoMergeSettings: async () => ({ status: "unavailable", reason: "unavailable" }),

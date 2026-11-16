@@ -137,7 +137,7 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
   Pick<UsageWiring, "validationEventStore"> &
   Pick<
     FoundationsWiring,
-    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection"
+    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
   > & {
     /** The level a Work thread's running turn holds; wired later, read per call. */
     readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
@@ -441,9 +441,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               current?.lifecycle === "active" &&
               String(current.providerInstanceId) === String(owner.providerInstanceId) &&
               String(current.modelId) === String(owner.modelId) &&
+              // A thread moved to Plan stops an owner composed outside it.
               !(
-                "executionPolicy" in current &&
-                current.executionPolicy === "plan" &&
+                ("executionPolicy" in current
+                  ? current.executionPolicy === "plan"
+                  : "access" in current && current.access === "plan") &&
                 owner.executionPolicy !== "plan"
               ) &&
               browserAuthority.canAccessWindow(
@@ -475,6 +477,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           externalContentIngested: (owner) =>
             readThreadExternalContentTaint(persistence.connection, owner.threadId)
               .externalContentIngested,
+          strict: (owner) => deps.resolveThreadStrict(owner.threadId),
           outsideContent: (owner) =>
             readApprovalOutsideContent(persistence.connection, owner.threadId),
           threadTitle: (owner) =>

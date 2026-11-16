@@ -109,6 +109,17 @@ export interface ProviderSessionStart {
    */
   readonly fullAccessSandbox?: boolean;
   /**
+   * Whether Strict is on for this launch, as the host resolved it from the
+   * thread, its Project and Settings. Strict keeps every protection Octant
+   * adds beside the provider's own: the fixed launch environment, the
+   * provider's channels (telemetry, error reports, feedback, marketplace
+   * installs) off, and the provider's own tools refused Octant's protected
+   * files. `false` lets the provider's own settings decide those. Absent is
+   * Strict, so a caller that never resolved it keeps today's launch and
+   * never loosens one.
+   */
+  readonly strict?: boolean;
+  /**
    * User-chosen values for options the model declares (`ProviderModel.options`),
    * keyed by option id. Drivers apply the ids they understand and ignore the
    * rest; absent means provider defaults.
@@ -268,6 +279,8 @@ export interface ProviderSessionResume {
   readonly autoApprove?: boolean;
   /** Same meaning as in {@link ProviderSessionStart.fullAccessSandbox}. */
   readonly fullAccessSandbox?: boolean;
+  /** Same meaning as in {@link ProviderSessionStart.strict}. */
+  readonly strict?: boolean;
   /**
    * The thread's current model. A driver that reports `modelSwitch` as
    * supported runs the resumed session on it; any other driver keeps the model

@@ -80,6 +80,12 @@ export function createComputerUseToolService(options: {
    */
   readonly fullAccess: (owner: ComputerUseOwner) => boolean;
   readonly externalContentIngested: (owner: ComputerUseOwner) => boolean;
+  /**
+   * Whether Strict is on for the owner's thread now. Outside Strict the mark
+   * is shown but adds no ask (Architecture: "Octant adds no restrictions of
+   * its own unless Strict is on"). Absent reads as Strict.
+   */
+  readonly strict?: (owner: ComputerUseOwner) => boolean;
   /** The sources that marked the owner's thread, read when an approval is asked. */
   readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
@@ -123,14 +129,21 @@ export function createComputerUseToolService(options: {
     { readonly appId: string; readonly leaseId: ComputerUseOwner["leaseId"] }
   >();
   /**
+   * Whether outside content on the owner's thread gates its actions: under
+   * Strict only. Outside Strict the mark tags the thread and its approvals
+   * but the grants and the level decide as they did before it.
+   */
+  const outsideContentGates = (owner: ComputerUseOwner): boolean =>
+    options.externalContentIngested(owner) && (options.strict?.(owner) ?? true);
+  /**
    * Whether outside content on the owner's thread makes every action ask.
-   * Below Full access it does: a standing grant must not carry an
+   * Under Strict below Full access it does: a standing grant must not carry an
    * irreversible action the content may have steered (untrustedContentPolicy).
-   * At Full access the mark gates nothing, as for every other tool there, and
-   * only the first action on each app asks.
+   * At Full access, and outside Strict, the mark gates nothing, as for every
+   * other tool there, and only the first action on each app asks.
    */
   const asksEveryAction = (owner: ComputerUseOwner): boolean =>
-    options.externalContentIngested(owner) && !options.fullAccess(owner);
+    outsideContentGates(owner) && !options.fullAccess(owner);
   /**
    * Why the tool-call authority gate refuses this owner, or undefined when it
    * admits it. `approved` says a one-time approval for this very action was
@@ -149,7 +162,7 @@ export function createComputerUseToolService(options: {
         host: { computerUseEnabled: options.settings().enabled },
         executionPolicy: owner.executionPolicy,
         approvalSatisfied: approved,
-        externalContentIngested: options.externalContentIngested(owner),
+        externalContentIngested: outsideContentGates(owner),
         toolConstraints: options.toolConstraints(owner),
       }),
     });

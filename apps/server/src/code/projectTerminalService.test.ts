@@ -214,6 +214,7 @@ function harness(
     >[0]["serverProject"];
     readonly personPairedDevice?: (scope: string) => boolean;
     readonly deviceQuietMs?: number;
+    readonly strict?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -259,6 +260,7 @@ function harness(
             options.personPairedDevice?.(String(scope)) === true,
         }),
     ...(options.deviceQuietMs === undefined ? {} : { deviceQuietMs: options.deviceQuietMs }),
+    ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
   });
   const events = () =>
     journal
@@ -900,7 +902,23 @@ describe("Project terminals", () => {
     });
   });
 
-  it("gives a Work Project the confined terminal a Code Project gets, now that Work has the shell", async () => {
+  it("outside Strict opens the person's own terminal unconfined, in a Code or a Work Project", async () => {
+    for (const type of ["code", "work"] as const) {
+      const { service, terminals, events } = harness({
+        projects: new Map([[ids.project, project({ type })]]),
+        access: () => true,
+        strict: false,
+      });
+
+      const result = await service.execute(windowId, "local-window", start());
+
+      expect(result).toMatchObject({ terminal: { posture: "full-access" } });
+      expect(terminals.launches[0]?.executionPolicy).toBe("full-access");
+      expect(events()[0]?.payload).toMatchObject({ posture: "full-access" });
+    }
+  });
+
+  it("under Strict gives a Work Project the confined terminal a Code Project gets", async () => {
     const { service, terminals } = harness({
       projects: new Map([[ids.project, project({ type: "work" })]]),
       access: () => true,

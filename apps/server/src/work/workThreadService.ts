@@ -26,6 +26,7 @@ import {
   type BindingRevisionId,
   type ProjectId,
   type WorkAccess,
+  type WorkPlanReturnAccess,
   type ProviderInstance,
   type ProviderModelId,
   type ProviderModelOptionValues,
@@ -60,6 +61,8 @@ import {
   guardrailLowered,
   permissionModeOf,
   workAccessOfPermissionMode,
+  workLevelChangeTarget,
+  workPlanReturnOf,
   workThreadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import {
@@ -387,8 +390,7 @@ export class WorkThreadService {
     )
       throw this.#failure("stale", "Work Project binding changed; reload and unlock again.");
     const updated = decodeWorkThread({
-      ...current,
-      access: input.access,
+      ...threadAtAccess(current, input.access),
       version: current.version + 1,
       updatedAt: decodeTimestamp(this.#clock()),
     });
@@ -418,6 +420,77 @@ export class WorkThreadService {
     });
     this.#projection.apply({ kind: "thread-updated", thread: updated });
     return updated;
+  }
+
+  /**
+   * The person approved the agent's own ask to plan first, or to leave Plan
+   * with its plan: the thread moves to Plan, remembering the guarded level it
+   * left, or back to that level, never to Full access. Worked out from the
+   * thread as it is now, so a person who lowered the level while the ask was
+   * open gets the plan's return at that lower level. Journaled as the person
+   * who answered, like a change from the level menu.
+   */
+  changeLevelAtAgentRequest(input: {
+    readonly threadId: WorkThreadId;
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly actor: EventActor;
+  }):
+    | { readonly status: "changed"; readonly thread: WorkThread }
+    | { readonly status: "refused"; readonly message: string } {
+    this.#assertReady();
+    const refused = {
+      status: "refused",
+      message: "The thread's level could not be changed. Change it from the level menu.",
+    } as const;
+    const current = this.#projection.read(input.threadId);
+    const project =
+      current === undefined ? undefined : this.#persistence.readProject(current.projectId);
+    if (
+      current === undefined ||
+      current.lifecycle !== "active" ||
+      project?.type !== "work" ||
+      project.lifecycle !== "active"
+    )
+      return refused;
+    // Leaving Plan applies only to a thread still in Plan, and entering it
+    // only to one outside: an answer the thread already moved past changes
+    // nothing.
+    if ((input.kind === "exit-plan") !== (current.access === "plan")) return refused;
+    const target = workLevelChangeTarget(current, input.kind);
+    // Neither target is Full access, so the sandbox choice is dropped as
+    // the level menu drops it.
+    const { fullAccessSandbox: _sandbox, ...unsandboxed } = current;
+    const updated = decodeWorkThread({
+      ...threadAtAccess(unsandboxed, target.to, target.planReturnAccess),
+      version: current.version + 1,
+      updatedAt: decodeTimestamp(this.#clock()),
+    });
+    try {
+      this.#inUnit(() => {
+        this.#append(
+          current.id,
+          current.version,
+          "work.thread-updated@1",
+          { kind: "thread-updated", thread: updated },
+          input.actor,
+        );
+        this.#journalLowering(
+          {
+            scope: "thread",
+            from: workModeOfAccess(current.access),
+            to: workModeOfAccess(updated.access),
+            projectId: current.projectId,
+            threadId: String(current.id),
+          },
+          input.actor,
+        );
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) return refused;
+      throw error;
+    }
+    this.#projection.apply({ kind: "thread-updated", thread: updated });
+    return { status: "changed", thread: updated };
   }
 
   /**
@@ -681,6 +754,9 @@ export class WorkThreadService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           // Absent reads as on, so only a stored off needs a value.
           ...((command.restartContinuation ?? current.restartContinuation) === false
             ? { restartContinuation: false }
@@ -854,6 +930,9 @@ export class WorkThreadService {
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
+          // Strict is stored only when the request chose; otherwise the
+          // thread follows its Project and Settings at each launch.
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -1277,10 +1356,14 @@ export class WorkThreadService {
         const sandboxed =
           command.access === "full-access" &&
           (command.fullAccessSandbox ?? currentSandbox) === true;
+        // Strict holds at every level: kept from the command, else from the
+        // thread; null returns the thread to its Project's and Settings' default.
+        const { strict: currentStrict, ...unchosen } = unsandboxed;
+        const strict = command.strict === undefined ? currentStrict : command.strict;
         const updated = decodeWorkThread({
-          ...unsandboxed,
-          access: command.access,
+          ...threadAtAccess(unchosen, command.access, command.planReturnAccess),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
+          ...(strict === null || strict === undefined ? {} : { strict }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -1695,6 +1778,7 @@ export class WorkThreadService {
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),
@@ -2453,6 +2537,27 @@ function withoutDoneMark(current: WorkThread): WorkThread {
     ...unmarked
   } = current;
   return unmarked as WorkThread;
+}
+
+/**
+ * The thread at `access`. In Plan it remembers the guarded level an approved
+ * plan returns it to, as a Code thread does: the one asked for, else the one
+ * it already remembers, else the level it leaves (Ask first when it leaves
+ * Full access). Outside Plan it remembers none.
+ */
+function threadAtAccess(
+  current: Omit<WorkThread, "fullAccessSandbox">,
+  access: WorkAccess,
+  asked?: WorkPlanReturnAccess,
+): Omit<WorkThread, "fullAccessSandbox"> {
+  const { planReturnAccess: remembered, ...rest } = current;
+  const planReturnAccess =
+    access !== "plan"
+      ? undefined
+      : (asked ??
+        (current.access === "plan" ? remembered : undefined) ??
+        workPlanReturnOf(current.access));
+  return { ...rest, access, ...(planReturnAccess === undefined ? {} : { planReturnAccess }) };
 }
 
 /** The picker's word for a Work thread's stored level. */

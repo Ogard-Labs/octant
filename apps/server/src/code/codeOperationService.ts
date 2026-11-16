@@ -101,6 +101,7 @@ import {
 } from "@octant/domain/code-policy";
 import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import {
+  coordinatorTurnPosture,
   decideRunMerge,
   describedImageText,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -1337,9 +1338,10 @@ export interface CodeOperationServiceOptions {
    */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /**
-   * Whether the thread has read outside content, read at each post. A marked
-   * thread's comment below Full access needs an approval for the act whatever
-   * the Project chose. Absent reads as marked.
+   * Whether the thread has read outside content under Strict, read at each
+   * post. Such a thread's comment below Full access needs an approval for the
+   * act whatever the Project chose; outside Strict the mark adds no ask.
+   * Absent reads as marked.
    */
   readonly threadReadOutsideContent?: (thread: CodeThread) => boolean;
   readonly reviewFindings: CodeOperationReviewFindingPort;
@@ -6993,15 +6995,14 @@ function turnAccessPosture(
   recorded: CodeThread["executionPolicy"] | undefined,
   coordinator: boolean,
 ): CodeThread["executionPolicy"] {
-  // A coordinator reads and its workers write: every one of its turns runs
-  // under Plan's read-only gate, whatever level the person gave the thread.
-  // That level stays on the thread as the ceiling for the workers it starts.
-  if (coordinator) return "plan";
   const requested = recorded ?? command.executionPolicy;
-  return clampTurnAccessPosture({
+  const posture = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
+  // A coordinator reads and its workers write: below Full access its turns
+  // run under Plan's read-only gate, whatever level the person gave the thread.
+  return coordinator ? coordinatorTurnPosture(posture) : posture;
 }
 
 function threadForTurn(

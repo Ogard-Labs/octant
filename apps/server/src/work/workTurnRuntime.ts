@@ -1,4 +1,5 @@
 import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN, MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -126,6 +127,8 @@ export interface WorkTurnRuntimePort {
     readonly access?: WorkAccess;
     /** The thread's opt-in sandbox at Full access; dropped unless access is Full access. */
     readonly fullAccessSandbox?: boolean;
+    /** Strict for this launch, as the host resolved it; absent is Strict. */
+    readonly strict?: boolean;
     /** The thread chose the runtime's own artifact tool and this turn offers it. */
     readonly nativeArtifacts?: boolean;
     /** What the session may load of the provider's own setup; absent keeps it all off. */
@@ -228,7 +231,7 @@ export interface WorkTurnRuntimeOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -298,7 +301,7 @@ export function workSessionTerms(
  * worktree, checkout and pull-request authority stay Code's.
  */
 export class WorkTurnRuntime implements WorkTurnRuntimePort {
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #cleanupTimeoutMs: number;
   readonly #forceStops = new Map<
@@ -381,7 +384,13 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     try {
       if (input.signal.aborted) return { kind: "cancelled" };
       const idle = await Effect.runPromise(
-        makeIdleTimeout(this.#stalledTurnLimitMs(), this.#providerToolCallPauseLimitMs()),
+        makeIdleTimeout(
+          this.#stalledTurnLimitMs({
+            fullAccess: input.access === "full-access",
+            strict: input.strict !== false,
+          }),
+          this.#providerToolCallPauseLimitMs(),
+        ),
       );
       const execution = Effect.scoped(
         this.#execute(input, idle, meter).pipe(
@@ -556,10 +565,14 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         // reviewer of its own keeps asking at Auto.
         ...workThreadAccessOf(input.access ?? DEFAULT_WORK_ACCESS),
         ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.strict === false ? { strict: false } : {}),
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
+        // The agent's own asks to plan first or to leave Plan reach the person
+        // as level-change requests, which the Work request service carries out.
+        levelChanges: true,
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })
