@@ -733,7 +733,11 @@ depends only on 1–3.
    default, since it makes Octant read another tool's credential store, but
    the person may opt in per endpoint with "Use my AWS profile", off by
    default, which reads their existing cloud profile (maintainer request,
-   2026-11-12; not built yet: today no cloud profile is read). The read can
+   2026-11-12; not built yet: today no cloud profile is read). Revised
+   (maintainer decision, 2026-11-16; designed, not built; [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
+   "Use my AWS profile" is to be built, and long-lived access keys are
+   allowed in the broker with a warning that they are reusable until the
+   person revokes them. The read can
    stay inside the broker, since a profile-sourced grant would sign through
    the same `/v1/cloud-iam/sign` route under the same stored scope and no
    runtime or journal would see it. Unresolved before it is built: which

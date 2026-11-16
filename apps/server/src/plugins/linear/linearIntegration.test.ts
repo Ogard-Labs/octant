@@ -126,6 +126,9 @@ describe("Linear integration plugin", () => {
         { operationId: "list-issue-filters", available: true },
       ],
     });
+    expect(
+      new TextEncoder().encode(JSON.stringify(observation.snapshot)).byteLength,
+    ).toBeLessThanOrEqual(4_096);
     expect(serialized(observation)).not.toContain(accessToken);
     expect(fetch).toHaveBeenCalledOnce();
     const firstCall = fetch.mock.calls[0];
@@ -183,6 +186,11 @@ describe("Linear integration plugin", () => {
         },
       },
     });
+    if (observation.kind === "operation") {
+      expect(
+        new TextEncoder().encode(JSON.stringify(observation.result)).byteLength,
+      ).toBeLessThanOrEqual(512 * 1_024);
+    }
     expect(serialized(observation)).not.toContain(accessToken);
     expect(fetch).toHaveBeenCalledOnce();
     const firstCall = fetch.mock.calls[0];
@@ -231,6 +239,11 @@ describe("Linear integration plugin", () => {
         },
       },
     });
+    if (observation.kind === "operation") {
+      expect(
+        new TextEncoder().encode(JSON.stringify(observation.result)).byteLength,
+      ).toBeLessThanOrEqual(512 * 1_024);
+    }
   });
 
   it("fails closed on stale authorization, missing capability, rate limits, and network loss", async () => {
