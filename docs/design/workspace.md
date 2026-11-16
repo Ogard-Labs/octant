@@ -1391,25 +1391,35 @@ beside the start screen ([Start screen: Welcome screen](start-screen.md#welcome-
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [Right dock and bottom panel](#right-dock-and-bottom-panel));
 its header is an empty band as tall as the title rail, and the tools are opened
-from the **tool row** in the thread pane's own header, after the title, so a
-thread and the controls that act on it read as one box. The title band keeps the
-window's controls only: Show sidebar, Back and Forward while the sidebar is
-hidden, the Open in and Project action slots, the Code start screen's
-uncommitted-changes count. It has no switch for the dock or the bottom panel:
+from the **tool row**: at 961px and wider it stands outermost at the end of the
+title band, above the Environment section, and it is the focused thread's row.
+Before it the band keeps the window's controls: Show sidebar, Back and Forward
+while the sidebar is hidden, the Open in and Project action slots, the Code
+start screen's uncommitted-changes count. It has no switch for the dock or the bottom panel:
 every tool is a panel that its button in the thread header's row opens, and that
 a person can move between the side and the bottom, so a window-level "show the
 side" or "show the bottom" switch no longer named anything (the side one only
-opened Review, 2026-11-16). At 961px and
-wider the focused pane has the row, and so does every other pane of a split that
-shows a thread. A single pane and its Environment section are one box under one
-header: the header runs on over the section, and the row ends on the box's
-narrowest line (see "The thread box and the tool row"), so it does not move
-when the section or a tool opens or closes. In a split each row stays inside
-its own pane and ends at the pane's edge where the pane is narrower than that
-line.
-The dock shows the focused thread's tools, so only the focused pane's row shows
-what is pressed. The row of another pane is **its own thread's row at rest**:
-the tools that thread's mode has (a Chat thread beside a Code thread offers no
+opened Review, 2026-11-16). The window has one row, and nothing moves it: not
+Environment or a tool opening or closing, not a change count or a Project
+action arriving beside it, not going from a thread to a new task. The pane
+draws it (it knows the thread and its tools) into a slot the title band offers,
+last in the band's trailing cluster; whatever stands at the window's top right
+(a pane's header, a tool tile's bar) already gives up the cluster's measured
+width. Under 640px of title band the row is one **Tools** menu button, read
+from the band and not from a pane's header, whose width the row itself
+changes. A destination page has no thread and so no row: the controls before
+it in the cluster then stand at the band's end, a move that happens with the
+page and never under a press on the row. A single pane and its Environment section are one box under one header,
+which runs on over the section and stops before the row. A split's other panes
+draw no row: the dock shows the focused thread's tools, so a press on a pane
+focuses it and the one row becomes that thread's. Until 2026-11-16 the row
+stood in the pane's header on the thread box's narrowest line, which kept it
+still but left it in the middle of the band with nothing open; each pane of a
+split had a row, and a resting one opened a tool for its own thread
+(maintainer request). A window with no title band slot (under 961px, or a pane
+drawn by itself) keeps that older arrangement: the row at the end of the pane's
+header, and a split's other thread panes with **their own row at rest**: the
+tools that thread's mode has (a Chat thread beside a Code thread offers no
 Terminal), each with the quiet open dot when that thread has it open in its own
 dock, none pressed, none draggable. Tools that depend on what only the focused
 thread reads (Plan, Delivery, Canvas, Document) are listed at rest only while
@@ -2477,9 +2487,9 @@ agent's session; an announcement whose every session is already a tab of the
 dock's Browser opens nothing, where it used to open the thread's shared
 Browser tab and leave an empty "New tab" beside the page.
 The Browser's toolbar is one row of plain icon buttons, the address field and
-trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** in the
-thread pane's header, after the title and ending on the thread box's narrowest
-line (see "How the width is shared"): icon buttons for
+trailing icons, as the Browser toolbar rules above set out. The right dock's tools are opened from a **tool row** at the
+end of the title band (in the thread pane's header where the window has no
+band slot; see "Shell grid and tool row" above): icon buttons for
 Environment, Terminal, Review, Browser, Files, then a **More tools** menu of
 checkbox items for every other tool the thread can use (grouped as the launcher
 groups them), then the pull requests the thread is about under "Relevant to this
@@ -2902,13 +2912,14 @@ what a tool region at its asked width (640px) leaves where that is more, up to
 the thread's minimum and the section together (860px, from a 1500px workspace
 up). The tool region takes only the room past that line, whether Environment is
 open or closed, in one column or two, and the resize handle stops there
-(`dockWidthCeiling`). The header's tool row ends on the line, 8px in, measured
-from the pane's left edge. So no click moves the row: not opening or closing
-Environment, not the first tool or the last, not a second tool stacking, not a
-second column. The row is at the header's end only where the box is at its
-narrowest; in a wider box it stands inside the header and the rest of the band
-moves the window. A pane narrower than the line (one of a split) ends its row
-at its own edge. Measured (2026-11-16, sidebar open): at 1800px the row's left
+(`dockWidthCeiling`). The tool row itself stands at the end of the title band
+and is moved by none of this (measured 2026-11-16 at 1800px with the sidebar
+open: x 1604 to 1792 with nothing open, with Environment, with Review beside
+it, and on a new task). Where a window has no band slot the row is in the
+pane's header and ends on the line, 8px in, measured from the pane's left
+edge, as it did everywhere before: there no click moves it either, and a pane
+narrower than the line (one of a split) ends its row at its own edge.
+Measured for that header placement (2026-11-16, sidebar open): at 1800px the row's left
 edge was at x 1532 with nothing open, 960 with one tool and 996 with
 Environment beside it, and is 960 in every state; at 1400px it was 1132, 696
 and 920, and is 696 in every state; at 2400px it is 996 with nothing open, one
@@ -3291,9 +3302,26 @@ under a small "Pull requests" caption: each is one row of fixed height with the
 state's mark in its colour (open, draft, merged, closed, or a neutral mark when
 the state is not known), the title on one line, then the repository, the
 number and the state in the meta ink, with "Ready to merge" and a stale or
-unavailable reading said in words. An open or draft pull request ends with a
-small dot for its checks (passing, failing, pending), and the row's name says
-the state and the checks, so colour is never the only sign. Pressing a row
+unavailable reading said in words, then the pull request's added and removed
+lines as "+A −D" in the two inks of the changes row. An open pull request that
+is on its way in says so instead of "Open": "Merging" while it sits in the
+repository's merge queue (with the merge glyph in the pending tone), "Merges
+when ready" while auto-merge is switched on. An open or draft pull request ends
+with a small dot for its checks (passing, failing, pending), preceded by
+"passed/total" in tabular digits (19/26) until every counted check has passed;
+skipped, neutral and cancelled checks are not counted. The trailing cluster
+holds one width on every row, so a count arriving moves nothing. The row's name
+says the state, the checks, the counts and the lines in words, so colour is
+never the only sign. The host sends each of these facts only when its refresh
+read it: the line counts and checks come with the list read, auto-merge with it
+and with the single-pull-request read, and the merge queue from one read-only
+GraphQL query per refreshed repository through the same `gh`, on the same
+explicit or background refresh; that query reads the 100 most recently updated
+open pull requests, so one in the queue beyond them reads as open. A snapshot from before a fact was recorded, a
+pull request known only from a thread, and a failed queue read send nothing for
+it, and an absent fact draws nothing (never a zero, never "0/0"). A merged or
+closed pull request keeps its line counts and has no checks or merging state.
+Pressing a row
 opens that pull request in the app; a "…" menu beside it (More for pull request
 #N), shown on hover and keyboard focus and always on touch, offers Open on
 GitHub and Copy link. The list is the host's cached reading: opening the strip

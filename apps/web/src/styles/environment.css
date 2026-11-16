@@ -54,7 +54,8 @@
 
 /* The changes row's count reads as one measurement, in the two inks the
    composer's checkout bar uses for the same figures. */
-.environment-git-group__diffstat {
+.environment-git-group__diffstat,
+.environment-thread-pr__diffstat {
   display: inline-flex;
   gap: var(--oct-space-2);
   font-family: var(--oct-font-mono);
@@ -62,11 +63,13 @@
   font-variant-numeric: tabular-nums;
 }
 
-.environment-git-group__insertions {
+.environment-git-group__insertions,
+.environment-thread-pr__insertions {
   color: var(--oct-success-fg);
 }
 
-.environment-git-group__deletions {
+.environment-git-group__deletions,
+.environment-thread-pr__deletions {
   color: var(--oct-danger-fg);
 }
 
@@ -1557,6 +1560,11 @@ html[data-octant-reduced-motion="true"] .thread-move-frozen__progress > span {
   color: var(--oct-pr-closed);
 }
 
+/* Queued: on its way in, so the pending tone the checks dot uses. */
+.environment-thread-pr__state[data-pr-state="queued"] {
+  color: var(--octant-warning-text);
+}
+
 .environment-thread-pr__state[data-pr-state="draft"],
 .environment-thread-pr__state[data-pr-state="unknown"] {
   color: var(--oct-pr-draft);
@@ -1569,11 +1577,32 @@ html[data-octant-reduced-motion="true"] .thread-move-frozen__progress > span {
 }
 
 .environment-thread-pr__title,
-.environment-thread-pr__meta {
+.environment-thread-pr__meta,
+.environment-thread-pr__repository,
+.environment-thread-pr__words {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Line two is a row of three: the repository gives way first (it shrinks far
+   faster than the words), and the line counts never shrink. */
+.environment-thread-pr__meta {
+  display: flex;
+  gap: var(--oct-space-1);
+}
+
+.environment-thread-pr__repository {
+  flex: 0 100 auto;
+}
+
+.environment-thread-pr__words {
+  flex: 0 1 auto;
+}
+
+.environment-thread-pr__diffstat {
+  flex: none;
 }
 
 .environment-thread-pr__title {
@@ -1585,6 +1614,30 @@ html[data-octant-reduced-motion="true"] .thread-move-frozen__progress > span {
 .environment-thread-pr__meta {
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
+}
+
+/* The trailing cluster has one width on every row, whether it holds a count and
+   a dot, a dot, or nothing, so a count arriving moves nothing. Right-aligned so
+   the dots share one column. */
+.environment-thread-pr__checks-end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+}
+
+/* Room for "123/456" and the dot: 56px. */
+.environment-thread-pr__checks-end[data-reserved="true"] {
+  min-width: calc(var(--oct-space-12) + var(--oct-space-2));
+}
+
+.environment-thread-pr__check-count {
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* A small dot for the checks of a pull request that can still merge. It never

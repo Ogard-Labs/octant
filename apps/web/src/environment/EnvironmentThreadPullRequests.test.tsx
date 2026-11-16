@@ -34,6 +34,15 @@ function summaries(
   return decodeThreadBoardPullRequestSummaries({ items, hiddenCount });
 }
 
+/** Line two of a row, read as one string: its parts are separate boxes so the repository can give way first. */
+function meta(text: string): HTMLElement {
+  return screen.getByText(
+    (_, element) =>
+      element?.classList.contains("environment-thread-pr__meta") === true &&
+      element.textContent === text,
+  );
+}
+
 describe("EnvironmentThreadPullRequests", () => {
   it("draws nothing without summaries and with an empty list", () => {
     const { container, rerender } = render(<EnvironmentThreadPullRequests />);
@@ -54,16 +63,16 @@ describe("EnvironmentThreadPullRequests", () => {
     );
     expect(screen.getByRole("group", { name: "Pull requests" })).toBeVisible();
     expect(screen.getByText("Change 1")).toBeVisible();
-    expect(screen.getByText("repo #1 · Open")).toBeVisible();
-    expect(screen.getByText("repo #2 · Draft")).toBeVisible();
-    expect(screen.getByText("repo #3 · Merged")).toBeVisible();
+    expect(meta("repo #1 · Open")).toBeVisible();
+    expect(meta("repo #2 · Draft")).toBeVisible();
+    expect(meta("repo #3 · Merged")).toBeVisible();
     rerender(
       <EnvironmentThreadPullRequests
         summaries={summaries([summary(4, { state: "closed" }), summary(5, { state: "unknown" })])}
       />,
     );
-    expect(screen.getByText("repo #4 · Closed")).toBeVisible();
-    expect(screen.getByText("repo #5")).toBeVisible();
+    expect(meta("repo #4 · Closed")).toBeVisible();
+    expect(meta("repo #5")).toBeVisible();
   });
 
   it("names checks in words for open and draft pull requests but not merged or closed ones", () => {
@@ -82,7 +91,7 @@ describe("EnvironmentThreadPullRequests", () => {
         name: "Pull request 1, Change 1, open, checks passing, ready to merge",
       }),
     ).toBeVisible();
-    expect(screen.getByText("repo #1 · Open · Ready to merge")).toBeVisible();
+    expect(meta("repo #1 · Open · Ready to merge")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Pull request 2, Change 2, draft, checks failing" }),
     ).toBeVisible();
@@ -98,7 +107,7 @@ describe("EnvironmentThreadPullRequests", () => {
     );
     expect(screen.getByRole("button", { name: "Pull request 4, Change 4, closed" })).toBeVisible();
     // A stale reading is said, not hidden.
-    expect(screen.getByText("repo #5 · Open · Stale snapshot")).toBeVisible();
+    expect(meta("repo #5 · Open · Stale snapshot")).toBeVisible();
   });
 
   it("opens the pull request in the app when its row is pressed", async () => {
@@ -156,5 +165,120 @@ describe("EnvironmentThreadPullRequests", () => {
     const rows = screen.getAllByRole("listitem");
     expect(rows).toHaveLength(2);
     for (const row of rows) expect(within(row).getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("shows added and removed lines after the state, and none when the host has not read them", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        summaries={summaries([
+          summary(1, { additions: 2173, deletions: 296 }),
+          summary(2, { additions: 0, deletions: 0, state: "merged" }),
+          summary(3),
+        ])}
+      />,
+    );
+    expect(meta("repo #1 \u00b7 Open +2,173 \u2212296")).toBeVisible();
+    expect(meta("repo #2 \u00b7 Merged +0 \u22120")).toBeVisible();
+    // Absent is not zero: nothing is drawn.
+    expect(meta("repo #3 \u00b7 Open")).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Pull request 1, Change 1, open, 2,173 lines added, 296 removed",
+      }),
+    ).toBeVisible();
+  });
+
+  it("shows passed out of counted only while checks have not all passed", () => {
+    const { container } = render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        summaries={summaries([
+          summary(1, { checks: "pending", checkCounts: { passed: 19, total: 26 } }),
+          summary(2, { checks: "passing", checkCounts: { passed: 26, total: 26 } }),
+          summary(3, { state: "merged", checks: "failing", checkCounts: { passed: 1, total: 2 } }),
+        ])}
+      />,
+    );
+    const rows = screen.getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByText("19/26")).toBeInTheDocument();
+    expect(container.querySelectorAll(".environment-thread-pr__check-count")).toHaveLength(1);
+    expect(
+      screen.getByRole("button", {
+        name: "Pull request 1, Change 1, open, checks pending, checks 19 of 26 passed",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Pull request 2, Change 2, open, checks passing" }),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Pull request 3, Change 3, merged" })).toBeVisible();
+  });
+
+  it("says Merging or Merges when ready instead of Open, in the row and its name", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={vi.fn()}
+        summaries={summaries([
+          summary(1, { merging: "queued" }),
+          summary(2, { merging: "auto-merge" }),
+          summary(3, { state: "merged", merging: "queued" }),
+        ])}
+      />,
+    );
+    expect(meta("repo #1 \u00b7 Merging")).toBeVisible();
+    expect(meta("repo #2 \u00b7 Merges when ready")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Pull request 1, Change 1, merging" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Pull request 2, Change 2, merges when ready" }),
+    ).toBeVisible();
+    // A merged pull request is no longer on its way in.
+    expect(meta("repo #3 \u00b7 Merged")).toBeVisible();
+  });
+
+  it("marks a queued pull request with the merge glyph in the pending tone and leaves auto-merge as open", () => {
+    const { container } = render(
+      <EnvironmentThreadPullRequests
+        summaries={summaries([
+          summary(1, { merging: "queued" }),
+          summary(2, { merging: "auto-merge" }),
+        ])}
+      />,
+    );
+    const marks = container.querySelectorAll(".environment-thread-pr__state");
+    expect(marks[0]?.getAttribute("data-pr-state")).toBe("queued");
+    expect(marks[1]?.getAttribute("data-pr-state")).toBe("open");
+  });
+
+  it("says one line added, not one lines", () => {
+    render(
+      <EnvironmentThreadPullRequests
+        onOpen={() => undefined}
+        summaries={summaries([summary(1, { additions: 1, deletions: 0 })])}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^Pull request 1, .*, 1 line added, 0 removed/ }),
+    ).toBeVisible();
+  });
+
+  it("keeps one width at the end of every open row whether or not it holds a count or a dot, and none on a merged one", () => {
+    const { container } = render(
+      <EnvironmentThreadPullRequests
+        summaries={summaries([
+          summary(1, { checks: "failing", checkCounts: { passed: 3, total: 9 } }),
+          summary(2, { checks: "passing" }),
+          summary(3, { state: "merged" }),
+        ])}
+      />,
+    );
+    const ends = container.querySelectorAll(".environment-thread-pr__checks-end");
+    expect(ends).toHaveLength(3);
+    // The width is one CSS rule keyed on this mark: the two open rows carry
+    // it, with a count and with a dot alone, so a count arriving moves nothing.
+    expect([...ends].map((end) => end.getAttribute("data-reserved"))).toEqual([
+      "true",
+      "true",
+      null,
+    ]);
   });
 });
