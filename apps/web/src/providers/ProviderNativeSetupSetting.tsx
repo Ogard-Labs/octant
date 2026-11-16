@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { SettingRow } from "../settings/primitives";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { keyProviderLabel } from "./providerSettingsPresentation";
 
 export interface ProviderNativeSetupSettingProps {
   readonly instance: {
@@ -21,13 +22,6 @@ export interface ProviderNativeSetupSettingProps {
   readonly onChange: (enabled: boolean) => Promise<boolean>;
 }
 
-const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  "mistral-vibe": "Mistral Vibe",
-};
-
 const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
   subagents: "its own subagents",
   webTools: "web search and fetch",
@@ -40,13 +34,15 @@ const FEATURE_NAMES: Readonly<Record<ProviderNativeSetupFeature, string>> = {
 /**
  * The person's switch for one key provider account running as it does in its
  * own app: its own subagents, web tools, skills, and home configuration. On by
- * default; turning it off keeps them unloaded below Full access. Only a
- * window on this host may change it (the server refuses others). The line
+ * default; turning it off keeps them unloaded below Full access, and the web
+ * tools at every level and in every mode. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device). The line
  * under the switch says which of those this provider's driver can load at
  * all, so a feature Octant cannot see is never implied.
  */
 export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProps) {
-  const name = PROVIDER_NAMES[props.instance.driverKind];
+  const name = keyProviderLabel(props.instance.driverKind);
   const settingId = `provider-${props.instance.id}-native-setup`;
   const unsupported = unsupportedFeatures(props.observed?.capabilities);
   return (
@@ -56,15 +52,17 @@ export function ProviderNativeSetupSetting(props: ProviderNativeSetupSettingProp
           Lets this account’s threads use {name}’s own setup, as in {name} itself: its own
           subagents, web search and fetch, skills, and the MCP servers, plugins, settings, and hooks
           in its home folder. On by default; each call still follows the thread’s level. Octant
-          still shows each subagent and marks each web read. Turned off, Full access still turns it
-          on. Plan stays read-only, and Chat never gets a folder or a shell. A Project’s own hooks,
-          MCP servers, and plugins load only in a Project you trust for {name}.
+          still shows each subagent and marks each web read. Turned off, web search and fetch stay
+          off in every mode, and Full access still turns the rest on. Plan stays read-only, and Chat
+          never gets a folder or a shell. A Project’s own hooks, MCP servers, and plugins load only
+          in a Project you trust for {name}.
           {props.instance.driverKind === "mistral-vibe" ? (
             <>
               {" "}
-              Vibe doesn’t say which tool its subagents ask to run, so their approvals show no tool
-              name, and a subagent running as one of your own Vibe agents may approve its own tools,
-              as in Vibe.
+              Vibe’s subagents, and your own Vibe agents they run as, work in Work and Code outside
+              Plan, at every level there. Vibe doesn’t say which tool its subagents ask to run, so
+              their approvals show no tool name, and a subagent running as one of your own Vibe
+              agents may approve its own tools, as in Vibe.
             </>
           ) : null}
           {unsupported.length === 0 ? null : (
@@ -97,30 +95,37 @@ export interface ProviderOwnMemorySettingProps {
     readonly id: string;
     readonly displayName: string;
     readonly driverKind: OwnMemoryProviderDriverKind;
-    readonly ownMemory?: true;
+    readonly ownMemory?: boolean;
   };
   readonly disabled: boolean;
   readonly onChange: (enabled: boolean) => Promise<boolean>;
 }
 
 /**
- * The person's switch for one Claude Code or Codex account's own memory, off
+ * The person's switch for one Claude Code or Codex account's own memory, on
  * by default and apart from "Run as itself": that switch and Full access never
- * turn memory on. The text says what Octant does not control once it is on,
- * and where it stays off. Only a window on this host may change it (the
- * server refuses others).
+ * turn memory on once the person turned it off. The text says what Octant does
+ * not control while it is on, and what it may do in Plan and Chat: Claude Code
+ * reads its memory there and cannot change it, and Codex, which writes its
+ * memory in the background, keeps it off there. Only the host's own person may
+ * change it, at a window on this host or on a device they paired (the server
+ * refuses every other device).
  */
 export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
-  const name = PROVIDER_NAMES[props.instance.driverKind];
+  const name = keyProviderLabel(props.instance.driverKind);
   const settingId = `provider-${props.instance.id}-own-memory`;
   return (
     <SettingRow
       description={
         <>
-          Lets {name} keep and use its own memory in this account’s Work and Code threads. {name}{" "}
-          decides what it remembers and carries it across Projects; Octant does not show, journal,
-          or clear it. It stays off in Plan and in Chat. Octant’s Project memory and its memory of
-          you work with this off. {name}’s telemetry and self-update stay off either way.
+          Lets {name} keep and use its own memory in this account’s Work and Code threads, as in{" "}
+          {name} itself. On by default. {name} decides what it remembers and carries it across
+          Projects; Octant does not show, journal, or clear it.{" "}
+          {props.instance.driverKind === "claude"
+            ? "In Plan and in Chat it reads its memory and cannot change it."
+            : "It stays off in Plan and in Chat, because it writes its memory in the background."}{" "}
+          Octant’s Project memory and its memory of you work with this off. {name}’s telemetry and
+          self-update stay off either way.
         </>
       }
       label={`Use ${name}’s own memory`}
@@ -128,7 +133,7 @@ export function ProviderOwnMemorySetting(props: ProviderOwnMemorySettingProps) {
       settingId={`provider-${props.instance.id}-own-memory`}
     >
       <OctantSwitch
-        checked={props.instance.ownMemory === true}
+        checked={props.instance.ownMemory !== false}
         describedBy={`${settingId}-description`}
         disabled={props.disabled}
         label={`Use ${props.instance.displayName}’s own memory`}

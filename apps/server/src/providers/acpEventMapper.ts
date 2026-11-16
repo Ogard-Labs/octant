@@ -11,6 +11,7 @@ import type {
 import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
+import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { providerApprovalCall } from "./providerApprovalCall";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -58,6 +59,11 @@ export interface AcpEventContext {
   readonly unnamedPermissionDescription?: string;
   /** The profile's `unseenChildCalls`. */
   readonly unseenChildCalls?: { readonly readOnlyAgents: ReadonlyArray<string> };
+  /**
+   * The calls Octant never saw that an agent without child sessions asked
+   * permission for, each already journaled as a subagent run.
+   */
+  unattributedSubagentRuns?: Set<string>;
   /** Unset until the agent writes its first text of the turn. */
   agentText?: AcpAgentTextState;
 }
@@ -77,6 +83,8 @@ export type AcpMappedPermission =
       readonly allowOptionId: string;
       readonly rejectOptionId: string;
       readonly event: ProviderRuntimeEvent;
+      /** Events journaled before the approval, in order. */
+      readonly preceding?: ReadonlyArray<ProviderRuntimeEvent>;
       /** The pending call, for an automatic reviewer; never on the event. */
       readonly call?: ProviderApprovalCall;
     }
@@ -277,8 +285,11 @@ function mapTool(
  * A call that started one of the agent's own subagents, shown as a child run
  * once the agent names the child's session under the profile's
  * `childRunMetaKey`: running when first named, then finished or failed with
- * the call. The task is the first line of what the agent sent the child;
- * nothing the child said is read.
+ * the call. The task is the first line of what the agent sent the child.
+ * The child's closing answer, which Mistral Vibe's source puts under
+ * `response` once the call finished, is carried for the person to read and
+ * never sent to a model. The agent names no model or token counts for its
+ * child, so those stay unknown.
  */
 function childRun(
   context: AcpEventContext,
@@ -300,6 +311,8 @@ function childRun(
   if (childAgentId === undefined || (!firstSeen && ended === undefined)) return [];
   const task = normalized(string(meta?.task)?.split("\n")[0], 200);
   const status = ended ?? "running";
+  const finalSummary =
+    status === "completed" ? boundedChildFinalSummary(string(meta?.response)) : undefined;
   const unseen = context.unseenChildCalls;
   if (unseen === undefined) {
     return [
@@ -307,6 +320,7 @@ function childRun(
         kind: "child-agent-activity",
         childAgentId,
         ...(task === undefined ? {} : { task }),
+        ...(finalSummary === undefined ? {} : { finalSummary }),
         status,
         summary:
           status === "running"
@@ -328,6 +342,7 @@ function childRun(
       kind: "child-agent-activity",
       childAgentId,
       ...(task === undefined ? {} : { task }),
+      ...(finalSummary === undefined ? {} : { finalSummary }),
       status,
       summary:
         status === "running"
@@ -516,6 +531,49 @@ export function mapAcpNotification(
   }
 }
 
+/**
+ * The record of a subagent run Octant learns of only through a permission
+ * request naming a call it never saw, from an agent that names no child
+ * session (every ACP agent but Mistral Vibe, whose child runs carry their own
+ * record). The first such request for a call journals a child run that says
+ * Octant cannot see its tool calls or when it ends, as a Vibe custom-agent
+ * run does, and marks the thread as having read outside content, since the
+ * subagent may have done so unseen.
+ */
+function unattributedSubagentRun(
+  context: AcpEventContext,
+  toolCallId: string,
+  requestId: string,
+): ReadonlyArray<ProviderRuntimeEvent> {
+  if (context.unnamedPermissionDescription === undefined || context.childRunMetaKey !== undefined) {
+    return [];
+  }
+  const trimmed = toolCallId.trim();
+  const childAgentId = trimmed.length > 0 && trimmed.length <= 255 ? trimmed : requestId;
+  const runs = (context.unattributedSubagentRuns ??= new Set());
+  if (runs.has(childAgentId)) return [];
+  runs.add(childAgentId);
+  const results: ProviderRuntimeEvent[] = [];
+  for (const value of [
+    {
+      kind: "child-agent-activity",
+      childAgentId,
+      status: "running",
+      summary: `${context.displayName} is running a subagent. Octant cannot see its tool calls or when it ends, only the approvals it asks for.`,
+    },
+    {
+      kind: "outside-content-read",
+      toolCallId: childAgentId,
+      toolName: outsideContentToolName("subagent unnamed"),
+      source: "hosted-tool",
+    },
+  ] as const satisfies ReadonlyArray<RuntimeEventWithoutEnvelope>) {
+    results.push(mappedEvent(context, value));
+    context.sequence += 1;
+  }
+  return results;
+}
+
 export function mapAcpPermissionRequest(
   context: AcpEventContext,
   request: AcpServerRequest,
@@ -594,6 +652,11 @@ export function mapAcpPermissionRequest(
       },
     };
   }
+  const preceding =
+    tool === undefined &&
+    normalized(request.params.toolCall.title, SUMMARY_MAX_CHARACTERS) === undefined
+      ? unattributedSubagentRun(context, request.params.toolCall.toolCallId, requestId)
+      : [];
   return {
     kind: "approval",
     requestId,
@@ -601,6 +664,7 @@ export function mapAcpPermissionRequest(
     toolKind,
     allowOptionId: allow.optionId,
     rejectOptionId: reject.optionId,
+    ...(preceding.length === 0 ? {} : { preceding }),
     event: mappedEvent(context, {
       kind: "approval-request",
       requestId,

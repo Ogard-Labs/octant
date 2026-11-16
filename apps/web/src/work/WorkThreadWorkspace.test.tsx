@@ -3681,3 +3681,49 @@ it("refuses a native folder as an attachment when the desktop extraction bridge 
   fireEvent.drop(input, { dataTransfer: nativeFolderTransfer() });
   expect(await screen.findByText(/Folder drops require this computer/)).toBeVisible();
 });
+
+it("offers an empty Work thread its folder's outside sessions and shows live tasks with Stop above the composer", async () => {
+  const clients = queuedWorkClients();
+  vi.mocked(clients.turnClient.transcriptWindow).mockResolvedValue(
+    decodeWorkThreadTranscriptWindow({
+      version: 1,
+      threadId,
+      turns: [],
+      liveCursor: 0,
+      hasEarlier: false,
+      hasLater: false,
+    }),
+  );
+  vi.mocked(clients.turnClient.transcript).mockResolvedValue(
+    decodeWorkThreadTranscript({ threadId, turns: [] }),
+  );
+  const stopLiveTasks = vi.fn(async () => ({ stopped: true }));
+  const sessionClient = {
+    liveTasks: vi.fn(async () => ({
+      tasks: [{ taskId: "bash-1", description: "npm run preview" }],
+      turnRunning: false,
+    })),
+    stopLiveTasks,
+    nativeSessions: vi.fn(async () => ({
+      sessions: [{ nativeSessionId: "outside-1", title: "Draft notes", lastModified: 1 }],
+    })),
+    adoptNativeSession: vi.fn(async () => ({ kind: "work-native-session-adopted" })),
+  };
+  const user = userEvent.setup();
+  render(
+    <WorkThreadWorkspace
+      initialThread={workThread()}
+      sessionClient={sessionClient}
+      {...clients}
+      threadId={threadId}
+      title="Draft brief"
+    />,
+  );
+  const live = await screen.findByRole("region", { name: "Live tasks" });
+  expect(within(live).getByText("npm run preview")).toBeVisible();
+  expect(
+    await screen.findByText("1 session in this folder was started outside Octant"),
+  ).toBeVisible();
+  await user.click(within(live).getByRole("button", { name: "Stop the live tasks" }));
+  expect(stopLiveTasks).toHaveBeenCalledWith(threadId);
+});

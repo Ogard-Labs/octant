@@ -359,7 +359,7 @@ describe("SafeNetworksSettings", () => {
       answer: () => ({ kind: "safe-networks-updated", view: view({ limitsOn: true }) }),
     });
 
-    expect(await screen.findByText(/Network limits are off\./)).toBeVisible();
+    expect(await screen.findByText(/Network limits are off, the default\./)).toBeVisible();
     expect(screen.getByText(/applies to the next runtime you start/i)).toBeVisible();
     await user.click(screen.getByRole("switch", { name: "Limit runtime network" }));
 

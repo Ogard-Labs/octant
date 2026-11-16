@@ -101,7 +101,21 @@ const settings = {
   autoCompactIdleMinutes: null,
   autoCompactLimitPercent: null,
   stalledTurnLimitMinutes: 30,
+  fullAccessStalledTurnLimitMinutes: null,
   providerToolCallPauseLimitMinutes: 120,
+  backgroundSessionIdleLimitMinutes: 120,
+  threadWakeupsWaitingLimit: 8,
+  threadWakeupsRunMissedOnReturn: false,
+  messageWakesPerHour: 30,
+  messageWakeRounds: 10,
+  coordinatorsPerProject: 4,
+  pullRequestWatchWakeLimit: 10,
+  pullRequestWatchDays: 3,
+  autoFixAttemptsPerFailure: 3,
+  threadMessagesPerTurn: 3,
+  browserWaitLimitMinutes: 10,
+  childRunWaitLimitSeconds: 120,
+  agentRoutinesStartActiveAtFullAccess: false,
   navigatorAssistant: {},
   voice: {},
   imageGeneration: { customSources: [] },
@@ -115,6 +129,7 @@ const settings = {
   keepToolCallRecords: true,
   toolStepsPerTurn: 64,
   fullAccessToolStepsPerTurn: 0,
+  runtimeTurnsPerTurn: 256,
   browserTransferFileLimitMegabytes: 25,
   browserHeldDownloadLimit: 5,
   browserUploadFileCountLimit: 5,
@@ -222,6 +237,17 @@ describe("shell bootstrap contracts", () => {
     expect(
       decodeShellSettings({ ...settings, keepToolCallRecords: false }).keepToolCallRecords,
     ).toBe(false);
+  });
+
+  it("lets a runtime start 256 turns of its own by default, and refuses a count outside 1 to 4,096", () => {
+    const { runtimeTurnsPerTurn: _omitted, ...saved } = settings;
+    expect(decodeShellSettings(saved).runtimeTurnsPerTurn).toBe(256);
+    expect(
+      decodeShellSettings({ ...settings, runtimeTurnsPerTurn: 4_096 }).runtimeTurnsPerTurn,
+    ).toBe(4_096);
+    for (const value of [0, 4_097]) {
+      expect(() => decodeShellSettings({ ...settings, runtimeTurnsPerTurn: value })).toThrow();
+    }
   });
 
   it("keeps 64 tool steps a turn below Full access and no limit at Full access for a store saved before the settings", () => {

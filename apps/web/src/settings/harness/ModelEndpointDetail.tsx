@@ -6,7 +6,11 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { modelCarriesAppManagedTools, subscriptionDescriptorIdOf } from "@octant/domain";
+import {
+  modelCarriesAppManagedTools,
+  ollamaAddressReach,
+  subscriptionDescriptorIdOf,
+} from "@octant/domain";
 import { ChevronLeft } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
@@ -850,8 +854,12 @@ function authenticationFact(
   hostPlatform: HostPlatform | undefined,
 ): string {
   if (offer !== undefined) return `${offer.accountLabel} sign-in (bearer token)`;
-  // Ollama answers only on the host's loopback, so the host names its computer.
-  if (instance.driverKind === "ollama") return `None (${thisComputerName(hostPlatform)} only)`;
+  // An Ollama on this computer answers only here, so the host names its computer.
+  if (instance.driverKind === "ollama") {
+    return ollamaAddressReach(new URL(instance.configuration.baseUrl).hostname) === "loopback"
+      ? `None (${thisComputerName(hostPlatform)} only)`
+      : "None";
+  }
   if (instance.driverKind === "amazon-bedrock") {
     return "Organization single sign-on (IAM Identity Center role; the credential broker signs each request)";
   }

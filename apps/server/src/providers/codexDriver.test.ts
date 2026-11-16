@@ -1790,9 +1790,8 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+  it("lets a Work thread read the Project's AGENTS.md and keep Codex's shell, as Code does, on start and every resume", async () => {
     const workOff = {
-      project_doc_max_bytes: 0,
       web_search: "disabled",
       skills: { config: [] },
     };
@@ -1818,6 +1817,13 @@ describe("Codex thread and turn lifecycle", () => {
       "config",
       "features.shell_tool",
     ]);
+    // Codex finds the Project's AGENTS.md by itself; no zero budget hides it.
+    for (const method of ["thread/start", "thread/resume"]) {
+      expect(f.calls.find((call) => call.method === method)?.input).not.toHaveProperty([
+        "config",
+        "project_doc_max_bytes",
+      ]);
+    }
     await work.close();
 
     const code = fixture();
@@ -2828,7 +2834,7 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("asks before every command on both prompting postures, since the sandbox outside Codex never escalates", () => {
+  it("asks before every command at Ask first and Accept edits, since the sandbox outside Codex never escalates", () => {
     // Below Full access the process runs inside Octant's profile and macOS
     // refuses Codex's own Seatbelt inside it, so turns name the sandbox
     // external. Under an external sandbox `on-request` runs every command
@@ -2842,6 +2848,18 @@ describe("Codex execution authority and approvals", () => {
         networkAccess: "restricted",
       });
     }
+  });
+
+  it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
+    // Network limits are off by default, so the process keeps open network;
+    // `restricted` would tell the model it has none.
+    expect(codexTurnExecutionSettings("approval-gated", false, false, true).sandboxPolicy).toEqual({
+      type: "externalSandbox",
+      networkAccess: "enabled",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", false, false, false).sandboxPolicy).toEqual(
+      { type: "externalSandbox", networkAccess: "restricted" },
+    );
   });
 
   it("carries the posture into a turn on a thread created under an older one", async () => {
@@ -2902,17 +2920,59 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
+  it("runs Auto as Codex's own Auto, on request with Codex's reviewer inside Octant's sandbox", () => {
+    // Codex's own Auto is `on-request` with its reviewer; under the external
+    // sandbox Octant names, commands then run unasked inside Octant's wall.
+    expect(codexExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "auto_review",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+      approvalsReviewer: "auto_review",
+    });
+  });
+
+  it("keeps Ask first asking for every command once the reviewer is withdrawn", () => {
+    expect(codexExecutionSettings("approval-gated", false)).toEqual({
+      approvalPolicy: "untrusted",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("keeps Accept edits asking for commands even when its prompts go to the reviewer", () => {
+    // Auto is `approval-gated` with the reviewer; Accept edits with it still
+    // reads as Accept edits, so its commands keep asking.
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "auto_review",
     });
-    expect(codexExecutionSettings("approval-gated", true)).toEqual({
-      approvalPolicy: "untrusted",
-      sandbox: "read-only",
+  });
+
+  it("starts an Auto thread on request with Codex's reviewer", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        autoApprove: true,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Run the tests.", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "on-request",
       approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
     });
+    await acquired.close();
   });
 
   it.each([
@@ -4139,6 +4199,95 @@ describe("Codex running as itself", () => {
       await acquired.close();
     },
   );
+
+  it("reports a subagent's requested model, closing answer and thread usage only when Codex reports them", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const observed = takeEvents(acquired.connection, 3);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Delegate.", attachments: [], tools: [] }),
+    );
+    const collab = (id: string, item: Readonly<Record<string, unknown>>) =>
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "collabAgentToolCall", id, status: "completed", ...item },
+        completedAtMs: 20,
+      });
+    f.emit(
+      collab("collab-1", {
+        tool: "spawnAgent",
+        receiverThreadIds: ["thread-child", "thread-quiet"],
+        model: "gpt-5.4-mini",
+      }),
+    );
+    const breakdown = (inputTokens: number, outputTokens: number) => ({
+      totalTokens: inputTokens + outputTokens,
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens,
+      reasoningOutputTokens: 0,
+    });
+    f.emit(
+      notification("thread/tokenUsage/updated", {
+        threadId: "thread-child",
+        turnId: "turn-child",
+        tokenUsage: {
+          total: breakdown(1200, 300),
+          last: breakdown(10, 3),
+          modelContextWindow: null,
+        },
+      }),
+    );
+    f.emit(
+      collab("collab-2", {
+        tool: "wait",
+        receiverThreadIds: [],
+        agentsStates: { "thread-child": { status: "completed", message: "Two tests fail." } },
+      }),
+    );
+    const events = await observed;
+    expect(events[0]).toMatchObject({ childAgentId: "thread-child", modelId: "gpt-5.4-mini" });
+    expect(events[2]).toMatchObject({
+      childAgentId: "thread-child",
+      status: "completed",
+      finalSummary: "Two tests fail.",
+      usage: { inputTokens: 1200, outputTokens: 300, totalTokens: 1500 },
+    });
+    await acquired.close();
+
+    const quiet = await parentWithSubagent();
+    const finished = takeEvents(quiet.acquired.connection, 1);
+    quiet.f.emit(
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-3",
+          tool: "wait",
+          status: "completed",
+          receiverThreadIds: [],
+          agentsStates: { "thread-child": { status: "completed", message: null } },
+        },
+        completedAtMs: 30,
+      }),
+    );
+    const done = (await finished)[0];
+    expect(done).toMatchObject({ status: "completed" });
+    expect(done).not.toHaveProperty("modelId");
+    expect(done).not.toHaveProperty("finalSummary");
+    expect(done).not.toHaveProperty("usage");
+    await quiet.acquired.close();
+  });
 
   it("refuses a subagent's request outside the Project as it refuses the parent's, without asking", async () => {
     const { f, acquired } = await parentWithSubagent();

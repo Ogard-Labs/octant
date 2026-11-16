@@ -52,6 +52,7 @@ import {
   refreshNewestTurns,
   startedConversationPickerGroups,
   type PickerGroup,
+  resolveStrict,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import {
@@ -91,6 +92,12 @@ import {
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
+import { CodeLiveTasks } from "../code/CodeLiveTasks";
+import { CodeNativeSession } from "../code/CodeNativeSession";
+import type { ThreadSessionClient } from "../code/codeSessionClient";
+import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -154,7 +161,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -199,6 +206,7 @@ import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -235,6 +243,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "steered";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -498,6 +511,8 @@ export interface WorkThreadWorkspaceProps {
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** Work's Strict default in Settings, which a thread and Project that did not choose follow. */
+  readonly workDefaultStrict?: boolean;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -518,6 +533,10 @@ export interface WorkThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
+  /** The thread's live tasks and outside sessions; absent builds one from the server address. */
+  readonly sessionClient?: ThreadSessionClient<WorkThreadId>;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -862,6 +881,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    provider: composerProviderCommands(props.providerGroups, thread?.providerInstanceId),
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
@@ -914,9 +934,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (access: WorkAccess, fullAccessSandbox?: boolean) => {
+  const changeAccess = async (
+    access: WorkAccess,
+    fullAccessSandbox?: boolean,
+    strict?: boolean,
+  ) => {
     if (thread === undefined || accessChanging) return;
-    if (access === thread.access && fullAccessSandbox === undefined) return;
+    if (access === thread.access && fullAccessSandbox === undefined && strict === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -927,6 +951,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         expectedVersion: thread.version,
         access,
         ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
+        ...(strict === undefined ? {} : { strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -983,6 +1008,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           selected: thread,
           latest: turns.at(-1)?.authority,
         });
+  const { serverUrl, windowCapability, sessionClient: givenSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      givenSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createWorkSessionClient({ serverUrl, windowCapability })),
+    [givenSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "work",
     hostId: props.hostId,
@@ -1474,6 +1508,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
       }
       if (!headPlaced) rows.push(head);
+      if (turn.steeredResults !== undefined && turn.steeredResults.length > 0) {
+        rows.push({
+          kind: "steered",
+          key: `${String(turn.requestId)}-steered`,
+          steered: turn.steeredResults,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -2728,6 +2769,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   />
                 );
               }
+              if (row.kind === "steered") {
+                return (
+                  <SteeredChildResults
+                    providerGroups={props.providerGroups}
+                    steered={row.steered}
+                  />
+                );
+              }
               if (row.kind === "tasks") {
                 return (
                   <ThreadTasksPanel
@@ -2987,7 +3036,24 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           />
         )}
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="work"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={turns.length > 0}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
@@ -3255,6 +3321,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     onFullAccessSandboxChange={(sandboxed) =>
                       void changeAccess("full-access", sandboxed)
                     }
+                    strict={
+                      thread.strict ??
+                      resolveStrict({
+                        project: project?.type === "work" ? project : undefined,
+                        settings: { defaultStrict: props.workDefaultStrict },
+                      })
+                    }
+                    onStrictChange={(strict) => void changeAccess(thread.access, undefined, strict)}
                   />
                 )}
               </>

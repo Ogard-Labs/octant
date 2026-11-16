@@ -214,6 +214,9 @@ const THREAD_OWNERSHIP_PATHS = [
   // these a restart replays the message and the purged thread's id back.
   "$.senderThreadId",
   "$.recipientThreadId",
+  // A wake-up is its own `thread-wakeup` aggregate; without this a purged
+  // thread's wake-ups and their prompts survive the purge.
+  "$.wakeup.threadId",
 ] as const;
 
 const CANVAS_LINK_PATHS = [

@@ -11,6 +11,7 @@ import type {
   CoordinatorWorkerListingByProject,
   CoordinatorWorkerLevel,
   SideChatDraftReturnReference,
+  WindowsTerminalShell,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -50,6 +51,7 @@ import {
   type CodeConversationTurn,
   type CodeProviderLimit,
   type CodeOperationEvent,
+  type CodeEvidenceContentId,
   type CodeOperationFailure,
   type CodeOperationId,
   type CodeThreadCheckoutRebindOutcome,
@@ -570,19 +572,45 @@ export function useCodeController(options: CodeControllerOptions) {
     if (conversationStarted) setFirstPromptInFlight(undefined);
   }, [conversationStarted]);
 
-  const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
-    if (event.kind === "owner-approval-settled") {
-      setProviderRequests((current) =>
-        current.filter(
-          (request) =>
-            request.kind !== "approval" || String(request.approvalId) !== String(event.approvalId),
-        ),
-      );
-      return;
-    }
-    const request = providerRequestFromEvent(event);
-    if (request !== undefined) setProviderRequests((current) => [...current, request]);
-  }, []);
+  const noteProviderRequest = useCallback(
+    (
+      event: CodeOperationEvent,
+      readText?: (contentId: CodeEvidenceContentId) => Promise<string | undefined>,
+    ) => {
+      if (event.kind === "owner-approval-settled") {
+        setProviderRequests((current) =>
+          current.filter(
+            (request) =>
+              request.kind !== "approval" ||
+              String(request.approvalId) !== String(event.approvalId),
+          ),
+        );
+        return;
+      }
+      const request = providerRequestFromEvent(event);
+      if (request === undefined) return;
+      setProviderRequests((current) => [...current, request]);
+      // The plan an agent asks the person to approve is read once and put on
+      // its card; a plan that cannot be read leaves the card with its summary.
+      const planContentId =
+        request.kind === "approval" ? request.levelChange?.planContentId : undefined;
+      if (planContentId === undefined || readText === undefined || request.kind !== "approval")
+        return;
+      void readText(planContentId).then((plan) => {
+        if (plan === undefined) return;
+        setProviderRequests((current) =>
+          current.map((candidate) =>
+            candidate.kind === "approval" &&
+            String(candidate.approvalId) === String(request.approvalId) &&
+            candidate.levelChange !== undefined
+              ? { ...candidate, levelChange: { ...candidate.levelChange, plan } }
+              : candidate,
+          ),
+        );
+      });
+    },
+    [],
+  );
   const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, TurnActivity>>(
     () => new Map(),
   );
@@ -1546,7 +1574,15 @@ export function useCodeController(options: CodeControllerOptions) {
                       return;
                     }
                     const event = frame.event;
-                    noteProviderRequest(event);
+                    noteProviderRequest(event, (contentId) =>
+                      readOperationText(
+                        client,
+                        threadId,
+                        operationId,
+                        contentId,
+                        controller.signal,
+                      ),
+                    );
                     noteActivity(operationId, event);
                     noteUsage(operationId, event);
                     const updateReply = codeReplyMetadataUpdate(event);
@@ -2717,6 +2753,7 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly coordinatorWorkerListingByProject?: CoordinatorWorkerListingByProject;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
       readonly restartContinuation?: boolean;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     }): Promise<boolean> => {
       if (bootstrap === undefined) return false;
       const result = await execute({
@@ -2978,7 +3015,15 @@ export function useCodeController(options: CodeControllerOptions) {
               cursor = Number(frame.cursor);
               assistantAt = frame.occurredAt;
               const event = frame.event;
-              noteProviderRequest(event);
+              noteProviderRequest(event, (contentId) =>
+                readOperationText(
+                  client,
+                  view.thread.id,
+                  operationId,
+                  contentId,
+                  controller.signal,
+                ),
+              );
               noteActivity(operationId, event);
               noteUsage(operationId, event);
               // The checkpoint is only known once the host has taken it, so the

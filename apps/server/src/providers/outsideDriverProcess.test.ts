@@ -176,16 +176,24 @@ function driverEnd(process: FakeProcess): InMemoryDriverEnd {
 }
 
 describe("outside driver processes", () => {
-  it.each(["linux", "win32"] as const)(
-    "never starts a driver on %s, which has no confinement for it",
-    async (platform) => {
-      const context = await processes({ platform });
+  it("never starts a driver on Windows, which runs none", async () => {
+    const context = await processes({ platform: "win32" });
 
-      expect(await context.start()).toEqual({ status: "refused", reason: "host-prohibited" });
-      expect(context.processes).toHaveLength(0);
-      expect(await readdir(context.root)).toEqual([]);
-    },
-  );
+    expect(await context.start()).toEqual({ status: "refused", reason: "host-prohibited" });
+    expect(context.processes).toHaveLength(0);
+    expect(await readdir(context.root)).toEqual([]);
+  });
+
+  it("starts a driver on Linux under the same driver launch, which the process port runs without confinement", async () => {
+    const context = await processes({ platform: "linux" });
+
+    expect((await context.start()).status).toBe("started");
+    expect(context.processes).toHaveLength(1);
+    expect(context.processes[0]?.input.sandbox).toMatchObject({
+      kind: "outside-driver",
+      instanceId: String(instanceA),
+    });
+  });
 
   it("finds a driver's runtime only in the server's own Bun or Electron run as Node", () => {
     const electron = "/Applications/Octant.app/Contents/MacOS/Octant";

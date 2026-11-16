@@ -3,7 +3,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_AUTO_FIX_RECORDED,
   CODE_PROJECT_PULL_REQUEST_MERGE_WHEN_READY_RECORDED,
   CODE_PROJECT_PULL_REQUEST_SWITCHES_AGGREGATE,
-  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
+  CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
   CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
   CODE_PROJECT_PULL_REQUEST_WATCH_RECORDED,
   decodeCodeProjectPullRequestAutoFixRecorded,
@@ -68,7 +68,14 @@ const MERGE_METHOD_PREFERENCE: ReadonlyArray<CodeProjectPullRequestMergeMethod> 
 ];
 const AUTO_FIX_SOURCE_LABEL = "pull-request-auto-fix";
 const WATCH_SOURCE_LABEL = "pull-request-watch";
-const WATCH_LIFETIME_DAYS = CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS / 86_400_000;
+const DAY_MS = 86_400_000;
+
+/** Auto-fix's and a watch's bounds as the person set them in Settings. */
+export interface PullRequestSwitchLimits {
+  readonly watchWakes: number;
+  readonly watchDays: number;
+  readonly autoFixAttempts: number;
+}
 
 export interface PullRequestSwitchAuthority {
   authorizePullRequest(
@@ -167,6 +174,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
    */
   readonly #vouchingWindows = new Map<string, WindowId>();
   #ticking = false;
+  readonly #limits: () => PullRequestSwitchLimits;
 
   constructor(options: {
     readonly authority: PullRequestSwitchAuthority;
@@ -175,7 +183,20 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
     readonly journal: Pick<Journal, "append" | "replayAggregateType">;
     readonly clock?: () => string;
     readonly uuid: () => string;
+    /**
+     * The person's limits from Settings, read at every pass so a change
+     * applies at once. Absent is the defaults: ten wakes, three days, three
+     * attempts per failure.
+     */
+    readonly limits?: () => PullRequestSwitchLimits;
   }) {
+    this.#limits =
+      options.limits ??
+      (() => ({
+        watchWakes: CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES,
+        watchDays: CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_DAYS,
+        autoFixAttempts: CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+      }));
     this.#authority = options.authority;
     this.#forge = options.forge;
     this.#threads = options.threads;
@@ -421,9 +442,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
     return {
       status: "watching",
       target,
-      until: new Date(
-        Date.parse(enabledAt) + CODE_PROJECT_PULL_REQUEST_WATCH_LIFETIME_MS,
-      ).toISOString(),
+      until: new Date(Date.parse(enabledAt) + this.#limits().watchDays * DAY_MS).toISOString(),
       alreadyWatching,
     };
   }
@@ -447,7 +466,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
         if (signal.aborted) return;
         // A watch's lifetime runs out on the clock, whether or not anything
         // vouches for it now.
-        if (pullRequestWatchExpired(fold.watch, this.#clock())) {
+        if (pullRequestWatchExpired(fold.watch, this.#clock(), this.#limits().watchDays * DAY_MS)) {
           await this.#stopWatch(fold.target, "expired");
         }
         const current = this.#fold(fold.target);
@@ -549,6 +568,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       },
       turnActive: thread.turnActive,
       personTyping: this.#personTyping(threadId),
+      maxAttempts: this.#limits().autoFixAttempts,
     });
     if (decision.kind === "paused") {
       this.#paused.set(key, decision.reason);
@@ -562,7 +582,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
         await this.#threads
           .notifyPerson(
             threadId,
-            `Auto-fix stopped on pull request #${target.number} after ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} attempts on the same failure.`,
+            `Auto-fix stopped on pull request #${target.number} after ${this.#limits().autoFixAttempts} attempts on the same failure.`,
           )
           .catch(() => undefined);
       }
@@ -582,7 +602,13 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
     );
     let result: "started" | "refused" | "unmarked" = "unmarked";
     if (marked) {
-      const text = autoFixTurnText(target, observation, wakeFailures, decision.attempt);
+      const text = autoFixTurnText(
+        target,
+        observation,
+        wakeFailures,
+        decision.attempt,
+        this.#limits().autoFixAttempts,
+      );
       result = (await this.#threads.startTurn(threadId, text).catch(() => false))
         ? "started"
         : "refused";
@@ -630,6 +656,8 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       now: this.#clock(),
       turnActive: thread.turnActive,
       personTyping: this.#personTyping(threadId),
+      maxWakes: this.#limits().watchWakes,
+      lifetimeMs: this.#limits().watchDays * DAY_MS,
     });
     if (decision.kind === "idle" || decision.kind === "paused") return;
     if (decision.kind === "stop") {
@@ -650,6 +678,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
         observation.activity,
         decision.signals,
         decision.wake,
+        this.#limits().watchWakes,
       );
       result = (await this.#threads.startTurn(threadId, text).catch(() => false))
         ? "started"
@@ -692,9 +721,9 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
     // them, while a merge, a close, or a gone thread already says itself.
     const notice =
       reason === "wake-limit"
-        ? `The watch on pull request #${target.number} stopped after ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES} wakes.`
+        ? `The watch on pull request #${target.number} stopped after ${this.#limits().watchWakes} wakes.`
         : reason === "expired"
-          ? `The watch on pull request #${target.number} ended after ${WATCH_LIFETIME_DAYS} days.`
+          ? `The watch on pull request #${target.number} ended after ${this.#limits().watchDays} days.`
           : undefined;
     if (notice !== undefined) {
       await this.#threads.notifyPerson(threadId, notice).catch(() => undefined);
@@ -886,6 +915,7 @@ export class CodeProjectPullRequestSwitchService implements PullRequestWatchPort
       target: fold.target,
       mergeWhenReady,
       autoFix,
+      autoFixAttempts: this.#limits().autoFixAttempts,
       generatedAt: this.#clock(),
     });
   }
@@ -958,6 +988,7 @@ export function watchTurnText(
   activity: GhPullRequestActivity,
   signals: ReadonlyArray<CodeProjectPullRequestWatchSignal>,
   wake: number,
+  maxWakes: number,
 ): string {
   const head = observation.headSha.slice(0, 12);
   const lines = signals.map((signal) => {
@@ -985,7 +1016,7 @@ export function watchTurnText(
     }
   });
   return [
-    `Octant is watching pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName} for this thread, and something changed (wake ${wake} of at most ${CODE_PROJECT_PULL_REQUEST_WATCH_MAX_WAKES}).`,
+    `Octant is watching pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName} for this thread, and something changed (wake ${wake} of at most ${maxWakes}).`,
     "",
     "Look at what changed and decide what this thread's task needs, under its usual rules and approvals. Nothing here is a request from the person. To stop being woken, call octant_pull_request with operation unwatch.",
     "",
@@ -1017,6 +1048,7 @@ export function autoFixTurnText(
   observation: Extract<GhPullRequestSwitchObservation, { status: "observed" }>,
   failures: ReadonlyArray<GhAutoFixFailureDetail>,
   attempt: number,
+  maxAttempts: number,
 ): string {
   const sections = failures.map((entry) => {
     const heading =
@@ -1028,7 +1060,7 @@ export function autoFixTurnText(
     return `${heading}\n${entry.detail}`;
   });
   return [
-    `Auto-fix found a problem on pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName} (${observation.headBranch} into ${observation.baseBranch}). This is automatic attempt ${attempt} of ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} for these failures.`,
+    `Auto-fix found a problem on pull request #${target.number} in ${target.repositoryOwner}/${target.repositoryName} (${observation.headBranch} into ${observation.baseBranch}). This is automatic attempt ${attempt} of ${maxAttempts} for these failures.`,
     "",
     "Fix it on this branch, then commit and push. Rules:",
     "- Never force-push and never rewrite pushed history: no rebase, amend, or reset of pushed commits.",

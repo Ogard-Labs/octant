@@ -26,7 +26,9 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
   type ProviderApprovalCall,
+  type ProviderChildUsage,
 } from "@octant/contracts";
+import { reportedChildUsage } from "@octant/provider-sdk/child-observations";
 import type {
   ProviderAcquireInput,
   ProviderCompactionPoint,
@@ -142,7 +144,6 @@ export interface CodexThreadConfig {
   readonly "features.view_image"?: false;
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
-  readonly project_doc_max_bytes?: 0;
   /**
    * The person's compaction point for this thread, in tokens: Codex compacts
    * once the context passes it, mid-turn too. Passed in the thread's own
@@ -176,25 +177,6 @@ export interface CodexThreadResumeInput {
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
-} as const satisfies CodexThreadConfig;
-
-/**
- * A Work turn does not read an agent brief already in the Project's folder.
- * Codex loads every `AGENTS.md` (and `AGENTS.override.md` or a configured
- * fallback name) from the repository root down to `cwd` into the model's
- * instructions by itself; a project doc budget of zero bytes skips that
- * discovery and leaves the user's own `$CODEX_HOME/AGENTS.md` in place.
- * Measured against codex-cli 0.162.1 with turns sent to a local stand-in
- * endpoint: a thread started in a Project holding an `AGENTS.md` sent its
- * contents with the first turn, the same thread started or resumed with
- * `project_doc_max_bytes = 0` did not, and a resume without the override sent
- * them again, so it is stated on every resume like the shell overrides. Read
- * at the Codex source tags, a zero budget has skipped discovery since 0.24.0
- * and `thread/start` has applied its `config` since it arrived in 0.56.0, so
- * every release with this protocol honors it.
- */
-const CODEX_WORK_CONFIG = {
-  project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -401,7 +383,7 @@ export interface CodexTurnStartInput {
     | { readonly type: "dangerFullAccess" }
     | { readonly type: "workspaceWrite" }
     | { readonly type: "readOnly" }
-    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" };
+    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -838,15 +820,42 @@ export function codexExecutionSettings(
       approvalsReviewer: "user",
     };
   }
+  if (policy === "approval-gated" && autoApprove === true) {
+    // Auto runs as Codex's own Auto does: `on-request` with Codex's reviewer.
+    // Codex's own Auto pairs that with its workspace-write sandbox; here the
+    // sandbox is Octant's profile, named to Codex as external, because macOS
+    // refuses a second Seatbelt inside the first (see below). Under an
+    // external sandbox `on-request` runs a command without asking unless
+    // Codex flags it as dangerous (codex-rs `exec_policy.rs`,
+    // `render_decision_for_unmatched_command_for_platform`, rust-v0.169.0),
+    // and applies an in-root patch without asking (`safety.rs`,
+    // `assess_patch_safety`); whatever still prompts goes to the reviewer. So
+    // a command runs unasked inside Octant's wall, as it runs unasked inside
+    // Codex's own sandbox in Codex's own Auto (maintainer decision,
+    // 2026-11-14).
+    //
+    // Codex raises no escalation here: the same function asks for a
+    // `require_escalated` command only under a restricted sandbox and allows
+    // it unasked under an external one, its bypass removes only Codex's own
+    // sandbox, which is not running, and `orchestrator.rs` never retries a
+    // denied command unsandboxed under `on-request`. A command that needs to
+    // leave Octant's wall fails at the wall instead of asking; carrying that
+    // ask is not built yet.
+    //
+    // Delegation is clamped off by taint and capability before it reaches
+    // here (`harnessAutoReviewEffective`), so a withdrawn reviewer falls
+    // through to Ask first's `untrusted` below.
+    return { approvalPolicy: "on-request", sandbox: "read-only", approvalsReviewer: "auto_review" };
+  }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // Every posture below Full access runs inside Octant's profile, and macOS
+    // Ask first and Accept edits run inside Octant's profile, and macOS
     // refuses a second Seatbelt inside the first (`sandbox_apply: Operation not
     // permitted`, measured on macOS 27.0.1), so each turn tells Codex the
     // sandbox is external (`codexTurnExecutionSettings`). Under an external
     // sandbox `on-request` runs every command without asking (codex-rs
     // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
-    // class the sandbox rules keep independent and the edit waiver keeps prompting under both of these
-    // postures. `untrusted` asks for every command Codex does not itself know
+    // class the sandbox rules keep independent and the edit waiver keeps
+    // prompting under both of these postures. `untrusted` asks for every command Codex does not itself know
     // to be read-only, and for every patch: a patch edit arrives as
     // `file-change` (auto-accept edits answers those itself) and a command as
     // `command`, which neither posture waives. What a command may touch once
@@ -856,11 +865,14 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer answers both prompting postures (maintainer decision,
-    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
-    // is thread-wide, so on auto-accept-edits it also answers the escalation
-    // an in-root patch edit raises, and may deny one: the person asked for
-    // its review there. `user` is sent rather than nothing whenever
+    // Auto is `approval-gated` with `autoApprove` (`threadAccessOf`). A
+    // posture that carries `auto-accept-edits` with `autoApprove` still reads
+    // as Accept edits (`permissionModeOf`), so it keeps Accept edits'
+    // `untrusted` and only hands its prompts to the reviewer (maintainer
+    // decision, 2026-10-31, ending the approval-gated-only exception). Codex's
+    // reviewer is thread-wide, so there it also answers the escalation an
+    // in-root patch edit raises, and may deny one: the person asked for its
+    // review there. `user` is sent rather than nothing whenever
     // delegation is off: omitting the field leaves a thread that once
     // delegated still routing to the reviewer after taint, after the user
     // turns it off, or on a resume under this posture.
@@ -887,16 +899,25 @@ export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
+  networkOpen?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
   // Below Full access the process already runs in Octant's profile, which is
-  // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
-  // keeps Codex from telling the model it has open network. A sandboxed Full
-  // access thread takes the same external sandbox, with `never`.
+  // the boundary; Codex's own Seatbelt cannot start inside it. Auto's
+  // `on-request` is what makes Codex run commands unasked inside it, and Ask
+  // first's and Accept edits' `untrusted` is what keeps them asking. A
+  // sandboxed Full access thread takes the same external sandbox, with
+  // `never`. The
+  // network claim follows the launch: `enabled` when the process launched
+  // without Octant's egress proxy (Network limits off, the default), so
+  // Codex tells the model what it really has; `restricted` behind the proxy.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
-      : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
+      : ({
+          type: "externalSandbox",
+          networkAccess: networkOpen === true ? "enabled" : "restricted",
+        } as const);
   return { ...rest, sandboxPolicy };
 }
 
@@ -1129,6 +1150,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   // Codex's own subagent threads outlive the turn and connection that started them.
   const subagentLineage = new Map<string, string>();
+  const subagentUsage = new Map<string, ProviderChildUsage>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -1200,6 +1222,10 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
           accountAllows: options.ownMemory?.() === true,
           mode,
           executionPolicy,
+          // Codex writes memories by itself after a turn, into
+          // `~/.codex/memories`, outside any tool call Octant's gate sees, so
+          // its memory stays off in Plan and Chat.
+          memoryWrites: "background",
         });
       const leaseKey = (
         executionPolicy: ProviderExecutionPolicy,
@@ -1288,6 +1314,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeTaskId,
             makeToolCallId,
             subagentLineage,
+            subagentUsage,
           },
         );
       });
@@ -1301,6 +1328,8 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+  /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
+  readonly networkOpen: boolean;
 }
 
 /** The root and mode a thread lease key names, or undefined for any other lease. */
@@ -1355,6 +1384,7 @@ function acquireRuntime(
             client: clientFactory(connection),
             version: connection.version,
             exited: connection.exited,
+            networkOpen: connection.networkOpen === true,
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -1560,6 +1590,8 @@ interface ConnectionFactories {
   readonly makeToolCallId: () => string;
   /** Each of Codex's own subagent threads, by the thread that started it; shared by the driver's connections. */
   readonly subagentLineage: Map<string, string>;
+  /** The latest usage Codex reported on each of its own subagent threads, bounded like the lineage. */
+  readonly subagentUsage: Map<string, ProviderChildUsage>;
 }
 
 /** How far a subagent's subagents are followed back to the thread that owns them. */
@@ -1619,6 +1651,7 @@ function makeConnection(
     let leasedPolicy: ProviderExecutionPolicy | undefined;
     let leasedOwnSubagents = false;
     let leasedFullAccessSandbox = false;
+    let leasedNetworkOpen = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -1677,9 +1710,7 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : mode === "work"
-              ? CODEX_WORK_CONFIG
-              : {};
+            : {};
         const webConfig =
           nativeSetup?.webTools === true
             ? modeConfig
@@ -1820,6 +1851,22 @@ function makeConnection(
     const observeSubagentThread = (message: CodexServerMessage) => {
       if (message.kind === "request") {
         answerSubagentRequest(message);
+        return;
+      }
+      if (
+        message.kind === "notification" &&
+        message.method === "thread/tokenUsage/updated" &&
+        subagentOwner(message.params.threadId) !== undefined
+      ) {
+        // The thread's running total; read when the agent is seen finishing.
+        const usage = reportedChildUsage(message.params.tokenUsage.total);
+        if (usage === undefined) return;
+        factories.subagentUsage.delete(message.params.threadId);
+        factories.subagentUsage.set(message.params.threadId, usage);
+        if (factories.subagentUsage.size > MAX_CODEX_SUBAGENT_LINEAGE) {
+          const oldest = factories.subagentUsage.keys().next().value;
+          if (oldest !== undefined) factories.subagentUsage.delete(oldest);
+        }
         return;
       }
       if (
@@ -2137,6 +2184,7 @@ function makeConnection(
               leasedPolicy = executionPolicy;
               leasedOwnSubagents = ownSubagents;
               leasedFullAccessSandbox = fullAccessSandbox;
+              leasedNetworkOpen = runtime.networkOpen;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -2481,6 +2529,7 @@ function makeConnection(
                         state.executionPolicy,
                         state.autoApprove,
                         state.fullAccessSandbox,
+                        leasedNetworkOpen,
                       ),
                       ...state.turnOverrides,
                       ...(state.collaborationMode === undefined
@@ -2909,6 +2958,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     agentMessages: new Map(),
     taskIds: new Map(),
     toolStates: new Map(),
+    subagentUsage: factories.subagentUsage,
     makeRequestId: factories.makeRequestId,
     makeTaskId: factories.makeTaskId,
     makeToolCallId: factories.makeToolCallId,

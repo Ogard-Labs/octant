@@ -23,6 +23,7 @@ import {
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
@@ -1176,6 +1177,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
+    provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
   const draftProviderFamily = providerFamilyForThread(
     props.providerGroups,

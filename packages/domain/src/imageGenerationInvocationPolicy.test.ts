@@ -193,9 +193,43 @@ describe("an agent's image generation before anyone is asked", () => {
     });
   });
 
-  it("asks at Full access when two profiles are ready, and below it whatever is ready", () => {
+  it("asks at Full access again once the person chose Ask again", () => {
+    expect(
+      imageGenerationWithoutAsking({
+        profiles: two,
+        kept: undefined,
+        fullAccess: true,
+        askAgain: true,
+      }),
+    ).toEqual({ kind: "ask", keptUnavailable: false });
+  });
+
+  it("generates at Full access on the profile Settings names, else the first ready, and asks below it", () => {
     expect(
       imageGenerationWithoutAsking({ profiles: two, kept: undefined, fullAccess: true }),
+    ).toEqual({
+      kind: "generate",
+      choice: { profileInstanceId: openAiImage().id, modelId: "gpt-image-2" },
+    });
+    expect(
+      imageGenerationWithoutAsking({
+        profiles: two,
+        kept: undefined,
+        fullAccess: true,
+        defaultProfileInstanceId: String(geminiImage().id),
+      }),
+    ).toMatchObject({ kind: "generate", choice: { profileInstanceId: geminiImage().id } });
+    // A named profile that is not ready falls back to the first ready one.
+    expect(
+      imageGenerationWithoutAsking({
+        profiles: two,
+        kept: undefined,
+        fullAccess: true,
+        defaultProfileInstanceId: "removed-profile",
+      }),
+    ).toMatchObject({ kind: "generate", choice: { profileInstanceId: openAiImage().id } });
+    expect(
+      imageGenerationWithoutAsking({ profiles: two, kept: undefined, fullAccess: false }),
     ).toEqual({ kind: "ask", keptUnavailable: false });
     expect(
       imageGenerationWithoutAsking({ profiles: one, kept: undefined, fullAccess: false }),

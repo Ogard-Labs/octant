@@ -1,12 +1,14 @@
 import type {
   CorrelationId,
   ProviderFailure,
+  ProviderChildUsage,
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
+import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS, decodeProviderModelId } from "@octant/contracts";
+import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { summarizeStepArgument, unwrapShellInvocation } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { watchedTextOf } from "@octant/domain/shield-watcher-policy";
@@ -64,6 +66,11 @@ export interface CodexEventContext {
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
   readonly toolStates: Map<string, CodexToolState>;
+  /**
+   * The latest thread-total usage Codex reported on each of its own subagent
+   * threads, shared by the driver's connections. Absent, usage stays unknown.
+   */
+  readonly subagentUsage?: ReadonlyMap<string, ProviderChildUsage>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
   readonly makeToolCallId: () => string;
@@ -532,6 +539,11 @@ export function mapCodexSubagentCall(
   const threads = [
     ...new Set([...item.receiverThreadIds, ...Object.keys(item.agentsStates ?? {})]),
   ];
+  const requestedModel = item.tool === "spawnAgent" ? (item.model?.trim() ?? "") : "";
+  const modelId =
+    requestedModel.length === 0 || requestedModel.length > 128
+      ? undefined
+      : decodeProviderModelId(requestedModel);
   for (const threadId of threads) {
     const childAgentId = threadId.trim();
     if (childAgentId.length === 0 || childAgentId.length > 255) continue;
@@ -545,12 +557,25 @@ export function mapCodexSubagentCall(
             : undefined
           : CODEX_SUBAGENT_STATUS[reported];
     if (status === undefined) continue;
+    // A finished agent's last answer is shown to the person only; the parent
+    // model already received it from Codex's own wait call.
+    const finalSummary =
+      status === "completed"
+        ? boundedChildFinalSummary(item.agentsStates?.[threadId]?.message ?? undefined)
+        : undefined;
+    const usage =
+      status === "completed" || status === "failed"
+        ? context.subagentUsage?.get(threadId)
+        : undefined;
     results.push(
       event(context, {
         kind: "child-agent-activity",
         childAgentId,
         ...lineage,
         ...(task.length === 0 ? {} : { task }),
+        ...(modelId === undefined ? {} : { modelId }),
+        ...(finalSummary === undefined ? {} : { finalSummary }),
+        ...(usage === undefined ? {} : { usage }),
         status,
         summary:
           status === "running" || status === "starting"
@@ -1022,6 +1047,8 @@ function mapTerminal(
     event(context, {
       kind: "completed",
       resumeCursor: { driverKind: "codex", value: context.threadId },
+      // `thread/fork` takes it as `lastTurnId` (app-server v2, rust-v0.162.1).
+      ...(turn.id.trim().length === 0 ? {} : { nativeAnchor: turn.id }),
     }),
   ];
 }

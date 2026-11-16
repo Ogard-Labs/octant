@@ -116,6 +116,8 @@ const JUDGED_FIELDS: ReadonlySet<string> = new Set([
   "grantRoot",
   "permissions",
   "networkApprovalContext",
+  // A command that leaves its runtime's sandbox: the reviewer must see it.
+  "dangerouslyDisableSandbox",
 ]);
 
 function judged(value: unknown, depth = 0): unknown {

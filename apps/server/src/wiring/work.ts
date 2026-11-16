@@ -28,6 +28,7 @@ import {
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   type AutomationRunReference,
+  RUNTIME_STARTED_TURN_PROMPT,
   type OctantMode,
   type ProjectId,
   type WindowId,
@@ -36,6 +37,9 @@ import {
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import { OutlivingSessions, type RuntimeTurnStarter } from "../providers/outlivingSessions";
+import { createWorkSessionRouteHandler } from "../work/workSessionRoutes";
+import { stopKeptSessionsOfChangedWorkThreads } from "../work/workKeptSessions";
 import { codeThreadTurns } from "../code/codeForkPoint";
 import { SERVER_RUNTIME_NOT_HARNESS } from "../serverProjects/serverProjectThreads";
 import {
@@ -48,11 +52,13 @@ import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueue
 import { createThreadMessageQueueAuthority } from "../messageQueue/threadMessageQueueAuthority";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
+import { createThreadWakeupRouteHandler } from "../wakeups/threadWakeupRoutes";
+import type { ThreadWakeupModePort } from "../wakeups/threadWakeupService";
 import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkThreadService } from "../work/workThreadService";
-import { WorkTurnRuntime } from "../work/workTurnRuntime";
+import { WorkTurnRuntime, workSessionKey, workSessionTerms } from "../work/workTurnRuntime";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
@@ -123,7 +129,11 @@ import { lookToolForThread } from "../image/lookTool";
 import { supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
-import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
+import {
+  backgroundSessionIdleLimitMs,
+  providerToolCallPauseLimitMs,
+  stalledTurnLimitMs,
+} from "../providers/turnBudget";
 import { withRoutineBrowserProfiles } from "../browser/browserRoutineSessions";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
@@ -142,6 +152,7 @@ import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -162,6 +173,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "windowAuthorityStore"
     | "personMemoryAccess"
     | "octantInstructions"
+    | "machineChangeFeed"
   > &
   Pick<
     AgentRunsWiring,
@@ -257,6 +269,8 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "resolveThreadStrict"
+    | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
@@ -265,6 +279,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
+    resolveThreadStrict,
     conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
@@ -343,6 +358,7 @@ export function wireWork(deps: WorkDependencies) {
     threadOutsideContentMarks,
     windowAuthorityStore,
     windowHoldsProject,
+    threadWakeups,
     workArtifactProjection,
     workAttachments,
     workProjectStatusFiles,
@@ -355,8 +371,56 @@ export function wireWork(deps: WorkDependencies) {
     octantInstructions,
     keptImageChoices,
     projectMemoryAccess,
+    machineChangeFeed,
   } = deps;
   return Effect.gen(function* () {
+    // A Work session whose runtime keeps background work (a dev server, a
+    // watch) outlives its turn as a Code session does; a turn the runtime
+    // starts by itself later is opened through the thread's ordinary
+    // admission, below, once the turn service exists.
+    let startWorkRuntimeTurn: RuntimeTurnStarter = () =>
+      Promise.resolve({ status: "refused", message: "Work turns are unavailable on this host." });
+    const outlivingWorkSessions = new OutlivingSessions({
+      idleLimitMs: () =>
+        backgroundSessionIdleLimitMs(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+        ),
+      startRuntimeTurn: (key) => startWorkRuntimeTurn(key),
+      currentTerms: (key) => {
+        if (!key.startsWith("work:")) return undefined;
+        try {
+          const thread = workThreadProjection.read(decodeWorkThreadId(key.slice("work:".length)));
+          return thread === undefined
+            ? undefined
+            : workSessionTerms(thread, persistence.readProject(thread.projectId));
+        } catch {
+          return undefined;
+        }
+      },
+      onChanged: () => machineChangeFeed.publish(["thread-follow-ups"]),
+      onError: (message, error) => console.error(`[live tasks] ${message}`, error),
+    });
+    // Every change to a Work thread or its Project passes through the journal
+    // (its level, provider or model, its folder, a move, an archive, a Done
+    // mark, a deletion; the Project's relink, archive or extra folders), so a
+    // kept session started on terms the thread no longer has is stopped here
+    // rather than from each command's path, judged from the committed change
+    // rather than the Work projection it has not reached yet.
+    const unsubscribeKeptWorkSessionTerms = persistence.journal.subscribeCommitted((append) => {
+      void stopKeptSessionsOfChangedWorkThreads(append, {
+        keeper: outlivingWorkSessions,
+        readThread: (threadId) => workThreadProjection.read(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+      }).catch((error: unknown) =>
+        console.error("[live tasks] A changed thread's session did not stop.", error),
+      );
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(async () => {
+        unsubscribeKeptWorkSessionTerms();
+        await outlivingWorkSessions.close();
+      }),
+    );
     const workTurnUsageStore = new WorkTurnUsageStore();
     // The navigation poll runs about once a second while a date in STATUS.md
     // moves at day granularity, so each Project's file is re-read at most this
@@ -476,6 +540,9 @@ export function wireWork(deps: WorkDependencies) {
         createRoutineProposalTools({
           ...routineTurn,
           proposals: routineProposalService,
+          startsActiveAtFullAccess: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .agentRoutinesStartActiveAtFullAccess,
           readPosture: () => {
             const access = runningWorkTurns.get(String(input.thread.id))?.access;
             return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
@@ -496,6 +563,8 @@ export function wireWork(deps: WorkDependencies) {
       );
     };
     const workTurnService = new WorkTurnService({
+      // A Work session hands its runtime's wake-ups to the host's schedule.
+      wakeupsForThread: (threadId) => threadWakeups.service?.forSession("work", threadId),
       toolCallRecorders: threadToolCallRecorders({
         connection: persistence.connection,
         // The host setting, read at each write.
@@ -508,9 +577,19 @@ export function wireWork(deps: WorkDependencies) {
       carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
       confirmAgentMessagesDelivered: (messageIds) =>
         agentMessageService.confirmDelivered(messageIds),
+      // A Work thread started from a provider session begun outside Octant
+      // is journaled on the thread, marked as carrying outside content first.
+      recordAdoptedSession: (thread, adopted) =>
+        workThreadService.recordAdoptedSession(thread, adopted),
+      // A compaction stops the session kept past the thread's last turn.
+      stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        outlivingSessions: outlivingWorkSessions,
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -542,6 +621,7 @@ export function wireWork(deps: WorkDependencies) {
       },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: resolveThreadStrict,
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
@@ -554,6 +634,7 @@ export function wireWork(deps: WorkDependencies) {
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
+        readProviderCliTrust: hostProviderCliProjectTrust(),
         readProviderModel: (providerInstanceId, modelId) =>
           persistence
             .readProviderCatalog?.(providerInstanceId)
@@ -725,6 +806,18 @@ export function wireWork(deps: WorkDependencies) {
               parentThreadId: String(input.thread.id),
               mode: "work",
               projectId: input.thread.projectId,
+              // A routine run has nobody to answer.
+              ...(input.routineRun !== undefined
+                ? {}
+                : {
+                    askThroughHost: {
+                      lead: {
+                        hostId: LOCAL_HOST_ID,
+                        providerInstanceId: input.thread.providerInstanceId,
+                        modelId: input.thread.modelId,
+                      },
+                    },
+                  }),
             });
         const canvasTools = !browserSupported
           ? undefined
@@ -758,6 +851,9 @@ export function wireWork(deps: WorkDependencies) {
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                   .imageGeneration.customSources,
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.defaultProfileInstanceId,
               readsImages: () =>
                 providerRuntimeRegistry
                   .observedState(input.thread.providerInstanceId)
@@ -1714,10 +1810,143 @@ export function wireWork(deps: WorkDependencies) {
         .onCommittedAppend(append)
         .catch(() => console.error("The message queue could not process a thread change."));
     });
+    // A wake-up's turn starts the way a message wake's does: the host starts
+    // it as itself and admission rechecks the thread, its Project and its
+    // authority, at the thread's own level. A thread with a turn running is
+    // busy, and the wake-up waits for it.
+    const workThreadWakeupPort: ThreadWakeupModePort = {
+      threadOpen: (threadId) => {
+        try {
+          return workThreadProjection.read(decodeWorkThreadId(threadId))?.lifecycle === "active";
+        } catch {
+          return false;
+        }
+      },
+      startTurn: async (threadId, prompt) => {
+        if (
+          !enabledModes(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          ).includes("work")
+        ) {
+          return { status: "refused", message: "Work is turned off on this host." };
+        }
+        const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+        if (thread === undefined || thread.bindingRevisionId === undefined) {
+          return { status: "refused", message: "The Work thread is unavailable." };
+        }
+        if (workTurnService.isTurnActive(thread.id)) return { status: "busy" };
+        const requestId = randomUUID();
+        const result = await workTurnService.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(requestId),
+          threadId: thread.id,
+          turnId: decodeWorkTurnId(randomUUID()),
+          prompt,
+          authority: {
+            hostId: LOCAL_HOST_ID,
+            projectId: thread.projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ".",
+            ...(thread.workingFolderId === undefined
+              ? {}
+              : { workingFolderId: thread.workingFolderId }),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+        });
+        return result.kind === "accepted"
+          ? { status: "started", turnId: requestId }
+          : { status: "refused", message: "The turn was not admitted." };
+      },
+    };
+    // The runtime's own turn runs at the thread's level as the host, like a
+    // wake-up's, and takes up the session the last turn left; its prompt is
+    // never sent, it records why the turn exists. A thread with a turn
+    // starting or running is busy, and the keeper asks again shortly.
+    startWorkRuntimeTurn = async (key) => {
+      if (!key.startsWith("work:"))
+        return { status: "refused", message: "That session is not a Work thread's." };
+      if (
+        !enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          "work",
+        )
+      )
+        return { status: "refused", message: "Work is turned off on this host." };
+      let thread: ReturnType<typeof workThreadProjection.read>;
+      try {
+        thread = workThreadProjection.read(decodeWorkThreadId(key.slice("work:".length)));
+      } catch {
+        thread = undefined;
+      }
+      if (thread === undefined || thread.bindingRevisionId === undefined)
+        return { status: "refused", message: "The Work thread is unavailable." };
+      if (workTurnService.isTurnActive(thread.id) || workTurnService.isTurnStarting(thread.id))
+        return { status: "busy" };
+      try {
+        const result = await workTurnService.startFirstTurn(
+          ROUTINE_HOST_SCOPE_ID,
+          {
+            kind: "start-work-thread-turn",
+            requestId: decodeWorkTurnRequestId(randomUUID()),
+            threadId: thread.id,
+            turnId: decodeWorkTurnId(randomUUID()),
+            prompt: RUNTIME_STARTED_TURN_PROMPT,
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: thread.workingDirectory ?? ".",
+              ...(thread.workingFolderId === undefined
+                ? {}
+                : { workingFolderId: thread.workingFolderId }),
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+          },
+          { runtimeTurn: true },
+        );
+        return result.kind === "accepted"
+          ? { status: "started" }
+          : { status: "refused", message: "The turn was not admitted." };
+      } catch (error) {
+        return {
+          status: "refused",
+          message: error instanceof Error ? error.message : "The turn was not admitted.",
+        };
+      }
+    };
+    // A Work thread's live tasks are read and stopped by a window on this
+    // host holding its Project, as a Code thread's are; a paired device does
+    // not see them yet. Its outside sessions answer only the person, and the
+    // turn service judges the thread, its Project and folder.
+    const workSessionRoutes = createWorkSessionRouteHandler({
+      windowAuthorityStore,
+      canOpenThread: (windowId, threadId) => {
+        if (isPairedDeviceScope(windowId)) return false;
+        try {
+          const thread = workThreadProjection.read(threadId);
+          return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+        } catch {
+          return false;
+        }
+      },
+      liveTasks: (threadId) => outlivingWorkSessions.liveTasks(workSessionKey(threadId)),
+      stopLiveTasks: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
+      isPerson: (windowId) => !isRoutineHostScope(windowId),
+      nativeSessions: (windowId, threadId) => workTurnService.nativeSessions(windowId, threadId),
+      adoptNativeSession: (windowId, threadId, nativeSessionId) =>
+        workTurnService.adoptNativeSession(windowId, threadId, nativeSessionId),
+    });
     // A message wakes a Work thread whose switch is on, as it wakes a Code
     // thread, counted in the store Code's wakes use so a restart keeps the
     // hourly and round bounds.
     const workMessageWake = new WorkMessageWake({
+      messageWakeDefaults: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
+      },
       readThread: (threadId) => {
         let thread: ReturnType<typeof workThreadProjection.read>;
         try {
@@ -1793,6 +2022,34 @@ export function wireWork(deps: WorkDependencies) {
       service: threadMessageQueue,
       windowAuthorityStore,
     });
+    // A wake-up is read and cancelled where its thread can be opened: a
+    // window holding the Work Project, or reaching the Code Project. A device
+    // the host's own person paired holds no workspace and reaches a thread as
+    // its own send would: any Work Project's, any active Code Project's.
+    const threadWakeupRoutes = createThreadWakeupRouteHandler({
+      service: () => threadWakeups.service,
+      windowAuthorityStore,
+      canOpenThread: (windowId, mode, threadId) => {
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
+        try {
+          if (mode === "work") {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            if (thread === undefined) return false;
+            return device
+              ? persistence.readProject(thread.projectId)?.type === "work"
+              : windowHoldsProject(windowId, thread.projectId, "work");
+          }
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
+        } catch {
+          return false;
+        }
+      },
+    });
     return {
       fileMentionRoutes,
       fileMentionService,
@@ -1804,6 +2061,9 @@ export function wireWork(deps: WorkDependencies) {
       threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,
+      threadWakeupRoutes,
+      workSessionRoutes,
+      workThreadWakeupPort,
       workArtifactProjection,
       workThreadService,
       observeWorkThreadRuntime,

@@ -14,8 +14,11 @@ import {
   ProviderInstanceId,
   ProviderModelId,
   ProviderModelOptionValues,
+  ProviderResumeCursor,
+  ProviderSessionId,
   ThreadProviderHandoff,
 } from "./providers";
+import { ProviderNativeSessionId } from "./providerNativeSession";
 import { UsageResumeThreadState } from "./usageResume";
 import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { BrowserProfileChoice } from "./projectBrowser";
@@ -68,6 +71,24 @@ export type WorkAccess = typeof WorkAccess.Type;
 /** The access a Work thread starts with when nothing else is set. */
 export const DEFAULT_WORK_ACCESS: WorkAccess = "ask-first";
 
+/**
+ * The provider session begun outside Octant that an empty Work thread was
+ * started from, with what its first turn must still match to resume it: the
+ * provider, model, Project binding and folder the host adopted it under. The
+ * cursor is the host's own resume record, as a turn's is.
+ */
+export const WorkThreadAdoptedSession = Schema.Struct({
+  nativeSessionId: ProviderNativeSessionId,
+  providerSessionId: ProviderSessionId,
+  resumeCursor: ProviderResumeCursor,
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  bindingRevisionId: BindingRevisionId,
+  workingDirectory: ThreadWorkingDirectory,
+  workingFolderId: Schema.optional(ProjectWorkingFolderId),
+}).annotations(strict);
+export type WorkThreadAdoptedSession = typeof WorkThreadAdoptedSession.Type;
+
 export const WorkThread = Schema.Struct({
   id: WorkThreadId,
   projectId: ProjectId,
@@ -94,6 +115,8 @@ export const WorkThread = Schema.Struct({
    * older journal replays as off.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict, the thread's own choice; same meaning as `CodeThread.strict`. */
+  strict: Schema.optional(Schema.Boolean),
   /**
    * The thread's pending usage-resume opt-in, when a person asked the host to
    * resume a usage-limited turn at the provider's declared reset. Journaled on
@@ -128,6 +151,12 @@ export const WorkThread = Schema.Struct({
    * is idle, under the wake bounds. Absent, the message waits for its next turn.
    */
   messageWake: Schema.optional(Schema.Literal(true)),
+  /**
+   * Set when the person started this thread from a provider session begun
+   * outside Octant: its first turn resumes that session. Journaled only on a
+   * thread with no turn yet; absent on every other thread.
+   */
+  adoptedSession: Schema.optional(WorkThreadAdoptedSession),
   /** Completed and snoozed rest, shared with Chat and Code; see {@link ThreadRestFields}. */
   ...ThreadRestFields,
   version: AggregateVersion,
@@ -164,6 +193,8 @@ export const CreateWorkThreadCommand = Schema.Struct({
    * clamps it off at every other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for this thread; absent follows its Project and Settings. */
+  strict: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type CreateWorkThreadCommand = typeof CreateWorkThreadCommand.Type;
 
@@ -346,6 +377,11 @@ export const ChangeWorkThreadAccessCommand = Schema.Struct({
    * the thread's current choice; the host drops it at any other level.
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Strict, chosen with the level at any level. Absent keeps the thread's
+   * current choice; null returns it to its Project's and Settings' default.
+   */
+  strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
 }).annotations(strict);
 export type ChangeWorkThreadAccessCommand = typeof ChangeWorkThreadAccessCommand.Type;
 
@@ -384,6 +420,8 @@ export const WorkSettings = Schema.Struct({
   defaultAccess: WorkAccess,
   /** New Work threads at Full access keep the sandbox. Absent is off. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Strict for Work threads whose thread and Project did not choose. Absent is off. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /**
    * Settings › Work › Continue after restart: whether the host continues, by
    * itself, a Work turn a restart cut off. Absent is on, which is also what a
@@ -411,6 +449,8 @@ export const UpdateWorkSettingsCommand = Schema.Struct({
   defaultAccess: WorkAccess,
   /** Absent keeps the stored choice. */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
+  /** Absent keeps the stored choice. */
+  defaultStrict: Schema.optional(Schema.Boolean),
   /** Absent keeps the stored choice. */
   restartContinuation: Schema.optional(Schema.Boolean),
 })

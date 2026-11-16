@@ -319,7 +319,7 @@ export type RemoteDependencies = {
     | "pushNotificationTokenStore"
   > &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
-  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<FoundationsWiring, "workThreadProjection" | "resolveThreadStrict"> &
   Pick<FoundationsWiring, "hostMemoryGuard" | "providerRuntimeRegistry"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "codeService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> & {
@@ -1015,6 +1015,7 @@ export function wireRemote(deps: RemoteDependencies) {
               readThreadExternalContentTaint(persistence.connection, threadId)
                 .externalContentIngested,
             runsAtFullAccess: parentRunsAtFullAccess,
+            strict: (threadId) => deps.resolveThreadStrict(threadId),
             standingAnswerCovers: (threadId) =>
               threadStandingAnswers.covers(threadId, "delegation", true),
             sessionStatus: (threadId) => nativeHarnessSessions.read(threadId)?.session.status,

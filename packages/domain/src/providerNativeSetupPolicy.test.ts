@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  accountKeepsOwnMemory,
   providerNativeSetupIsOn,
   providerOwnMemoryLaunches,
   resolveProviderNativeSetup,
@@ -16,39 +17,20 @@ const everything = {
 } as const;
 
 describe("a key provider running as itself", () => {
-  it("keeps only the runtime's own web search on at Guarded and Reviewed until the person turns the rest on", () => {
+  it("keeps the runtime's own web search and fetch off in Work and Code for an account the person turned off", () => {
     for (const mode of ["work", "code"] as const) {
-      for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
-        const setup = resolveProviderNativeSetup({
-          driverKind: "claude",
-          mode,
-          executionPolicy,
-          accountAllows: false,
-          projectTrusts: false,
-        });
-        expect(setup).toEqual({
-          subagents: false,
-          webTools: true,
-          skills: false,
-          toolServers: false,
-          hooks: false,
-          projectCode: false,
-        });
-        expect(providerRunsAsItself(setup)).toBe(false);
+      for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+        expect(
+          resolveProviderNativeSetup({
+            driverKind: "claude",
+            mode,
+            executionPolicy,
+            accountAllows: false,
+            projectTrusts: false,
+          }),
+        ).toBeUndefined();
       }
     }
-  });
-
-  it("keeps the runtime's web search off in Plan and Chat until the person turns it on", () => {
-    expect(
-      resolveProviderNativeSetup({
-        driverKind: "claude",
-        mode: "code",
-        executionPolicy: "plan",
-        accountAllows: false,
-        projectTrusts: false,
-      }),
-    ).toBeUndefined();
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -60,7 +42,26 @@ describe("a key provider running as itself", () => {
     ).toBeUndefined();
   });
 
-  it("turns its own setup on at Full access, with a Project's code only where the Project is trusted", () => {
+  it("keeps the runtime's own web search and fetch on in Work and Code for an account running as itself", () => {
+    for (const mode of ["work", "code"] as const) {
+      for (const executionPolicy of [
+        "approval-gated",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
+        const setup = resolveProviderNativeSetup({
+          driverKind: "claude",
+          mode,
+          executionPolicy,
+          accountAllows: true,
+          projectTrusts: false,
+        });
+        expect(setup?.webTools).toBe(true);
+      }
+    }
+  });
+
+  it("turns the rest of its own setup on at Full access, with a Project's code only where the Project is trusted", () => {
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -69,7 +70,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: false,
       }),
-    ).toEqual({ ...everything, projectCode: false });
+    ).toEqual({ ...everything, webTools: false, projectCode: false });
     expect(
       resolveProviderNativeSetup({
         driverKind: "codex",
@@ -78,7 +79,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: true,
       }),
-    ).toEqual(everything);
+    ).toEqual({ ...everything, webTools: false });
   });
 
   it("loads the account's setup when the account allows it and the Project's code only when trusted", () => {
@@ -99,7 +100,7 @@ describe("a key provider running as itself", () => {
         accountAllows: false,
         projectTrusts: true,
       }),
-    ).toEqual(everything);
+    ).toEqual({ ...everything, webTools: false });
   });
 
   it("never runs hooks, tool servers, or a Project's code in Plan, which stays read-only", () => {
@@ -151,7 +152,7 @@ describe("a key provider running as itself", () => {
   });
 
   it("gives every provider that is not a key provider nothing, at every level", () => {
-    for (const driverKind of ["pi", "kimi-code", "ollama", "openai-compatible"] as const) {
+    for (const driverKind of ["pi", "ollama", "openai-compatible"] as const) {
       expect(
         resolveProviderNativeSetup({
           driverKind,
@@ -179,7 +180,22 @@ describe("a key provider running as itself", () => {
     ).toBeUndefined();
   });
 
-  it("loads a thread's setup as the account switch would when the thread turned it on", () => {
+  it("keeps the web tools off for a thread that turned them off while its account runs as itself", () => {
+    for (const mode of ["work", "code"] as const) {
+      expect(
+        resolveProviderNativeSetup({
+          driverKind: "claude",
+          mode,
+          executionPolicy: "approval-gated",
+          accountAllows: true,
+          projectTrusts: false,
+          threadChoice: "off",
+        }),
+      ).toBeUndefined();
+    }
+  });
+
+  it("loads a thread's setup as the account switch would when the thread turned it on, without the web tools of an account turned off", () => {
     expect(
       resolveProviderNativeSetup({
         driverKind: "opencode",
@@ -189,7 +205,7 @@ describe("a key provider running as itself", () => {
         projectTrusts: false,
         threadChoice: "on",
       }),
-    ).toEqual({ ...everything, projectCode: false });
+    ).toEqual({ ...everything, webTools: false, projectCode: false });
   });
 
   it("never loads a Project's own code for a thread that turned it on in an untrusted Project", () => {
@@ -219,31 +235,95 @@ describe("a key provider running as itself", () => {
 });
 
 describe("a provider's own memory", () => {
-  it("launches in Work and Code only when the person turned the account's setting on", () => {
-    for (const mode of ["work", "code"] as const) {
-      for (const executionPolicy of [
-        "approval-gated",
-        "auto-accept-edits",
-        "full-access",
-      ] as const) {
-        expect(providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy })).toBe(
-          true,
-        );
-        // Full access turns the provider's own setup on, never its memory.
-        expect(providerOwnMemoryLaunches({ accountAllows: false, mode, executionPolicy })).toBe(
-          false,
-        );
+  it("is on for an account the person never turned off, and off once they did", () => {
+    expect(accountKeepsOwnMemory({})).toBe(true);
+    // An earlier default stored the person's on as `true`.
+    expect(accountKeepsOwnMemory({ ownMemory: true })).toBe(true);
+    expect(accountKeepsOwnMemory({ ownMemory: false })).toBe(false);
+  });
+
+  it("launches in Work and Code unless the person turned the account's setting off", () => {
+    for (const memoryWrites of ["session-tools", "background"] as const) {
+      for (const mode of ["work", "code"] as const) {
+        for (const executionPolicy of [
+          "approval-gated",
+          "auto-accept-edits",
+          "full-access",
+        ] as const) {
+          expect(
+            providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy, memoryWrites }),
+          ).toBe(true);
+          // Full access turns the provider's own setup on, never its memory.
+          expect(
+            providerOwnMemoryLaunches({
+              accountAllows: false,
+              mode,
+              executionPolicy,
+              memoryWrites,
+            }),
+          ).toBe(false);
+        }
       }
     }
   });
 
-  it("stays off in Plan, in Chat, and for a session that names no mode, with the setting on", () => {
-    expect(
-      providerOwnMemoryLaunches({ accountAllows: true, mode: "code", executionPolicy: "plan" }),
-    ).toBe(false);
-    for (const mode of ["chat", undefined] as const) {
+  it("loads a memory only its session tools write in Plan and Chat, read-only", () => {
+    const memoryWrites = "session-tools";
+    for (const mode of ["chat", "work", "code"] as const) {
       expect(
-        providerOwnMemoryLaunches({ accountAllows: true, mode, executionPolicy: "approval-gated" }),
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode,
+          executionPolicy: "plan",
+          memoryWrites,
+        }),
+      ).toBe(true);
+    }
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(true);
+    // The person's own switch still decides there.
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: false,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a memory the runtime writes in the background off in Plan and Chat, and for a session that names no mode", () => {
+    const memoryWrites = "background";
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "code",
+        executionPolicy: "plan",
+        memoryWrites,
+      }),
+    ).toBe(false);
+    expect(
+      providerOwnMemoryLaunches({
+        accountAllows: true,
+        mode: "chat",
+        executionPolicy: "approval-gated",
+        memoryWrites,
+      }),
+    ).toBe(false);
+    for (const writes of ["session-tools", "background"] as const) {
+      expect(
+        providerOwnMemoryLaunches({
+          accountAllows: true,
+          mode: undefined,
+          executionPolicy: "approval-gated",
+          memoryWrites: writes,
+        }),
       ).toBe(false);
     }
   });

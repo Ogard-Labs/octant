@@ -122,6 +122,7 @@ import {
   USAGE_RESUME_CANCELLED,
   USAGE_RESUME_SCHEDULED,
   type UsageResumeRecord,
+  type WindowsTerminalShell,
 } from "@octant/contracts";
 import type {
   AgentProfile,
@@ -264,6 +265,13 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "plan-on-server":
     "Plan changes nothing on a server, so it cannot start a thread in a new worktree there. Choose another level or Current checkout.",
 };
+
+/** Absent reads as Windows PowerShell, so only another choice is stored. */
+function windowsTerminalShellSetting(shell: WindowsTerminalShell | undefined): {
+  readonly windowsTerminalShell?: WindowsTerminalShell;
+} {
+  return shell === undefined || shell === "powershell" ? {} : { windowsTerminalShell: shell };
+}
 
 function stripProposedOutcome(
   deliveryTarget: CodeThread["deliveryTarget"],
@@ -729,6 +737,8 @@ export interface CodeServiceOptions {
     thread: CodeThread,
   ) => { readonly root: string; readonly reader: Pick<GitHistoryPort, "read"> } | undefined;
   readonly persistence: CodePersistencePort;
+  /** How many coordinators a Code Project may hold, read from Settings at each change; absent is 4. */
+  readonly coordinatorsPerProject?: () => number;
   readonly access: CodeWindowAccessPort;
   readonly checkouts: CodeCheckoutObservationPort;
   readonly roots: CodeFileRootAuthorityPort;
@@ -917,9 +927,29 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 /** A thread without the two choices a mode change states afresh. */
 function withoutAccessChoices(
   thread: CodeThread,
-): Omit<CodeThread, "autoApprove" | "fullAccessSandbox"> {
-  const { autoApprove: _autoApprove, fullAccessSandbox: _fullAccessSandbox, ...rest } = thread;
+): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy" | "strict"> {
+  // Strict is dropped too, so the change's own choice (or null, returning
+  // the thread to its Project's and Settings' default) is all that stays.
+  const {
+    autoApprove: _autoApprove,
+    fullAccessSandbox: _fullAccessSandbox,
+    planReturnPolicy: _planReturnPolicy,
+    strict: _strict,
+    ...rest
+  } = thread;
   return rest;
+}
+
+/**
+ * The thread's own Strict choice after a mode change: the command's, else the
+ * thread's; null clears it so the thread follows its Project and Settings.
+ */
+function threadStrictChoice(
+  requested: boolean | null | undefined,
+  current: boolean | undefined,
+): { readonly strict?: boolean } {
+  const chosen = requested === undefined ? current : requested;
+  return chosen === null || chosen === undefined ? {} : { strict: chosen };
 }
 
 /**
@@ -1018,6 +1048,7 @@ export class CodeServiceError extends Error {
 
 export class CodeService {
   readonly #persistence: CodePersistencePort;
+  readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
@@ -1079,6 +1110,7 @@ export class CodeService {
 
   constructor(options: CodeServiceOptions) {
     this.#persistence = options.persistence;
+    this.#coordinatorsPerProject = options.coordinatorsPerProject;
     this.#access = options.access;
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
@@ -1574,8 +1606,6 @@ export class CodeService {
   ): Promise<CodeCommandResult> {
     const actor = executionContext?.actor;
     try {
-      if (process.platform === "win32")
-        throw this.#failure("unavailable", "Code execution requires Windows host confinement.");
       let command;
       try {
         command = decodeCodeCommand(input);
@@ -2038,6 +2068,9 @@ export class CodeService {
           ...((command.defaultFullAccessSandbox ?? current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
             ? { androidEmulatorSnapshotBoot: true }
             : {}),
@@ -2088,6 +2121,10 @@ export class CodeService {
           ...((command.restartContinuation ?? current.restartContinuation) === false
             ? { restartContinuation: false }
             : {}),
+          // Absent reads as Windows PowerShell, so only another choice needs a value.
+          ...windowsTerminalShellSetting(
+            command.windowsTerminalShell ?? current.windowsTerminalShell,
+          ),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -2147,7 +2184,9 @@ export class CodeService {
           command.thread.coordinatorBounds !== undefined ||
           command.thread.coordinatorWorkerLevel !== undefined ||
           command.thread.messageWake !== undefined ||
-          command.thread.coordinatorWakeOff !== undefined
+          command.thread.coordinatorWakeOff !== undefined ||
+          // Only the host's own move writes this reason, which the transcript shows as Octant's.
+          command.thread.providerHandoff?.continuedOnFallback !== undefined
         ) {
           throw this.#failure(
             "unauthorized",
@@ -2347,6 +2386,20 @@ export class CodeService {
           kind: "thread-updated",
           thread: this.#sessionAuthority.effectiveThread(authenticatedWindowId, next),
         };
+      }
+      // A return level only labels where an agent's approved plan takes the
+      // thread back to; it never reaches Full access by that route.
+      if (
+        command.kind === "change-code-thread-access" &&
+        command.planReturnPolicy !== undefined &&
+        (command.executionPolicy !== "plan" ||
+          command.planReturnPolicy === "full-access" ||
+          command.planReturnPolicy === "plan")
+      ) {
+        throw this.#failure(
+          "invalid",
+          "A thread returns from Plan only to a level below Full access.",
+        );
       }
       const updatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "set-code-thread-restart-continuation") {
@@ -2781,6 +2834,19 @@ export class CodeService {
                           ...withoutAccessChoices(current),
                           executionPolicy: command.executionPolicy,
                           permissionPersistence: command.permissionPersistence,
+                          // Where an agent's approved plan returns the thread:
+                          // kept only while it stays in Plan, and never Full
+                          // access, which only the person chooses.
+                          ...(command.executionPolicy === "plan" &&
+                          (command.planReturnPolicy ??
+                            (current.executionPolicy === "plan"
+                              ? current.planReturnPolicy
+                              : undefined)) !== undefined
+                            ? {
+                                planReturnPolicy:
+                                  command.planReturnPolicy ?? current.planReturnPolicy,
+                              }
+                            : {}),
                           // Store `true` when enabled; drop the field when disabled so
                           // a journal written before the flag existed replays as false.
                           // A posture-only change omits the field and keeps the current value.
@@ -2793,6 +2859,10 @@ export class CodeService {
                           ...((command.fullAccessSandbox ?? current.fullAccessSandbox) === true
                             ? { fullAccessSandbox: true }
                             : {}),
+                          // Strict holds at every level: kept from the
+                          // command, else from the thread; null returns the
+                          // thread to its Project's and Settings' default.
+                          ...threadStrictChoice(command.strict, current.strict),
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }
@@ -2828,6 +2898,16 @@ export class CodeService {
                                     nextModelId: command.modelId,
                                     changedAt: updatedAt,
                                     ...(releasedStopId === undefined ? {} : { releasedStopId }),
+                                    // Only the host's own continued-on-fallback move carries it.
+                                    ...(current.coordinatorChoice !== undefined &&
+                                    executionContext?.coordinatorChoice?.move ===
+                                      "continued-on-fallback" &&
+                                    executionContext.coordinatorChoice.reason !== undefined
+                                      ? {
+                                          continuedOnFallback:
+                                            executionContext.coordinatorChoice.reason,
+                                        }
+                                      : {}),
                                   },
                                 }),
                             version: command.expectedVersion + 1,
@@ -4267,6 +4347,9 @@ export class CodeService {
       },
       make: command.coordinator,
       coordinatorsInProject,
+      ...(this.#coordinatorsPerProject === undefined
+        ? {}
+        : { coordinatorLimit: this.#coordinatorsPerProject() }),
     });
     if (decision.status === "refused") throw this.#failure("invalid", decision.message);
     if (decision.status === "unchanged") return current;

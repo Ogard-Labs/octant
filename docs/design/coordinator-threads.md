@@ -42,15 +42,19 @@ read-only gate is a maintainer live check.
   anything but a local window or a device the host's own person paired. A new
   thread's creation command may not carry the role, lineage, switches, bounds,
   or workers' level.
-- **Several per Project.** A Code Project may have up to four coordinators at
-  once, for separate lines of work (one for the backlog, one for a dependency
-  audit). Each coordinator has its own workers.
+- **Several per Project.** A Code Project may have as many coordinators at
+  once as Settings › Permissions › Coordinators per Project allows (default 4,
+  1 to 32), for separate lines of work (one for the backlog, one for a
+  dependency audit). Each coordinator has its own workers. The host reads the
+  setting when a person makes a coordinator or designates a planner; lowering
+  it stops none that exist (maintainer decision, 2026-11-16; built, under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)).
 - **It replaces the planner role.** The Project's designated planner reads as a
   coordinator whose starts always need approval, derived from the designation
   with no journal change: it takes the read-only gate and the roster, its
   `start` always proposes whatever the start setting, its pending proposals
-  stay pending, and it counts toward the four per Project. Designating a worker
-  or a fifth coordinator is refused (`thread-is-worker`,
+  stay pending, and it counts toward that number. Designating a worker or a
+  coordinator past the number is refused (`thread-is-worker`,
   `coordinator-limit-reached`). Its role follows the designation, so **Make
   coordinator** and **Stop coordinating** are not offered on it; removing the
   designation ends it. Designation does not turn on its **Wake when a message
@@ -79,12 +83,16 @@ An ordinary thread does one task and finishes. A coordinator stays open for as
 long as its line of work lasts, and its job is to direct workers rather than to
 make changes itself.
 
-- **It reads; its workers write.** A coordinator's own file, shell, and Git
-  actions go through the same read-only gate Plan mode applies, whatever its
-  guardrail level. Reading the checkout, GitHub reads, Canvas, `ask-user`,
-  Project memory, and the coordinator operations below stay offered, and child
-  runs it delegates take the same read-only gate. Its guardrail level does not govern its own actions; it is the
-  ceiling for the workers it starts. It opens no pull request of its own
+- **It reads; its workers write.** Below Full access a coordinator's own
+  file, shell, and Git actions go through the same read-only gate Plan mode
+  applies. Reading the checkout, GitHub reads, Canvas, `ask-user`, Project
+  memory, and the coordinator operations below stay offered, and child runs it
+  delegates take the same read-only gate. At Full access its own turn runs at
+  that level instead (maintainer decision, 2026-11-16; built, under
+  [Octant's own limits become settings](../architecture.md#security-and-authority)):
+  the person chose to let the thread act without asking. Below Full access
+  its guardrail level does not govern its own actions; at every level it is
+  the ceiling for the workers it starts. It opens no pull request of its own
   (`octant_pull_request` is not offered).
 - **No delivery target and no Done.** A coordinator has no delivery target,
   never appears as a board card, and is never Done. A person stops it with
@@ -220,8 +228,9 @@ every `start`; the renderer and the agent decide nothing.
    is at a usage limit (a failed request's own limit signal, or the host's
    plan-usage reading of a window the provider flagged exhausted or at 100%,
    a quota flagged exhausted with no window, or a request or token bucket
-   with nothing left, until its reset; a reading below the limit never
-   filters), the Project's
+   with nothing left, until its reset; a reached limit whose reading names
+   no reset counts for 5 minutes from the reading's own time, like a down
+   mark; a reading below the limit never filters), the Project's
    policy or data rules disallow it, an endpoint Octant runs has not proven its
    tools, or `needsImages` is set and it cannot read images while Sees images
    cannot describe one for this Project. With Sees images able to (a model in
@@ -285,11 +294,67 @@ request clears both. A restart forgets them.
   card holds only host facts, provider-reported model names and names the
   person chose, so it never marks the coordinator.
 
-Not in this slice: continuing a running worker on a fallback (**Continue on
-the fallback if the model stops** is stored and not read), and an `escalate`
-reply. Rationale: fallback happens only at the start, so a running worker
-keeps its model, as threads do; the person's fallback order is the consent for
-moving a worker that has done nothing yet.
+### Running workers
+
+A worker that stops mid-run because its model hit a usage limit (the
+provider's own signal, or a failure while the host's facts hold the account
+at its limit) or failed for availability (refused connection, 5xx,
+overloaded, timeout) carries on with the next model of its role when the
+role's **Continue on the fallback if the model stops** box is on. The box is
+per role, in Settings with a Project's choice for the role first, and on by
+default (absent is on). The person's fallback list is their consent
+(maintainer decision, 2026-11-15).
+
+- **Who moves.** Only a coordinator's worker whose model the roles chose. A
+  thread a person started never moves on its own, nor does a coordinator, a
+  worker a person moved to a model of their own (its choice then reads
+  "chosen by you"), one with the person's own **On usage limit → Hand off
+  to**, or one put away, marked Done, snoozed or archived. A worker's first
+  request that failed before any work is still the start and moves by the
+  rule above. The harness's own helper runs keep the fallback they already
+  have.
+- **Where to.** The next eligible model after the current one in the same
+  walk a start takes: the role's list, then the lists it may borrow, with the
+  start's own filters (ready, allowed, tools, images when the start needed
+  them, a review's other provider), which the worker's recorded choice keeps.
+  The model that stopped is out; its siblings on the same account are judged
+  by the host's facts, since some limits are per model. Never a model outside
+  the roles, and never one in a role that has **Ask before using**: a start
+  there would ask a person, so the worker pauses instead, and a worker in an
+  ask-first role keeps the one model a person approved.
+- **How.** The ordinary provider change, made as the host and recorded on the
+  worker's choice with `continued-on-fallback` and a host-written reason
+  ("Opus 5.5 (Work) at usage limit; continued on Astra (Personal)"). On the
+  same provider, the runtime carries the session on with a model switch
+  where it supports `modelSwitch`, and otherwise, as on another provider or
+  account, the next turn starts with the disclosed hand-off the model picker
+  uses. Then one host turn continues the work, under the ordinary admission
+  (spend ceilings, capacity, the Done lock; approvals still wait for a
+  person). Its message names the old and new model and account and why, and
+  tells the model to continue where it left off. The move only counts for
+  the turn that stopped, on the model it ran on: when a person's turn started
+  or anyone changed the model since, the host does nothing. A refused turn is
+  an ordinary refusal: the worker stays idle on its new model.
+- **Disclosure.** The provider change records the reason on the thread's
+  hand-off record, and the transcript shows "Octant moved this thread:
+  <reason>" after the turn that stopped, whether or not the continuing turn
+  was admitted. The worker row shows "fallback: <reason>", and the
+  coordinator gets a `continued-on-fallback` notice (below). The transcript
+  line follows the thread's latest hand-off, so a later move or a person's
+  model change replaces it; every move stays in the thread's journal and in
+  the coordinator's notices.
+- **Propose for approval.** The Starting workers setting covers starting new
+  workers only; it does not stop a running worker continuing on its role's
+  fallback, since the role's list is the person's consent (maintainer
+  decision, 2026-11-15). **Ask before using** on a role does stop it.
+- **Bounds.** The walk only goes forward and passes over every model it
+  already reached, so a worker moves through its lists at most once and never
+  back; one stop moves it once. With nothing eligible left it pauses as
+  before (a Needs you row), and the coordinator hears of it as an ordinary
+  state notice. With the box off it pauses too, and the coordinator may start
+  a worker on the fallback itself.
+
+Not built: an `escalate` reply.
 
 ### The start setting
 
@@ -411,9 +476,11 @@ capped ([Starting workers](#starting-workers)).
 - **State notices.** When a worker's turn ends, when it starts waiting for a
   person (an approval, a question, or a usage-limit pause), and when it becomes
   Done, the host queues a notice for its coordinator: the worker's reference,
-  the new state from a closed set, and the time. A notice carries no text an
-  agent wrote, so it does not mark the coordinator. At most one notice waits per
-  worker; a newer state replaces it. Notices reach the coordinator's next turn
+  the new state from a closed set, and the time. When the host moved a running
+  worker on to its role's next model, the notice says `continued-on-fallback`
+  instead, beside its state notice rather than in its place. A notice carries
+  no text an agent wrote, so it does not mark the coordinator. At most one
+  state notice waits per worker; a newer state replaces it. Notices reach the coordinator's next turn
   beside its roster and wake it when it is idle, under the wake bounds below.
 - **Bounds on waking.** Wake turns keep the messaging bounds: one at a time per
   thread, an hourly count per thread, and the hop count. The hourly count and
@@ -523,11 +590,11 @@ Scout, Quick edit, Builder, Hard problems, Reviewer, Sees images and Small
 jobs, each a list with a main model and fallbacks, and two choices per role,
 **Ask before using** and **Continue on the fallback if the model stops**.
 Choosing by task and size, falling back at the start, borrowing the next
-tier, and asking before a role are built
-([Choosing the worker's model](#choosing-the-workers-model)), and Sees images
-describes an image for a worker whose model cannot read one
-([Architecture: Sees images](../architecture.md#sees-images)). Continuing a
-running worker on the fallback is designed, not built.
+tier, asking before a role, and continuing a running worker on the fallback
+are built ([Choosing the worker's model](#choosing-the-workers-model),
+[Running workers](#running-workers)), and Sees images describes an image for
+a worker whose model cannot read one
+([Architecture: Sees images](../architecture.md#sees-images)).
 
 ## Not in this design
 
@@ -558,7 +625,12 @@ ids refused once roles exist and today's model with none, an ask-first role
 proposing under Start without asking, the choice journaled without the
 prompt, a usage-limited main model starting the fallback with its reason, a
 first request that failed before any work moving the worker, the marks
-expiring after 5 minutes, and the role card not marking. For the workers' subagents: the graph read
+expiring after 5 minutes, a reached reading with no reset capped at 5
+minutes, and the role card not marking. For a running worker: a usage limit
+or outage mid-run moving it to the next model with one host turn under the
+ordinary admission; the box off, a person's model, a person's thread, a
+coordinator and a thread at rest never moved; the end of the list pausing
+with no loop; and the `continued-on-fallback` notice not marking. For the workers' subagents: the graph read
 refused for a window that does not hold the coordinator and for a thread that is
 not a coordinator, before any run is read; and its answer carrying no reply,
 result, recovery text or version. For where workers appear: with Show workers off no worker

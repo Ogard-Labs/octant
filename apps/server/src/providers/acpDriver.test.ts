@@ -3,6 +3,7 @@ import {
   decodeProviderSessionId,
   type ProviderFailure,
   type ProviderModelId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
@@ -1178,6 +1179,17 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(supported.capabilities.appManagedTools).toBe("supported");
   });
 
+  it("reports app-managed tools on Linux as on macOS, and not on Windows", async () => {
+    const probed = (platform: NodeJS.Platform) =>
+      withProcessPlatform(platform, () =>
+        Effect.runPromise(
+          Effect.scoped(fixture(profile, { mcpHttp: true }).driver.probe({ instanceId })),
+        ),
+      );
+    expect((await probed("linux")).capabilities.appManagedTools).toBe("supported");
+    expect((await probed("win32")).capabilities.appManagedTools).toBe("unsupported");
+  });
+
   it("registers the exact app tool catalogue before an HTTP-capable ACP session starts", async () => {
     const bridgeClose = vi.fn(async () => undefined);
     type ExecuteManagedTool = (
@@ -1213,30 +1225,34 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       },
     ] as const;
 
-    await withProcessPlatform("darwin", () =>
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-            yield* connection.start({
-              sessionId,
-              modelId,
-              executionPolicy: "approval-gated",
-              tools,
-            });
-            expect(client.newSession).toHaveBeenCalledWith(projectRoot, [
-              expect.objectContaining({ type: "http", name: "octant-browser" }),
-            ]);
-            yield* connection.stop(sessionId);
-          }),
+    // Linux carries the bridge as macOS does: the launch reaches its port
+    // on the shared host network or through the forwarder's relay.
+    for (const platform of ["darwin", "linux"] as const) {
+      await withProcessPlatform(platform, () =>
+        Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+              yield* connection.start({
+                sessionId,
+                modelId,
+                executionPolicy: "approval-gated",
+                tools,
+              });
+              expect(client.newSession).toHaveBeenLastCalledWith(projectRoot, [
+                expect.objectContaining({ type: "http", name: "octant-browser" }),
+              ]);
+              yield* connection.stop(sessionId);
+            }),
+          ),
         ),
-      ),
-    );
-    expect(bridgeFactory).toHaveBeenCalledOnce();
-    expect(bridgeClose).toHaveBeenCalledOnce();
+      );
+    }
+    expect(bridgeFactory).toHaveBeenCalledTimes(2);
+    expect(bridgeClose).toHaveBeenCalledTimes(2);
   });
 
-  it("refuses app tools before session creation when ACP HTTP MCP was not negotiated", async () => {
+  it("refuses app tools before session creation on a host whose confinement cannot carry the bridge", async () => {
     const bridgeClose = vi.fn(async () => undefined);
     const bridgeFactory = vi.fn(async () => ({
       server: {
@@ -1254,7 +1270,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const tools = [
       { name: "octant_browser", inputSchema: { type: "object", properties: {} } },
     ] as const;
-    const refusal = await withProcessPlatform("linux", () =>
+    const refusal = await withProcessPlatform("win32", () =>
       Effect.runPromise(
         Effect.scoped(
           Effect.flip(
@@ -2501,22 +2517,46 @@ describe("ACP provider driver profile quirks", () => {
     });
   });
 
-  it("rejects provider slash commands before they reach Kimi Code ACP", async () => {
+  it("runs Kimi Code's own reviewed slash commands in Plan as in Code, and only those", async () => {
     const { driver, client } = fixture(kimi);
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
           const failure = yield* Effect.flip(
             connection.send({ sessionId, prompt: "  /skill:embedded", attachments: [], tools: [] }),
           );
           expect(failure).toEqual({
             category: "unauthorized",
             message:
-              "Kimi Code slash commands are disabled. Rephrase the request without a leading slash.",
+              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
           });
           expect(client.prompt).not.toHaveBeenCalled();
+          yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
+          expect(client.prompt).toHaveBeenCalled();
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    const code = fixture(kimi);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* code.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          // A command Kimi Code did not list and Octant did not review stays refused.
+          const unreviewed = yield* Effect.flip(
+            connection.send({ sessionId, prompt: "/skill:embedded", attachments: [], tools: [] }),
+          );
+          expect(unreviewed).toEqual({
+            category: "unauthorized",
+            message:
+              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
+          });
+          expect(code.client.prompt).not.toHaveBeenCalled();
+          yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
+          expect(code.client.prompt).toHaveBeenCalled();
           yield* connection.stop(sessionId);
         }),
       ),
@@ -2624,6 +2664,155 @@ describe("ACP provider driver profile quirks", () => {
         }),
       ),
     );
+  });
+
+  it("shows another ACP agent's unattributed subagent request at Guarded with honest text, refuses it on Deny, and fails it in Plan", async () => {
+    const goose = acpProviderProfiles.goose;
+    const ownSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    const run = (executionPolicy: "approval-gated" | "plan") => {
+      const { driver, client } = fixture(goose);
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy,
+              nativeSetup:
+                executionPolicy === "plan"
+                  ? { ...ownSetup, toolServers: false, hooks: false }
+                  : ownSetup,
+            });
+            const events: ProviderRuntimeEvent[] = [];
+            yield* Effect.forkScoped(
+              Stream.runForEach(yield* connection.subscribe, (event) =>
+                Effect.sync(() => {
+                  if (event.kind === "approval-request" || event.kind === "failed") {
+                    events.push(event);
+                  }
+                }),
+              ),
+            );
+            yield* Effect.sleep("1 millis");
+            client.request({
+              kind: "request",
+              id: "subagent-permission",
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+            const card = events[0];
+            if (card?.kind === "approval-request") {
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: card.requestId,
+                approved: false,
+              });
+            }
+            return { events, client };
+          }),
+        ),
+      );
+    };
+
+    const guarded = await run("approval-gated");
+    expect(guarded.events).toHaveLength(1);
+    const card = guarded.events[0];
+    if (card?.kind !== "approval-request") throw new Error("approval missing");
+    expect(card.description).toBe("A Goose subagent asks to run a tool. Goose doesn't say which.");
+    expect(guarded.client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+
+    // Plan runs no subagents, so such a request still fails the turn.
+    const plan = await run("plan");
+    expect(plan.events.some((event) => event.kind === "approval-request")).toBe(false);
+  });
+
+  it("journals another ACP agent's unseen subagent run once, saying Octant cannot see its calls, and marks outside content", async () => {
+    const { driver, client } = fixture(acpProviderProfiles.goose);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            nativeSetup: {
+              subagents: true,
+              webTools: true,
+              skills: true,
+              toolServers: true,
+              hooks: true,
+              projectCode: false,
+            },
+          });
+          const seen: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (
+                  event.kind === "approval-request" ||
+                  event.kind === "child-agent-activity" ||
+                  event.kind === "outside-content-read"
+                ) {
+                  seen.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Two requests from the same unseen call are one subagent run.
+          for (const id of ["subagent-permission-1", "subagent-permission-2"]) {
+            client.request({
+              kind: "request",
+              id,
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+          }
+          return seen;
+        }),
+      ),
+    );
+    expect(events.map((event) => event.kind)).toEqual([
+      "child-agent-activity",
+      "outside-content-read",
+      "approval-request",
+      "approval-request",
+    ]);
+    expect(events[0]).toMatchObject({
+      childAgentId: "child-call-3",
+      status: "running",
+      summary:
+        "Goose is running a subagent. Octant cannot see its tool calls or when it ends, only the approvals it asks for.",
+    });
+    expect(events[1]).toMatchObject({ toolCallId: "child-call-3", source: "hosted-tool" });
+    // Each event takes its own place in the session's sequence.
+    const sequences = events.map((event) => event.sequence);
+    expect(new Set(sequences).size).toBe(sequences.length);
   });
 
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
@@ -3769,14 +3958,24 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
     return root;
   };
 
-  const startIn = (profile: AcpProviderProfile, root: string, mode: "code" | "chat" = "code") => {
+  const startIn = (
+    profile: AcpProviderProfile,
+    root: string,
+    mode: "code" | "chat" = "code",
+    nativeSetup?: ProviderNativeSetup,
+  ) => {
     const { driver, starts } = fixture(profile);
     const outcome = Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode });
           const result = yield* Effect.either(
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
+            }),
           );
           if (result._tag === "Right") yield* connection.stop(sessionId);
           return result;
@@ -3804,9 +4003,36 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       expect(result.left).toMatchObject({ category: "incompatible" });
       const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
       expect(result.left.message).toContain(`\`${entry}\``);
-      expect(result.left.message).toMatch(/without Octant's approval/);
-      expect(result.left.message).toMatch(/Remove or rename/);
+      expect(result.left.message).toMatch(/only once you trust this Project/);
+      expect(result.left.message).toMatch(/remove or rename/);
       expect(starts).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "starts %s in a Project trusted for it, which loads its %s as on its own, and refuses it again without that trust",
+    async (kind, file) => {
+      const root = projectWith(file);
+      const trusted = {
+        subagents: true,
+        webTools: true,
+        skills: true,
+        toolServers: true,
+        hooks: true,
+        projectCode: true,
+      } as const;
+      const started = startIn(acpProviderProfiles[kind], root, "code", trusted);
+      expect((await started.outcome)._tag).toBe("Right");
+      expect(started.starts).toHaveLength(1);
+      // Plan and an untrusted Project carry no Project code.
+      const held = startIn(acpProviderProfiles[kind], root, "code", {
+        ...trusted,
+        projectCode: false,
+      });
+      expect((await held.outcome)._tag).toBe("Left");
     },
   );
 

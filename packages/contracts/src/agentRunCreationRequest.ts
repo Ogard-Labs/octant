@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { ConversationInputPolicy } from "./conversationInputs";
 import {
+  AgentRunCompareGroup,
   AgentRunDependencies,
   AgentRunAuthority,
   AgentRunCreationPosture,
@@ -113,6 +114,7 @@ export const AgentRunCreationRequest = Schema.Struct({
   parentThreadId: AgentRunParentThreadId,
   parentRunId: Schema.optional(AgentRunId),
   dependsOn: Schema.optional(AgentRunDependencies),
+  compareGroup: Schema.optional(AgentRunCompareGroup),
   role: AgentRunRole,
   task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
   mode: OctantMode,
@@ -172,6 +174,8 @@ export const AgentRunControlRequest = Schema.Struct({
   contextInputPolicy: Schema.optional(ConversationInputPolicy),
   /** Sibling runs this one waits for; see `AgentRun.dependsOn`. */
   dependsOn: Schema.optional(AgentRunDependencies),
+  /** Sibling runs sharing this label are shown side by side; see `AgentRun.compareGroup`. */
+  compareGroup: Schema.optional(AgentRunCompareGroup),
   /**
    * Optional one-off multi-model pool. The server still resolves the route;
    * the primary candidate is the parent thread's provider/model, never a

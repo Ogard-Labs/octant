@@ -384,6 +384,52 @@ describe("remote route policy", () => {
     expect(classifyProductAction(new Request(`${origin}/api/octant-instructions`))).toBeUndefined();
   });
 
+  it("forwards Safe networks for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(request("/api/access/safe-networks?projectId=p"));
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/access/safe-networks", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(new Request(`${origin}/api/access/safe-networks`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
+  it("forwards a thread's wake-ups for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(
+      request("/api/thread-wakeups?mode=code&threadId=93000000-0000-4000-8000-000000000001"),
+    );
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/thread-wakeups/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/thread-wakeups/commands`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect(classifyProductAction(new Request(`${origin}/api/thread-wakeups`))).toBeUndefined();
+  });
+
   it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const post = await fixture.route(
@@ -1101,6 +1147,34 @@ describe("remote route policy", () => {
       surface: "authenticated-product",
     });
     expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
+  });
+
+  it("applies an exact product route's response budget and keeps the listener default when none is declared", async () => {
+    const fixture = handler({
+      policy: policy({ maxResponseBytes: 8_192 }),
+      authenticatedProduct: async () => new Response("x".repeat(6_000)),
+    });
+    const headers = { origin, "sec-fetch-site": "same-origin" };
+
+    const capped = await fixture.route(request("/api/host/resources", { headers }));
+    expect((await capped.arrayBuffer()).byteLength).toBe(4_096);
+    const defaulted = await fixture.route(request("/api/replica-sync/status", { headers }));
+    expect((await defaulted.arrayBuffer()).byteLength).toBe(6_000);
+
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    for (const [path, method, maxResponseBytes] of [
+      ["/api/github/authentication", "GET", 4_096],
+      ["/api/github/authentication/commands", "POST", 4_096],
+      ["/api/integrations/linear/authentication", "GET", 4_096],
+      ["/api/integrations/linear/authentication/commands", "POST", 4_096],
+      ["/api/integrations/linear/operations", "POST", 512 * 1_024],
+    ] as const) {
+      expect(
+        routePolicy.inspect(
+          request(path, { method, headers: { ...headers, "content-type": "application/json" } }),
+        ),
+      ).toMatchObject({ kind: "allow", maxResponseBytes });
+    }
   });
 
   it("admits a paired device's reply detail read and nothing that could change it", () => {

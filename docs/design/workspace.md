@@ -490,6 +490,10 @@ where a coordinator and its workers appear. Built; rendered against mocked threa
   host's reason>", or "chosen: <the coordinator's why>" for an override, or
   "chosen by you" after a person changed it
   ([Coordinator threads: Choosing the worker's model](coordinator-threads.md#choosing-the-workers-model)).
+  A running worker the host moved on to its role's next model shows
+  "fallback: <old model> (<account>) at usage limit; continued on <new model>
+  (<account>)", or "unavailable" for an outage
+  ([Coordinator threads: Running workers](coordinator-threads.md#running-workers)).
   A row opens the worker. In Graph, each worker's subagents
   are drawn under its row as the same cards and arrows a thread's own graph
   uses, and a card there opens the worker, since its subagents' pages and
@@ -1639,8 +1643,15 @@ done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
 keeps completed history reachable. Chat admits Agents as its only dock tool;
-opening it does not expose Work or Code tools or the bottom panel. Provider-observed children carry an explicit
-observation-only label and no managed controls. Task-plan progress remains a
+opening it does not expose Work or Code tools or the bottom panel. Every
+subagent of the thread is one row in the same list, whether Octant started it
+through `octant_agents` or the thread's provider runtime started it itself, and
+every row names its provider and its model ("Model unknown" when the runtime
+does not report one). A provider-started row reads "Started by <provider>",
+sits under the run or subagent that started it, and has no managed controls;
+it offers Stop only when the thread's running turn can stop that one subagent
+on its own (built for Claude and OpenCode), and keeps its reported state until
+the provider reports it finished. Task-plan progress remains a
 separate disclosure. See
 [Thread view: Subagents in a thread](thread-view.md#subagents-in-a-thread).
 The Agents dock is a list and a page, and it shows and controls subagents
@@ -1654,7 +1665,13 @@ Graph switch sits beside the title. **Graph** arranges the same subagents by
 what waits for what: a run sits below every run it runs after and below the run
 that started it, with an arrow from each run it waits for and a dashed line
 from the run that started it, and a row keeps the order its runs were requested
-in. A card carries the task, the provider's mark and the model, the effort and
+in. A provider-started subagent is a leaf card under its parent, with the
+dashed started-by line and no dependency arrows. Siblings the agent labelled
+with the same `compareGroup` render as one labelled group of side-by-side
+cards (provider, model, state, how long it ran, task, latest result preview)
+in the order they were requested; the host groups them and ranks nothing, and
+the composer card shows the group as one line with counts by state. A card
+carries the task, the provider's mark and the model, the effort and
 role, and the state in words, which reads "Waiting on N" while the host holds
 the run for N unfinished runs; it opens the page a row opens, and Back returns
 to the graph. A row of cards wider than the dock scrolls sideways.
@@ -1918,13 +1935,18 @@ hidden reasoning and injected tool text, marks the new thread with outside
 content before it exists, and journals the framed read-only history on that
 thread ([details](host-reads-and-commands.md#terminal-sessions)). Its first
 admitted turn reads this snapshot once. The receipt and UI distinguish that new
-session from native adoption. Native adoption is refused while the adapter
-cannot prove historical account binding, runtime compatibility and exclusive
-session ownership: a folder, filename or current provider login is not proof of
-the account that created an external session. The current adapters cannot
-supply that proof and offer only the labeled text handoff. They never resume
-an unverified native session or clone its writer. Nothing is uploaded or written
-back to the command-line tool's files.
+session from native adoption. Native adoption is a separate path: an empty
+Code thread on Claude Code continues a session of the same account and folder
+from its own row ([Thread view: Sessions started outside
+Octant](thread-view.md#sessions-started-outside-octant)), because the driver
+lists only sessions stored under that account's configuration folder for the
+thread's folder and refuses one another Octant thread already resumes. This
+tab never adopts natively: a folder, filename or current provider login here
+is not proof of the account that created an external session, so it offers
+only the labeled text handoff, and it never resumes an unverified native
+session or clones its writer. Native adoption for Work threads and for Codex
+is not built yet. Nothing is uploaded or written back to the command-line
+tool's files.
 
 ## Context and usage
 

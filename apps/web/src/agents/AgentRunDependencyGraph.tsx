@@ -149,9 +149,12 @@ function GraphCard(props: {
   const { row } = props;
   const provider =
     row.providerInstanceId === undefined ? undefined : props.providers?.get(row.providerInstanceId);
-  const how = [row.effort, subagentRoleWord(row.role)].filter(
-    (part): part is string => part !== undefined,
-  );
+  const how =
+    row.startedByProvider === undefined
+      ? [row.effort, subagentRoleWord(row.role)].filter(
+          (part): part is string => part !== undefined,
+        )
+      : [`Started by ${row.startedByProvider}`];
   return (
     <OctantButton
       className="agent-run-graph__open"

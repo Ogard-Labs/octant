@@ -7,6 +7,8 @@ import {
   ReplayCursor,
   decodeBindingRevisionId,
   decodeCodeTerminalId,
+  decodeLayoutNodeId,
+  decodePaneId,
   decodeProjectTerminalCommand,
   decodeProject,
   decodeProjectId,
@@ -15,7 +17,12 @@ import {
   type ProjectId,
   type ProjectTerminalCommand,
   type ProjectTerminalResult,
+  type WindowWorkspace,
 } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { decodeWorkspaceTab } from "@octant/contracts/shell";
+import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
+import { windowCanAccessCodeProject } from "../windowCodeProjectAccess";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { requireLinuxConfinement } from "../process/linuxConfinement";
@@ -203,6 +210,7 @@ function harness(
     readonly serverProject?: ConstructorParameters<
       typeof ProjectTerminalService
     >[0]["serverProject"];
+    readonly strict?: boolean;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -241,6 +249,7 @@ function harness(
     uuid: () => `91000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
     clock: () => now,
     ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
+    ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
   });
   const events = () =>
     journal
@@ -310,7 +319,7 @@ it.runIf(process.platform === "darwin")(
       actor,
       uuid: () => crypto.randomUUID(),
       clock: () => now,
-      shell: "/bin/sh",
+      shell: () => "/bin/sh",
     });
     try {
       expect(
@@ -794,7 +803,23 @@ describe("Project terminals", () => {
     expect(events()).toHaveLength(1);
   });
 
-  it("gives a Work Project the confined terminal a Code Project gets, now that Work has the shell", async () => {
+  it("outside Strict opens the person's own terminal unconfined, in a Code or a Work Project", async () => {
+    for (const type of ["code", "work"] as const) {
+      const { service, terminals, events } = harness({
+        projects: new Map([[ids.project, project({ type })]]),
+        access: () => true,
+        strict: false,
+      });
+
+      const result = await service.execute(windowId, "local-window", start());
+
+      expect(result).toMatchObject({ terminal: { posture: "full-access" } });
+      expect(terminals.launches[0]?.executionPolicy).toBe("full-access");
+      expect(events()[0]?.payload).toMatchObject({ posture: "full-access" });
+    }
+  });
+
+  it("under Strict gives a Work Project the confined terminal a Code Project gets", async () => {
     const { service, terminals } = harness({
       projects: new Map([[ids.project, project({ type: "work" })]]),
       access: () => true,
@@ -1188,6 +1213,77 @@ describe("a server Project's terminal", () => {
     registered.value = false;
     expect(refusal(await service.execute(windowId, "local-window", start()))).toBe("unavailable");
     expect(terminals.launches).toEqual([]);
+  });
+
+  it("opens beside a local Project's pane and ends its reach once its own pane closes", async () => {
+    const localLead = decodeProjectId("90000000-0000-4000-8000-0000000000b1");
+    const base = defaultWindowWorkspace(windowId);
+    const lead = base.layouts.code;
+    if (lead.kind !== "pane") throw new Error("expected the default single pane");
+    const leadContext = contextKeyForProject("code", LOCAL_HOST_ID, localLead, "/local-repo");
+    const alone: WindowWorkspace = {
+      ...base,
+      contextByMode: { ...base.contextByMode, code: leadContext },
+    };
+    // A server Project's pane holds no folder on this host: its context has no bound root.
+    const beside: WindowWorkspace = {
+      ...alone,
+      layouts: {
+        ...alone.layouts,
+        code: {
+          kind: "split",
+          nodeId: decodeLayoutNodeId("90000000-0000-4000-8000-0000000000c1"),
+          orientation: "horizontal",
+          ratio: 0.5,
+          first: lead,
+          second: {
+            kind: "pane",
+            nodeId: decodeLayoutNodeId("90000000-0000-4000-8000-0000000000c2"),
+            paneId: decodePaneId("90000000-0000-4000-8000-0000000000c3"),
+            surface: decodeWorkspaceTab({
+              kind: "project",
+              id: "90000000-0000-4000-8000-0000000000c4",
+              projectId: ids.project,
+              mode: "code",
+              title: "Server Project",
+            }),
+            context: { host: LOCAL_HOST_ID, mode: "code", projectId, boundRoot: null },
+          },
+        },
+      },
+    };
+    let shown = beside;
+    const { service, terminals } = harness({
+      projects: new Map(),
+      serverProject: (id) =>
+        String(id) === ids.project
+          ? {
+              mode: "code" as const,
+              bindingRevisionId: decodeBindingRevisionId(serverRevision),
+              login: () => login,
+            }
+          : undefined,
+      access: (window, id) =>
+        window === ids.window &&
+        windowCanAccessCodeProject({
+          workspace: shown,
+          projectId: decodeProjectId(id),
+          hasActiveCodeProject: () => true,
+        }),
+    });
+
+    const started = await service.execute(windowId, "local-window", start());
+    shown = alone;
+    const typed = await service.execute(windowId, "local-window", {
+      kind: "write",
+      projectId,
+      terminalId,
+      data: "ls\r",
+    });
+
+    expect(started.kind).toBe("project-terminal");
+    expect(terminals.launches[0]?.server).toEqual(login);
+    expect(refusal(typed)).toBe("unauthorized");
   });
 
   it("types no saved action and suggests none there", async () => {

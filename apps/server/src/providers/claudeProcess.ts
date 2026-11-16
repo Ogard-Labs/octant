@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import { EventEmitter } from "node:events";
 import {
   accessSync,
@@ -181,7 +182,9 @@ function processGroupExists(child: ChildProcess): boolean {
 function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the runtime and every
+    // program it started, where `child.kill` ended only the runtime.
+    if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;

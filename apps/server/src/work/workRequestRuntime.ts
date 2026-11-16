@@ -51,7 +51,8 @@ export type WorkRequestRuntimeContext = Omit<WorkRequestSubscriptionInput, "conn
   readonly projectRoot?: string;
   /** The Project's extra folders, judged as the root is. */
   readonly extraFolders?: ReadonlyArray<string>;
-  readonly signal?: AbortSignal;
+  /** The running turn's stop; read whenever it is used, since a kept session serves several turns. */
+  readonly signal?: AbortSignal | undefined;
   readonly onApprovalReviewed?: NonNullable<
     NonNullable<ProviderAcquireInput["workRequest"]>["onApprovalReviewed"]
   >;
@@ -100,8 +101,10 @@ export class WorkRequestRuntime {
     if (isTerminalEvent(event)) {
       return Effect.try({
         try: () => {
+          // The connection stays registered until it detaches: a session the
+          // host keeps past its turn asks again in a later turn on the same
+          // connection, and that turn's answers go back through it.
           const results = this.#requests.interruptSession(input.sessionId);
-          this.#connections.delete(String(input.sessionId));
           this.#forgetOwnerRequests(input.sessionId);
           const failed = results.find((result) => result.status === "failure");
           if (failed?.status === "failure") throw new Error(failed.failure.message);
@@ -438,17 +441,21 @@ export function attachWorkRequestRuntime(
         if (input.workRequest === undefined) return connection;
         const active = runtime();
         if (active === undefined) return connection;
+        const workRequest = input.workRequest;
+        // The stop signal and the review display are read when a call
+        // arrives, not when the connection is acquired: a session the host
+        // keeps past its turn is acquired once and held by later turns.
         const context = {
-          projectId: input.workRequest.projectId,
-          threadId: input.workRequest.threadId,
+          projectId: workRequest.projectId,
+          threadId: workRequest.threadId,
           providerInstanceId: input.instanceId,
-          sessionId: input.workRequest.sessionId,
+          sessionId: workRequest.sessionId,
           projectRoot: input.projectRoot,
           ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
-          ...(input.workRequest.signal === undefined ? {} : { signal: input.workRequest.signal }),
-          ...(input.workRequest.onApprovalReviewed === undefined
-            ? {}
-            : { onApprovalReviewed: input.workRequest.onApprovalReviewed }),
+          get signal() {
+            return workRequest.signal;
+          },
+          onApprovalReviewed: (review) => workRequest.onApprovalReviewed?.(review),
         } satisfies WorkRequestRuntimeContext;
         const detach = active.register({ ...context, connection });
         yield* Effect.addFinalizer(() => Effect.sync(detach));

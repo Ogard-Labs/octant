@@ -1,4 +1,5 @@
 import { NativeHarnessAskUserArguments, type Questionnaire } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import { validateQuestionnaireAnswer } from "@octant/domain";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -35,7 +36,6 @@ import {
   type ThreadTaskProgress,
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
   MAX_THREAD_TASKS_PER_TURN,
-  MAX_TURN_RUNTIME_EVENTS,
   restateThreadTaskList,
   upsertThreadTaskProgress,
   type ThreadToolStep,
@@ -50,6 +50,7 @@ import {
   recordThreadToolStep,
   startTurnMetrics,
   type ThreadToolSteps,
+  turnRuntimeEventBudget,
 } from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -70,11 +71,12 @@ import {
 } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
@@ -92,7 +94,6 @@ import type { ResearchRouteDecision, ResearchRouter } from "./research/researchR
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const DEFAULT_MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // How long one app-managed tool call may run before the turn fails. It is the
 // call's own deadline, apart from the stalled-turn limit, which is paused
 // while the call runs and may be turned off.
@@ -225,7 +226,7 @@ export interface ChatTurnRunnerOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -277,6 +278,8 @@ export interface ChatTurnRunnerInput {
   readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
+  /** Strict for this launch, as the host resolved it; absent is Strict. */
+  readonly strict?: boolean;
   readonly researchRoute: ResearchRouteDecision;
   readonly appManagedTools?: AppManagedToolSet;
   /**
@@ -360,8 +363,8 @@ export type { AppManagedToolSet } from "../providers/appManagedToolSet";
 export class ChatTurnRunner {
   readonly #capacityScheduler: ProviderCapacityScheduler;
   readonly #contextHarness: ContextHarnessService;
-  readonly #maxEvents: number;
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #maxEvents: number | undefined;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #appManagedToolDeadlineMs: number;
   readonly #maxStreamedOutputBytes: number;
@@ -374,7 +377,7 @@ export class ChatTurnRunner {
     this.#capacityScheduler = options.capacityScheduler;
     this.#spendCeiling = options.spendCeiling;
     this.#contextHarness = options.contextHarness;
-    this.#maxEvents = options.maxEvents ?? DEFAULT_MAX_EVENTS;
+    this.#maxEvents = options.maxEvents;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
     this.#providerToolCallPauseLimitMs =
@@ -426,7 +429,12 @@ export class ChatTurnRunner {
     const ambiguousRecovery = input.ambiguousRecovery ?? "interrupted";
     const capacityScheduler = this.#capacityScheduler;
     const contextHarness = this.#contextHarness;
-    const maxEvents = this.#maxEvents;
+    // The event budget follows the person's tool-step limit; Chat has no Full
+    // access, so it is always a number there.
+    const maxEvents =
+      this.#maxEvents ??
+      turnRuntimeEventBudget(input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN) ??
+      Number.POSITIVE_INFINITY;
     const stalledTurnLimitMs = this.#stalledTurnLimitMs;
     const providerToolCallPauseLimitMs = this.#providerToolCallPauseLimitMs;
     const appManagedToolDeadlineMs = this.#appManagedToolDeadlineMs;
@@ -483,8 +491,8 @@ export class ChatTurnRunner {
           startedAt: turnStartedAt,
           endedAt: clock(),
         });
-      const answeredToolRequestIds = new Set<string>();
-      const answeredApprovalRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
+      const answeredApprovalRequests = new AnsweredRequests();
       const selectedResearchBackend: "searxng" | "provider-native" =
         input.researchRoute.kind === "ready" ? input.researchRoute.backend : "searxng";
       let handledEvents = 0;
@@ -497,7 +505,7 @@ export class ChatTurnRunner {
           : Effect.promise(() =>
               input.onTurnCompleted!({
                 text: responseText,
-                toolCalls: answeredToolRequestIds.size,
+                toolCalls: answeredToolRequests.count,
                 turn: endOfTurn(outputLimited ? "max-tokens" : "end-of-turn"),
               }).catch(() => undefined),
             );
@@ -734,6 +742,12 @@ export class ChatTurnRunner {
           ),
           Effect.catchAll(persistProviderFailure),
         );
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.attempt.providerSessionId,
+        providerInstanceId: input.providerInstanceId,
+        takesSteeredResults: true,
+      });
       const cleanup = { released: false };
       const killSession = connection.forceStop;
       if (killSession !== undefined) {
@@ -981,6 +995,7 @@ export class ChatTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
+              ...(input.strict === false ? { strict: false } : {}),
             })
           : connection.start({
               sessionId: input.attempt.providerSessionId,
@@ -989,6 +1004,7 @@ export class ChatTurnRunner {
               tools: [...(input.appManagedTools?.definitions ?? [])],
               ...modelOptionValues,
               ...nativeSetup,
+              ...(input.strict === false ? { strict: false } : {}),
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 
@@ -1046,7 +1062,11 @@ export class ChatTurnRunner {
               }),
             );
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      // Chat never runs at Full access.
+      const idle = yield* makeIdleTimeout(
+        stalledTurnLimitMs({ fullAccess: false, strict: input.strict !== false }),
+        providerToolCallPauseLimitMs(),
+      );
       const shareEventLoop = makeEventLoopShare();
       const timeoutWatcher = yield* Effect.forkScoped(
         idle.expired.pipe(
@@ -1265,8 +1285,7 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "approval-request") {
-                  if (answeredApprovalRequestIds.has(event.requestId)) return;
-                  answeredApprovalRequestIds.add(event.requestId);
+                  if (!answeredApprovalRequests.answer(event.requestId)) return;
                   // Chat has no filesystem, shell, or network authority. Decline
                   // Codex-native approvals so the turn can finish instead of
                   // aborting the pending tool as a user interrupt.
@@ -1280,8 +1299,7 @@ export class ChatTurnRunner {
                   return;
                 }
                 if (event.kind === "tool-request") {
-                  if (answeredToolRequestIds.has(event.requestId)) return;
-                  answeredToolRequestIds.add(event.requestId);
+                  if (!answeredToolRequests.answer(event.requestId)) return;
                   const requestSignal = connection.toolRequestSignal?.({
                     sessionId: input.attempt.providerSessionId,
                     requestId: event.requestId,
@@ -1659,7 +1677,7 @@ export class ChatTurnRunner {
                   if (
                     !input.signal?.aborted &&
                     terminalOutcome !== "cancelled" &&
-                    answeredApprovalRequestIds.size > 0 &&
+                    answeredApprovalRequests.count > 0 &&
                     sawVisibleResponse &&
                     currentAttempt.responseRefs.length > 0
                   ) {
@@ -1741,6 +1759,7 @@ export class ChatTurnRunner {
               context: [...context],
               attachments: [...input.attachments],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...providerWebSearchAtSend(input.appManagedTools, input.attempt.providerSessionId),
             })
             .pipe(Effect.catchAll(persistProviderFailure));
         }),

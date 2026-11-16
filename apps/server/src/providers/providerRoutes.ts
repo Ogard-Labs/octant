@@ -197,8 +197,9 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
           );
         }
         if (threadRequest.kind === "set") {
-          // Loading a provider's own code and tool servers is the person's
-          // decision at a window on this host, as it is for the account.
+          // Loading a provider's own code and tool servers is the host's own
+          // person's decision, at a local window or on a device they paired,
+          // as it is for the account.
           const setter = readPrincipalRouteContext(request)?.principal;
           if (setter !== undefined && !principalActsAsHostPerson(setter)) {
             return response(
@@ -215,7 +216,7 @@ export function createProviderRouteHandler(dependencies: ProviderRouteDependenci
               {
                 category: "unsupported",
                 message:
-                  "Only a Claude Code, Codex, OpenCode, or Mistral Vibe thread can change this.",
+                  "Only a Claude Code, Codex, OpenCode, or ACP agent thread can change this.",
               },
               400,
               origin,

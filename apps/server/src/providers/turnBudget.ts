@@ -24,6 +24,38 @@ export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "k
 }
 
 /**
+ * The most answered request ids a turn remembers to refuse a repeat. A turn
+ * with no event budget (a tool-step limit that is off) has no end to its
+ * requests, so the oldest answered ids are forgotten past this: an answered
+ * request is settled, and a repeat of one that old is answered again rather
+ * than letting the set grow for as long as the turn runs.
+ */
+export const MAX_REMEMBERED_ANSWERED_REQUESTS = 4_096;
+
+/** The requests a turn has answered, remembered within a bound, and how many there were. */
+export class AnsweredRequests {
+  readonly #ids = new Set<string>();
+  #count = 0;
+
+  /** Records the answer; `false` when this request was already answered. */
+  answer(requestId: string): boolean {
+    if (this.#ids.has(requestId)) return false;
+    this.#ids.add(requestId);
+    this.#count += 1;
+    for (const oldest of this.#ids) {
+      if (this.#ids.size <= MAX_REMEMBERED_ANSWERED_REQUESTS) break;
+      this.#ids.delete(oldest);
+    }
+    return true;
+  }
+
+  /** Every request answered, including those no longer remembered. */
+  get count(): number {
+    return this.#count;
+  }
+}
+
+/**
  * The most streamed text and reasoning one turn may journal. The deltas are
  * exempt from the event budget above, and Chat and Code journal every one, so
  * without this a provider that never stops streaming grows the journal until
@@ -125,16 +157,41 @@ export function makeTurnTextParagraphs(): (event: ProviderRuntimeEvent) => Provi
   };
 }
 
+/** What decides which stalled-turn limit a turn runs under. */
+export interface StalledTurnScope {
+  readonly fullAccess: boolean;
+  readonly strict: boolean;
+}
+
 /**
- * The stalled-turn limit the host setting asks for, in milliseconds; `null`
- * when the setting is Off and no turn is cut off for silence.
+ * The stalled-turn limit the host settings ask for one turn, in milliseconds;
+ * `null` when that setting is Off and no turn is cut off for silence. A turn
+ * at Full access outside Strict takes the Full access limit, Off unless the
+ * person set one; every other turn, and every turn under Strict, takes the
+ * stalled-turn limit (Architecture: "Octant adds no restrictions of its own
+ * unless Strict is on").
  */
 export function stalledTurnLimitMs(
-  settings: Pick<ShellSettings, "stalledTurnLimitMinutes">,
+  settings: Pick<ShellSettings, "stalledTurnLimitMinutes" | "fullAccessStalledTurnLimitMinutes">,
+  turn: StalledTurnScope,
 ): number | null {
-  return settings.stalledTurnLimitMinutes === null
+  const minutes =
+    turn.fullAccess && !turn.strict
+      ? settings.fullAccessStalledTurnLimitMinutes
+      : settings.stalledTurnLimitMinutes;
+  return minutes === null ? null : minutes * 60_000;
+}
+
+/**
+ * How long a session left running only background work is kept with no turn
+ * in its thread, in milliseconds; `null` when the setting is Off.
+ */
+export function backgroundSessionIdleLimitMs(
+  settings: Pick<ShellSettings, "backgroundSessionIdleLimitMinutes">,
+): number | null {
+  return settings.backgroundSessionIdleLimitMinutes === null
     ? null
-    : settings.stalledTurnLimitMinutes * 60_000;
+    : settings.backgroundSessionIdleLimitMinutes * 60_000;
 }
 
 /** The limit a runner uses when nothing tells it the host's setting. */

@@ -14,6 +14,7 @@ import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelecti
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -312,11 +313,6 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
     ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
-  const slash = useComposerSlashCommands({
-    textarea: () => textareaRef.current,
-    draft: prompt,
-    onDraftChange: setPrompt,
-  });
   const atMenu = useComposerAtMenu({
     textarea: () => textareaRef.current,
     draft: prompt,
@@ -422,6 +418,12 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
   const { executionPolicy, autoApprove } = threadAccessOf(permissionMode);
+  const slash = useComposerSlashCommands({
+    textarea: () => textareaRef.current,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    provider: composerProviderCommands(providerGroups, props.selectedProviderInstanceId),
+  });
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
   // `octant/<short-id>` default once from a stable short id.

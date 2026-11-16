@@ -6,8 +6,13 @@ import type {
   ProviderRuntimeEvent,
   ProviderSessionId,
   UtcTimestamp,
+  ProviderLevelChangeRequest,
 } from "@octant/contracts";
-import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_PROVIDER_PLAN_CHARACTERS,
+  MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS,
+  decodeProviderModelId,
+} from "@octant/contracts";
 import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { remoteHostsNamedBy } from "@octant/domain/shield-server-policy";
 import { createHash } from "node:crypto";
@@ -19,10 +24,15 @@ import type {
   ClaudeJsonValue,
   ClaudeTaskUsage,
   ClaudeToolRequest,
+  ClaudeWorkflowAgent,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
 import { isClaudeTaskTool, type ClaudeTaskList } from "./claudeTaskList";
 import { outputStopReason } from "./outputStopReason";
+import {
+  boundedChildFinalSummary,
+  reportedChildUsage,
+} from "@octant/provider-sdk/child-observations";
 import { outsideContentTarget } from "./outsideContentRead";
 import { proposedPlanText } from "./proposedPlan";
 
@@ -50,6 +60,12 @@ export const CLAUDE_SUBAGENT_TOOL = "Agent";
  * never leaves Plan (see `claudeDriver.ts`).
  */
 export const CLAUDE_PLAN_EXIT_TOOL = "ExitPlanMode";
+/**
+ * Claude Code's workflow tool: it runs a script that starts several agents,
+ * offered on the same switch as `Agent`. The call returns at once and the
+ * workflow runs as a background task, whose frames say where each agent is.
+ */
+export const CLAUDE_WORKFLOW_TOOL = "Workflow";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -92,12 +108,21 @@ const DECODED_MESSAGE_KINDS = new Set([
   "ignored",
 ]);
 
-interface ClaudeFileChange {
-  readonly path: string;
-  readonly change: "modified";
-  readonly diff: string;
-  readonly successSummary: string;
-}
+/**
+ * What an Edit or Write call changes. `outside` is a file outside the
+ * thread's checkout, which the gate lets through only at Full access or in a
+ * worktree the session was let into: it is journaled as the tool step it is,
+ * with no file change or diff the checkout's views would show as theirs.
+ */
+type ClaudeFileChange =
+  | {
+      readonly kind: "checkout";
+      readonly path: string;
+      readonly change: "modified";
+      readonly diff: string;
+      readonly successSummary: string;
+    }
+  | { readonly kind: "outside"; readonly successSummary: string };
 
 export interface ClaudeToolState {
   readonly toolCallId: string;
@@ -108,6 +133,14 @@ export interface ClaudeToolState {
   fileChange?: ClaudeFileChange;
   /** A task tool call's input, applied with its result once that arrives. */
   taskInput?: { readonly [key: string]: ClaudeJsonValue };
+  /** The start's journaled notice, once one went out. */
+  noticed?: true;
+  /**
+   * Octant answered this call itself in place of the runtime (a wake-up
+   * call): the runtime reports the answer as a refused call, which is not a
+   * failure.
+   */
+  answeredByOctant?: true;
 }
 
 export interface ClaudeRequestCorrelation {
@@ -124,6 +157,15 @@ export interface ClaudeTaskState {
   readonly lifecycle: "pending" | "running" | "paused" | "completed" | "failed";
   readonly lastSubtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
   readonly summary: string;
+  /**
+   * A workflow's task: the child run that stands for the workflow (its
+   * `Workflow` call's id), and what was last shown for each of its agents, so
+   * a progress frame that restates the whole list shows only what moved.
+   */
+  readonly workflow?: {
+    readonly childAgentId: string;
+    readonly shownAgents: Map<number, string>;
+  };
 }
 
 export interface ClaudeEventContext {
@@ -158,6 +200,12 @@ export interface ClaudeEventContext {
   compactionRequested?: boolean;
   /** When the last liveness event went out, in epoch milliseconds. */
   lastLivenessAt?: number;
+  /**
+   * The transcript id of the newest assistant message this turn, which the
+   * turn's completion reports as its native anchor so a fork or rewind can
+   * cut the session there.
+   */
+  lastAssistantUuid?: string;
   /** Where the agent's own text stands in this turn; unset until it writes any. */
   agentText?: { toolStepSince: boolean; endsWithNewline: boolean };
   /**
@@ -168,6 +216,12 @@ export interface ClaudeEventContext {
   readonly callUsage: Map<string, ClaudeUsage>;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
+  /**
+   * The runtime's task id of each subagent, by the Octant child id its
+   * activity is reported under. Stopping one subagent names the runtime's
+   * task, while the person only ever sees the child id.
+   */
+  readonly subagentTaskIds: Map<string, string>;
   /**
    * The task id of each checklist position. Claude restates the whole list on
    * every `TodoWrite`, and the task panel keeps a task's first-seen place, so
@@ -474,6 +528,42 @@ function jsonString(
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * The note journaled on the start of a tool whose effect the thread's views
+ * do not follow, so the record says so where the call is.
+ *
+ * - `REPL` runs code in Claude's own process: outside the command sandbox
+ *   that holds every shell command below Full access, and outside the secret
+ *   guard's file checks.
+ * - A `Bash` call with `dangerouslyDisableSandbox` leaves that sandbox, which
+ *   the gate asked about first.
+ * - `EnterWorktree` and `ExitWorktree` move the session's working directory.
+ *   A thread is bound to one checkout, and its file views and diffs stay on
+ *   it; a worktree inside the Project still shows its files under the
+ *   worktree's own folder there.
+ */
+function toolStartNotice(
+  content: Extract<ClaudeAssistantContent, { readonly kind: "tool-use" }>,
+): string | undefined {
+  switch (content.toolName) {
+    case "REPL":
+      return "Unsandboxed: runs code in Claude's own process, outside the command sandbox and the secret guard.";
+    case "Bash":
+      return content.input.dangerouslyDisableSandbox === true
+        ? "Unsandboxed: this command runs outside Claude's command sandbox."
+        : undefined;
+    case "EnterWorktree": {
+      const named = jsonString(content.input, "path") ?? jsonString(content.input, "name");
+      const target = named === undefined ? undefined : normalized(named, SUMMARY_MAX_CHARACTERS);
+      return `This call moves Claude's session into a worktree${target === undefined ? "" : ` (${target})`}. The thread's file views and diffs stay on its original checkout.`;
+    }
+    case "ExitWorktree":
+      return "This call moves Claude's session back to the thread's checkout.";
+    default:
+      return undefined;
+  }
+}
+
 function contentShape(value: string): string {
   const lines = value.split("\n").length;
   const characters = Array.from(value).length;
@@ -486,13 +576,20 @@ function fileChange(
 ): ClaudeFileChange | undefined {
   if (content.toolName !== "Edit" && content.toolName !== "Write") return undefined;
   const pathValue = jsonString(content.input, "file_path");
-  const path = pathValue === undefined ? undefined : confinedRelativePath(context, pathValue);
-  if (path === undefined) return undefined;
+  if (pathValue === undefined) return undefined;
+  // A path outside the checkout is the gate's to authorize: it asks there
+  // below Full access, so one approved reaches here. It is journaled as a tool
+  // step with no file change, since the thread's views stay on the checkout.
+  const path = confinedRelativePath(context, pathValue);
   if (content.toolName === "Edit") {
     const previous = jsonString(content.input, "old_string");
     const replacement = jsonString(content.input, "new_string");
     if (previous === undefined || replacement === undefined) return undefined;
+    if (path === undefined) {
+      return { kind: "outside", successSummary: "File edit completed outside the checkout." };
+    }
     return {
+      kind: "checkout",
       path,
       change: "modified",
       diff: truncate(
@@ -504,7 +601,11 @@ function fileChange(
   }
   const replacement = jsonString(content.input, "content");
   if (replacement === undefined) return undefined;
+  if (path === undefined) {
+    return { kind: "outside", successSummary: "File write completed outside the checkout." };
+  }
   return {
+    kind: "checkout",
     path,
     change: "modified",
     diff: truncate(
@@ -620,7 +721,23 @@ function mapToolUse(
       ? toolCallContent(context, resolved.state.toolCallId, "input", recordedInput(content))
       : [];
   if (!resolved.state.emitsActivity) return [{ kind: "ignored" }];
-  if (!resolved.created) return withoutIgnored(inputContent());
+  if (!resolved.created) {
+    // A streamed start carried no input, so a notice that depends on it (a
+    // command leaving the sandbox) is journaled when the whole input comes,
+    // under the start that already went out.
+    const late =
+      authoritativeInput && resolved.state.noticed !== true ? toolStartNotice(content) : undefined;
+    if (late === undefined) return withoutIgnored(inputContent());
+    resolved.state.noticed = true;
+    return [
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: late,
+      }),
+    ];
+  }
   // A shell command rides on the tool's start only when it reaches a server,
   // so the command can be journaled with its host as Octant Shield's record
   // of it; the start of any other command names the tool and nothing more.
@@ -641,6 +758,14 @@ function mapToolUse(
     // The runtime's own subagent: shown as a child run of this thread from
     // its start. Its own tool calls each pass Octant's gate on their own.
     const task = normalized(jsonString(content.input, "description") ?? "", SUMMARY_MAX_CHARACTERS);
+    // The model the call asked for, as Claude names it (an alias such as
+    // "haiku" or a full id). Without one the subagent's definition or the
+    // parent decides, which Claude does not report, so it stays unknown.
+    const requestedModel = jsonString(content.input, "model")?.trim() ?? "";
+    const modelId =
+      requestedModel.length === 0 || requestedModel.length > 128
+        ? undefined
+        : decodeProviderModelId(requestedModel);
     return [
       start,
       ...inputContent(),
@@ -648,8 +773,22 @@ function mapToolUse(
         kind: "child-agent-activity",
         childAgentId: resolved.state.toolCallId,
         ...(task === undefined ? {} : { task }),
+        ...(modelId === undefined ? {} : { modelId }),
         status: "starting",
         summary: "Claude started a subagent.",
+      }),
+    ];
+  }
+  const notice = toolStartNotice(content);
+  if (notice !== undefined) {
+    resolved.state.noticed = true;
+    return [
+      start,
+      ...inputContent(),
+      event(context, {
+        kind: "tool-progress",
+        toolCallId: resolved.state.toolCallId,
+        message: notice,
       }),
     ];
   }
@@ -803,6 +942,7 @@ function mapAssistant(
   if (!usageIsSafe(message.usage)) {
     return [failure("Claude returned invalid usage metadata.")];
   }
+  if (message.uuid !== undefined) context.lastAssistantUuid = message.uuid;
   const messageToolNames = new Map<string, string>();
   const fileChanges = new Map<string, ClaudeFileChange>();
   for (const content of message.content) {
@@ -960,12 +1100,22 @@ function mapToolResults(
         }),
       );
     }
-    if (pair.result.isError) {
+    if (pair.result.isError && state.answeredByOctant !== true) {
       results.push(
         event(context, {
           kind: "tool-failure",
           toolCallId: state.toolCallId,
           message: "Tool failed.",
+        }),
+      );
+      continue;
+    }
+    if (state.fileChange?.kind === "outside") {
+      results.push(
+        event(context, {
+          kind: "tool-success",
+          toolCallId: state.toolCallId,
+          summary: state.fileChange.successSummary,
         }),
       );
       continue;
@@ -991,7 +1141,12 @@ function mapToolResults(
       event(context, {
         kind: "tool-success",
         toolCallId: state.toolCallId,
-        summary: published === undefined ? "Tool completed." : "Published to claude.ai.",
+        summary:
+          published !== undefined
+            ? "Published to claude.ai."
+            : state.answeredByOctant === true
+              ? "Octant answered from this thread's wake-ups."
+              : "Tool completed.",
         ...(published === undefined ? {} : { published }),
       }),
     );
@@ -1106,11 +1261,23 @@ function mapTask(
     if (existing !== undefined || providedSummary === undefined) {
       return [failure("Claude returned an invalid task lifecycle transition.")];
     }
+    let workflow: ClaudeTaskState["workflow"];
+    if (message.workflow !== undefined) {
+      // A workflow's task names the `Workflow` call that started it; one that
+      // names no such call of this session is not one Octant opened.
+      const call =
+        message.toolUseId === undefined ? undefined : context.toolStates.get(message.toolUseId);
+      if (call === undefined || call.toolName !== CLAUDE_WORKFLOW_TOOL) {
+        return [failure("Claude workflow activity did not match a workflow call.")];
+      }
+      workflow = { childAgentId: call.toolCallId, shownAgents: new Map() };
+    }
     next = {
       taskId: context.makeTaskId(),
       lifecycle: "running",
       lastSubtype: message.subtype,
       summary: providedSummary,
+      ...(workflow === undefined ? {} : { workflow }),
     };
   } else {
     if (existing === undefined) {
@@ -1169,15 +1336,130 @@ function mapTask(
       next = { ...existing, lifecycle, lastSubtype: message.subtype, summary };
     }
   }
+  if (message.workflow?.agents !== undefined && next.workflow === undefined) {
+    return [failure("Claude workflow activity did not match a workflow call.")];
+  }
   context.taskIds.set(message.taskId, next);
+  if (message.subtype === "task_started" && message.toolUseId !== undefined) {
+    const parent = context.toolStates.get(message.toolUseId);
+    if (parent?.toolName === CLAUDE_SUBAGENT_TOOL) {
+      context.subagentTaskIds.set(parent.toolCallId, message.taskId);
+    }
+  }
+  const progress = event(context, {
+    kind: "task-progress",
+    taskId: next.taskId,
+    status: normalizedTaskStatus(next.lifecycle),
+    summary: next.summary,
+  });
+  const childAgentId =
+    message.subtype === "task_notification"
+      ? [...context.subagentTaskIds].find(([, taskId]) => taskId === message.taskId)?.[0]
+      : undefined;
+  if (childAgentId === undefined) {
+    return [progress, ...workflowChildActivity(context, message, existing, next)];
+  }
+  // The subagent's closing report and the total tokens Claude counted for it.
+  // Claude reports no input/output split, so only the total is carried. The
+  // report reaches the person only; the parent already holds it as the tool
+  // result Claude itself returned.
+  const finalSummary = boundedChildFinalSummary(message.summary);
+  const usage =
+    message.usage === undefined
+      ? undefined
+      : reportedChildUsage({ totalTokens: message.usage.totalTokens });
   return [
+    progress,
     event(context, {
-      kind: "task-progress",
-      taskId: next.taskId,
-      status: normalizedTaskStatus(next.lifecycle),
-      summary: next.summary,
+      kind: "child-agent-activity",
+      childAgentId,
+      status: next.lifecycle === "completed" ? "completed" : "failed",
+      summary: next.lifecycle === "completed" ? "The subagent finished." : "The subagent failed.",
+      ...(finalSummary === undefined ? {} : { finalSummary }),
+      ...(usage === undefined ? {} : { usage }),
     }),
+    ...workflowChildActivity(context, message, existing, next),
   ];
+}
+
+const WORKFLOW_AGENT_STATUS: Readonly<
+  Record<ClaudeWorkflowAgent["state"], "running" | "completed" | "failed">
+> = { start: "running", progress: "running", done: "completed", error: "failed" };
+
+/**
+ * A workflow shown as child runs under its `Workflow` call: the workflow
+ * itself is the call's child, and each agent it starts is a child of the
+ * workflow, through the same display a subagent `Agent` starts. Each agent's
+ * tool calls reach Octant's gate on their own, at the thread's level.
+ */
+function workflowChildActivity(
+  context: ClaudeEventContext,
+  message: Extract<ClaudeDecodedMessage, { readonly kind: "task" }>,
+  previous: ClaudeTaskState | undefined,
+  next: ClaudeTaskState,
+): ReadonlyArray<ClaudeMappedMessage> {
+  const workflow = next.workflow;
+  if (workflow === undefined) return [];
+  const results: ClaudeMappedMessage[] = [];
+  if (message.subtype === "task_started") {
+    const task = normalized(message.workflow?.name ?? next.summary, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: workflow.childAgentId,
+        ...(task === undefined ? {} : { task }),
+        status: "starting",
+        summary: "Claude started a workflow.",
+      }),
+    );
+  }
+  for (const agent of message.workflow?.agents ?? []) {
+    const lastToolName =
+      agent.lastToolName === undefined
+        ? undefined
+        : normalized(agent.lastToolName, LABEL_MAX_CHARACTERS);
+    const shown = `${agent.state}\u0000${lastToolName ?? ""}`;
+    if (workflow.shownAgents.get(agent.index) === shown) continue;
+    workflow.shownAgents.set(agent.index, shown);
+    const status = WORKFLOW_AGENT_STATUS[agent.state];
+    const task = normalized(agent.label, SUMMARY_MAX_CHARACTERS);
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: `${workflow.childAgentId}:agent-${agent.index}`,
+        parentChildAgentId: workflow.childAgentId,
+        ...(task === undefined ? {} : { task }),
+        status,
+        summary:
+          status === "completed"
+            ? "The workflow agent finished."
+            : status === "failed"
+              ? "The workflow agent failed."
+              : lastToolName === undefined
+                ? "The workflow agent is working."
+                : `The workflow agent is using ${lastToolName}.`,
+      }),
+    );
+  }
+  const ended =
+    (next.lifecycle === "completed" || next.lifecycle === "failed") &&
+    previous !== undefined &&
+    previous.lifecycle !== "completed" &&
+    previous.lifecycle !== "failed";
+  if (ended) {
+    results.push(
+      event(context, {
+        kind: "child-agent-activity",
+        childAgentId: workflow.childAgentId,
+        status: next.lifecycle === "completed" ? "completed" : "failed",
+        summary:
+          next.lifecycle === "completed"
+            ? "The workflow finished."
+            : "The workflow did not finish.",
+      }),
+    );
+  }
+  return results;
 }
 
 /**
@@ -1296,6 +1578,9 @@ function mapResult(
         kind: "completed",
         resumeCursor: { driverKind: "claude", value: context.claudeSessionId },
         ...(stop === undefined ? {} : { stopReason: stop }),
+        ...(context.lastAssistantUuid === undefined
+          ? {}
+          : { nativeAnchor: context.lastAssistantUuid }),
       }),
     );
     return results;
@@ -1485,6 +1770,9 @@ export function mapClaudeMessage(
           ]
         : [{ kind: "ignored" }];
     case "status":
+      return [{ kind: "ignored" }];
+    // The driver records the list on the provider's observation.
+    case "commands-changed":
       return [{ kind: "ignored" }];
     case "compaction":
       // A compacted session keeps a summary and, at most, the messages the
@@ -1723,6 +2011,23 @@ function artifactApprovalDescription(
   return `Publish ${target ?? "a Project file"} to your claude.ai account${replacing}. It leaves this computer.`;
 }
 
+/**
+ * Claude Code's own plan-mode calls, read as the level change they ask for.
+ * `ExitPlanMode` carries the plan the person is asked to approve, bounded;
+ * a plan that is not text is left out rather than refusing the ask.
+ */
+function claudeLevelChangeRequest(
+  request: ClaudeToolRequest,
+): ProviderLevelChangeRequest | undefined {
+  if (request.toolName === "EnterPlanMode") return { kind: "enter-plan" };
+  if (request.toolName !== "ExitPlanMode") return undefined;
+  const plan =
+    typeof request.input.plan === "string"
+      ? Array.from(request.input.plan.trim()).slice(0, MAX_PROVIDER_PLAN_CHARACTERS).join("")
+      : "";
+  return plan.length === 0 ? { kind: "exit-plan" } : { kind: "exit-plan", plan };
+}
+
 export function mapClaudeToolRequest(
   context: ClaudeEventContext,
   request: ClaudeToolRequest,
@@ -1745,6 +2050,30 @@ export function mapClaudeToolRequest(
   if (correlated.kind === "failure") return correlated;
   const normalizedRequestId = correlated.requestId;
   const target = approvalTarget(context, request);
+  const levelChange = claudeLevelChangeRequest(request);
+  if (levelChange !== undefined) {
+    return {
+      kind: "approval",
+      request: {
+        kind: "approval",
+        requestId: normalizedRequestId,
+        providerSessionId: context.claudeSessionId,
+        providerToolUseId: request.toolUseId,
+        inputDigest: digest,
+        toolName,
+        event: mappedEvent(context, {
+          kind: "approval-request",
+          requestId: normalizedRequestId,
+          action: toolName,
+          description:
+            levelChange.kind === "enter-plan"
+              ? "Claude asks to plan first: the thread moves to Plan, read-only, from its next turn."
+              : "Claude finished planning and asks to leave Plan to carry out its plan from the thread's next turn.",
+          levelChange,
+        }),
+      },
+    };
+  }
   const requestEvent = mappedEvent(context, {
     kind: "approval-request",
     requestId: normalizedRequestId,
@@ -1756,7 +2085,12 @@ export function mapClaudeToolRequest(
         ? artifactApprovalDescription(target, request.input)
         : target === undefined
           ? `Claude requests permission to use ${toolName}.`
-          : `${toolName} · ${target}`,
+          : request.toolName === "Bash" && request.input.dangerouslyDisableSandbox === true
+            ? // Claude retries a command its sandbox stopped (a push that
+              // needs `~/.ssh`, a `gh` call that needs its config) outside
+              // it; the person is told before it runs with their own access.
+              `${toolName} outside the sandbox · ${target}`
+            : `${toolName} · ${target}`,
   });
   return {
     kind: "approval",

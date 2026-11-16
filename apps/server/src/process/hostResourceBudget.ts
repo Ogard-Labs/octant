@@ -7,6 +7,9 @@ import {
   type HostResourceLimits,
 } from "@octant/domain/host-resource-policy";
 
+/** `setTimeout` fires at once for a delay above 2^31-1 ms. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export interface HostResourceLease {
   readonly workers: number;
   readonly release: () => void;
@@ -116,12 +119,16 @@ export class HostResourceBudget {
         resolve(undefined);
         this.#pump();
       };
-      const timeout = setTimeout(cancel, Math.min(timeoutMs, 30 * 60_000));
+      // A launch waits as long as its own operation allows, cancellable and
+      // shown as queued; the queue adds no deadline of its own (it refused a
+      // wait past 30 minutes before, which protected no hard line). A deadline
+      // past what a timer can hold waits for the signal alone.
+      const timeout = timeoutMs <= MAX_TIMER_DELAY_MS ? setTimeout(cancel, timeoutMs) : undefined;
       const waiter: Waiter = {
         signal,
         resolve,
         clean: () => {
-          clearTimeout(timeout);
+          if (timeout !== undefined) clearTimeout(timeout);
           signal?.removeEventListener("abort", cancel);
         },
       };

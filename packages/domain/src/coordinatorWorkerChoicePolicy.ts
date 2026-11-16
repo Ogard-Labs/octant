@@ -1,5 +1,6 @@
 import {
   nativeHarnessSlotCandidateKey,
+  type CoordinatorWorkerChoice,
   type CoordinatorWorkerChoiceRank,
   type CoordinatorWorkerRole,
   type CoordinatorWorkerRoleName,
@@ -386,6 +387,137 @@ export function chooseWorkerModel(
     `No model in ${WORKER_ROLE_NAMES[role]}, or in the roles it may borrow, can start a worker now.`,
     passedOver,
   );
+}
+
+/** Why a running worker stays on its model when it stops. */
+export type WorkerFallbackStay =
+  /** A person picked the worker's model, so it is theirs to move. */
+  | "taken-over"
+  /** The role's **Continue on the fallback** box is off. */
+  | "box-off"
+  /** The roles no longer list the model it runs on. */
+  | "not-in-roles"
+  /** The next model sits in a role that asks a person before using it. */
+  | "asks-first"
+  /** No model after it in the walk can take the work now. */
+  | "none-left";
+
+export type WorkerFallbackChoice =
+  | {
+      readonly kind: "continue";
+      readonly candidate: NativeHarnessSlotCandidate;
+      readonly role: CoordinatorWorkerRole;
+      readonly rank: CoordinatorWorkerChoiceRank;
+      /** Every model after the current one passed over before this one, with why. */
+      readonly passedOver: ReadonlyArray<WorkerCandidateVerdict>;
+    }
+  | {
+      readonly kind: "stays";
+      readonly reason: WorkerFallbackStay;
+      readonly perCandidate: ReadonlyArray<WorkerCandidateVerdict>;
+    };
+
+/**
+ * The model a running worker continues on when its own stops on a usage
+ * limit or an outage (docs/design/coordinator-threads.md, Running workers):
+ * the next eligible model after the current one in the same walk a start
+ * takes (the role's list, then the lists it may borrow), with the start's
+ * own filters. The walk only goes forward and passes over every model it
+ * already reached, so a worker moves through its lists at most once and
+ * never back; at the end it stays, and pauses as before. A worker whose
+ * model a person picked, whose role has the box off (the Project's choice
+ * for the role before Settings), or whose model the roles no longer list
+ * stays too, and so does one whose next model sits in a role that asks a
+ * person first, or whose own role asks first (a person approved one model,
+ * not the list). It never returns a model outside the roles.
+ */
+export function nextWorkerFallback(
+  roles: WorkerRoles,
+  facts: WorkerChoiceFacts,
+  worker: {
+    readonly current: Pick<NativeHarnessSlotCandidate, "providerInstanceId" | "modelId">;
+    readonly choice: CoordinatorWorkerChoice;
+  },
+): WorkerFallbackChoice {
+  const stays = (
+    reason: WorkerFallbackStay,
+    perCandidate: ReadonlyArray<WorkerCandidateVerdict> = [],
+  ): WorkerFallbackChoice => ({ kind: "stays", reason, perCandidate });
+  const { choice } = worker;
+  if (choice.rank === "person") return stays("taken-over");
+  const role = choice.role;
+  const roleSlot = effectiveWorkerRoleSlot(roles, role);
+  if (roleSlot?.continueOnFallback === false) return stays("box-off");
+  // A person approved one model in an ask-first role, not the role's list.
+  if (roleSlot?.askBeforeUsing === true) return stays("asks-first");
+  const walk = [role, ...BORROWS[role]].flatMap((listRole) =>
+    (effectiveWorkerRoleSlot(roles, listRole)?.candidates ?? []).map((candidate, index) => ({
+      candidate,
+      listRole,
+      index,
+    })),
+  );
+  // By provider and model: the worker's record carries no host, and a role
+  // lists each model once per host.
+  const keyOf = (candidate: Pick<NativeHarnessSlotCandidate, "providerInstanceId" | "modelId">) =>
+    `${String(candidate.providerInstanceId)}\u0000${String(candidate.modelId)}`;
+  const current = keyOf(worker.current);
+  // The list the choice names first: a borrowed model sits in the list it was borrowed from.
+  const named =
+    typeof choice.rank === "object" && "borrowed" in choice.rank ? choice.rank.borrowed : role;
+  let position = walk.findIndex(
+    (entry) => entry.listRole === named && keyOf(entry.candidate) === current,
+  );
+  if (position === -1) position = walk.findIndex((entry) => keyOf(entry.candidate) === current);
+  if (position === -1) return stays("not-in-roles");
+  const reached = new Set(walk.slice(0, position + 1).map((entry) => keyOf(entry.candidate)));
+  const request: WorkerChoiceRequest = {
+    task: choice.reviewedProviderKind === undefined ? "feature" : "review",
+    size: "normal",
+    ...(choice.needsImages === true ? { needsImages: true } : {}),
+    ...(choice.reviewedProviderKind === undefined
+      ? {}
+      : { reviewedProviderKind: choice.reviewedProviderKind }),
+  };
+  const remaining = walk.slice(position + 1).filter((entry) => {
+    const key = keyOf(entry.candidate);
+    if (reached.has(key)) return false;
+    reached.add(key);
+    return true;
+  });
+  const passedOver: WorkerCandidateVerdict[] = [];
+  for (const listRole of [role, ...BORROWS[role]]) {
+    const entries = remaining.filter((entry) => entry.listRole === listRole);
+    if (entries.length === 0) continue;
+    const verdicts = filterList(
+      entries.map((entry) => entry.candidate),
+      listRole,
+      facts,
+      request,
+    );
+    const pickedIndex = verdicts.findIndex((verdict) => verdict.reasons.length === 0);
+    const picked = pickedIndex === -1 ? undefined : entries[pickedIndex];
+    if (picked === undefined) {
+      passedOver.push(...verdicts);
+      continue;
+    }
+    passedOver.push(...verdicts.slice(0, pickedIndex));
+    // A start there would ask a person first, so a running move never goes there.
+    if (effectiveWorkerRoleSlot(roles, listRole)?.askBeforeUsing === true) {
+      return stays("asks-first", passedOver);
+    }
+    const rank: CoordinatorWorkerChoiceRank =
+      listRole !== role
+        ? {
+            borrowed: listRole,
+            ...(TIER[listRole] < TIER[role] ? { lowerTier: true as const } : {}),
+          }
+        : picked.index === 0
+          ? "main"
+          : { fallback: picked.index };
+    return { kind: "continue", candidate: picked.candidate, role, rank, passedOver };
+  }
+  return stays("none-left", passedOver);
 }
 
 function filterList(

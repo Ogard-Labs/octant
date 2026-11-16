@@ -1,4 +1,12 @@
 import { Schema } from "effect";
+import {
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATOR_ROUNDS,
+  MAX_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_COORDINATORS_PER_PROJECT_SETTING,
+} from "./octantLimits";
 import { ProjectId } from "./projects";
 
 /**
@@ -52,22 +60,16 @@ export type CoordinatorWorkerListingByProject = typeof CoordinatorWorkerListingB
 
 export const DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT = 6;
 export const MAX_COORDINATOR_OPEN_WORKER_LIMIT = 16;
-export const MAX_COORDINATORS_PER_PROJECT = 4;
-
-/**
- * A coordinator's hourly and round bounds when the person set none
- * (docs/design/coordinator-threads.md, Bounds and Talking to workers).
- */
-export const DEFAULT_COORDINATOR_WAKES_PER_HOUR = 30;
-export const DEFAULT_COORDINATOR_ROUNDS = 10;
+export {
+  DEFAULT_COORDINATOR_ROUNDS,
+  DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATOR_ROUNDS,
+  MAX_COORDINATOR_WAKES_PER_HOUR,
+  MAX_COORDINATORS_PER_PROJECT,
+  MAX_COORDINATORS_PER_PROJECT_SETTING,
+};
 export const DEFAULT_COORDINATOR_STARTS_PER_HOUR = 60;
-/**
- * The most a person may set. These bounds are what stops two agents waking
- * each other without end and a coordinator filling a Project with threads, so
- * each keeps a finite top.
- */
-export const MAX_COORDINATOR_WAKES_PER_HOUR = 600;
-export const MAX_COORDINATOR_ROUNDS = 100;
+/** Keeps a coordinator from filling a Project with threads. */
 export const MAX_COORDINATOR_STARTS_PER_HOUR = 600;
 
 /**
@@ -200,6 +202,17 @@ export const CoordinatorWorkerState = Schema.Literal(
 export type CoordinatorWorkerState = typeof CoordinatorWorkerState.Type;
 
 /**
+ * What a state notice to a coordinator says about one worker: a state the
+ * roster carries, or `continued-on-fallback` when the host moved a running
+ * worker to the next model of its role because its own stopped.
+ */
+export const CoordinatorWorkerNotice = Schema.Literal(
+  ...CoordinatorWorkerState.literals,
+  "continued-on-fallback",
+);
+export type CoordinatorWorkerNotice = typeof CoordinatorWorkerNotice.Type;
+
+/**
  * Where in its role's list the model a worker started on sits. `main` is the
  * role's first model; `fallback` the n-th one after it; `borrowed` a model
  * of another role's list because every model of this role was unavailable;
@@ -227,6 +240,11 @@ export const MAX_COORDINATOR_CHOICE_REASON_LENGTH = 400;
  * reason is host-written from its own facts ("main at usage limit until
  * 14:00"); `why` is the coordinator's reason for an override, as it wrote it.
  * Never the prompt.
+ *
+ * `needsImages` and `reviewedProviderKind` are the start's own filters, kept
+ * so a later move to the role's next model applies them again. `move` says
+ * the host wrote this choice when it moved a running worker on: the model
+ * stopped and the role's **Continue on the fallback** setting allowed it.
  */
 export const CoordinatorWorkerChoice = Schema.Struct({
   role: CoordinatorWorkerRole,
@@ -237,5 +255,8 @@ export const CoordinatorWorkerChoice = Schema.Struct({
   why: Schema.optional(
     Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_COORDINATOR_START_WHY_LENGTH)),
   ),
+  needsImages: Schema.optional(Schema.Literal(true)),
+  reviewedProviderKind: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  move: Schema.optional(Schema.Literal("continued-on-fallback")),
 }).annotations({ parseOptions: { onExcessProperty: "error" } });
 export type CoordinatorWorkerChoice = typeof CoordinatorWorkerChoice.Type;

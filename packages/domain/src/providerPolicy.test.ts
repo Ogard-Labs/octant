@@ -17,6 +17,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   ProviderPolicyRejected,
+  ollamaAddressWarning,
   changeAcpAgentConfiguration,
   createAcpAgentProvider,
   isAcpAgentInstance,
@@ -2322,7 +2323,7 @@ describe("provider instance policy", () => {
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 
-  it("creates and updates Ollama while accepting only exact loopback HTTP origins", () => {
+  it("creates and updates Ollama on this computer, the local network over HTTP, or anywhere over HTTPS", () => {
     const policy = providerPolicy as unknown as {
       createOllamaProvider: (input: Record<string, unknown>) => ProviderInstance;
       changeOllamaConfiguration: (
@@ -2355,9 +2356,27 @@ describe("provider instance policy", () => {
       version: 2,
       updatedAt,
     });
+    for (const [baseUrl, origin] of [
+      ["https://ollama.com", "https://ollama.com"],
+      ["http://192.168.1.20:11434/", "http://192.168.1.20:11434"],
+      ["http://100.101.102.103:11434", "http://100.101.102.103:11434"],
+      ["http://studio.local:11434", "http://studio.local:11434"],
+      ["http://[fd12:3456::1]:11434", "http://[fd12:3456::1]:11434"],
+    ] as const) {
+      expect(
+        policy.createOllamaProvider({
+          id: ids.local,
+          displayName: "Ollama elsewhere",
+          configuration: { kind: "ollama-native-http", baseUrl },
+          existingInstances: [],
+          expectedVersion: version(0),
+          createdAt,
+        }),
+      ).toMatchObject({ configuration: { baseUrl: origin } });
+    }
     for (const baseUrl of [
-      "https://ollama.com",
-      "http://192.168.1.20:11434",
+      "http://ollama.example.com:11434",
+      "http://203.0.113.9:11434",
       "http://127.0.0.2:11434",
       "http://localhost:11434/api",
       "http://localhost:11434/api/v1",
@@ -2384,6 +2403,12 @@ describe("provider instance policy", () => {
         1,
       ),
     ).toThrow("Stop active sessions before changing this provider endpoint.");
+  });
+
+  it("warns about plain HTTP to Ollama on the local network and nowhere else", () => {
+    expect(ollamaAddressWarning("http://192.168.1.20:11434")).toContain("unencrypted");
+    expect(ollamaAddressWarning("http://127.0.0.1:11434")).toBeUndefined();
+    expect(ollamaAddressWarning("https://ollama.com")).toBeUndefined();
   });
 
   it("keeps a Claude account pinned to the config directory and accent it was given", () => {
@@ -2547,31 +2572,31 @@ describe("provider instance policy", () => {
     expect(off.configuration).not.toHaveProperty("artifactDelivery");
   });
 
-  it("turns a provider's own memory on only for a Claude Code or Codex account, apart from running as itself", () => {
+  it("keeps a provider's own memory on by default and stores only the person's off, apart from running as itself", () => {
     for (const account of [claudeProvider(), codexProvider()]) {
-      const on = setProviderOwnMemory(account, { enabled: true, updatedAt });
-      expect(on.ownMemory).toBe(true);
-      expect(on).not.toHaveProperty("nativeSetup");
-      expect(on.version).toBe(account.version + 1);
-      expect(decodeProviderInstance(on)).toEqual(on);
-      expect(setProviderNativeSetup(on, { enabled: false, updatedAt })).toMatchObject({
-        ownMemory: true,
+      const off = setProviderOwnMemory(account, { enabled: false, updatedAt });
+      expect(off.ownMemory).toBe(false);
+      expect(off).not.toHaveProperty("nativeSetup");
+      expect(off.version).toBe(account.version + 1);
+      expect(decodeProviderInstance(off)).toEqual(off);
+      expect(setProviderNativeSetup(off, { enabled: false, updatedAt })).toMatchObject({
+        ownMemory: false,
         nativeSetup: false,
       });
-      expect(setProviderOwnMemory(on, { enabled: false, updatedAt })).not.toHaveProperty(
+      expect(setProviderOwnMemory(off, { enabled: true, updatedAt })).not.toHaveProperty(
         "ownMemory",
       );
     }
-    const claudeOn = setProviderOwnMemory(claudeProvider(), { enabled: true, updatedAt });
-    if (claudeOn.driverKind !== "claude")
+    const claudeOff = setProviderOwnMemory(claudeProvider(), { enabled: false, updatedAt });
+    if (claudeOff.driverKind !== "claude")
       throw new Error("A Claude account stays a Claude account.");
     expect(
-      changeClaudeConfiguration(claudeOn, {
+      changeClaudeConfiguration(claudeOff, {
         configuration: { ...claudeProvider().configuration, accent: "rose" },
         activeSessionCount: 1,
         updatedAt,
       }),
-    ).toMatchObject({ ownMemory: true });
+    ).toMatchObject({ ownMemory: false });
 
     // OpenCode and Mistral Vibe keep no memory of their own behind a switch.
     for (const account of [provider(), mistralVibeProvider(), piProvider(), httpProvider()]) {
@@ -2582,7 +2607,13 @@ describe("provider instance policy", () => {
   });
 
   it("runs a key provider account as itself unless the person turns it off, and keeps that choice through an account edit", () => {
-    for (const account of [claudeProvider(), codexProvider(), provider(), mistralVibeProvider()]) {
+    for (const account of [
+      claudeProvider(),
+      codexProvider(),
+      provider(),
+      mistralVibeProvider(),
+      kimiCodeProvider(),
+    ]) {
       const off = setProviderNativeSetup(account, { enabled: false, updatedAt });
       expect(off.nativeSetup).toBe(false);
       expect(off.version).toBe(account.version + 1);
@@ -2604,14 +2635,15 @@ describe("provider instance policy", () => {
     });
     expect(recoloured.nativeSetup).toBe(false);
 
-    for (const account of [kimiCodeProvider(), piProvider(), ollamaProvider(), httpProvider()]) {
+    for (const account of [piProvider(), ollamaProvider(), httpProvider()]) {
       expect(() => setProviderNativeSetup(account, { enabled: true, updatedAt })).toThrow(
-        "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+        "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
       );
     }
-    // The journal refuses the switch on any other ACP agent, so a hand-written
-    // row cannot slip one past the policy.
-    expect(() => decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: true })).toThrow();
+    // Every ACP agent is a key provider, so the journal keeps its switch too.
+    expect(decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: false })).toMatchObject({
+      nativeSetup: false,
+    });
   });
 
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {

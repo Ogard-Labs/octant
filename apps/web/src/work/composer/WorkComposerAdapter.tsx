@@ -15,6 +15,7 @@ import { useExtensionDraftSelections } from "../../chat/useExtensionDraftSelecti
 import {
   useComposerSlashCommands,
   ComposerSlashTypeahead,
+  composerProviderCommands,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -146,6 +147,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
+    provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
   const atMenu = useComposerAtMenu({
     textarea: () => textareaRef.current,

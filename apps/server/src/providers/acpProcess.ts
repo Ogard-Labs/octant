@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import {
   accessSync,
   chmodSync,
@@ -19,7 +20,13 @@ import type {
   ProviderNativeSetup,
 } from "@octant/contracts";
 import { Effect, type Scope } from "effect";
-import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
+import {
+  HOST_PASSTHROUGH_VARIABLES,
+  acpSubagentsRun,
+  type AcpProviderProfile,
+  type AcpSessionMode,
+} from "./acpProfiles";
+import { providerHostEnvironment } from "./providerHostEnvironment";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
@@ -76,6 +83,8 @@ export interface AcpConfinementInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /** Whether the launch is Strict; absent is Strict. */
+  readonly strict?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly environment: NodeJS.ProcessEnv;
@@ -128,6 +137,12 @@ export interface AcpProcessStartInput {
    * Absent, Full access launches unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /**
+   * Whether the launch is Strict; absent is Strict. Off, the agent gets the
+   * host's environment less Octant's variables and other providers' keys, and
+   * its channel guards follow the person's own settings.
+   */
+  readonly strict?: boolean;
   /** A non-mutating readiness check may contact the provider without a thread. */
   readonly purpose?: "probe" | "session";
   readonly apiKey?: string;
@@ -294,7 +309,11 @@ function canonicalTemporaryDirectory(
 
 function writeManagedFiles(
   profile: AcpProviderProfile,
-  input: { readonly managedHome: string; readonly executionPolicy: ProviderExecutionPolicy },
+  input: {
+    readonly managedHome: string;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly ownSubagents?: boolean;
+  },
 ): Effect.Effect<void, ProviderFailure> {
   return Effect.try({
     try: () => {
@@ -323,6 +342,7 @@ function prepareHostAuthentication(
   profile: AcpProviderProfile,
   managedHome: string,
   overridePath: string | undefined,
+  releasedEntries: ReadonlySet<string> = new Set(),
 ): Effect.Effect<HostAuthenticationPaths, ProviderFailure> {
   const hostAuthentication = profile.process.hostAuthentication;
   if (hostAuthentication === undefined)
@@ -345,9 +365,9 @@ function prepareHostAuthentication(
       Effect.map((canonical) => ({
         readPaths: [canonical],
         writePaths: [canonical],
-        forbiddenPaths: (hostAuthentication.forbiddenEntries ?? []).map((entry) =>
-          join(canonical, entry),
-        ),
+        forbiddenPaths: (hostAuthentication.forbiddenEntries ?? [])
+          .filter((entry) => !releasedEntries.has(entry))
+          .map((entry) => join(canonical, entry)),
         environment: hostAuthentication.environment?.(canonical) ?? {},
       })),
     );
@@ -377,7 +397,11 @@ function releasedByNativeSetup(
   profile: AcpProviderProfile,
   setup: ProviderNativeSetup | undefined,
   launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode?: AcpSessionMode },
-): { readonly guards: ReadonlySet<string>; readonly rootEntries: ReadonlySet<string> } {
+): {
+  readonly guards: ReadonlySet<string>;
+  readonly rootEntries: ReadonlySet<string>;
+  readonly hostEntries: ReadonlySet<string>;
+} {
   const released =
     setup === undefined || profile.process.nativeSetup === undefined
       ? undefined
@@ -385,6 +409,7 @@ function releasedByNativeSetup(
   return {
     guards: new Set(released?.releasedGuards ?? []),
     rootEntries: new Set(released?.releasedRootEntries ?? []),
+    hostEntries: new Set(released?.releasedHostEntries ?? []),
   };
 }
 
@@ -395,10 +420,12 @@ function hostExtensionDenyPaths(
   launch: { readonly executionPolicy: ProviderExecutionPolicy; readonly mode: AcpSessionMode },
   nativeSetup?: ProviderNativeSetup,
 ): ReadonlyArray<string> {
-  const hostEntries = profile.process.hostDeniedEntries ?? [];
-  const released = releasedByNativeSetup(profile, nativeSetup, launch).rootEntries;
+  const released = releasedByNativeSetup(profile, nativeSetup, launch);
+  const hostEntries = (profile.process.hostDeniedEntries ?? []).filter(
+    (entry) => !released.hostEntries.has(entry),
+  );
   const rootEntries = (profile.process.forbiddenRootEntries ?? []).filter(
-    (entry) => !released.has(entry),
+    (entry) => !released.rootEntries.has(entry),
   );
   return [
     ...(hostDirectory === undefined ? [] : hostEntries.map((entry) => join(hostDirectory, entry))),
@@ -457,9 +484,17 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
           profile,
           managedHome,
           options.hostAuthenticationPath,
+          releasedByNativeSetup(profile, input.nativeSetup, {
+            executionPolicy: input.executionPolicy,
+            mode: input.mode,
+          }).hostEntries,
         );
         const hostReadPaths = yield* canonicalExistingReadPaths(profile);
-        yield* writeManagedFiles(profile, { managedHome, executionPolicy: input.executionPolicy });
+        yield* writeManagedFiles(profile, {
+          managedHome,
+          executionPolicy: input.executionPolicy,
+          ownSubagents: acpSubagentsRun(input.mode, input.executionPolicy, input.nativeSetup),
+        });
         const root =
           input.root === input.managedHome
             ? managedHome
@@ -559,6 +594,9 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 : { extraBoundRoots: input.extraFolders }),
               temporaryDirectory,
               networkEgress,
+              // Outside Strict the agent's own tools may use the protected
+              // files inside its folders, other providers' sign-ins excepted.
+              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
               // On Linux the capsule reaches the tool bridges through the
               // forwarder's loopback relay; Seatbelt opens them above.
               ...(platform === "linux" &&
@@ -673,7 +711,9 @@ function processGroupExists(child: ChildProcess): boolean {
 function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the runtime and every
+    // program it started, where `child.kill` ended only the runtime.
+    if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -1013,21 +1053,35 @@ export function sanitizeAcpEnvironment(
     readonly mode?: AcpSessionMode;
     readonly apiKey?: string;
     readonly nativeSetup?: ProviderNativeSetup;
+    /** Absent is Strict: the profile's fixed passthrough list and every guard. */
+    readonly strict?: boolean;
   },
 ): NodeJS.ProcessEnv {
+  const strict = input.strict !== false;
   const released = releasedByNativeSetup(profile, input.nativeSetup, {
     executionPolicy: input.executionPolicy ?? "approval-gated",
     ...(input.mode === undefined ? {} : { mode: input.mode }),
   }).guards;
+  const channels = new Set(strict ? [] : (profile.process.channelGuards ?? []));
   const guards = Object.fromEntries(
-    Object.entries(profile.process.guards).filter(([name]) => !released.has(name)),
-  );
-  const passthrough = new Set(profile.process.passthroughVariables);
-  const environment = Object.fromEntries(
-    Object.entries(inherited).filter(
-      ([key, value]) => value !== undefined && (passthrough.has(key) || key.startsWith("LC_")),
+    Object.entries(profile.process.guards).filter(
+      ([name]) => !released.has(name) && !channels.has(name),
     ),
   );
+  const passthrough = new Set(profile.process.passthroughVariables);
+  // Outside Strict the agent gets the host's environment as in the person's
+  // own shell, less Octant's variables and other providers' keys; a standard
+  // host variable the profile deliberately leaves out (Kimi's HOME) stays out.
+  const withheld = new Set(HOST_PASSTHROUGH_VARIABLES.filter((name) => !passthrough.has(name)));
+  const environment = strict
+    ? Object.fromEntries(
+        Object.entries(inherited).filter(
+          ([key, value]) => value !== undefined && (passthrough.has(key) || key.startsWith("LC_")),
+        ),
+      )
+    : Object.fromEntries(
+        Object.entries(providerHostEnvironment(inherited)).filter(([key]) => !withheld.has(key)),
+      );
   return {
     ...environment,
     ...profile.process.environment({
@@ -1263,6 +1317,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           ...(input.apiKey === undefined ? {} : { apiKey: input.apiKey }),
           ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+          ...(input.strict === false ? { strict: false } : {}),
         });
         const wall = acpWallPolicy(input);
         const network =
@@ -1292,6 +1347,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
           mode: input.mode,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           ...(input.purpose === undefined ? {} : { purpose: input.purpose }),
           environment,
           ...(input.loopbackPorts === undefined ? {} : { loopbackPorts: input.loopbackPorts }),

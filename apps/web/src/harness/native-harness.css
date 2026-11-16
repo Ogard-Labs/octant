@@ -42,11 +42,6 @@
   padding: var(--oct-space-3) var(--oct-space-4);
 }
 
-.native-harness-roles__flags {
-  margin: 0;
-  padding: var(--oct-space-3) var(--oct-space-4) 0;
-}
-
 .model-role {
   display: grid;
   gap: var(--oct-space-2);

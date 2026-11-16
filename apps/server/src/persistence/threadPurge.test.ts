@@ -161,6 +161,30 @@ describe("thread purge sweep", () => {
     ]);
   });
 
+  it("erases a helper result steered into a purged thread's running turn and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedCodeProjection(harness, threads.code.id);
+    seedControlThread(harness);
+    for (const threadId of [threads.code.id, controlThreadId]) {
+      insertEvent(
+        harness.connection,
+        "agent-result-steering",
+        uuidFor(threadId, "steered"),
+        { kind: "agent-result-steered", threadId, turnKey: "turn", body: `steered ${threadId}` },
+        "agent.result-steered@1",
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(
+        "SELECT json_extract(payload_json, '$.threadId') AS threadId FROM event_journal WHERE aggregate_type = 'agent-result-steering'",
+      )
+      .all();
+    expect(remaining).toEqual([{ threadId: controlThreadId }]);
+  });
+
   it("refuses a remote principal and a purge that was not confirmed", async () => {
     const harness = openHarness();
     const scope = {
@@ -385,6 +409,33 @@ describe("thread purge sweep", () => {
     await purgeThread(harness, "code", threads.code.id);
 
     expect(claudeResumeIdentitySessions(harness.connection)).toEqual([keptSession]);
+  });
+
+  it("erases a purged thread's wake-ups and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    seedCodeProjection(harness, threads.code.id);
+    const purgedWakeup = "c3630000-0000-4000-8000-0000000000e1";
+    const keptWakeup = "c3630000-0000-4000-8000-0000000000e2";
+    for (const [wakeupId, threadId] of [
+      [purgedWakeup, threads.code.id],
+      [keptWakeup, controlThreadId],
+    ] as const) {
+      insertEvent(
+        harness.connection,
+        "thread-wakeup",
+        wakeupId,
+        { wakeup: { id: wakeupId, mode: "code", threadId, prompt: threads.code.marker } },
+        "thread-wakeup.changed@1",
+      );
+    }
+
+    await purgeThread(harness, "code", threads.code.id);
+
+    const remaining = harness.connection
+      .prepare(`SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'thread-wakeup'`)
+      .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+    expect(remaining.map((row) => row.aggregate_id)).toEqual([keptWakeup]);
   });
 
   it("keeps a Chat source's Claude resume identity when its branch is purged and erases it with the source", async () => {

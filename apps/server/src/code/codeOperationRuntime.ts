@@ -1,9 +1,11 @@
 import { OwnerApprovalId } from "@octant/contracts/owner-approvals";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { DesignSystemTurnContext } from "../designSystems/designSystemContext";
 import type { RuntimeApprovalRecovery } from "../providers/runtimeApprovalRecovery";
 import { withHandoverSummary } from "../agentRun/conversationHandoff";
-import { validateQuestionnaireAnswer } from "@octant/domain";
+import { projectExtraFolderRoots, validateQuestionnaireAnswer } from "@octant/domain";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type {
@@ -48,6 +50,10 @@ import {
   decodeHarnessRetryNotice,
   decodeCodeReviewFindingId,
   decodeProviderSessionId,
+  decodeCodeNativeSessionId,
+  type AdoptCodeNativeSessionResult,
+  type CodeNativeSessionId,
+  type CodeNativeSessions,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
   type AndroidEmulatorRequest,
@@ -87,17 +93,17 @@ import {
   type ProviderCapabilities,
   type ProviderNativeSetup,
   type ProviderRuntimeEvent,
+  type ProviderInstanceId,
   type ProviderResumeCursor,
   type ProviderProbeResult,
   type WindowId,
+  type ProviderExecutionPolicy,
+  type Project,
   decodeCodeFailure,
   MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
-import {
-  forgeShellChanges,
-  FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
-} from "@octant/domain/forge-shell-change-policy";
 import { shieldCallFromProviderRequest } from "@octant/domain/shield-judge-policy";
+import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import type { ShieldReviewPort } from "../shield/octantShield";
 import { Effect, Schema } from "effect";
 import type {
@@ -105,8 +111,10 @@ import type {
   ProviderConnection,
   ProviderDriver,
   ProviderSessionResume,
+  ProviderWakeupSchedule,
 } from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
+import type { OutlivingSessions } from "../providers/outlivingSessions";
 import { createGhPullRequestPort } from "./ghPullRequestActionPort";
 import { createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -389,7 +397,12 @@ export interface CodeOperationRuntimeOptions {
    * The host's stalled-turn limit in milliseconds, `null` when it is Off,
    * read as each turn starts. Absent uses the default limit.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
+  /**
+   * The person's tool-step limit for a turn at the given level, `undefined`
+   * when it is off; a turn's event budget follows it. Read as each turn starts.
+   */
+  readonly toolStepLimit?: (fullAccess: boolean) => number | undefined;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off, read as each turn starts.
@@ -401,6 +414,12 @@ export interface CodeOperationRuntimeOptions {
    * a folder added or removed applies from the next turn. Absent reads none.
    */
   readonly readProjectExtraFolders?: (projectId: CodeThread["projectId"]) => ReadonlyArray<string>;
+  /**
+   * The thread's Project, read when a kept session is taken so the session
+   * is held to the folder authority the Project grants (see
+   * {@link codeSessionTerms}).
+   */
+  readonly readProject?: (projectId: CodeThread["projectId"]) => Project | undefined;
   /**
    * The paired device a lease confirmation names, as the host last saw it.
    * Absent on a host with no device layer, where no lease is ever confirmed.
@@ -466,7 +485,19 @@ export interface CodeOperationRuntimeOptions {
    * the provider itself reported it. Fires once the turn has closed. A
    * rejection is ignored: the stop is journaled and stays.
    */
-  readonly onUsageLimitStop?: (threadId: CodeThreadId) => Promise<void>;
+  readonly onUsageLimitStop?: (threadId: CodeThreadId, stopped: CodeStoppedTurn) => Promise<void>;
+  /**
+   * The thread's provider turn just stopped on a failure that was not a usage
+   * limit the provider reported: `down` when the provider could not take the
+   * work (refused connection, 5xx, overloaded, timeout), else undefined. A
+   * cancelled turn never fires it. Fires once the turn has closed; a
+   * rejection is ignored.
+   */
+  readonly onProviderStop?: (
+    threadId: CodeThreadId,
+    availability: "down" | undefined,
+    stopped: CodeStoppedTurn,
+  ) => Promise<void>;
   /** Refuses every new Code turn whose current Project policy no longer accepts its provider/model. */
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   /**
@@ -824,6 +855,12 @@ export interface CodeOperationRuntimeOptions {
     readonly externalContentIngested: boolean;
   };
   /**
+   * Whether Strict is on for this thread now (`createStrictResolver`), read
+   * at each launch and each decision. Absent reads as Strict, so a runtime
+   * built without the resolver keeps every protection.
+   */
+  readonly resolveStrict?: (threadId: CodeThreadId) => boolean;
+  /**
    * Octant Shield, which answers a provider's approval prompts before the
    * person is asked when it is the thread's reviewer at Auto. Absent, or
    * answering nothing for a thread, every prompt goes to the person.
@@ -847,6 +884,29 @@ export interface CodeOperationRuntimeOptions {
    * level. Absent keeps every native feature off.
    */
   readonly resolveProviderNativeSetup?: (thread: CodeThread) => ProviderNativeSetup | undefined;
+  /**
+   * The host's schedule for a thread's wake-ups, read at each session start;
+   * absent, or answering undefined, offers the runtime no wake-up tool.
+   */
+  readonly resolveThreadWakeups?: (thread: CodeThread) => ProviderWakeupSchedule | undefined;
+  /**
+   * Changes a thread's level for the window that approved the agent's ask,
+   * through the thread's ordinary access command, journaled as the person's.
+   * Answers whether it changed; absent, an approval changes nothing.
+   */
+  readonly changeThreadLevel?: (input: {
+    readonly windowId: WindowId;
+    readonly threadId: CodeThreadId;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly planReturnPolicy?: ProviderExecutionPolicy;
+  }) => Promise<boolean>;
+  /**
+   * Keeps a thread's provider session past its turn while the runtime runs
+   * background work. Absent, every session stops when its turn ends.
+   */
+  readonly outlivingSessions?: Pick<OutlivingSessions, "acquire" | "stopThread">;
+  /** Whether the host opened this turn for one the runtime started by itself. */
+  readonly isRuntimeStartedTurn?: (operationId: string) => boolean;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   readonly resolveSideChatReturns?: CodeOperationServiceOptions["resolveSideChatReturns"];
@@ -895,6 +955,21 @@ export interface CodeOperationRuntimeOptions {
     readonly checkoutRoot: string;
     readonly secrets: ReadonlyArray<string>;
   }) => Promise<ProviderResumeCursor | undefined>;
+  /**
+   * Where a completed turn ends in its runtime's own session, as the journal
+   * recorded it, for a driver that copies its own session (`forkSession`).
+   * Absent, or undefined for a turn, means that turn goes back as text.
+   */
+  readonly nativeTurnAnchor?: (
+    threadId: CodeThreadId,
+    operationId: string,
+  ) =>
+    | {
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly resumeCursor: ProviderResumeCursor;
+        readonly anchor: string;
+      }
+    | undefined;
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
   readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
   readonly pinnedExtensionIds?: CodeOperationServiceOptions["pinnedExtensionIds"];
@@ -1108,6 +1183,19 @@ export interface CodeOperationRuntime {
     ) => Promise<
       { readonly acquire: ProviderAcquireInput; readonly resume: ProviderSessionResume } | undefined
     >;
+  };
+  /**
+   * Starting an empty thread from a session its provider keeps for the same
+   * account and folder, begun outside Octant. Each answers under the asking
+   * window's authority over the thread's Project and checkout.
+   */
+  readonly nativeSessions?: {
+    readonly list: (windowId: WindowId, threadId: CodeThreadId) => Promise<CodeNativeSessions>;
+    readonly adopt: (
+      windowId: WindowId,
+      threadId: CodeThreadId,
+      nativeSessionId: CodeNativeSessionId,
+    ) => Promise<AdoptCodeNativeSessionResult>;
   };
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
@@ -1380,6 +1468,15 @@ export function createCodeOperationRuntime(
       return turns.threadWithActiveTurnPosture(session);
     },
   };
+  const operationAccess = (
+    windowId: WindowId,
+    command: CodeOperationCommand,
+  ): Pick<CodeThread, "executionPolicy" | "fullAccessSandbox"> => {
+    const stored =
+      "threadId" in command ? options.persistence.readCodeThread(command.threadId) : undefined;
+    if (stored === undefined) return { executionPolicy: "plan" };
+    return authorityForTurn.effectiveThread?.(windowId, stored) ?? stored;
+  };
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
@@ -1483,8 +1580,11 @@ export function createCodeOperationRuntime(
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : {
+          // The mark adds the ask before a comment only under Strict; outside
+          // it the Project's switch and the level decide as before the mark.
           threadReadOutsideContent: (thread: CodeThread) =>
-            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false,
+            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false &&
+            (options.resolveStrict?.(thread.id) ?? true),
         }),
     ...(options.recordExternalContentIngestion === undefined
       ? {}
@@ -1515,7 +1615,25 @@ export function createCodeOperationRuntime(
       codeThreadTurns((page) => events.conversation(page), threadId, read),
     ...(options.supportsSessionRollback === undefined
       ? {}
-      : { supportsSessionRollback: options.supportsSessionRollback }),
+      : {
+          supportsSessionRollback: async (thread, lastKeptTurn) => {
+            if (options.supportsSessionRollback?.(thread) !== true) return false;
+            if (lastKeptTurn === undefined) return true;
+            // A runtime that copies its own session cuts only at the anchor
+            // the last kept turn journaled; without one the rewind sends the
+            // text handoff, so the preview must not promise a copy. The
+            // harness's transcript copy needs no anchor.
+            const driver = await Promise.resolve(options.resolveProviderDriver(thread)).catch(
+              () => undefined,
+            );
+            if (driver?.forkSession === undefined) return true;
+            const anchor = options.nativeTurnAnchor?.(thread.id, String(lastKeptTurn));
+            return (
+              anchor !== undefined &&
+              String(anchor.providerInstanceId) === String(thread.providerInstanceId)
+            );
+          },
+        }),
     events,
     ...(options.resolveSideChatReturns === undefined
       ? {}
@@ -1592,6 +1710,90 @@ export function createCodeOperationRuntime(
   };
 
   const fileReviewLeases = new Set<string>();
+  /**
+   * Threads taking up a provider session. A turn admitted meanwhile would
+   * journal its own session, and the adopted one appended after it would then
+   * be the session the next turn resumes, dropping the conversation that just
+   * ran; so turn admission refuses while a thread is here.
+   */
+  const adoptingThreads = new Set<string>();
+  /**
+   * Why the thread cannot be started from an outside session because it
+   * already has a conversation, or a turn admitted or running. Read
+   * synchronously so a caller can act on the answer before another turn is
+   * admitted.
+   */
+  const conversationRefusal = (
+    thread: CodeThread,
+  ): { readonly message: string; readonly adopted?: string } | undefined => {
+    const adopted = events.adoptedNativeSession(thread.id);
+    const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
+    if (recovered.status !== "ok") return { message: "This thread's history could not be read." };
+    if (
+      adopted !== undefined ||
+      recovered.priorTurn ||
+      recovered.session !== undefined ||
+      startingTurns.has(String(thread.id)) ||
+      turns.holdsTurn(String(thread.id))
+    )
+      return {
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+        ...(adopted === undefined ? {} : { adopted: adopted.nativeSessionId }),
+      };
+    return undefined;
+  };
+  /**
+   * What an adoption of a thread's provider session would act on, or why the
+   * thread cannot be started from one: only an active, empty thread on this
+   * host, read by a window that can open its Project, whose provider can take
+   * up its own sessions.
+   */
+  const adoptionTarget = async (
+    windowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly thread: CodeThread;
+        readonly projectRoot: string;
+        readonly nativeSessions: NonNullable<ProviderDriver["nativeSessions"]>;
+      }
+    | { readonly status: "refused"; readonly message: string; readonly adopted?: string }
+  > => {
+    const thread = options.persistence.readCodeThread(threadId);
+    if (thread === undefined || String(thread.id) !== String(threadId))
+      return { status: "refused", message: "This thread is unavailable." };
+    if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId)))
+      return { status: "refused", message: "This thread is not open to this window." };
+    const occupied = conversationRefusal(thread);
+    if (occupied !== undefined) return { status: "refused", ...occupied };
+    if (thread.lifecycle !== "active")
+      return { status: "refused", message: "This thread is not active." };
+    const checkout = options.persistence.readCodeCheckout(thread.checkoutId);
+    if (checkout === undefined || checkout.kind === "remote-root")
+      return {
+        status: "refused",
+        message: "Only a thread on this computer can continue a session started here.",
+      };
+    const root = await options.resolveCheckoutRoot(windowId, thread, checkout);
+    if (root === undefined || root === null)
+      return { status: "refused", message: "This thread's folder is unavailable." };
+    const driver = await options.resolveProviderDriver(thread);
+    if (driver?.nativeSessions === undefined)
+      return {
+        status: "refused",
+        message: "This thread's provider cannot continue a session started outside Octant.",
+      };
+    return {
+      status: "ready",
+      thread,
+      projectRoot:
+        thread.workingFolderId === undefined
+          ? root.checkoutRoot
+          : (root.workingDirectory ?? root.checkoutRoot),
+      nativeSessions: driver.nativeSessions,
+    };
+  };
   const readProviderFileReview = createCodeProviderFileReview({
     host: options,
     source: compactableSession,
@@ -1846,13 +2048,6 @@ export function createCodeOperationRuntime(
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
     execute: async (windowId, rawCommand, executeOptions) => {
-      if (process.platform === "win32")
-        throw new CodeServiceError(
-          decodeCodeFailure({
-            category: "unavailable",
-            message: "Code execution requires Windows host confinement.",
-          }),
-        );
       // A turn counts as running for a compaction from the moment it passes the
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.
@@ -1861,6 +2056,19 @@ export function createCodeOperationRuntime(
       let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
+        // A thread's terminals, tests and other operations run on a host
+        // without Octant's sandbox only at the level that uses none, read from
+        // the posture a live turn narrows it to. An operation that names no
+        // thread has no level to read, so it refuses there. A provider turn is
+        // judged again at its own clamped level when it starts.
+        const sandboxRefusal = hostSandboxRefusal({
+          platform: process.platform,
+          access: operationAccess(windowId, command),
+        });
+        if (sandboxRefusal !== undefined)
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: sandboxRefusal }),
+          );
         if (command.kind === "start-provider-turn") {
           const thread = options.persistence.readCodeThread(command.threadId);
           // The pause state is the thread's own; a window without Open
@@ -1873,6 +2081,20 @@ export function createCodeOperationRuntime(
               decodeCodeFailure({
                 category: "unauthorized",
                 message: "Code operation is unauthorized.",
+              }),
+            );
+          }
+          // Refused rather than held: the adoption may wait on the provider for
+          // a long time, and the message would otherwise run before the session
+          // it was meant to continue exists. This check and the hold below run
+          // in one synchronous step, so an adoption that starts later sees
+          // this turn.
+          if (thread !== undefined && adoptingThreads.has(String(thread.id))) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "waiting",
+                message:
+                  "This thread is taking up a session started elsewhere. Send again when it finishes.",
               }),
             );
           }
@@ -2112,6 +2334,15 @@ export function createCodeOperationRuntime(
         if (checkout === undefined || checkout.kind === "remote-root") return undefined;
         const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
         if (root === undefined || root === null) return undefined;
+        // The compaction resumes this native session on a connection of its
+        // own. A session the host kept past its last turn (background tasks
+        // still running) is stopped first, tasks and all: two processes must
+        // never write the same native history, and the next turn must resume
+        // what the compaction left rather than a handle from before it.
+        const key = String(stored.id);
+        if (startingTurns.has(key) || turns.holdsTurn(key)) return undefined;
+        await options.outlivingSessions?.stopThread(codeSessionKey(stored.id));
+        if (startingTurns.has(key) || turns.holdsTurn(key)) return undefined;
         const thread = options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
         return {
           acquire: {
@@ -2137,6 +2368,167 @@ export function createCodeOperationRuntime(
             tools: [],
           },
         };
+      },
+    },
+    nativeSessions: {
+      list: async (windowId, threadId) => {
+        const target = await adoptionTarget(windowId, threadId);
+        if (target.status === "refused")
+          return {
+            threadId,
+            sessions: [],
+            unavailable: target.message,
+            ...(target.adopted === undefined
+              ? {}
+              : { adopted: { nativeSessionId: target.adopted } }),
+          };
+        const listed = await Effect.runPromise(
+          Effect.either(
+            target.nativeSessions.list({
+              instanceId: target.thread.providerInstanceId,
+              projectRoot: target.projectRoot,
+            }),
+          ),
+        );
+        if (listed._tag === "Left")
+          return { threadId, sessions: [], unavailable: listed.left.message };
+        return {
+          threadId,
+          sessions: listed.right.flatMap((session) => {
+            try {
+              return [
+                {
+                  nativeSessionId: decodeCodeNativeSessionId(session.nativeSessionId),
+                  lastModified: Math.max(0, session.lastModified),
+                  ...(session.title === undefined ? {} : { title: session.title.slice(0, 200) }),
+                  ...(session.gitBranch === undefined
+                    ? {}
+                    : { gitBranch: session.gitBranch.slice(0, 256) }),
+                },
+              ];
+            } catch {
+              return [];
+            }
+          }),
+        };
+      },
+      adopt: async (windowId, threadId, nativeSessionId) => {
+        const key = String(threadId);
+        if (adoptingThreads.has(key))
+          return {
+            kind: "code-native-session-refused",
+            message: "This thread is already taking up a session.",
+          };
+        adoptingThreads.add(key);
+        try {
+          const target = await adoptionTarget(windowId, threadId);
+          if (target.status === "refused")
+            return { kind: "code-native-session-refused", message: target.message };
+          const sessionId = decodeProviderSessionId(options.uuid());
+          const adopted = await Effect.runPromise(
+            Effect.either(
+              target.nativeSessions.adopt({
+                instanceId: target.thread.providerInstanceId,
+                projectRoot: target.projectRoot,
+                mode: "code",
+                sessionId,
+                nativeSessionId,
+                modelId: target.thread.modelId,
+              }),
+            ),
+          );
+          if (adopted._tag === "Left")
+            return { kind: "code-native-session-refused", message: adopted.left.message };
+          // The provider claimed the session for this thread before the thread
+          // could record it. An adoption that is not recorded gives the claim
+          // back, or the session could never be offered or adopted again.
+          let committed = false;
+          try {
+            // The thread must still be empty when the adoption commits. Nothing
+            // yields from here to the journal appends, so no turn slips in.
+            const occupied = conversationRefusal(target.thread);
+            if (occupied !== undefined)
+              return { kind: "code-native-session-refused", message: occupied.message };
+            // The session was claimed for the thread as it stood before the
+            // provider was asked. A thread rebound meanwhile (a relink that
+            // moved its checkout, another provider or folder) would journal a
+            // session for a checkout it no longer has, which neither a send
+            // nor another adoption could then take up.
+            const current = options.persistence.readCodeThread(target.thread.id);
+            if (
+              current === undefined ||
+              adoptionBinding(current) !== adoptionBinding(target.thread)
+            )
+              return {
+                kind: "code-native-session-refused",
+                message: "This thread changed while it took up the session. Try again.",
+              };
+            // The session began outside Octant, so whatever it read there is
+            // unseen here: the thread carries outside content from its start.
+            const marked = options.recordExternalContentIngestion?.({
+              threadId: String(target.thread.id),
+              provenance: { origin: "external-content", sourceLabel: "adopted-provider-session" },
+              contentReference: `adopted-session-${createHash("sha256")
+                .update(`${String(target.thread.providerInstanceId)}\0${nativeSessionId}`)
+                .digest("hex")}`,
+              correlationId: options.uuid(),
+              authorized: true,
+            });
+            if (
+              marked === undefined ||
+              (marked.kind !== "recorded" && marked.kind !== "already-recorded")
+            )
+              return {
+                kind: "code-native-session-refused",
+                message: "The thread could not be marked as carrying outside content.",
+              };
+            const operationId = decodeCodeOperationId(options.uuid());
+            const thread = target.thread;
+            const cursor = adopted.right;
+            // One journal unit: an adoption is recorded whole or not at all, so
+            // a claim given back never leaves half an adoption behind.
+            options.persistence.journal.transaction(() => {
+              events.append({
+                threadId: thread.id,
+                operationId,
+                expectedCursor: 0,
+                event: {
+                  kind: "native-session-adopted",
+                  nativeSessionId,
+                  providerInstanceId: thread.providerInstanceId,
+                },
+              });
+              events.append({
+                threadId: thread.id,
+                operationId,
+                expectedCursor: 1,
+                event: {
+                  kind: "provider-session-ready",
+                  sessionId,
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                  checkoutId: thread.checkoutId,
+                  resumeCursor: cursor,
+                },
+              });
+            });
+            committed = true;
+            return { kind: "code-native-session-adopted", threadId, nativeSessionId };
+          } finally {
+            if (!committed)
+              await Effect.runPromise(
+                (
+                  target.nativeSessions.release?.({
+                    instanceId: target.thread.providerInstanceId,
+                    nativeSessionId,
+                    sessionId,
+                  }) ?? Effect.void
+                ).pipe(Effect.catchAll(() => Effect.void)),
+              );
+          }
+        } finally {
+          adoptingThreads.delete(key);
+        }
       },
     },
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
@@ -2697,6 +3089,13 @@ type PendingHandoffRecord = HandoffAttached extends infer Record
   : never;
 
 /** The running Code turns, by thread id. */
+/** A provider turn that just stopped: its operation and the model it launched on. */
+export interface CodeStoppedTurn {
+  readonly operationId: string;
+  readonly providerInstanceId: string;
+  readonly modelId: string;
+}
+
 export type CodeActiveTurns = Map<string, ActiveTurn>;
 
 /**
@@ -2783,6 +3182,10 @@ interface ActiveTurn {
   readonly rootIdentity?: { readonly device: string; readonly inode: string };
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders: ReadonlyArray<string>;
+  /** A kept session's terms, from the Project as it stood when `extraFolders` was read. */
+  readonly sessionTerms?: string;
+  /** The runtime started this turn by itself; it attaches to the kept session and sends nothing. */
+  readonly runtimeTurn?: true;
   readonly driver: ProviderDriver;
   readonly resumeCursor?: ProviderResumeCursor;
   /** What the provider session held of Octant's per-turn context before this turn. */
@@ -2797,6 +3200,19 @@ interface ActiveTurn {
   readonly secrets: readonly string[];
   readonly abort: AbortController;
   readonly approvals: Map<string, string>;
+  /**
+   * What each pending level-change approval asks (to plan first, or to leave
+   * Plan) and the level it showed the person it would move the thread to, by
+   * approval id. The level it applies is worked out again when it is answered.
+   */
+  readonly levelChanges: Map<
+    string,
+    {
+      readonly kind: "enter-plan" | "exit-plan";
+      readonly to: ProviderExecutionPolicy;
+      readonly planReturnPolicy?: ProviderExecutionPolicy;
+    }
+  >;
   /**
    * The thread's posture, as `#approvalPosture` reads it, when each pending
    * approval (provider or app-managed tool) was asked, by approval id. An
@@ -2836,8 +3252,6 @@ interface ActiveTurn {
   shutDown?: boolean;
   /** A burst that could not be journaled; the turn may not report `completed` afterwards. */
   deltaFlushFailure?: { readonly error: unknown };
-  /** Denied tool requests on this turn, provider and browser alike; the third ends it. */
-  deniedApprovals: number;
   /** Reason a forced stop journals instead of the runner's generic cancellation copy. */
   interruptMessage?: string;
   state: "running" | "waiting" | "completed" | "interrupted" | "failed";
@@ -3038,6 +3452,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       ...(input.options.stalledTurnLimitMs === undefined
         ? {}
         : { stalledTurnLimitMs: input.options.stalledTurnLimitMs }),
+      ...(input.options.toolStepLimit === undefined
+        ? {}
+        : { toolStepLimit: input.options.toolStepLimit }),
       ...(input.options.providerToolCallPauseLimitMs === undefined
         ? {}
         : { providerToolCallPauseLimitMs: input.options.providerToolCallPauseLimitMs }),
@@ -3194,6 +3611,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       return failStart(
         "This task's provider session belongs to a different checkout. Restore that selection or start a new task.",
       );
+    // A turn the runtime started by itself attaches to the session the
+    // thread's last turn left and sends nothing. It opens only on that
+    // session as it stands: a switch, a rewind or a fork would journal a
+    // handoff as delivered that this turn never sends. The mark is read once,
+    // here, and carried on the turn.
+    const runtimeTurn = this.#options.isRuntimeStartedTurn?.(String(command.operationId)) === true;
+    if (
+      runtimeTurn &&
+      (!priorTurn || previous?.kind !== "provider-session-ready" || providerSwitch !== undefined)
+    )
+      return failStart("The runtime's own turn has no session of this thread to open in.");
     // Another provider, or another model this provider cannot carry the
     // session on to, cannot take up this session, so the turn starts a new
     // one with a disclosed text handoff of the thread's own conversation. The
@@ -3315,15 +3743,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       // lapsed during driver and credential preparation copies nothing.
       if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
         return refuseRevokedAdmission();
-      const seeded = await this.#options
-        .forkProviderSession?.({
-          fork: input.thread,
-          origin: forkOrigin,
-          sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
-          secrets,
-        })
-        .catch(() => undefined);
+      const seeded = await this.#forkSession(driver, {
+        fork: input.thread,
+        origin: forkOrigin,
+        sessionId: decodeProviderSessionId(input.sessionId),
+        checkoutRoot: input.providerRoot ?? input.checkoutRoot,
+        secrets,
+      });
       if (seeded !== undefined) {
         resumeCursor = seeded;
         forkSeeded = true;
@@ -3344,15 +3770,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     ) {
       if (input.folderCurrent?.() === false || input.admissionCurrent?.() === false)
         return refuseRevokedAdmission();
-      const seeded = await this.#options
-        .forkProviderSession?.({
-          fork: input.thread,
-          origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
-          sessionId: decodeProviderSessionId(input.sessionId),
-          checkoutRoot: input.providerRoot ?? input.checkoutRoot,
-          secrets,
-        })
-        .catch(() => undefined);
+      const seeded = await this.#forkSession(driver, {
+        fork: input.thread,
+        origin: { threadId: input.thread.id, throughOperationId: lastKeptTurn },
+        sessionId: decodeProviderSessionId(input.sessionId),
+        checkoutRoot: input.providerRoot ?? input.checkoutRoot,
+        secrets,
+      });
       if (seeded !== undefined) {
         resumeCursor = seeded;
         // The copy's history is the kept turns', not the newest turn's (a
@@ -3519,26 +3943,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // that cannot read it refuses rather than dropping it silently.
     let forkMerges: Awaited<ReturnType<typeof forkMergeDelivery>>;
     let recoveredMergeInputs = false;
-    try {
-      const replay = this.#events.replay({
-        threadId: input.thread.id,
-        operationId: command.operationId,
-        afterCursor: 0,
-        limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
-      });
-      recoveredMergeInputs =
-        replay.status === "ok" &&
-        replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
-      forkMerges =
-        replay.status === "ok"
-          ? await forkMergeDelivery(
-              { events: this.#events, readEvidence: this.#options.evidence.read },
-              { threadId: input.thread.id, frames: replay.frames },
-            )
-          : { status: "refused" };
-    } catch {
-      forkMerges = { status: "refused" };
-    }
+    // A turn the runtime started by itself sends nothing, so it carries no
+    // merged fork and journals no delivery for one: the merge stays pending
+    // for the person's next turn.
+    if (runtimeTurn) forkMerges = { status: "ready", blocks: [], records: [] };
+    else
+      try {
+        const replay = this.#events.replay({
+          threadId: input.thread.id,
+          operationId: command.operationId,
+          afterCursor: 0,
+          limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+        });
+        recoveredMergeInputs =
+          replay.status === "ok" &&
+          replay.frames.some((frame) => frame.event.kind === "fork-context-delivered");
+        forkMerges =
+          replay.status === "ok"
+            ? await forkMergeDelivery(
+                { events: this.#events, readEvidence: this.#options.evidence.read },
+                { threadId: input.thread.id, frames: replay.frames },
+              )
+            : { status: "refused" };
+      } catch {
+        forkMerges = { status: "refused" };
+      }
     if (forkMerges.status === "refused") {
       await input.extensionTools?.close?.().catch(() => undefined);
       return failStart(FORK_MERGE_UNREADABLE);
@@ -3641,6 +4070,14 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           : []),
       ]),
     ].filter((folder) => folder !== providerRoot);
+    // The terms a kept session is held to come from the Project as it stood
+    // when the turn took its folders, in the same step: a folder removed
+    // while the turn starts is still in the session, and terms read later
+    // would match the narrower Project and keep that session past its turn.
+    const sessionTerms = codeSessionTerms(
+      input.thread,
+      this.#options.readProject?.(input.thread.projectId),
+    );
     // Read before the final admission check, which must not yield before the
     // turn is owned. A server Project's folder is on another machine, so its
     // design system is the runtime's to read there.
@@ -3722,6 +4159,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       checkoutRoot: input.checkoutRoot,
       ...(input.rootIdentity === undefined ? {} : { rootIdentity: input.rootIdentity }),
       extraFolders,
+      ...(sessionTerms === undefined ? {} : { sessionTerms }),
+      ...(runtimeTurn ? { runtimeTurn: true as const } : {}),
       driver,
       firstTurn:
         !priorTurn &&
@@ -3748,6 +4187,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       secrets,
       abort: new AbortController(),
       approvals: new Map(),
+      levelChanges: new Map(),
       approvalPostures: new Map(),
       toolApprovals: new Map(),
       browserGrantKeys: new Set(),
@@ -3756,7 +4196,6 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       harnessQuestions: new Set(),
       providerQuestionnaires: new Map(),
       cursor: 0,
-      deniedApprovals: 0,
       state: "running",
     };
     active.launch = () =>
@@ -4036,6 +4475,51 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     return { status: "readable", source };
   }
 
+  /**
+   * A copy of a session cut back at a kept turn, for a fork's first session
+   * or a rewound thread's next one. A runtime that copies its own session
+   * (`forkSession`) is asked first, at the turn's journaled anchor; the host's
+   * own harness transcript copy is tried next. Undefined when neither can make
+   * an exact copy, including a turn journaled before its anchor was recorded,
+   * so the caller sends the text handoff instead.
+   */
+  async #forkSession(
+    driver: ProviderDriver,
+    input: {
+      readonly fork: CodeThread;
+      readonly origin: NonNullable<CodeThread["forkedFrom"]>;
+      readonly sessionId: ProviderSessionId;
+      readonly checkoutRoot: string;
+      readonly secrets: ReadonlyArray<string>;
+    },
+  ): Promise<ProviderResumeCursor | undefined> {
+    const copySession = driver.forkSession;
+    if (copySession !== undefined) {
+      const anchor = this.#options.nativeTurnAnchor?.(
+        input.origin.threadId,
+        input.origin.throughOperationId,
+      );
+      if (
+        anchor !== undefined &&
+        String(anchor.providerInstanceId) === String(input.fork.providerInstanceId)
+      ) {
+        const copied = await Effect.runPromise(
+          copySession({
+            instanceId: input.fork.providerInstanceId,
+            sessionId: input.sessionId,
+            source: anchor.resumeCursor,
+            anchor: anchor.anchor,
+            projectRoot: input.checkoutRoot,
+            mode: "code",
+            modelId: input.fork.modelId,
+          }),
+        ).catch(() => undefined);
+        if (copied !== undefined) return copied;
+      }
+    }
+    return this.#options.forkProviderSession?.(input).catch(() => undefined);
+  }
+
   /** A fork's text handoff: the source's conversation through the fork point. */
   async #forkTextHandoff(
     thread: CodeThread,
@@ -4218,9 +4702,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   }
 
   /**
-   * A provider's pending approval prompt. Recognizable forge writes below
-   * Full access must use the scoped tools; only other calls reach Shield when
-   * it reviews this thread. An allow or deny goes back to the provider for this
+   * A provider's pending approval prompt. It reaches Shield when Shield
+   * reviews this thread, a push or pull-request change included. An allow or
+   * deny goes back to the provider for this
    * one call and nobody is asked; an ask, or a thread Shield does not review,
    * becomes the ordinary approval for the person. Shield's decision is
    * journaled beside the tool rows either way. The pending call comes from the
@@ -4251,6 +4735,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       );
       return;
     }
+    // A level change is the person's alone: no reviewer answers it.
+    if (event.levelChange !== undefined) {
+      this.#persistNormalized(active, event);
+      return;
+    }
     const restore = (text: string | undefined) =>
       text?.replaceAll("[CHECKOUT]", active.checkoutRoot);
     const summary = event.text ?? "Provider approval requested.";
@@ -4270,45 +4759,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       description: restore(summary) ?? summary,
       boundRoot: active.checkoutRoot,
     });
-    // Only a pending call supplied by the connection can be stopped here.
-    // A provider's own reviewer and tool-start observations never enter this path.
-    const posture = this.#effectiveThread(active.windowId, active.thread.id)?.executionPolicy;
-    if (
-      posture !== "full-access" &&
-      pendingCall.command !== undefined &&
-      forgeShellChanges(pendingCall.command).length > 0
-    ) {
-      const frame = this.#appendTurnEvent(active, {
-        event: {
-          kind: "tool-activity",
-          toolCallId: `forge-refusal:${requestId}`,
-          toolName: pendingCall.tool,
-          state: "failed",
-          summary: FORGE_SHELL_TOOL_REQUIRED_MESSAGE,
-        },
-      });
-      active.cursor = frame.cursor;
-      try {
-        await Effect.runPromise(
-          active.connection.answerApproval({
-            sessionId: active.sessionId as never,
-            requestId,
-            approved: false,
-            scope: "once",
-          }),
-        );
-      } catch {
-        // A denied forge call must never become an ordinary approvable prompt.
-        active.interruptMessage = FORGE_SHELL_TOOL_REQUIRED_MESSAGE;
-        active.abort.abort();
-        await Effect.runPromise(
-          active.connection
-            .interrupt(active.sessionId as never)
-            .pipe(Effect.catchAll(() => Effect.void)),
-        );
-      }
-      return;
-    }
+    // A push or pull-request change from the runtime's own shell is an
+    // ordinary ask below Full access: the person approves it, or Shield
+    // decides it where Shield reviews this thread, with its forge hard lines.
+    // Octant's structured Git and pull-request tools stay an option, not a
+    // requirement; the runtime forge observer journals the change as it starts.
     if (shield === undefined) {
       this.#persistNormalized(active, event);
       return;
@@ -4334,9 +4789,8 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       this.#persistNormalized(active, event);
       return;
     }
-    // Shield's answer covers this one call. It is not the person's, so it
-    // does not count toward the three refusals that end a turn; Shield's own
-    // brake hands the next call to the person after repeated denials.
+    // Shield's answer covers this one call. Shield's own brake hands the next
+    // call to the person after repeated denials.
     try {
       await Effect.runPromise(
         active.connection.answerApproval({
@@ -4799,6 +5253,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             thread: input.thread.executionPolicy,
           });
     const toolApproval = active?.toolApprovals.get(input.approvalId);
+    const levelChange = active?.levelChanges.get(input.approvalId);
+    if (active !== undefined && providerRequestId !== undefined && levelChange !== undefined)
+      return this.#answerLevelChange(active, input, providerRequestId, levelChange);
     if (
       active !== undefined &&
       (toolApproval !== undefined || providerRequestId !== undefined) &&
@@ -4830,8 +5287,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       )
         return turnState("failed");
       toolApproval.finish(input.decision === "approved" ? "approved" : "denied");
-      if (input.decision === "approved") return answeredTurnState(active.state);
-      return this.#countDeniedApproval(active);
+      return answeredTurnState(active.state);
     }
     if (active === undefined || providerRequestId === undefined)
       return this.#settleDeadTurnRequest(input.thread, "approval", String(input.approvalId));
@@ -4863,39 +5319,87 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         });
       }),
     );
-    if (input.decision === "approved") return answeredTurnState(active.state);
-    return this.#countDeniedApproval(active);
+    // A denial goes back to the model, which adjusts, as on the provider's
+    // own: no count of denials ends the turn (Architecture: "Octant adds no
+    // restrictions of its own unless Strict is on", in Strict too).
+    return answeredTurnState(active.state);
   }
 
   /**
-   * A provider that keeps asking after repeated refusals is looping on the
-   * person, so the third denial ends the turn the way a cancel does. The
-   * reason rides on `interruptMessage` so the runner's settlement — not this
-   * answer — writes the single terminal frame after the change list. The
-   * denial itself was delivered, so its result is a bare `interrupted` with no
-   * failure: every refused answer names its reason, and a surface that read
-   * this one as refused would keep a Deny the provider already acted on.
+   * The person answered the agent's ask to plan first or to leave Plan. An
+   * approval journals the level change as the person's own, through the
+   * thread's ordinary access command, and then ends the turn: Plan's
+   * read-only rule rests on the tool set and sandbox profile a session
+   * launches with, so the new level applies from the next turn's session and
+   * never inside this one. The runtime is told what was decided and never
+   * switches its own mode.
    */
-  async #countDeniedApproval(active: ActiveTurn) {
-    active.deniedApprovals += 1;
-    if (active.deniedApprovals < 3 || (active.state !== "running" && active.state !== "waiting"))
+  async #answerLevelChange(
+    active: ActiveTurn,
+    input: Parameters<CodeOperationTurnPort["answerApproval"]>[0],
+    providerRequestId: string,
+    asked: { readonly kind: "enter-plan" | "exit-plan" },
+  ) {
+    const connection = active.connection;
+    if (connection === undefined) return turnState("failed");
+    const answer = (approved: boolean) =>
+      Effect.runPromise(
+        connection
+          .answerApproval({
+            sessionId: active.sessionId as never,
+            requestId: providerRequestId,
+            approved,
+            scope: "once",
+          })
+          .pipe(Effect.catchAll(() => Effect.void)),
+      );
+    active.approvals.delete(input.approvalId);
+    active.approvalPostures.delete(input.approvalId);
+    active.levelChanges.delete(input.approvalId);
+    if (input.decision === "denied") {
+      await answer(false);
+      return answeredTurnState(active.state);
+    }
+    // Worked out from the thread as it is now, not as the turn found it: a
+    // person who lowered the level while the ask was open gets the plan's
+    // return at that lower level, never the wider one the turn started at.
+    const change = levelChangeTarget(input.thread, asked.kind);
+    const changed =
+      input.windowId === undefined
+        ? false
+        : await (
+            this.#options.changeThreadLevel?.({
+              windowId: input.windowId,
+              threadId: active.thread.id,
+              executionPolicy: change.to,
+              ...(change.planReturnPolicy === undefined
+                ? {}
+                : { planReturnPolicy: change.planReturnPolicy }),
+            }) ?? Promise.resolve(false)
+          ).catch(() => false);
+    if (!changed) {
+      await answer(false);
+      return turnState("failed", {
+        category: "failed",
+        message: "The thread's level could not be changed. Change it from the level menu.",
+      });
+    }
+    await answer(true);
+    if (active.state !== "running" && active.state !== "waiting")
       return answeredTurnState(active.state);
     const lostText = this.#flushBeforeStop(active);
-    const deniedMessage =
-      "Stopped after 3 denied tool requests in one turn. Send a new message to continue.";
-    active.interruptMessage =
-      lostText === undefined ? deniedMessage : `${deniedMessage} ${lostText}`;
+    const ended =
+      change.to === "plan"
+        ? "The thread moved to Plan at the agent's request. Its next turn runs in Plan, read-only."
+        : "The plan was approved and the thread left Plan. Its next turn carries the plan out.";
+    active.interruptMessage = lostText === undefined ? ended : `${ended} ${lostText}`;
     active.state = "interrupted";
     this.#revokeBrowserGrants(active);
     this.#persistRuntimeWork(active, "interrupted");
     active.abort.abort();
-    if (active.connection !== undefined) {
-      await Effect.runPromise(
-        active.connection
-          .interrupt(active.sessionId as never)
-          .pipe(Effect.catchAll(() => Effect.void)),
-      );
-    }
+    await Effect.runPromise(
+      connection.interrupt(active.sessionId as never).pipe(Effect.catchAll(() => Effect.void)),
+    );
     return turnState("interrupted");
   }
 
@@ -5064,7 +5568,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
-    if (active === undefined) return turnState("failed");
+    if (active === undefined) {
+      // No turn runs, but the session the last one left with background
+      // work may: Stop ends it and every task in it.
+      if (
+        input.turnOperationId === undefined &&
+        (await this.#options.outlivingSessions?.stopThread(codeSessionKey(input.thread.id))) ===
+          true
+      )
+        return turnState("interrupted");
+      return turnState("failed");
+    }
     if (
       input.turnOperationId !== undefined &&
       String(active.operationId) !== String(input.turnOperationId)
@@ -5230,9 +5744,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)
-              .externalContentIngested !== false,
+              .externalContentIngested !== false && this.#strict(active.thread.id),
           ...(pullRequestWatch === undefined
             ? {}
             : {
@@ -5598,41 +6113,53 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // A runtime that keeps its own conversation already holds the standing
     // context an earlier completed turn of this session carried; only what is
     // new goes out, and only that is counted as this turn's copy.
+    // A turn the runtime started by itself sends nothing. It leaves the
+    // held-context record as the session's last sent turn left it, so a
+    // block this turn would have carried is never counted as held, and
+    // nothing is counted as this turn's copy.
     const delivery: ProviderTurnContextDelta =
-      active.driver.conversationOwnership === "provider"
-        ? heldTurnContext.forTurn({
-            sessionId: decodeProviderSessionId(active.sessionId),
-            resumed: active.resumeCursor !== undefined,
-            context: fullContext,
-          })
-        : { kind: "appended", context: fullContext, held: [] };
+      active.runtimeTurn === true
+        ? { kind: "appended", context: [], held: fullContext }
+        : active.driver.conversationOwnership === "provider"
+          ? heldTurnContext.forTurn({
+              sessionId: decodeProviderSessionId(active.sessionId),
+              resumed: active.resumeCursor !== undefined,
+              context: fullContext,
+            })
+          : { kind: "appended", context: fullContext, held: [] };
     const heldKeys = new Set(delivery.held.map((block) => `${block.kind}\u0000${block.text}`));
     const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
       blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     const nativeSetup = this.#options.resolveProviderNativeSetup?.(active.thread);
+    const wakeups = this.#options.resolveThreadWakeups?.(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
+      // A turn the runtime started sends nothing, so it counts no copy.
       turn: estimateSentContextParts({
-        sent: {
-          instructions: [
-            ...(delivery.kind === "restated"
-              ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
-              : []),
-            ...sentNow([
-              ...hostGuidance,
-              ...instructionBlocks,
-              ...personMemory,
-              ...projectMemory,
-              ...(active.sentContext?.instructions ?? []),
-            ]),
-          ],
-          skills: sentNow(active.sentContext?.skills ?? []),
-        },
+        sent:
+          active.runtimeTurn === true
+            ? { instructions: [], skills: [] }
+            : {
+                instructions: [
+                  ...(delivery.kind === "restated"
+                    ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
+                    : []),
+                  ...sentNow([
+                    ...hostGuidance,
+                    ...instructionBlocks,
+                    ...personMemory,
+                    ...projectMemory,
+                    ...(active.sentContext?.instructions ?? []),
+                  ]),
+                ],
+                skills: sentNow(active.sentContext?.skills ?? []),
+              },
         attachments,
       }),
     };
     let stoppedOnUsageLimit = false;
+    let stoppedOnFailure: { readonly availability: "down" | undefined } | undefined;
     const folderWatch =
       active.folderCurrent === undefined
         ? undefined
@@ -5772,7 +6299,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               }),
           ...(attachments === undefined ? {} : { attachments }),
           ...(harnessAutoReviewEnabled ? { harnessAutoReviewEnabled: true } : {}),
+          strict: this.#strict(active.thread.id),
           ...(nativeSetup === undefined ? {} : { nativeSetup }),
+          ...(wakeups === undefined ? {} : { wakeups }),
+          ...(active.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
@@ -5786,7 +6316,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              return active.driver.acquire(acquireInput).pipe(
+              const keeper = this.#options.outlivingSessions;
+              return (
+                keeper === undefined
+                  ? active.driver.acquire(acquireInput)
+                  : keeper.acquire(
+                      codeSessionKey(active.thread.id),
+                      JSON.stringify([
+                        String(active.thread.providerInstanceId),
+                        acquireInput.projectRoot,
+                        acquireInput.extraFolders ?? [],
+                        acquireInput.permissionPersistence,
+                      ]),
+                      active.driver.acquire(acquireInput),
+                      active.sessionTerms,
+                    )
+              ).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;
@@ -5891,6 +6436,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                           sanitizeProviderText(reason, active.checkoutRoot, active.secrets),
                         );
                   if (failure?.usageLimit !== undefined) stoppedOnUsageLimit = true;
+                  else if (failure !== undefined && outcome !== "interrupted") {
+                    stoppedOnFailure = {
+                      availability: failure.availability === "down" ? "down" : undefined,
+                    };
+                  }
                   this.#persistOutcome(
                     active,
                     outcome,
@@ -5958,8 +6508,19 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         this.#options.nativeHarness?.turnEnded?.(harnessScope, endedTurn);
         if (this.#active.get(String(active.thread.id)) === active)
           this.#active.delete(String(active.thread.id));
+        // The turn that stopped, as it launched, so a reader acts on it and
+        // not on whatever turn or model the thread has by then.
+        const stopped: CodeStoppedTurn = {
+          operationId: String(active.operationId),
+          providerInstanceId: String(active.thread.providerInstanceId),
+          modelId: String(active.thread.modelId),
+        };
         if (stoppedOnUsageLimit) {
-          void this.#options.onUsageLimitStop?.(active.thread.id).catch(() => undefined);
+          void this.#options.onUsageLimitStop?.(active.thread.id, stopped).catch(() => undefined);
+        } else if (stoppedOnFailure !== undefined) {
+          void this.#options
+            .onProviderStop?.(active.thread.id, stoppedOnFailure.availability, stopped)
+            .catch(() => undefined);
         }
       });
   }
@@ -6003,8 +6564,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       autoApprove: true,
       posture: thread.executionPolicy,
       externalContentIngested,
+      strict: this.#strict(thread.id),
       capabilitySupported: capabilities.harnessAutoReview === "supported",
     });
+  }
+
+  #strict(threadId: CodeThreadId): boolean {
+    return this.#options.resolveStrict?.(threadId) ?? true;
   }
 
   #noteHarnessRetry(active: ActiveTurn, event: CodeOperationEvent): void {
@@ -6642,6 +7208,103 @@ function evidenceCapacityFailure(error: unknown): CodeOperationFailure | undefin
   };
 }
 
+/**
+ * Where an agent's ask to change the level would take the thread. Entering
+ * Plan remembers the level it left, never Full access, which only the person
+ * chooses; leaving Plan returns there, or to approval-gated when the thread
+ * was put in Plan by the person.
+ */
+function levelChangeTarget(
+  thread: CodeThread,
+  kind: "enter-plan" | "exit-plan",
+): { readonly to: ProviderExecutionPolicy; readonly planReturnPolicy?: ProviderExecutionPolicy } {
+  if (kind === "enter-plan") {
+    const leaving = thread.executionPolicy;
+    return {
+      to: "plan",
+      planReturnPolicy:
+        leaving === "full-access" || leaving === "plan" ? "approval-gated" : leaving,
+    };
+  }
+  const back = thread.planReturnPolicy;
+  return {
+    to: back === undefined || back === "full-access" || back === "plan" ? "approval-gated" : back,
+  };
+}
+
+/**
+ * What an adopted session is bound to on a Code thread: the session is
+ * journaled for exactly this provider, model, Project binding, checkout and
+ * folder, so an adoption that finishes after any of them changed is refused.
+ */
+function adoptionBinding(thread: CodeThread): string {
+  return JSON.stringify([
+    thread.lifecycle,
+    String(thread.projectId),
+    String(thread.bindingRevisionId),
+    String(thread.checkoutId),
+    String(thread.providerInstanceId),
+    String(thread.modelId),
+    thread.workingFolderId === undefined ? null : String(thread.workingFolderId),
+    thread.workingDirectory ?? null,
+  ]);
+}
+
+/** The key a Code thread's kept provider session is held under. */
+export function codeSessionKey(threadId: CodeThreadId): string {
+  return `code:${String(threadId)}`;
+}
+
+/**
+ * What a Code thread's kept provider session was started on: its level and
+ * how its asks are answered, its provider and model, its checkout and
+ * folder, and that it is active. A session kept past its turn on other terms
+ * is stopped, so a person lowering the level, switching the model, moving
+ * the checkout, or archiving, moving or deleting the thread never leaves it
+ * acting as before. The folder authority the thread's Project grants (its
+ * current binding and root, the thread's approved working folder, the extra
+ * folders) is part of the terms too: a relink, an archive or a removed extra
+ * folder touches no thread, and a session left running would keep reaching a
+ * folder the Project no longer grants. A thread whose Project is not a local
+ * active Code Project can run no turn here.
+ */
+export function codeSessionTerms(
+  thread: CodeThread,
+  project: Project | undefined,
+): string | undefined {
+  // `waiting` and `interrupted` are a turn's state after a restart; the
+  // thread still runs turns.
+  if (thread.lifecycle === "archived") return undefined;
+  if (project?.type !== "code" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
+  return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+    [...projectExtraFolderRoots(project)].sort(),
+    thread.executionPolicy,
+    thread.autoApprove === true,
+    thread.fullAccessSandbox === true,
+    thread.permissionPersistence,
+    thread.coordinator === true,
+    thread.toolConstraints ?? [],
+    String(thread.providerInstanceId),
+    String(thread.modelId),
+    thread.modelOptionValues ?? null,
+    String(thread.projectId),
+    String(thread.checkoutId),
+    String(thread.bindingRevisionId),
+    thread.workingFolderId === undefined ? null : String(thread.workingFolderId),
+    thread.workingDirectory ?? null,
+  ]);
+}
+
 function normalizedOperationEvent(
   event: CodeTurnEvent,
   active: ActiveTurn,
@@ -6658,6 +7321,24 @@ function normalizedOperationEvent(
   if (event.category === "approval" && event.requestId !== undefined) {
     const approvalId = CodeApprovalId.make(uuid());
     active.approvals.set(String(approvalId), event.requestId);
+    if (event.levelChange !== undefined) {
+      const change = levelChangeTarget(active.thread, event.levelChange.kind);
+      active.levelChanges.set(String(approvalId), { kind: event.levelChange.kind, ...change });
+      return {
+        kind: "approval-requested",
+        approvalId,
+        action: "level-change",
+        summary:
+          boundProviderSummary(event.text ?? "The agent asks to change this thread's level.") ??
+          "The agent asks to change this thread's level.",
+        levelChange: {
+          to: change.to,
+          ...(event.levelChange.plan === undefined
+            ? {}
+            : { plan: evidence.put(event.levelChange.plan) }),
+        },
+      };
+    }
     return {
       kind: "approval-requested",
       approvalId,
@@ -6847,10 +7528,18 @@ function normalizedOperationEvent(
       };
     }
   }
-  if (event.category === "runtime-turn" && event.status === "background-task") {
-    return { kind: "runtime-turn-started", trigger: "background-task" };
+  if (
+    event.category === "runtime-turn" &&
+    (event.status === "background-task" || event.status === "person-message")
+  ) {
+    return { kind: "runtime-turn-started", trigger: event.status };
   }
-  if (event.category === "completion") return { kind: "operation-state", state: "completed" };
+  if (event.category === "completion")
+    return {
+      kind: "operation-state",
+      state: "completed",
+      ...(event.nativeAnchor === undefined ? {} : { nativeAnchor: event.nativeAnchor }),
+    };
   if (event.category === "waiting") return { kind: "operation-state", state: "waiting" };
   if (event.category === "interruption") {
     // The provider's sentence is the only reason the person will ever see, so
@@ -6994,8 +7683,7 @@ function sanitizeProviderEvent(
 /**
  * What an answer the turn took reports. A turn a cancel or an earlier stop
  * already interrupted cannot act on the answer, so it is refused with that
- * reason; only the denial that itself stops a turn reports a bare
- * `interrupted`.
+ * reason.
  */
 function answeredTurnState(state: ActiveTurn["state"]): ReturnType<typeof turnState> {
   return state === "interrupted"

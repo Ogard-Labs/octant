@@ -11,6 +11,10 @@ export function coordinatorChoiceNote(
   choice: CoordinatorWorkerChoice | undefined,
 ): string | undefined {
   if (choice === undefined) return undefined;
+  // A running worker the host moved on says so, whatever chose its first model.
+  if (choice.move === "continued-on-fallback" && choice.reason !== undefined) {
+    return `fallback: ${choice.reason}`;
+  }
   if (choice.why !== undefined) return `chosen: ${choice.why}`;
   if (choice.rank === "person") return "chosen by you";
   if (choice.rank === "main" || choice.rank === "chosen") return undefined;

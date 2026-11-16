@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
+import { HostPlatformContext } from "../platform";
 import { CodeSettingsView, type CodeSettingsUpdate } from "./CodeSettingsView";
 
 const settings = {
@@ -12,6 +13,30 @@ const settings = {
 } as const;
 
 describe("CodeSettingsView", () => {
+  it("offers the terminal shell on a Windows host, Windows PowerShell first, and saves the choice", async () => {
+    const update = vi.fn(async (_input: CodeSettingsUpdate) => true);
+    render(
+      <HostPlatformContext.Provider value="win32">
+        <CodeSettingsView onUpdate={update} settings={settings as never} />
+      </HostPlatformContext.Provider>,
+    );
+    const shell = screen.getByRole("combobox", { name: "Terminal shell" });
+    expect(shell).toHaveTextContent("Windows PowerShell");
+    await chooseSelectFieldOption(userEvent.setup(), shell, "PowerShell 7");
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ windowsTerminalShell: "pwsh" }),
+    );
+  });
+
+  it("shows no terminal shell choice on a Mac host, which opens the login shell", () => {
+    render(
+      <HostPlatformContext.Provider value="darwin">
+        <CodeSettingsView onUpdate={vi.fn(async () => true)} settings={settings as never} />
+      </HostPlatformContext.Provider>,
+    );
+    expect(screen.queryByRole("combobox", { name: "Terminal shell" })).toBeNull();
+  });
+
   it("refreshes saved defaults without replacing an unfinished editor field", () => {
     const onUpdate = vi.fn(async () => true);
     const { rerender } = render(
@@ -143,7 +168,7 @@ describe("CodeSettingsView", () => {
       expect(update).not.toHaveBeenCalled();
       const warning = await screen.findByRole("dialog", { name: "Use Full access?" });
       expect(warning).toHaveTextContent(
-        "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.",
+        "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys. Secret values are redacted from what Octant records.",
       );
       await user.click(screen.getByRole("button", { name: "Use Full access" }));
       expect(update).toHaveBeenLastCalledWith(

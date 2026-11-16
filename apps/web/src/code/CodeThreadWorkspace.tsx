@@ -47,6 +47,7 @@ import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/Thr
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -69,6 +70,11 @@ import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import { CodeLiveTasks } from "./CodeLiveTasks";
+import { CodeNativeSession } from "./CodeNativeSession";
+import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
   applyComposerCaret,
@@ -87,7 +93,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -187,6 +193,7 @@ import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -230,6 +237,8 @@ export interface CodeThreadWorkspaceProps {
    * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
+  /** Strict as the thread's Project and Settings set it, for a thread that did not choose. */
+  readonly strictDefault?: boolean;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly threadId: CodeThreadId;
@@ -324,6 +333,9 @@ export interface CodeThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
+  readonly codeSessionClient?: CodeSessionClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -476,6 +488,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
+    provider: composerProviderCommands(props.providerGroups, view?.thread.providerInstanceId),
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
@@ -595,6 +608,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const { serverUrl, windowCapability, codeSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      codeSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createCodeSessionClient({ serverUrl, windowCapability })),
+    [codeSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "code",
     hostId: props.hostId,
@@ -960,6 +982,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  // Only a coordinator's worker carries a host move's reason.
+  const continuedOnFallback =
+    view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
+      ? undefined
+      : continuedOnFallbackPlacement(messages, view.thread.providerHandoff);
   const loadedOperationIds = new Set(
     messages.flatMap((message) =>
       message.role === "assistant" && message.operationId !== undefined
@@ -1541,6 +1568,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         executionPolicy: access.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
         autoApprove: access.autoApprove,
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
+  async function changeStrict(strict: boolean) {
+    props.controller.setAccessNotice(undefined);
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: thread.executionPolicy,
+        permissionPersistence: thread.permissionPersistence,
+        ...(thread.autoApprove === true ? { autoApprove: true } : {}),
+        strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2351,6 +2396,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                       </TurnActionMenu>
                     </article>
+                    <SteeredChildResults
+                      providerGroups={providerGroups}
+                      steered={message.steeredResults}
+                    />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <SideTaskInline
                         last={message === lastReply}
@@ -2364,6 +2413,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         }
                         turnId={String(message.operationId)}
                       />
+                    ) : null}
+                    {continuedOnFallback?.afterId === message.id ? (
+                      <OctantSeparatorWithLabel aria-label="Continued on the fallback">
+                        Octant moved this thread: {continuedOnFallback.reason}
+                      </OctantSeparatorWithLabel>
                     ) : null}
                   </div>
                 );
@@ -2445,6 +2499,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })
                   }
                   summary={request.summary}
+                  {...(request.levelChange === undefined
+                    ? {}
+                    : { levelChange: request.levelChange })}
                 />
               ) : (
                 <ProviderQuestionCard
@@ -2501,7 +2558,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="code"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={props.controller.conversation.length > 0}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
@@ -2883,6 +2957,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     thread.providerInstanceId,
                   )}
                   onFullAccessSandboxChange={(sandboxed) => void changeFullAccessSandbox(sandboxed)}
+                  strict={thread.strict ?? props.strictDefault === true}
+                  onStrictChange={(strict) => void changeStrict(strict)}
                 />
               </>
             ),
@@ -3384,4 +3460,43 @@ function observedTaskChangedFiles(
 
 function messageHappenedAt(message: CodeConversationMessage): string | undefined {
   return message.at;
+}
+
+/**
+ * Where the transcript says the host moved a coordinator's running worker
+ * on to its role's next model: after the last message journaled before the
+ * move, so it reads between the turn that stopped and the one that
+ * continues, and stands even when that turn was never admitted. Only the
+ * thread's latest move carries its reason.
+ */
+function continuedOnFallbackPlacement(
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly at?: string;
+    readonly operationId?: unknown;
+  }>,
+  handoff: CodeThread["providerHandoff"],
+): { readonly afterId: string; readonly reason: string } | undefined {
+  const reason = handoff?.continuedOnFallback;
+  if (handoff === undefined || reason === undefined) return undefined;
+  const movedAt = Date.parse(String(handoff.changedAt));
+  // A prompt's time is its turn's start, which never moves; a reply's is its
+  // turn's last update, which may come after the move. So the stopped turn
+  // is found by its prompt, and the marker goes after that turn's reply.
+  const promptIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "user" && message.at !== undefined && Date.parse(message.at) <= movedAt,
+  );
+  const prompt = messages[promptIndex];
+  if (prompt === undefined) return undefined;
+  const reply = messages
+    .slice(promptIndex + 1)
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        prompt.operationId !== undefined &&
+        String(message.operationId) === String(prompt.operationId),
+    );
+  return { afterId: (reply ?? prompt).id, reason };
 }

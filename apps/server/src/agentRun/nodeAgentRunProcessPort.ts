@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import type { AgentRun } from "@octant/contracts/agent-run";
 import type { AgentRunProcessHandle, AgentRunProcessPort } from "./agentRunProcessSupervisor";
 import {
@@ -211,7 +212,8 @@ function signalProcess(
   if (child.pid === undefined) return;
   try {
     if (killProcessGroup !== undefined) killProcessGroup(-Math.abs(child.pid), signal);
-    else if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the run and its children.
+    else if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;

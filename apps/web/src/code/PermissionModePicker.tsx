@@ -2,6 +2,8 @@ import type { PermissionMode } from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
+  hostSandboxRefusal,
+  threadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
@@ -15,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useId } from "react";
+import { useHostPlatform } from "../platform";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useFullAccessWarning, type FullAccessWarningScope } from "./FullAccessWarning";
 import {
@@ -129,7 +132,23 @@ export interface PermissionModePickerProps {
    * cannot, the choice stays listed but disabled, with the reason.
    */
   readonly fullAccessSandboxSupported?: boolean;
+  /**
+   * Whether Strict is on for this thread: its own choice, else its Project's
+   * and Settings' default. With a handler, the picker offers Strict at every
+   * mode; without one it offers none. The host decides what Strict does.
+   */
+  readonly strict?: boolean;
+  readonly onStrictChange?: (strict: boolean) => void;
 }
+
+/**
+ * The trade-off Strict makes, in the words the picker and Settings use: off,
+ * the provider behaves as it does on its own; on, Octant adds its own limits
+ * and some of the provider's workflows stop working.
+ */
+export const STRICT_DETAIL =
+  "Adds Octant's own limits on top of the provider's: a fixed environment, provider telemetry off, secret files closed to every tool, and asks again after outside content. Some workflows that work in the provider's own app stop working.";
+const STRICT_WINDOWS_DETAIL = "Strict needs Octant's sandbox, which does not run on Windows yet.";
 
 const SANDBOX_DETAIL = "No prompts, but writes stay in the folder and secret files stay closed.";
 const SANDBOX_UNSUPPORTED_DETAIL =
@@ -147,7 +166,18 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
+  // A host without Octant's sandbox (Windows today) runs only Full access with
+  // the sandbox off. The host refuses the rest; the picker shows them
+  // unavailable with that reason rather than offering a choice it refuses.
+  const hostPlatform = useHostPlatform();
+  const hostRefusalOf = (mode: PermissionMode) =>
+    hostSandboxRefusal({ platform: hostPlatform, access: threadAccessOf(mode) });
+  const sandboxHostRefusal = hostSandboxRefusal({
+    platform: hostPlatform,
+    access: { executionPolicy: "full-access", fullAccessSandbox: true },
+  });
   const sandboxed = props.value === "full-access" && props.fullAccessSandbox === true;
+  const strictUnavailable = hostPlatform === "win32" && props.strict !== true;
   const triggerLabel = autoFallsBack
     ? "Ask first"
     : sandboxed
@@ -214,8 +244,14 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                 }}
               >
                 {options.map((option) => {
-                  const unsupported = option.id === "auto" && !autoSupported;
-                  const note = unsupported ? unsupportedReason : detailOf(option.id);
+                  const hostRefusal = hostRefusalOf(option.id);
+                  const unsupported =
+                    hostRefusal !== undefined || (option.id === "auto" && !autoSupported);
+                  const note =
+                    hostRefusal ??
+                    (option.id === "auto" && !autoSupported
+                      ? unsupportedReason
+                      : detailOf(option.id));
                   return (
                     <OctantMenuRadioItem
                       aria-describedby={`${idPrefix}-${option.id}-note`}
@@ -249,7 +285,8 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     // because that is what a refused turn asks the person to do.
                     disabled={
                       props.disabled === true ||
-                      (!sandboxSupported && props.fullAccessSandbox !== true)
+                      ((!sandboxSupported || sandboxHostRefusal !== undefined) &&
+                        props.fullAccessSandbox !== true)
                     }
                     onCheckedChange={(checked) => {
                       if (props.disabled === true) return;
@@ -259,12 +296,35 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     <span className="flex min-w-0 flex-col">
                       <span>Keep the sandbox</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
-                        {sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL}
+                        {sandboxHostRefusal ??
+                          (sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>
                 </OctantMenuGroup>
               ) : null}
+              {props.onStrictChange === undefined ? null : (
+                <OctantMenuGroup>
+                  <OctantMenuCheckboxItem
+                    aria-describedby={`${idPrefix}-strict-note`}
+                    checked={props.strict === true}
+                    // Turning Strict off is always allowed where it is on;
+                    // turning it on needs Octant's sandbox.
+                    disabled={props.disabled === true || strictUnavailable}
+                    onCheckedChange={(checked) => {
+                      if (props.disabled === true) return;
+                      props.onStrictChange?.(checked === true);
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span>Strict</span>
+                      <span className="oct-menu-detail" id={`${idPrefix}-strict-note`}>
+                        {strictUnavailable ? STRICT_WINDOWS_DETAIL : STRICT_DETAIL}
+                      </span>
+                    </span>
+                  </OctantMenuCheckboxItem>
+                </OctantMenuGroup>
+              )}
               {props.profileName === undefined ? null : (
                 <OctantMenuGroup>
                   <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>

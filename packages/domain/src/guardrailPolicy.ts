@@ -159,6 +159,67 @@ export function refusesFullAccessSandbox(input: {
   );
 }
 
+/**
+ * Why a level cannot run on a Windows host. Every level below Full access, and
+ * Full access with the sandbox kept, runs inside Octant's process sandbox, and
+ * Windows has no sandbox Octant can use yet: its launcher is built but has not
+ * run a real provider on a person's Windows machine. A turn there is refused
+ * rather than run with less confinement than its level promises.
+ */
+export const WINDOWS_SANDBOX_MISSING_REASON =
+  "This level needs Octant's process sandbox, which Windows does not have yet. On this computer only Full access runs; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
+
+/**
+ * Whether a turn at `access` needs Octant's process sandbox: every level
+ * below Full access, and Full access with the sandbox kept.
+ */
+export function levelNeedsSandbox(access: ThreadAccess): boolean {
+  return access.executionPolicy !== "full-access" || access.fullAccessSandbox === true;
+}
+
+/**
+ * Why a turn, terminal or command at `access` refuses on this host, or
+ * undefined when it may run. The caller passes the level the work runs at
+ * (a turn's clamped level, not only the thread's stored one), and the host's
+ * own platform.
+ */
+export function hostSandboxRefusal(input: {
+  readonly platform: string | undefined;
+  readonly access: ThreadAccess;
+}): string | undefined {
+  return input.platform === "win32" && levelNeedsSandbox(input.access)
+    ? WINDOWS_SANDBOX_MISSING_REASON
+    : undefined;
+}
+
+/**
+ * Whether this host starts new threads at Full access with the sandbox off:
+ * Settings › Code's default mode, or Settings › Work's default access, with
+ * the sandbox not kept. Choosing either shows the one-time Full access
+ * warning. A Windows host reads a provider's model catalog unconfined only
+ * then, because that catalog serves turns that run unconfined.
+ */
+export function hostStartsThreadsAtOpenFullAccess(input: {
+  readonly code?:
+    | {
+        readonly defaultExecutionPolicy: ProviderExecutionPolicy;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+  readonly work?:
+    | {
+        readonly defaultAccess: WorkAccess;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+      }
+    | undefined;
+}): boolean {
+  return (
+    (input.code?.defaultExecutionPolicy === "full-access" &&
+      input.code.defaultFullAccessSandbox !== true) ||
+    (input.work?.defaultAccess === "full-access" && input.work.defaultFullAccessSandbox !== true)
+  );
+}
+
 /** The picker's words for a stored posture. */
 export function permissionModeOf(access: ThreadAccess): PermissionMode {
   switch (access.executionPolicy) {
@@ -519,6 +580,24 @@ export function defaultFullAccessSandboxFor(input: {
 }): boolean {
   return (
     input.project?.defaultFullAccessSandbox ?? input.settings?.defaultFullAccessSandbox ?? false
+  );
+}
+
+/**
+ * Whether Strict is on for one launch or call: the thread's own choice, else
+ * its Project's, else Settings', else off. Read at each launch and each call,
+ * never stamped on the thread, so a thread that never chose follows its
+ * Project and Settings as they are now. Strict restores the protections Octant
+ * adds beside a provider's own (Architecture: "Octant adds no restrictions of
+ * its own unless Strict is on"); off, the provider's own settings decide.
+ */
+export function resolveStrict(input: {
+  readonly thread?: { readonly strict?: boolean | undefined } | undefined;
+  readonly project?: { readonly defaultStrict?: boolean | undefined } | undefined;
+  readonly settings?: { readonly defaultStrict?: boolean | undefined } | undefined;
+}): boolean {
+  return (
+    input.thread?.strict ?? input.project?.defaultStrict ?? input.settings?.defaultStrict ?? false
   );
 }
 

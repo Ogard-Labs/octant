@@ -9,6 +9,7 @@ import {
   ownReviewerLabel,
   reviewVerdictsLabel,
   sessionRollbackLabel,
+  turnModesLabel,
 } from "./providerSettingsPresentation";
 
 describe("provider Settings presentation", () => {
@@ -372,6 +373,25 @@ describe("sessionRollbackLabel", () => {
       "starts a fresh session with the kept turns as text",
     );
     expect(sessionRollbackLabel({} as never)).toMatch(/^None\./);
+  });
+});
+
+describe("turnModesLabel", () => {
+  it("says a runtime runs only in Work and Code outside Plan when this computer cannot confine it elsewhere", () => {
+    expect(
+      turnModesLabel({
+        turnModes: {
+          chat: "unsupported",
+          plan: "unsupported",
+          work: "supported",
+          code: "supported",
+          unsupportedReason: "host-confinement",
+        },
+      } as never),
+    ).toBe(
+      "Work and Code outside Plan. This computer's sandbox cannot confine it in the other modes.",
+    );
+    expect(turnModesLabel({} as never)).toBeUndefined();
   });
 });
 

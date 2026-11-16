@@ -1,5 +1,7 @@
 import { createElement, useId, useState, type KeyboardEvent } from "react";
 import { Slash } from "lucide-react";
+import type { ProviderInstanceId, ProviderSlashCommand } from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 import {
   applySlashCommandToken,
   filterOctantCommands,
@@ -9,18 +11,65 @@ import {
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { OctantButton } from "../ui/base/OctantButton";
 
+/** The provider's own slash commands a composer lists beside Octant's. */
+export interface ComposerProviderCommands {
+  /** The provider's name, so each row says whose command it is. */
+  readonly label: string;
+  readonly commands: ReadonlyArray<ProviderSlashCommand>;
+}
+
+/**
+ * The selected provider's own commands, as its picker group carries them.
+ * Every mode lists and runs them, Chat and Plan included; the thread's level
+ * decides on the host what a command may then do.
+ */
+export function composerProviderCommands(
+  groups: ReadonlyArray<PickerGroup> | undefined,
+  instanceId: ProviderInstanceId | undefined,
+): ComposerProviderCommands | undefined {
+  if (instanceId === undefined) return undefined;
+  const group = groups?.find((candidate) => String(candidate.instance.id) === String(instanceId));
+  const commands = group?.providerCommands;
+  if (group === undefined || commands === undefined || commands.length === 0) return undefined;
+  return { label: group.driverLabel, commands };
+}
+
+/** The provider's own commands as `/` menu rows, each writing `/name ` into the draft. */
+export function providerCommandEntries(
+  provider: ComposerProviderCommands | undefined,
+): ReadonlyArray<OctantCommand> {
+  if (provider === undefined) return [];
+  return provider.commands.map((command) => ({
+    id: `provider-command:${command.name}`,
+    title: `/${command.name}`,
+    group: "Provider commands",
+    detail: [`${provider.label}'s own`, command.argumentHint, command.description]
+      .filter((part) => part !== undefined && part.length > 0)
+      .join(" · "),
+    keywords: [command.name, provider.label],
+    action: { kind: "address", reference: `/${command.name} ` },
+  }));
+}
+
 /**
  * Shared `/` behavior for every composer, including first-turn drafts. `/`
- * runs commands only; skills, plugin servers, and connectors are picked with
- * `@` (see `useComposerAtMenu`).
+ * runs Octant's commands and lists the thread's provider's own commands
+ * beside them, labelled as the provider's; choosing one of those writes
+ * `/name ` into the draft, which is sent to the runtime as the prompt.
+ * Skills, plugin servers, and connectors are picked with `@` (see
+ * `useComposerAtMenu`).
  */
 export function useComposerSlashCommands(input: {
   readonly draft: string;
   readonly onDraftChange: (draft: string, caret?: number) => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
+  readonly provider?: ComposerProviderCommands | undefined;
 }) {
   const listId = useId();
-  const commands = useOctantCommands().filter((command) => command.action.kind === "run");
+  const commands = [
+    ...useOctantCommands().filter((command) => command.action.kind === "run"),
+    ...providerCommandEntries(input.provider),
+  ];
   const [token, setToken] = useState<ReturnType<typeof parseSlashCommandToken>>();
   const [activeIndex, setActiveIndex] = useState(0);
   const matches = token === undefined ? [] : filterOctantCommands(commands, token.query);
@@ -35,7 +84,12 @@ export function useComposerSlashCommands(input: {
   };
   const choose = (command: OctantCommand) => {
     if (token === undefined || !tokenIsCurrent) return;
-    const applied = applySlashCommandToken(input.draft, token);
+    const removed = applySlashCommandToken(input.draft, token);
+    const reference = command.action.kind === "address" ? command.action.reference : "";
+    const applied = {
+      draft: `${removed.draft.slice(0, removed.caretIndex)}${reference}${removed.draft.slice(removed.caretIndex)}`,
+      caretIndex: removed.caretIndex + reference.length,
+    };
     input.onDraftChange(applied.draft, applied.caretIndex);
     setToken(undefined);
     setActiveIndex(0);

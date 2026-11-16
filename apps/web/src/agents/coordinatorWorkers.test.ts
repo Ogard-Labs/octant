@@ -101,6 +101,16 @@ describe("coordinatorWorkersOf", () => {
         reason: "lower tier: all Hard problems models unavailable",
       }),
     ).toBe("fallback: lower tier: all Hard problems models unavailable");
+    // A running worker the host moved on to its role's next model.
+    expect(
+      coordinatorChoiceNote({
+        role: "default",
+        rank: { fallback: 1 },
+        reason: "Opus 5.5 (Work) at usage limit; continued on Astra (Personal)",
+        why: "needs the larger context",
+        move: "continued-on-fallback",
+      }),
+    ).toBe("fallback: Opus 5.5 (Work) at usage limit; continued on Astra (Personal)");
     expect(coordinatorChoiceNote({ role: "deep", rank: "person" })).toBe("chosen by you");
     expect(coordinatorChoiceNote(undefined)).toBeUndefined();
   });

@@ -409,6 +409,13 @@ export const CodeThread = Schema.Struct({
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
   /**
+   * The level the thread returns to when its agent asks to leave Plan and the
+   * person approves. Recorded only when the thread entered Plan at its
+   * agent's request (`EnterPlanMode`) and dropped when it leaves Plan; never
+   * Full access, which only the person chooses. Absent on every other thread.
+   */
+  planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
    * The profile this thread runs under, recorded so the thread can say which
    * working mode produced its posture. Optional so a journal written before
    * profiles bound threads replays as "no profile" rather than being rejected.
@@ -469,6 +476,13 @@ export const CodeThread = Schema.Struct({
    * before the flag existed replays as off (Full access stays fully open).
    */
   fullAccessSandbox: Schema.optional(Schema.Boolean),
+  /**
+   * Strict, the thread's own choice. Absent follows its Project, else
+   * Settings, else off (`resolveStrict`); the host reads it at each launch
+   * and call, so a thread that never chose follows those as they are now.
+   * Strict restores the protections Octant adds beside the provider's own.
+   */
+  strict: Schema.optional(Schema.Boolean),
   version: AggregateVersion,
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -498,6 +512,16 @@ export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 /** How Review shows a checkout diff: stacked files, or one file beside its pair. */
 export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
 export type CodeDiffLayout = typeof CodeDiffLayout.Type;
+
+/**
+ * The shell a Code or Project terminal opens on a Windows host. Windows has no
+ * login shell to read, and guessing a POSIX shell there opened nothing, so the
+ * person names one: Windows PowerShell (`powershell`, the default, which every
+ * Windows install carries), PowerShell 7 (`pwsh`), or Command Prompt (`cmd`).
+ * macOS and Linux hosts keep the login shell and ignore this.
+ */
+export const WindowsTerminalShell = Schema.Literal("powershell", "pwsh", "cmd");
+export type WindowsTerminalShell = typeof WindowsTerminalShell.Type;
 
 /**
  * Threads without a Project once had their own Code switch beside the Git
@@ -553,6 +577,11 @@ export const CodeSettings = Schema.Struct({
    */
   defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
   /**
+   * Strict for Code threads whose thread and Project did not choose. Absent
+   * is off: the provider's own settings decide.
+   */
+  defaultStrict: Schema.optional(Schema.Boolean),
+  /**
    * Whether an Android emulator Octant boots may load and save a quickboot
    * snapshot. Absent is off: every boot is cold, which is what a store
    * persisted before the switch existed did. Cold is the default because a
@@ -599,6 +628,12 @@ export const CodeSettings = Schema.Struct({
    * store persisted before the switch existed reads as.
    */
   restartContinuation: Schema.optional(Schema.Boolean),
+  /**
+   * Settings › Code › Terminal shell on a Windows host. Absent is Windows
+   * PowerShell, which is also what a store persisted before the choice existed
+   * reads as.
+   */
+  windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   fullAccessSandboxOff: RetiredSandboxOffSwitch,
   version: AggregateVersion,
   updatedAt: UtcTimestamp,
@@ -821,6 +856,8 @@ export const CodeCommand = Schema.Union(
     /** Absent keeps the stored choice. */
     defaultFullAccessSandbox: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
+    defaultStrict: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
     androidEmulatorSnapshotBoot: Schema.optional(Schema.Boolean),
     /** Absent keeps the stored choice. */
     autoReviewer: Schema.optional(AutoReviewer),
@@ -838,6 +875,8 @@ export const CodeCommand = Schema.Union(
     coordinatorOpenWorkerLimit: Schema.optional(CoordinatorOpenWorkerLimit),
     /** Absent keeps the stored choice. */
     restartContinuation: Schema.optional(Schema.Boolean),
+    /** Absent keeps the stored choice. */
+    windowsTerminalShell: Schema.optional(WindowsTerminalShell),
   }).annotations(strict),
   CreateCodeThreadCommand,
   Schema.Struct({
@@ -957,6 +996,12 @@ export const CodeCommand = Schema.Union(
     ...CodeThreadCommandFields,
     executionPolicy: ProviderExecutionPolicy,
     permissionPersistence: PermissionPersistence,
+    /**
+     * Set only with `executionPolicy: "plan"` when the person approved the
+     * agent's own ask to plan: the level the thread returns to when the
+     * person later approves its plan. The host refuses Full access here.
+     */
+    planReturnPolicy: Schema.optional(ProviderExecutionPolicy),
     approvalId: Schema.optional(CodeApprovalId),
     autoApprove: Schema.optional(Schema.Boolean),
     /**
@@ -964,6 +1009,11 @@ export const CodeCommand = Schema.Union(
      * the thread's current choice; the host drops it below Full access.
      */
     fullAccessSandbox: Schema.optional(Schema.Boolean),
+    /**
+     * Strict, chosen with the mode at any level. Absent keeps the thread's
+     * current choice; null returns it to its Project's and Settings' default.
+     */
+    strict: Schema.optional(Schema.NullOr(Schema.Boolean)),
   }).annotations(strict),
   /**
    * The person moves the thread to another account (provider instance) of the

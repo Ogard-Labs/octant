@@ -13,7 +13,9 @@ import { renameSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { SECRET_REDACTION } from "@octant/domain/secret-guard-policy";
 import { secretGuardRefusal } from "../process/secretGuard";
+import { redactHostSecretsInValue } from "../process/secretRedaction";
 import {
   buildDocxFixture,
   buildPdfFixture,
@@ -79,6 +81,71 @@ describe("native harness file tools and the secret guard", () => {
     expect(outcome.kind).toBe("matches");
     if (outcome.kind !== "matches") return;
     expect(outcome.matches.map((match) => match.path)).toEqual(["notes.md"]);
+  });
+
+  describe("at Full access", () => {
+    // Built at run time so no key-shaped literal sits in the source.
+    const fakeKey = [
+      `-----BEGIN OPENSSH ${"PRIVATE"} KEY-----`,
+      "b3BlbnNzaC1rZXktdjEAAAAA",
+      `-----END OPENSSH ${"PRIVATE"} KEY-----`,
+    ].join("\n");
+
+    async function fullAccessFixture(fullAccess: boolean) {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-full-")));
+      await mkdir(join(root, ".ssh"), { recursive: true });
+      await writeFile(join(root, ".ssh", "id_test"), `${fakeKey}\n`);
+      await mkdir(join(root, ".codex"), { recursive: true });
+      await writeFile(join(root, ".codex", "auth.json"), '{"token":"fake"}\n');
+      const fs = new NativeHarnessFileSystem({
+        root,
+        protectedFileRefusal: (path, atFullAccess) =>
+          secretGuardRefusal(path, {
+            platform: "darwin",
+            homeDirectory: root,
+            fullAccess: atFullAccess,
+          }),
+        fullAccess: () => fullAccess,
+      });
+      return { root, fs };
+    }
+
+    it("reads and edits a protected file, as Claude Code's own file tools do there", async () => {
+      const { fs } = await fullAccessFixture(true);
+      const read = await fs.read({ path: ".ssh/id_test" });
+      expect(read.kind).toBe("file");
+      expect(await fs.write({ path: ".ssh/id_new", content: "x" })).toMatchObject({
+        kind: "written",
+      });
+    });
+
+    it("still refuses a provider's stored sign-in", async () => {
+      const { fs } = await fullAccessFixture(true);
+      const outcome = await fs.read({ path: ".codex/auth.json" });
+      expect(outcome).toMatchObject({ kind: "refused", reason: "protected-file" });
+      if (outcome.kind !== "refused") return;
+      expect(outcome.message).toContain("Provider sign-ins");
+    });
+
+    it("keeps refusing a protected file below Full access", async () => {
+      const { fs } = await fullAccessFixture(false);
+      expect(await fs.read({ path: ".ssh/id_test" })).toMatchObject({
+        kind: "refused",
+        reason: "protected-file",
+      });
+    });
+
+    it("hands back a key whose value the record of the call never keeps", async () => {
+      const { fs } = await fullAccessFixture(true);
+      const read = await fs.read({ path: ".ssh/id_test" });
+      expect(read.kind).toBe("file");
+      if (read.kind !== "file") return;
+      // What a tool returns reaches the journal through the driver boundary's
+      // redaction (`redactProviderRuntimeEvent`), which uses this.
+      const recorded = redactHostSecretsInValue({ output: read.lines.join("\n") });
+      expect(recorded.output).not.toContain("b3BlbnNzaC1rZXktdjEAAAAA");
+      expect(recorded.output).toContain(SECRET_REDACTION);
+    });
   });
 });
 

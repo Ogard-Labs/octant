@@ -237,9 +237,32 @@ describe("provider runtime network", () => {
     ]);
   });
 
-  it("puts sandboxed runtimes behind the proxy by default, with no switch ever recorded", async () => {
+  it("leaves sandboxed runtimes on open network by default, with no switch ever recorded", async () => {
     const host = runtimeHost({ limitsOn: "store" });
-    expect(host.store.limitsOn()).toBe(true);
+    expect(host.store.limitsOn()).toBe(false);
+    for (const runtime of ["codex", "opencode", "acp", "pi", "claude-sandbox"] as const) {
+      expect(
+        await host.network.start({
+          runtime,
+          root: "/projects/app",
+          executionPolicy: "approval-gated",
+        }),
+      ).toEqual({ status: "open" });
+    }
+    expect(host.events(RUNTIME_NETWORK_AGGREGATE)).toEqual([]);
+    expect(host.events(SAFE_NETWORKS_AGGREGATE)).toEqual([]);
+  });
+
+  it("puts sandboxed runtimes behind the proxy once a person turns Network limits on", async () => {
+    const host = runtimeHost({ limitsOn: "store" });
+    expect(host.store.setLimits({ enabled: true, principal: "remote-device" })).toEqual({
+      kind: "refused",
+      reason: "needs-local-window",
+    });
+    expect(host.store.limitsOn()).toBe(false);
+    expect(host.store.setLimits({ enabled: true, principal: "local-window" })).toEqual({
+      kind: "changed",
+    });
     const launch = await started(
       host.network.start({
         runtime: "codex",
@@ -248,11 +271,14 @@ describe("provider runtime network", () => {
       }),
     );
     expect(launch.status).toBe("proxied");
-    expect(host.events(SAFE_NETWORKS_AGGREGATE)).toEqual([]);
+    expect(host.events(SAFE_NETWORKS_AGGREGATE).map((event) => event.eventName)).toEqual([
+      "safe-networks.limits-set@1",
+    ]);
   });
 
   it("keeps open Full access on open network, and tells a refused request where to trust the host", async () => {
     const host = runtimeHost({ limitsOn: "store" });
+    host.store.setLimits({ enabled: true, principal: "local-window" });
     expect(
       await host.network.start({
         runtime: "codex",
@@ -276,8 +302,9 @@ describe("provider runtime network", () => {
     expect(refused.answer).toContain("choose Trust beside it under Recently refused");
   });
 
-  it("leaves every runtime on open network once a person turns Network limits off, and journals the switch", async () => {
+  it("leaves every runtime on open network once a person turns Network limits back off, and journals the switch", async () => {
     const host = runtimeHost({ limitsOn: "store" });
+    host.store.setLimits({ enabled: true, principal: "local-window" });
     expect(host.store.setLimits({ enabled: false, principal: "remote-device" })).toEqual({
       kind: "refused",
       reason: "needs-local-window",
@@ -298,17 +325,18 @@ describe("provider runtime network", () => {
     expect(host.events(RUNTIME_NETWORK_AGGREGATE)).toEqual([]);
     expect(host.events(SAFE_NETWORKS_AGGREGATE).map((event) => event.eventName)).toEqual([
       "safe-networks.limits-set@1",
+      "safe-networks.limits-set@1",
     ]);
   });
 
-  it("replays the Network limits switch at startup, so a host that turned it off stays off", async () => {
+  it("replays the Network limits switch at startup, so a host that turned it on stays on", async () => {
     const first = runtimeHost({ limitsOn: "store" });
-    first.store.setLimits({ enabled: false, principal: "local-window" });
+    first.store.setLimits({ enabled: true, principal: "local-window" });
     const restarted = runtimeHost({ directory: first.directory, limitsOn: "store" });
-    expect(restarted.store.limitsOn()).toBe(false);
-    restarted.store.setLimits({ enabled: true, principal: "local-window" });
+    expect(restarted.store.limitsOn()).toBe(true);
+    restarted.store.setLimits({ enabled: false, principal: "local-window" });
     const again = runtimeHost({ directory: first.directory, limitsOn: "store" });
-    expect(again.store.limitsOn()).toBe(true);
+    expect(again.store.limitsOn()).toBe(false);
   });
 
   it("refuses a request without the launch token, and names no host for it", async () => {
@@ -803,7 +831,60 @@ describe("provider runtime network", () => {
     expect(host.events(SAFE_NETWORKS_AGGREGATE)).toEqual([]);
   });
 
-  it("serves the Safe networks view and refuses a paired device's change over the route", async () => {
+  it("lets a device the host's own person paired change Safe networks and Network limits, journaled with the device as actor", async () => {
+    const host = runtimeHost({ limitsOn: "store" });
+    const deviceId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const handler = createSafeNetworkRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: host.store,
+      network: host.network,
+      projectExists: (id) => id === projectId,
+      now: () => 1,
+    });
+    const send = async (command: unknown) => {
+      const request = new Request("http://127.0.0.1/api/access/safe-networks", {
+        method: "POST",
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "eeeeeeee-eeee-4eee-8eee-0000000000aa",
+          admittedBy: "host-person",
+        } as never,
+        scopeId: deviceId as never,
+      });
+      return await handler(request);
+    };
+    expect(
+      (
+        await send({
+          kind: "set-places",
+          scope: { kind: "account" },
+          places: [{ kind: "private-network", tag: "local-network" }],
+        })
+      )?.status,
+    ).toBe(200);
+    expect((await send({ kind: "set-limits", enabled: true }))?.status).toBe(200);
+    expect(host.store.limitsOn()).toBe(true);
+    const events = host.events(SAFE_NETWORKS_AGGREGATE);
+    expect(events.map((event) => event.eventName)).toEqual([
+      "safe-networks.places-set@1",
+      "safe-networks.limits-set@1",
+    ]);
+    for (const event of events) {
+      expect(event.actor).toEqual({ kind: "remote-device", actorId: deviceId, deviceId });
+      expect(event.payload).toMatchObject({ principal: { kind: "person-paired-device" } });
+    }
+  });
+
+  it("serves the Safe networks view and refuses a change from a device the hub's roster introduced over the route", async () => {
     const host = runtimeHost();
     const windowId = decodeWindowId("00000000-0000-4000-8000-000000000468");
     const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -847,7 +928,7 @@ describe("provider runtime network", () => {
       view: {
         account: [{ kind: "private-network", tag: "local-network" }],
         enforced: true,
-        limitsOn: true,
+        limitsOn: false,
       },
     });
     const read = await handler(

@@ -2,6 +2,7 @@ import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "./useExtensionDraftSelections";
@@ -108,6 +109,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
+    provider: composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
   });
   const family = providerFamilyForThread(props.providerGroups, props.selectedProviderInstanceId);
   const extensionDraft = useExtensionDraftSelections({

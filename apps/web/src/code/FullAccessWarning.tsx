@@ -4,7 +4,7 @@ import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
 export const FULL_ACCESS_WARNING =
-  "Agents can change any file and run any command without asking, with no sandbox. Protected files, such as SSH and cloud keys, are guarded by Octant's own tools and redaction only, and a shell command can read them.";
+  "Agents can change any file and run any command without asking, with no sandbox, and can read protected files such as SSH and cloud keys. Secret values are redacted from what Octant records.";
 
 /**
  * Where the warning was seen: this machine (its Settings default and first

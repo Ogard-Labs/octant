@@ -746,6 +746,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
     "/api/v1/shares",
     "Served by the public Canvas share service (apps/share in this repository, self-hosted by each user) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
   ],
+  [
+    "/api/command",
+    "Not served by Octant (2026-11-15): OpenCode 2's own server answers it, and the OpenCode driver in apps/server calls it to list OpenCode's commands, building the address from the runtime's server URL. The checker reads every /api path in apps/server as one Octant serves. Remove when the checker counts apps/server as a caller of a provider runtime's routes.",
+  ],
 ]);
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;

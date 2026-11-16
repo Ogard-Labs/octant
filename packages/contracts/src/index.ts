@@ -216,6 +216,10 @@ export * from "./simulatorDevice";
 export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
+export * from "./threadWakeups";
+export * from "./codeSessions";
+export * from "./workSessions";
+export * from "./providerNativeSession";
 export * from "./agentObservation";
 export * from "./hostAnswer";
 export * from "./terminalSessions";

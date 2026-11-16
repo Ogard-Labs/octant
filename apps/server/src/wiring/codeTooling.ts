@@ -1,4 +1,5 @@
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import { terminalShellFor } from "../code/terminalShell";
 import {
   resolveThreadWorkingDirectory,
   threadWorkingDirectoryCurrent,
@@ -125,7 +126,10 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     CodeRuntimeWiring,
     "codeOperationRuntime" | "contributeCodeTools" | "routeCodeService" | "terminalProcessPort"
   > &
-  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection"> &
+  Pick<
+    FoundationsWiring,
+    "browserAuthority" | "workThreadProjection" | "resolveThreadStrict" | "resolveProjectStrict"
+  > &
   Pick<HarnessStateWiring, "serverConnection" | "serverProjectStore"> &
   Pick<IntegrationsWiring, "toolEgressRules"> &
   Pick<
@@ -261,7 +265,16 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         ? undefined
         : new ProjectTerminalService({
             ...serverActions,
+            strict: ({ projectId, workThreadId }) =>
+              workThreadId === undefined
+                ? deps.resolveProjectStrict(String(projectId))
+                : deps.resolveThreadStrict(workThreadId),
             terminals: sharedTerminals,
+            shell: () =>
+              terminalShellFor({
+                platform: process.platform,
+                windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+              }),
             worktreePreparation,
             childWorktreeSources,
             readProject: persistence.readProject,

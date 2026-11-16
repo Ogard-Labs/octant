@@ -55,6 +55,7 @@ const launch: Schema.Schema<ProcessConfinementPrepareInput> = Schema.Struct({
   privateHomeAllowPaths: optionalPaths,
   ownAccountPaths: optionalPaths,
   ownAccountAccess: Schema.optionalWith(Schema.Literal("none"), { exact: true }),
+  protectedFiles: Schema.optionalWith(Schema.Literal("provider-sign-ins"), { exact: true }),
   extraRules: Schema.optionalWith(Schema.Array(text), { exact: true }),
   terminal: Schema.optionalWith(Schema.Struct({ shellStateDirectory: path }), { exact: true }),
   inboundRelay: Schema.optionalWith(Schema.Struct({ socketPath: path, port }), { exact: true }),

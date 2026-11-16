@@ -1,6 +1,9 @@
 import { compactAcpConversation } from "./acpCompaction";
+import { appToolBridgeReachesLaunchOn } from "./appToolBridgeHost";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
+import { providerCommandOf } from "@octant/domain";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 import {
   CorrelationId,
   UtcTimestamp,
@@ -19,6 +22,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
@@ -57,7 +61,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import type { AcpProviderProfile } from "./acpProfiles";
+import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -274,6 +278,30 @@ function baseCapabilities(
   } as const;
 }
 
+/**
+ * What an approval says when the agent asks about a call Octant never saw.
+ * The agent's own subagents run in Work and Code outside Plan wherever the
+ * person's setup carries them (maintainer decision, 2026-11-14), and a
+ * subagent's request names a call only the child saw, so it is shown plainly
+ * with Allow and Deny under the thread's level instead of failing the turn. A
+ * profile with its own sentence keeps it everywhere; elsewhere, and in Chat
+ * and Plan, such a request still fails the turn.
+ */
+function unnamedPermission(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+  executionPolicy: ProviderExecutionPolicy,
+  nativeSetup: ProviderNativeSetup | undefined,
+): { readonly unnamedPermissionDescription?: string } {
+  if (profile.unnamedPermissionDescription !== undefined) {
+    return { unnamedPermissionDescription: profile.unnamedPermissionDescription };
+  }
+  if (!acpSubagentsRun(mode, executionPolicy, nativeSetup)) return {};
+  return {
+    unnamedPermissionDescription: `A ${profile.displayName} subagent asks to run a tool. ${profile.displayName} doesn't say which.`,
+  };
+}
+
 /** Every ACP agent but a key provider loads none of its own setup. */
 const NO_NATIVE_SETUP = {
   subagents: "unsupported",
@@ -289,10 +317,7 @@ function negotiatedAppManagedTools(
   profile: AcpProviderProfile,
   version: string,
 ): ProviderCapabilitySupport {
-  // The managed bridge is a loopback HTTP endpoint. The current Linux
-  // Bubblewrap launch has no narrow host-loopback rule; sharing its network
-  // namespace would grant wider egress, so Linux stays fail-closed here.
-  return process.platform === "darwin" &&
+  return appToolBridgeReachesLaunchOn(process.platform) &&
     (initialized.agentCapabilities.mcpCapabilities?.http === true ||
       (initialized.agentCapabilities.mcpCapabilities?.http === undefined &&
         profile.unadvertisedHttpMcpVersions?.includes(version) === true))
@@ -573,6 +598,15 @@ function commandInventory(notification: AcpServerNotification): ReadonlyArray<st
   return names;
 }
 
+/** The commands an `available_commands_update` lists, with what the menu shows for each. */
+function advertisedCommandsOf(
+  notification: AcpServerNotification,
+): ReadonlyArray<ProviderSlashCommand> | undefined {
+  const update = notification.params.update;
+  if (update.sessionUpdate !== "available_commands_update") return undefined;
+  return advertisedSlashCommands(update.availableCommands);
+}
+
 function isReviewedCommandInventory(
   reviewed: ReadonlyArray<string>,
   commands: ReadonlyArray<string>,
@@ -764,6 +798,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const { connection, client } = yield* managedHomeClient;
+        // The agent lists its commands after `session/new`; the probe's
+        // client closes with its scope, and the listener with it.
+        let advertised: ReadonlyArray<ProviderSlashCommand> = [];
+        client.onNotification((notification) => {
+          const commands = advertisedCommandsOf(notification);
+          if (commands !== undefined) advertised = commands;
+        });
         if (profile.authenticateOnProbe) {
           yield* request(() => client.authenticate(), {
             stage: "authentication",
@@ -826,8 +867,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        options.runtimeRegistry.setObservedState(observed);
-        return observed;
+        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
+        options.runtimeRegistry.setObservedState(listed);
+        return listed;
       });
     },
     acquire: ({ instanceId, projectRoot, mode, extraFolders = [] }) => {
@@ -1070,6 +1112,10 @@ function makeConnection(
       if (notification.params.sessionId === state.sourceSessionId && commands !== undefined) {
         state.runtime.commands.clear();
         for (const command of commands) state.runtime.commands.add(command);
+        options.runtimeRegistry.setObservedCommands(
+          options.instanceId,
+          advertisedCommandsOf(notification) ?? [],
+        );
         return;
       }
       if (
@@ -1186,6 +1232,9 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
+      // An unseen subagent's run is journaled before the approval it asks for.
+      if (mapped.kind === "approval")
+        for (const preceding of mapped.preceding ?? []) offer(preceding);
       // Plan is read-only, so nothing it asks for is anyone's to approve. Work
       // and Code share the shell at the thread's level, so an `execute`
       // request reaches the person in Work as it does in Code.
@@ -1222,6 +1271,7 @@ function makeConnection(
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       source: AcpNewSessionResult,
       scope: Scope.CloseableScope,
@@ -1249,9 +1299,7 @@ function makeConnection(
         ...(profile.childRunMetaKey === undefined
           ? {}
           : { childRunMetaKey: profile.childRunMetaKey }),
-        ...(profile.unnamedPermissionDescription === undefined
-          ? {}
-          : { unnamedPermissionDescription: profile.unnamedPermissionDescription }),
+        ...unnamedPermission(profile, mode, input.executionPolicy, input.nativeSetup),
         ...(profile.unseenChildCalls === undefined
           ? {}
           : { unseenChildCalls: profile.unseenChildCalls }),
@@ -1306,6 +1354,7 @@ function makeConnection(
     const startProcess = async (
       executionPolicy: ProviderExecutionPolicy,
       fullAccessSandbox: boolean,
+      strict: boolean,
       loopbackPorts: ReadonlyArray<number> = [],
       tools: ReadonlyArray<ProviderToolDefinition> = [],
       nativeSetup?: ProviderNativeSetup,
@@ -1337,6 +1386,7 @@ function makeConnection(
               mode,
               executionPolicy,
               ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
+              ...(strict ? {} : { strict: false }),
               ...(apiKey === undefined ? {} : { apiKey }),
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               ...(nativeSetup === undefined ? {} : { nativeSetup }),
@@ -1382,6 +1432,7 @@ function makeConnection(
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly modelOptionValues?: ProviderModelOptionValues;
       readonly autoApprove?: boolean;
       readonly nativeSetup?: ProviderNativeSetup;
@@ -1472,6 +1523,10 @@ function makeConnection(
             // A process launched open never serves a sandboxed session, nor
             // the reverse: the wall is fixed when the process starts.
             input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+            // The launch environment and channel guards are fixed when the
+            // process starts, so a Strict process never serves a session that
+            // is not, nor the reverse.
+            input.strict !== false,
             // The agent's own reviewer is the session's mode and the person's
             // setup is its launch's guards and filesystem denies; a retained
             // process opened under either other value is never taken up.
@@ -1527,11 +1582,15 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
+            // A Project trusted for the agent, outside Plan, loads the files
+            // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+                ? profile.refusesProject?.(projectRoot)
+                : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
-            if (bridgeTools.length > 0 && process.platform !== "darwin") {
+            if (bridgeTools.length > 0 && !appToolBridgeReachesLaunchOn(process.platform)) {
               throw failure(
                 "unsupported",
                 "App-managed tools are unsupported by this ACP runtime on this platform.",
@@ -1542,6 +1601,7 @@ function makeConnection(
             const started = await startProcess(
               input.executionPolicy,
               input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+              input.strict !== false,
               managedTools?.bridge.port === undefined ? [] : [managedTools.bridge.port],
               input.tools,
               input.nativeSetup,
@@ -1559,6 +1619,10 @@ function makeConnection(
               commandSessionId ??= notification.params.sessionId;
               if (commandSessionId !== notification.params.sessionId) commandsMismatch = true;
               startupCommands = commands;
+              options.runtimeRegistry.setObservedCommands(
+                options.instanceId,
+                advertisedCommandsOf(notification) ?? [],
+              );
             });
             const appManagedTools = negotiatedAppManagedTools(
               connection.initialized,
@@ -1992,6 +2056,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           sourceSessionId: input.resumeCursor.value,
           ...(input.current === undefined ? {} : { current: input.current }),
           ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
@@ -2041,11 +2106,24 @@ function makeConnection(
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                if (profile.reviewedCommands !== undefined && prompt.trimStart().startsWith("/")) {
+                // An agent with a reviewed inventory runs only a command on
+                // that inventory, and one its session listed once it has
+                // listed any, so an unreviewed command cannot run. It does so
+                // in every mode; the level's tool rules decide what it does.
+                const reviewed = profile.reviewedCommands;
+                const opensWithSlash = prompt.trimStart().startsWith("/");
+                const listed = [...state.runtime.commands];
+                const command = providerCommandOf(
+                  input.prompt,
+                  (reviewed ?? [])
+                    .filter((commandName) => listed.length === 0 || listed.includes(commandName))
+                    .map((commandName) => ({ name: commandName })),
+                );
+                if (reviewed !== undefined && opensWithSlash && command === undefined) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} slash commands are disabled. Rephrase the request without a leading slash.`,
+                      `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }

@@ -60,15 +60,6 @@ function sources(instance: ProviderInstance, project: Project) {
   };
 }
 
-const WEB_TOOLS_ONLY = {
-  subagents: false,
-  webTools: true,
-  skills: false,
-  toolServers: false,
-  hooks: false,
-  projectCode: false,
-};
-
 describe("a session's native setup read from the journal", () => {
   it("runs the provider as itself for an account the person never changed", () => {
     expect(
@@ -88,7 +79,7 @@ describe("a session's native setup read from the journal", () => {
     });
   });
 
-  it("keeps only the runtime's web search for an account the person turned off, until its Project is trusted", () => {
+  it("loads nothing, web search and fetch included, for an account the person turned off until its Project is trusted", () => {
     const off = codex({ nativeSetup: false });
     expect(
       sessionNativeSetup(sources(off, codeProject()), {
@@ -97,7 +88,7 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toEqual(WEB_TOOLS_ONLY);
+    ).toBeUndefined();
 
     const trusted = codeProject({ nativeProviders: ["codex"] });
     expect(
@@ -107,7 +98,7 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toMatchObject({ subagents: true, projectCode: true });
+    ).toMatchObject({ subagents: true, webTools: false, projectCode: true });
 
     // Another provider's trust in the same Project does not count.
     expect(
@@ -117,7 +108,7 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toEqual(WEB_TOOLS_ONLY);
+    ).toBeUndefined();
   });
 
   it("loads a Project's own code only once the Project trusts this provider", () => {

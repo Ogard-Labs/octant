@@ -49,6 +49,14 @@ export const ThreadProviderHandoff = Schema.Struct({
    * the host's admission and the composer read this to stop waiting on it.
    */
   releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  /**
+   * Set when the host moved a coordinator's running worker on to its role's
+   * next model because its own stopped: the host-written reason, naming the
+   * old and new model and account and why. The transcript shows it where
+   * the move happened, whether or not the turn that continues the work was
+   * admitted.
+   */
+  continuedOnFallback: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(400))),
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 
@@ -82,9 +90,16 @@ export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 /**
  * The key providers: the runtimes that run inside Octant as they run on their
  * own, with their own subagents, web tools, skills, configuration, and a
- * trusted Project's code, once the person allows it.
+ * trusted Project's code, once the person allows it. Every ACP agent is one
+ * (maintainer decision, 2026-11-14): each reports in its `nativeSetup`
+ * capability which of those features its launch can load.
  */
-export const KEY_PROVIDER_DRIVER_KINDS = ["claude", "codex", "opencode", "mistral-vibe"] as const;
+export const KEY_PROVIDER_DRIVER_KINDS = [
+  "claude",
+  "codex",
+  "opencode",
+  ...ACP_AGENT_KINDS,
+] as const;
 export const KeyProviderDriverKind = Schema.Literal(...KEY_PROVIDER_DRIVER_KINDS);
 export type KeyProviderDriverKind = typeof KeyProviderDriverKind.Type;
 export const KeyProviderDriverKinds = Schema.Array(KeyProviderDriverKind).pipe(
@@ -1005,15 +1020,18 @@ export const OWN_MEMORY_PROVIDER_DRIVER_KINDS = [
 export type OwnMemoryProviderDriverKind = (typeof OWN_MEMORY_PROVIDER_DRIVER_KINDS)[number];
 
 /**
- * A Claude Code or Codex account the person let keep the provider's own
- * memory: the runtime reads and writes it by its own rules, across Projects
- * and outside Octant's journal, in the account's Work and Code sessions
- * outside Plan. Absent is off. Only `set-provider-own-memory`, sent from a
- * window on this host, changes it; "Run as itself" and Full access never do.
+ * Whether a Claude Code or Codex account keeps the provider's own memory: the
+ * runtime reads and writes it by its own rules, across Projects and outside
+ * Octant's journal, in the account's Work and Code sessions outside Plan.
+ * Absent is on, the default (maintainer decision, 2026-11-14); `false` means
+ * the person turned it off for this account. An earlier default kept it off
+ * until the person turned it on, so a record may still carry `true`, which
+ * reads as on. Only `set-provider-own-memory`, sent from a window on this
+ * host, changes it; "Run as itself" and Full access never do.
  */
 const OwnMemoryProviderInstanceFields = {
   ...KeyProviderInstanceFields,
-  ownMemory: Schema.optional(Schema.Literal(true)),
+  ownMemory: Schema.optional(Schema.Boolean),
 } as const;
 
 export const OpenCodeProviderInstance = Schema.Struct({
@@ -1036,8 +1054,8 @@ export const ClaudeProviderInstance = Schema.Struct({
 export type ClaudeProviderInstance = typeof ClaudeProviderInstance.Type;
 /**
  * An instance of any ACP agent; its configuration kind must match its driver
- * kind. Of the ACP agents only Mistral Vibe is a key provider, so only its
- * instance may carry `nativeSetup`.
+ * kind. Every ACP agent is a key provider, so any instance may carry
+ * `nativeSetup`.
  */
 export const AcpAgentProviderInstance = Schema.Struct({
   ...KeyProviderInstanceFields,
@@ -1047,9 +1065,7 @@ export const AcpAgentProviderInstance = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (instance) =>
-        instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind) &&
-        (instance.nativeSetup === undefined || instance.driverKind === "mistral-vibe"),
+      (instance) => instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind),
     ),
   );
 export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
@@ -1304,9 +1320,7 @@ export const ProviderInstanceNativeSetupChanged = Schema.Struct({
     OpenCodeProviderInstance,
     CodexProviderInstance,
     ClaudeProviderInstance,
-    AcpAgentProviderInstance.pipe(
-      Schema.filter((instance) => instance.driverKind === "mistral-vibe"),
-    ),
+    AcpAgentProviderInstance,
   ),
 }).annotations(strict);
 export type ProviderInstanceNativeSetupChanged = typeof ProviderInstanceNativeSetupChanged.Type;
@@ -1580,6 +1594,22 @@ export const ProviderCapabilities = Schema.Struct({
    */
   sessionRollback: Schema.optional(ProviderCapabilitySupport),
   /**
+   * Where this host lets the runtime run turns, when that is narrower than
+   * every mode: `chat` for Chat, `plan` for Plan in Work and Code, `work` and
+   * `code` for those modes at any other level. `unsupportedReason` says why a
+   * mode reads unsupported. Absent means every mode the other capabilities
+   * allow.
+   */
+  turnModes: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      plan: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+      unsupportedReason: Schema.optional(Schema.Literal("host-confinement")),
+    }).annotations(strict),
+  ),
+  /**
    * Whether one session's runtime process can be killed on its own, through
    * the connection's `forceStop`. A runtime that serves several threads from
    * one process reports `unsupported`, since killing it would end the others.
@@ -1737,6 +1767,18 @@ export const ProviderTurnInput = Schema.Struct({
   ),
   tools: Schema.Array(ProviderToolDefinition).pipe(
     Schema.filter((tools) => tools.length <= MAX_PROVIDER_TOOLS),
+  ),
+  /**
+   * The host let the native harness offer the provider's own web search this
+   * turn, as its research route chose. `withdrawAfterFirstStep` (below Full access)
+   * leaves it out of every request after the turn's first search or first
+   * tool answer, which may have read outside content the provider's own
+   * search could carry out in a query Octant never sees.
+   */
+  providerWebSearch: Schema.optional(
+    Schema.Struct({
+      withdrawAfterFirstStep: Schema.Boolean,
+    }).annotations(strict),
   ),
 }).annotations(strict);
 export type ProviderTurnInput = typeof ProviderTurnInput.Type;
@@ -2026,6 +2068,20 @@ export const ProviderModelToolCheck = Schema.Struct({
 }).annotations(strict);
 export type ProviderModelToolCheck = typeof ProviderModelToolCheck.Type;
 
+/**
+ * One of the provider's own slash commands, as its runtime listed it: Claude
+ * Code's commands and skills, an ACP agent's `available_commands_update`,
+ * OpenCode's commands. Choosing it in a composer sends `/name` to the
+ * runtime as the prompt.
+ */
+export const ProviderSlashCommand = Schema.Struct({
+  name: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9:_.-]*$/u), Schema.maxLength(128)),
+  description: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  argumentHint: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
+}).annotations(strict);
+export type ProviderSlashCommand = typeof ProviderSlashCommand.Type;
+export const MAX_PROVIDER_SLASH_COMMANDS = 256;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -2041,6 +2097,14 @@ export const ProviderObservedState = Schema.Struct({
   directoryBinding: Schema.optional(ProviderObservedDirectoryBinding),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
+  /**
+   * The provider's own slash commands its runtime last listed, by the probe
+   * or by a session that reported a change. Absent when it lists none or
+   * cannot say.
+   */
+  commands: Schema.optional(
+    Schema.Array(ProviderSlashCommand).pipe(Schema.maxItems(MAX_PROVIDER_SLASH_COMMANDS)),
+  ),
   // Models a person explicitly verified for tool support through the
   // verify-model-tools command, on any endpoint profile (OpenAI-compatible,
   // Anthropic-compatible, Azure AI Foundry). The sender gates tool requests
@@ -2085,6 +2149,11 @@ export const OutsideProviderDriverListing = Schema.Struct({
   installed: Schema.Boolean,
   trusted: Schema.Boolean,
   publisherKey: Schema.optional(ExtensionPublisherKeyFingerprint),
+  /**
+   * Present when this host has no confinement for the driver's process, so it
+   * runs without one (Linux). Absent where the host confines it (macOS).
+   */
+  hostConfinement: Schema.optional(Schema.Literal("unconfined")),
 }).annotations(strict);
 export type OutsideProviderDriverListing = typeof OutsideProviderDriverListing.Type;
 
@@ -2703,6 +2772,18 @@ const ProviderRuntimeEventFields = {
   occurredAt: UtcTimestamp,
 } as const;
 
+/**
+ * Token counts a runtime reported for one of its own subagents. Each count is
+ * present only when the runtime reported it: some runtimes report only a total.
+ */
+export const ProviderChildUsage = Schema.Struct({
+  inputTokens: Schema.optional(Schema.NonNegativeInt),
+  outputTokens: Schema.optional(Schema.NonNegativeInt),
+  totalTokens: Schema.optional(Schema.NonNegativeInt),
+}).annotations(strict);
+export type ProviderChildUsage = typeof ProviderChildUsage.Type;
+export const MAX_PROVIDER_CHILD_FINAL_SUMMARY = 2048;
+
 /** A provider report is observation only; it carries no execution authority. */
 export const ProviderChildActivityEvent = Schema.Struct({
   ...ProviderRuntimeEventFields,
@@ -2713,6 +2794,14 @@ export const ProviderChildActivityEvent = Schema.Struct({
   task: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
   status: Schema.Literal("starting", "running", "waiting", "completed", "failed"),
   summary: Schema.NonEmptyTrimmedString,
+  /**
+   * The subagent's own closing report, as the runtime relayed it. It is
+   * outside content: it is shown to the person and never sent to a model.
+   */
+  finalSummary: Schema.optional(
+    Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_PROVIDER_CHILD_FINAL_SUMMARY)),
+  ),
+  usage: Schema.optional(ProviderChildUsage),
 }).annotations(strict);
 export type ProviderChildActivityEvent = typeof ProviderChildActivityEvent.Type;
 
@@ -2734,6 +2823,8 @@ export const ProviderChildObservation = Schema.Struct({
     "unknown",
   ),
   latestSummary: Schema.String.pipe(Schema.maxLength(512)),
+  finalSummary: ProviderChildActivityEvent.fields.finalSummary,
+  usage: ProviderChildActivityEvent.fields.usage,
   firstObservedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
   historyStatus: Schema.Literal("partial", "truncated", "conflicted"),
@@ -2782,6 +2873,18 @@ export type ProviderApprovalCall = typeof ProviderApprovalCall.Type;
 
 /** The most of a runtime tool's result the Watcher is handed. */
 export const OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS = 65_536;
+
+/** A point in a runtime's own session, as the runtime names it. */
+export const ProviderNativeAnchor = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256));
+export type ProviderNativeAnchor = typeof ProviderNativeAnchor.Type;
+
+/** The most of a plan a runtime may put before the person when it asks to leave Plan. */
+export const MAX_PROVIDER_PLAN_CHARACTERS = 32_768;
+export const ProviderLevelChangeRequest = Schema.Struct({
+  kind: Schema.Literal("enter-plan", "exit-plan"),
+  plan: Schema.optional(Schema.String.pipe(Schema.maxLength(MAX_PROVIDER_PLAN_CHARACTERS))),
+}).annotations(strict);
+export type ProviderLevelChangeRequest = typeof ProviderLevelChangeRequest.Type;
 
 export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
@@ -3059,7 +3162,7 @@ export const ProviderRuntimeEvent = Schema.Union(
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("runtime-turn-started"),
-    trigger: Schema.Literal("background-task"),
+    trigger: Schema.Literal("background-task", "person-message"),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -3086,13 +3189,14 @@ export const ProviderRuntimeEvent = Schema.Union(
     requestId: Schema.NonEmptyTrimmedString,
     action: Schema.NonEmptyTrimmedString,
     description: Schema.NonEmptyTrimmedString,
-  }).annotations(strict),
-  Schema.Struct({
-    ...ProviderRuntimeEventFields,
-    kind: Schema.Literal("approval-request"),
-    requestId: Schema.NonEmptyTrimmedString,
-    action: Schema.NonEmptyTrimmedString,
-    description: Schema.NonEmptyTrimmedString,
+    /**
+     * The runtime asks to change the thread's level rather than to run a
+     * tool: `enter-plan` to plan read-only first, `exit-plan` to leave Plan
+     * and carry out `plan`. Only a session started with `levelChanges` asks
+     * this; the runtime never changes its own mode, and an approval applies
+     * from the thread's next session.
+     */
+    levelChange: Schema.optional(ProviderLevelChangeRequest),
   }).annotations(strict),
   /**
    * The runtime's own reviewer answered one approval itself, so the person was
@@ -3183,6 +3287,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     resumeCursor: Schema.optional(ProviderResumeCursor),
     /** Present only when the runtime said why this reply stopped. */
     stopReason: Schema.optional(ProviderOutputStopReason),
+    /**
+     * Where this turn ends in the runtime's own session, in the runtime's own
+     * terms (Claude's last assistant message id, a Codex turn id), so a fork
+     * or rewind can ask the runtime to cut its session there. Absent when the
+     * runtime names no such point.
+     */
+    nativeAnchor: Schema.optional(ProviderNativeAnchor),
   }).annotations(strict),
 );
 export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;

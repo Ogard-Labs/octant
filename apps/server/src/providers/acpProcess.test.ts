@@ -32,6 +32,7 @@ import {
   SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import { projectCodeEntries } from "@octant/domain";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -214,6 +215,38 @@ afterAll(() => {
 });
 
 describe.each(profiles)("ACP process boundary ($displayName)", (profile) => {
+  it("outside Strict passes the host's environment less Octant's variables, other providers' keys and the host names the profile withholds, and lifts only channel guards", () => {
+    const environment = sanitizeAcpEnvironment(
+      profile,
+      {
+        PATH: "/usr/bin",
+        HOME: "/Users/test",
+        HTTPS_PROXY: "http://proxy.invalid",
+        GH_TOKEN: "gh-token",
+        MISTRAL_API_KEY: "must-not-cross",
+        ANTHROPIC_API_KEY: "must-not-cross",
+        OCTANT_SECRET: "must-not-cross",
+      },
+      { managedHome: "/private/tmp/octant-acp-home", strict: false },
+    );
+    const channels = new Set(profile.process.channelGuards ?? []);
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin",
+      HTTPS_PROXY: "http://proxy.invalid",
+      GH_TOKEN: "gh-token",
+      ...Object.fromEntries(
+        Object.entries(profile.process.guards).filter(([name]) => !channels.has(name)),
+      ),
+    });
+    for (const name of channels) {
+      expect(environment[name]).toBeUndefined();
+    }
+    if (!profile.process.passthroughVariables.includes("HOME")) {
+      expect(environment.HOME).not.toBe("/Users/test");
+    }
+    expect(JSON.stringify(environment)).not.toContain("must-not-cross");
+  });
+
   it("forces feature denial and strips inherited credentials and executable authority", () => {
     const environment = sanitizeAcpEnvironment(
       profile,
@@ -655,9 +688,10 @@ describe("ACP child-server profiles", () => {
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
+    // An approval-gated launch asks before reaching a folder outside the Project.
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
       permissions: expect.arrayContaining([
-        { action: "external_directory", effect: "deny", resource: "*" },
+        { action: "external_directory", effect: "ask", resource: "*" },
         { action: "skill", effect: "deny", resource: "*" },
       ]),
     });
@@ -1793,6 +1827,47 @@ describe("ACP probe confinement", () => {
     expect(launch.environment.HTTPS_PROXY).toBe("http://octant:token@127.0.0.1:47001");
   });
 
+  it("carries the tool bridge on Linux: directly on the shared host network, and through the forwarder's relay when proxied", async () => {
+    const target = fixture(kilo);
+    const managedHome = join(target.canonicalRoot, "managed-home");
+    const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostAuthenticationPath, { recursive: true });
+    const prepare = (network?: { readonly path: string }) =>
+      Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "linux",
+          sandboxPath: target.bwrapPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath,
+        }).prepare({
+          profile: kilo,
+          binaryPath: target.binaryPath,
+          root: managedHome,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: {},
+          loopbackPorts: [43124],
+          ...(network === undefined
+            ? {}
+            : {
+                network: {
+                  endpoint: { kind: "unix-socket" as const, path: network.path },
+                  environment: { HTTPS_PROXY: "http://127.0.0.1:3128" },
+                },
+              }),
+        }),
+      );
+    const shared = await prepare();
+    expect(shared.args).toContain("--share-net");
+    expect(shared.args).not.toContain("--loopback");
+    const proxied = await prepare({ path: join(target.canonicalRoot, "egress.sock") });
+    expect(proxied.args).not.toContain("--share-net");
+    const relay = proxied.args.indexOf("--loopback");
+    expect(relay).toBeGreaterThan(-1);
+    expect(proxied.args[relay + 1]).toBe("43124");
+  });
+
   it("lets the agent's own ssh read the Project's server folder and use its agent socket", async () => {
     const target = fixture(kilo);
     const managedHome = join(target.canonicalRoot, "managed-home");
@@ -2318,5 +2393,129 @@ describe("Mistral Vibe running as itself", () => {
     expect(vibe.sessionMode("chat", "approval-gated", true)).toBe("ask");
     expect(vibe.sessionMode("code", "plan", true)).toBe("plan");
     expect(kimi.ownReviewer).toBeUndefined();
+  });
+});
+
+describe("ACP agents running as themselves", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  // What Plan and an untrusted Project carry: the person's skills, no Project code.
+  const untrusted = { ...everything, toolServers: false, hooks: false, projectCode: false };
+
+  it("holds each agent's Project entries until the Project is trusted for it, and the trust prompt names every one", () => {
+    for (const profile of Object.values(acpProviderProfiles)) {
+      const held = profile.process.forbiddenRootEntries ?? [];
+      const release = profile.process.nativeSetup;
+      if (profile.kind === "opencode") continue;
+      expect(release, profile.kind).toBeDefined();
+      if (release === undefined) continue;
+      const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };
+      const named = new Set(projectCodeEntries(profile.kind).map((entry) => entry.path));
+      const beforeTrust = new Set(release(untrusted, launch).releasedRootEntries);
+      for (const entry of held) {
+        expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
+        // An entry readable before trust is instruction text, never code.
+        if (beforeTrust.has(entry)) expect(entry, profile.kind).toBe("AGENTS.md");
+        else expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
+      }
+    }
+  });
+
+  it("starts an agent's own subagents at Guarded in Code and keeps them off in Plan and Chat", () => {
+    const grokGuard = (
+      executionPolicy: "approval-gated" | "plan",
+      mode: "code" | "chat",
+      nativeSetup: ProviderNativeSetup = everything,
+    ) =>
+      sanitizeAcpEnvironment(grok, {}, { managedHome: "/x", executionPolicy, mode, nativeSetup })
+        .GROK_SUBAGENTS;
+    expect(grokGuard("approval-gated", "code")).toBeUndefined();
+    expect(grokGuard("plan", "code", untrusted)).toBe("0");
+    expect(grokGuard("approval-gated", "chat")).toBe("0");
+    expect(grokGuard("approval-gated", "code", { ...everything, subagents: false })).toBe("0");
+
+    const devinConfig = (ownSubagents: boolean) =>
+      JSON.parse(
+        devin.process.managedFiles({
+          managedHome: "/x",
+          executionPolicy: "approval-gated",
+          ownSubagents,
+        })[0]?.content ?? "{}",
+      ) as { readonly subagents_enabled: boolean };
+    expect(devinConfig(true).subagents_enabled).toBe(true);
+    expect(devinConfig(false).subagents_enabled).toBe(false);
+  });
+
+  it("keeps Goose's Project plugins and skills unreadable until the Project is trusted", async () => {
+    const target = fixture(goose);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: goose,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const plugins = join(target.canonicalRoot, ".agents/plugins");
+    const denies = (args: ReadonlyArray<string>) =>
+      args.some((arg) => arg.includes(`(deny file-read* (subpath "${plugins}"))`));
+    expect(denies((await launch()).args)).toBe(true);
+    expect(denies((await launch(untrusted)).args)).toBe(true);
+    expect(denies((await launch(everything)).args)).toBe(false);
+  });
+
+  it("reads the person's own Kimi Code skills, servers and hooks with their setup, and none without it", async () => {
+    const target = fixture(kimi);
+    const hostDirectory = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostDirectory, { recursive: true });
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: hostDirectory,
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const deniesHome = (args: ReadonlyArray<string>, entry: string) =>
+      args.some((arg) => arg.includes(`${realpathSync(hostDirectory)}/${entry}"`));
+    const locked = (await launch()).args;
+    const own = (await launch(everything)).args;
+    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
+      expect(deniesHome(locked, entry), entry).toBe(true);
+      expect(deniesHome(own, entry), entry).toBe(false);
+    }
+    // Plan carries no hooks or servers, so those stay held while skills load.
+    const plan = (await launch(untrusted)).args;
+    expect(deniesHome(plan, "skills")).toBe(false);
+    expect(deniesHome(plan, "hooks")).toBe(true);
+    expect(deniesHome(plan, "mcp.json")).toBe(true);
   });
 });

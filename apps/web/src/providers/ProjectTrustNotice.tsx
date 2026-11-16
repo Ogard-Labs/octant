@@ -10,13 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ComposerNoticeItem } from "../composer/ComposerNotice";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useThreadNativeSetupServices } from "./ThreadNativeSetupControl";
-
-const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  "mistral-vibe": "Mistral Vibe",
-};
+import { keyProviderLabel } from "./providerSettingsPresentation";
 
 const KIND_WORDS: Readonly<Record<ProjectCodeKind, string>> = {
   settings: "settings",
@@ -26,6 +20,7 @@ const KIND_WORDS: Readonly<Record<ProjectCodeKind, string>> = {
   plugins: "plugins",
   tools: "tools",
   agents: "agents",
+  commands: "commands",
 };
 
 const DISMISSED_KEY = "octant.project-trust-prompt.not-now.v1";
@@ -71,7 +66,7 @@ export function projectTrustSentence(
   provider: KeyProviderDriverKind,
   found: ReadonlyArray<ProjectCodeKind>,
 ): string {
-  return `This Project has its own ${PROVIDER_NAMES[provider]} ${listWords(found.map((kind) => KIND_WORDS[kind]))}. They load once you trust this Project for ${PROVIDER_NAMES[provider]}.`;
+  return `This Project has its own ${keyProviderLabel(provider)} ${listWords(found.map((kind) => KIND_WORDS[kind]))}. They load once you trust this Project for ${keyProviderLabel(provider)}.`;
 }
 
 /**
@@ -149,7 +144,7 @@ export function useProjectTrustNotice(input: {
   if (trustedKinds.includes(projectCode.provider)) return undefined;
   const key = dismissalKey(projectId, projectCode.provider);
   if (dismissed.includes(key)) return undefined;
-  const name = PROVIDER_NAMES[projectCode.provider];
+  const name = keyProviderLabel(projectCode.provider);
   return {
     key: "project-trust",
     tone: "neutral",

@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { hostStartsThreadsAtOpenFullAccess } from "@octant/domain/guardrail-policy";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -131,6 +132,7 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -221,9 +223,11 @@ import {
 import {
   type NativeHarnessEndpointHooks,
   NativeHarnessEndpointRegistry,
+  NativeHarnessProviderSearchGrants,
 } from "../harness/nativeHarnessEndpointRegistry";
 import {
   appToolThreadLevel,
+  accountKeepsOwnMemory,
   browserToolTransport,
   claudePlanUsageStateDirectory,
   defaultShellSettings,
@@ -232,6 +236,7 @@ import {
   isNativeHarnessDriverKind,
   isKeyProviderDriverKind,
   providerKeepsConversation,
+  providerOwnSearchOrigin,
   resolveModelContextWindow,
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
@@ -244,7 +249,8 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkRequestStateWiring } from "./workRequestState";
-import { secretGuardEntries } from "../process/secretGuard";
+import { protectedAtLevel, secretGuardEntries } from "../process/secretGuard";
+import type { OpenCodeProtectedPaths } from "../providers/openCodeDriver";
 
 export interface ConfiguredProviderDriverOptions {
   readonly openCodeProcess: OpenCodeProcessPort;
@@ -265,8 +271,8 @@ export interface ConfiguredProviderDriverOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
-  /** The host's protected files and folders in force, as absolute paths. */
-  readonly protectedPaths?: () => ReadonlyArray<string>;
+  /** The host's protected files and folders in force, as absolute paths at each level. */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   readonly codexInstances?: ReadonlyArray<ProviderInstance>;
   readonly runtimeRegistry: ProviderRuntimeRegistry;
@@ -277,6 +283,8 @@ export interface ConfiguredProviderDriverOptions {
    */
   readonly compactionShare?: (keeper: "octant" | "runtime") => number | null;
   readonly permissionPersistence: () => PermissionPersistence;
+  /** The person's runtime-turn count from Settings, read when a runtime starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
@@ -435,6 +443,9 @@ export function makeConfiguredProviderDriver(
       // `claudeInstances` is a getter over the journal on the host's options;
       // reading it here at every call keeps a running session on the
       // person's current switch.
+      ...(options.runtimeTurnsPerTurn === undefined
+        ? {}
+        : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
       claudeArtifactDelivery: (instanceId) =>
         options.claudeInstances?.some(
           (candidate) =>
@@ -450,7 +461,7 @@ export function makeConfiguredProviderDriver(
           (candidate) =>
             String(candidate.id) === String(instanceId) &&
             (candidate.driverKind === "claude" || candidate.driverKind === "codex") &&
-            candidate.ownMemory === true,
+            accountKeepsOwnMemory(candidate),
         ) === true,
       ...(options.codexInstances === undefined ? {} : { codexInstances: options.codexInstances }),
       ...(options.credentialResolver === undefined
@@ -526,14 +537,19 @@ function runDirectEndpointOnNativeHarness(
 }
 
 /**
- * The protected files in force on this host, resolved here so a provider driver
- * receives the list and never reads the protected-file configuration itself.
- * A name pattern is given as its whole folder.
+ * The protected files in force on this host at each level, resolved here so a
+ * provider driver receives plain lists and never reads the protected-file
+ * configuration or its Full access policy itself. A name pattern is given as
+ * its whole folder.
  */
-function hostProtectedPaths(): ReadonlyArray<string> {
-  return secretGuardEntries({ platform: process.platform }).map((entry) =>
-    entry.kind === "path" ? entry.path : entry.directory,
-  );
+function hostProtectedPaths(): OpenCodeProtectedPaths {
+  const entries = secretGuardEntries({ platform: process.platform });
+  const pathOf = (entry: (typeof entries)[number]) =>
+    entry.kind === "path" ? entry.path : entry.directory;
+  return {
+    belowFullAccess: protectedAtLevel(entries, false).map(pathOf),
+    atFullAccess: protectedAtLevel(entries, true).map(pathOf),
+  };
 }
 
 export function pathIsProjectConfined(projectRoot: string, absolutePath: string): boolean {
@@ -643,7 +659,10 @@ export type ProvidersDependencies = Pick<
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+  >;
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
@@ -670,6 +689,8 @@ export function wireProviders(deps: ProvidersDependencies) {
     workThreadProjection,
     workRequestRuntime,
   } = deps;
+  // The trust a person already gave a Project's folder in Claude Code or Codex.
+  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     const codeThreadDrivers = new Map<
       string,
@@ -734,7 +755,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
     const codexProcessPort =
       options.codexProcess ??
-      makeCodexProcessLive({ octantVersion: version, runtimeNetwork, serverAccess });
+      makeCodexProcessLive({
+        octantVersion: version,
+        runtimeNetwork,
+        serverAccess,
+        windowsCatalogForOpenFullAccess: () =>
+          hostStartsThreadsAtOpenFullAccess({
+            code: persistence.readCodeSettings()?.settings,
+            work: workThreadProjection.settings(),
+          }),
+      });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
         Effect.suspend(() =>
@@ -1072,9 +1102,11 @@ export function wireProviders(deps: ProvidersDependencies) {
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
           isPairedDeviceScope: isRestrictedDeviceScope,
+          // The mark adds a network server's ask only under Strict; outside it
+          // the remembered grants decide as they did before the mark.
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
-              .externalContentIngested,
+              .externalContentIngested && deps.resolveThreadStrict(threadId),
           outsideContent: (threadId) =>
             readApprovalOutsideContent(persistence.connection, threadId),
           verifiedPublisherKey: (version) =>
@@ -1628,6 +1660,9 @@ export function wireProviders(deps: ProvidersDependencies) {
     // asks the fallback (built below, from the options these hooks are part
     // of) where to go when its own model stays down.
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
+    // Each harness turn's provider-search grant, tracked by the harness
+    // composition (wired later, in the harness area) and asked by the loop.
+    const nativeHarnessProviderSearchGrants = new NativeHarnessProviderSearchGrants();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
       // What a request teaches about its model's window is kept with the
@@ -1639,6 +1674,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       leadFallback: {
         next: (input) => nativeHarnessLeadFallback.next(input),
       },
+      ownSearchOn: (instanceId) => {
+        const instance = persistence.readProviderInstance(instanceId);
+        return instance !== undefined && providerOwnSearchOrigin(instance) !== undefined;
+      },
+      providerSearch: nativeHarnessProviderSearchGrants,
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
     const credentialBroker =
@@ -1938,6 +1978,7 @@ export function wireProviders(deps: ProvidersDependencies) {
               readCodeThread: (threadId) => persistence.readCodeThread(threadId),
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readProviderCliTrust: providerCliProjectTrust,
             },
             request,
           ),
@@ -2083,6 +2124,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       return openAdmittedSqlite(admission);
     };
     const configuredDriverOptions: ConfiguredProviderDriverOptions = {
+      runtimeTurnsPerTurn: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).runtimeTurnsPerTurn,
       compactionShare: (keeper) => {
         const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
         return keeper === "octant"
@@ -2361,6 +2404,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessLeadFallback,
+      nativeHarnessProviderSearchGrants,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       verifyModelToolsOnFirstUse,

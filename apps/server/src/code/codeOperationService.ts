@@ -99,7 +99,9 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
+import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import {
+  coordinatorTurnPosture,
   decideRunMerge,
   describedImageText,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -1094,6 +1096,8 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+    /** The window that answered, which a level change acts for. */
+    readonly windowId?: WindowId;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -1334,9 +1338,10 @@ export interface CodeOperationServiceOptions {
    */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /**
-   * Whether the thread has read outside content, read at each post. A marked
-   * thread's comment below Full access needs an approval for the act whatever
-   * the Project chose. Absent reads as marked.
+   * Whether the thread has read outside content under Strict, read at each
+   * post. Such a thread's comment below Full access needs an approval for the
+   * act whatever the Project chose; outside Strict the mark adds no ask.
+   * Absent reads as marked.
    */
   readonly threadReadOutsideContent?: (thread: CodeThread) => boolean;
   readonly reviewFindings: CodeOperationReviewFindingPort;
@@ -1371,8 +1376,15 @@ export interface CodeOperationServiceOptions {
     threadId: CodeThreadId,
     options?: { readonly includeRewound?: boolean },
   ) => ReadonlyArray<CodeConversationTurn> | undefined;
-  /** Whether the thread's provider reports it can cut its own session back. */
-  readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
+  /**
+   * Whether a rewind keeping turns through `lastKeptTurn` continues a copy of
+   * the provider's own session rather than a text handoff, as the rewind's
+   * preview promises it.
+   */
+  readonly supportsSessionRollback?: (
+    thread: CodeThread,
+    lastKeptTurn: CodeOperationId | undefined,
+  ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
    * Resolves the `#thread` mentions a Code turn names.
@@ -4469,6 +4481,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             approvalId: command.approvalId,
             decision: command.decision,
+            windowId,
           }),
         );
       case "force-stop-provider-turn":
@@ -5599,6 +5612,12 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
+    // A server thread's session is never copied on this host.
+    const native =
+      checkout.kind !== "remote-root" &&
+      (await Promise.resolve(
+        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+      ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
     if (point.kind !== "checkpoint") files = point;
@@ -5622,11 +5641,7 @@ export class CodeOperationService {
       fromOperationId: command.fromOperationId,
       removedTurns: turns.removed.length,
       files,
-      // A server thread's session is never copied on this host.
-      rollback:
-        checkout.kind !== "remote-root" && this.#options.supportsSessionRollback?.(thread) === true
-          ? "native"
-          : "handoff",
+      rollback: native ? "native" : "handoff",
     });
   }
 
@@ -6217,6 +6232,12 @@ export class CodeOperationService {
     folderCurrent?: () => boolean,
     includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
+    // `thread` carries the level this turn runs at: the composer's, a
+    // recorded start's, or a coordinator's Plan, clamped to the thread's own.
+    // Checked before the worktree is prepared or any runtime starts.
+    const sandboxRefusal = hostSandboxRefusal({ platform: process.platform, access: thread });
+    if (sandboxRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(
@@ -6974,15 +6995,14 @@ function turnAccessPosture(
   recorded: CodeThread["executionPolicy"] | undefined,
   coordinator: boolean,
 ): CodeThread["executionPolicy"] {
-  // A coordinator reads and its workers write: every one of its turns runs
-  // under Plan's read-only gate, whatever level the person gave the thread.
-  // That level stays on the thread as the ceiling for the workers it starts.
-  if (coordinator) return "plan";
   const requested = recorded ?? command.executionPolicy;
-  return clampTurnAccessPosture({
+  const posture = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
+  // A coordinator reads and its workers write: below Full access its turns
+  // run under Plan's read-only gate, whatever level the person gave the thread.
+  return coordinator ? coordinatorTurnPosture(posture) : posture;
 }
 
 function threadForTurn(

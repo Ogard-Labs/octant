@@ -1045,6 +1045,36 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps the Windows terminal shell a person chose across later default changes, and stores nothing for Windows PowerShell", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      windowsTerminalShell: "pwsh",
+    });
+    expect(chosen).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      windowsTerminalShell: "powershell",
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(back.settings.windowsTerminalShell).toBeUndefined();
+  });
+
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
     const fixture = serviceFixture();
     const defaults = {
@@ -1175,6 +1205,25 @@ describe("CodeService commands", () => {
     expect(updated).not.toHaveProperty("settings.allowDefaultFolderThreads");
   });
 
+  it("refuses a new thread that carries a host move's continued-on-fallback reason", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const spoofed = thread({
+      executionPolicy: "approval-gated",
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider,
+        previousModelId: "model-a",
+        nextProviderInstanceId: ids.provider,
+        nextModelId: "model-b",
+        changedAt: "2026-11-15T12:00:00.000Z",
+        continuedOnFallback: "Words a client wrote",
+      } as never,
+    });
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: spoofed }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("journals an authorized new thread at expected aggregate version zero", async () => {
     const created = thread({ executionPolicy: "approval-gated" });
     const fixture = serviceFixture({ threads: [] });
@@ -1298,6 +1347,66 @@ describe("CodeService commands", () => {
     expect(restarted).toMatchObject({
       thread: { coordinatorChoice: { rank: { fallback: 1 } } },
     });
+  });
+
+  it("records the host's continued-on-fallback reason on the hand-off, and only the host's", async () => {
+    const worker = () =>
+      thread({
+        coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+        coordinatorChoice: { role: "default", rank: "main" },
+      });
+    const reason = "model-a (Work) at usage limit; continued on model-b (Work)";
+    const continued = await serviceFixture({ threads: [worker()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason,
+          move: "continued-on-fallback",
+        },
+      },
+    );
+    expect(continued).toMatchObject({
+      thread: { providerHandoff: { nextModelId: "model-b", continuedOnFallback: reason } },
+    });
+    // A person's own move carries no reason, and neither does a thread a person started.
+    const byPerson = await serviceFixture({ threads: [worker()] }).service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(
+      byPerson.kind === "thread-updated" && byPerson.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
+    const personThread = await serviceFixture({ threads: [thread()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: { role: "default", rank: "main", reason, move: "continued-on-fallback" },
+      },
+    );
+    expect(
+      personThread.kind === "thread-updated" &&
+        personThread.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
   });
 
   it("returns to provider defaults when a reasoning choice is cleared or the model changes", async () => {
@@ -2146,6 +2255,46 @@ describe("CodeService commands", () => {
       });
     });
 
+    it("records where an agent's approved plan returns a thread, and never Full access", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-code-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1 as never,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+          planReturnPolicy: "full-access",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      const planned = await fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        planReturnPolicy: "auto-accept-edits",
+      });
+      expect(planned).toMatchObject({
+        thread: { executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" },
+      });
+      const inPlan = serviceFixture({
+        threads: [thread({ executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      const back = await inPlan.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "auto-accept-edits",
+        permissionPersistence: "current-session",
+      });
+      expect("thread" in back ? back.thread : undefined).not.toHaveProperty("planReturnPolicy");
+    });
+
     it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
       const raised = serviceFixture({
         threads: [thread({ executionPolicy: "full-access" })],
@@ -2175,6 +2324,39 @@ describe("CodeService commands", () => {
       expect(
         "thread" in result && result.thread !== undefined
           ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+          : "missing",
+      ).toBeUndefined();
+    });
+
+    it("keeps a Code thread's Strict choice across a mode change and drops it when the change returns the thread to its defaults", async () => {
+      const kept = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const unchanged = await kept.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(unchanged).toMatchObject({ thread: { strict: false } });
+
+      const reset = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const result = await reset.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        strict: null,
+      });
+      expect(
+        "thread" in result && result.thread !== undefined
+          ? (result.thread as { strict?: boolean }).strict
           : "missing",
       ).toBeUndefined();
     });

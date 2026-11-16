@@ -11,6 +11,7 @@ import {
   type CoordinatorBounds,
   type CoordinatorStartInput,
   type CoordinatorWorkerChoice,
+  type CoordinatorWorkerNotice,
   type CoordinatorWorkerState,
   type NativeHarnessSlotCandidate,
   type Project,
@@ -26,6 +27,7 @@ import {
   decideMessageWake,
   describeWorkerCandidateRejection,
   effectiveWorkerRoleSlot,
+  nextWorkerFallback,
   readsAsCoordinator,
   WORKER_ROLE_CALL_NAMES,
   WORKER_ROLE_NAMES,
@@ -33,6 +35,7 @@ import {
   workerClockTime,
   workerModelHandles,
   workerRolesConfigured,
+  type MessageWakeDefaults,
   type WorkerCandidateVerdict,
   type WorkerChoiceRequest,
   type WorkerModelChoice,
@@ -51,6 +54,8 @@ export const MAX_COORDINATOR_ROSTER_ROWS = 32;
 export const COORDINATOR_TRACK_RECORD_WORKERS = 20;
 /** A worker's first turn is watched this long for a failure before any work. */
 const FIRST_TURN_WATCH_MS = 15 * 60_000;
+/** Stopped turns remembered so one stop moves a worker once; the walk itself only goes forward. */
+const MAX_REMEMBERED_STOPS = 512;
 const HOUR_MS = 60 * 60_000;
 
 /** What the coordinator service reads and does through the host. */
@@ -144,14 +149,42 @@ export interface CoordinatorServicePorts {
   readonly wakes?: CoordinatorWakes;
   readonly uuid: () => string;
   readonly now: () => number;
+  /** Settings' message-wake bounds for a thread no coordinator bounded, read at each wake. */
+  readonly messageWakeDefaults?: () => MessageWakeDefaults;
   readonly onError?: (message: string, error: unknown) => void;
 }
 
 type ToolAnswer = { readonly result: unknown; readonly isError: boolean };
 
 interface PendingNotice {
-  readonly state: CoordinatorWorkerState;
+  readonly state: CoordinatorWorkerNotice;
   readonly at: string;
+  /** The worker, when the notice's key is not its thread id alone. */
+  readonly worker?: string;
+}
+
+/** A continued-on-fallback notice sits beside the worker's state notice, never in its place. */
+function continuedNoticeKey(workerId: string): string {
+  return `${workerId} continued-on-fallback`;
+}
+
+/** Why a running worker's model stopped, as the host read it. */
+type WorkerStop = "usage-limit" | "down";
+
+/**
+ * What the host tells a worker it moved on, as the opening of the turn that
+ * continues the work. Host-written from its own facts; the model names are
+ * the provider's and the account names the person's.
+ */
+export function continuedOnFallbackPrompt(input: {
+  readonly from: string;
+  readonly fromAccount: string;
+  readonly to: string;
+  readonly toAccount: string;
+  readonly stop: WorkerStop;
+}): string {
+  const why = input.stop === "usage-limit" ? "hit its usage limit" : "was unavailable";
+  return `Octant moved this thread from ${input.from} (${input.fromAccount}) to ${input.to} (${input.toAccount}) because ${input.from} ${why}; your role's fallback list allows this. Inspect the saved conversation and any work already performed, then continue where you left off. Do not blindly repeat operations that may already have taken effect. Ask again for any approval or answer still needed.`;
 }
 
 /** The model a start resolved: from the roles, or the call's own (no roles configured). */
@@ -201,6 +234,8 @@ export class CoordinatorService {
   readonly #notices = new Map<string, Map<string, PendingNotice>>();
   readonly #noticeHops = new Map<string, number>();
   readonly #firstTurns = new Map<string, WatchedFirstTurn>();
+  /** Stopped turns a fallback was already decided for, so one stop moves a worker once. */
+  readonly #continuedStops = new Set<string>();
   #sweepTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(ports: CoordinatorServicePorts) {
@@ -407,7 +442,15 @@ export class CoordinatorService {
         : { reviewedProviderKind: filters.reviewedProviderKind }),
     });
     if (choice.kind === "refused") return { status: "refused", message: choice.message };
-    return { status: "chosen", resolved: this.#resolvedFrom(project, choice, undefined) };
+    return {
+      status: "chosen",
+      resolved: this.#resolvedFrom(project, choice, undefined, undefined, {
+        ...(filters.needsImages === true ? { needsImages: true } : {}),
+        ...(filters.reviewedProviderKind === undefined
+          ? {}
+          : { reviewedProviderKind: filters.reviewedProviderKind }),
+      }),
+    };
   }
 
   #chooseFromRoles(
@@ -493,6 +536,8 @@ export class CoordinatorService {
         project,
         choice,
         call.role !== undefined || call.model !== undefined ? call.why : undefined,
+        undefined,
+        request,
       ),
       request,
       asksFirst: choice.kind === "propose",
@@ -504,6 +549,7 @@ export class CoordinatorService {
     choice: Extract<WorkerModelChoice, { readonly kind: "start" | "propose" }>,
     why: string | undefined,
     reasonPrefix?: string,
+    filters: Pick<WorkerChoiceRequest, "needsImages" | "reviewedProviderKind"> = {},
   ): ResolvedWorkerModel {
     const reason =
       reasonPrefix === undefined
@@ -518,6 +564,11 @@ export class CoordinatorService {
         rank: choice.rank,
         ...(reason === undefined || reason === "" ? {} : { reason: reason.slice(0, 400) }),
         ...(why === undefined ? {} : { why }),
+        // The start's filters, so a later move to the next model keeps them.
+        ...(filters.needsImages === true ? { needsImages: true as const } : {}),
+        ...(filters.reviewedProviderKind === undefined
+          ? {}
+          : { reviewedProviderKind: filters.reviewedProviderKind.slice(0, 128) }),
       },
       ...(label === undefined ? {} : { modelName: label.slice(0, 256) }),
     };
@@ -668,9 +719,10 @@ export class CoordinatorService {
     });
     const notices = this.#notices.get(threadId);
     this.#notices.delete(threadId);
-    const changes = [...(notices?.entries() ?? [])].map(
-      ([workerId, notice]) =>
-        `- ${workerId}@${String(coordinator.projectId)} became ${notice.state} at ${notice.at}`,
+    const changes = [...(notices?.entries() ?? [])].map(([key, notice]) =>
+      notice.state === "continued-on-fallback"
+        ? `- ${notice.worker ?? key}@${String(coordinator.projectId)} continued-on-fallback at ${notice.at}: its model stopped and Octant moved it to the next model of its role`
+        : `- ${key}@${String(coordinator.projectId)} became ${notice.state} at ${notice.at}`,
     );
     return [
       "Coordinator roster, written by Octant from its own records (no agent wrote this).",
@@ -971,6 +1023,7 @@ export class CoordinatorService {
       choice,
       worker.coordinatorChoice?.why,
       `first request on ${failedName} failed before any work`,
+      watch.request,
     );
     if (resolved.choice === undefined || this.#ports.moveWorkerToModel === undefined) return;
     const moved = await this.#ports.moveWorkerToModel(worker, choice.candidate, resolved.choice);
@@ -989,6 +1042,159 @@ export class CoordinatorService {
       tried: [...tried, `${resolved.providerInstanceId}:${resolved.modelId}`],
       startedAt: this.#ports.now(),
     });
+  }
+
+  /**
+   * A coordinator's running worker whose model just stopped on a usage limit
+   * or an outage carries on with the next model of its role, when the role's
+   * **Continue on the fallback if the model stops** box allows it
+   * (docs/design/coordinator-threads.md, Running workers). The person's
+   * fallback list is their consent; it never applies to a thread a person
+   * started, a coordinator, a thread put away, marked Done, snoozed or
+   * archived, one a person moved to a model of their own, or one with the
+   * person's own usage-limit hand-off. The move is the ordinary provider
+   * change, made as the host and recorded with `continued-on-fallback`;
+   * the work then continues with one host turn under the ordinary
+   * admission, which tells the model it was moved. The walk only goes
+   * forward ({@link nextWorkerFallback}), so a worker moves through its list
+   * at most once; with nothing left it pauses as before.
+   *
+   * `availability` is what the failed request said; without it, a stop
+   * counts only while the host's own facts hold the account at its limit
+   * (a plan-usage reading or an earlier request's limit signal).
+   */
+  async continueOnFallback(
+    workerId: string,
+    availability: WorkerStop | undefined,
+    stopped: {
+      readonly operationId: string;
+      readonly providerInstanceId: string;
+      readonly modelId: string;
+    },
+  ): Promise<"continued" | "stays"> {
+    const worker = this.#ports.readThread(workerId);
+    const choice = worker?.coordinatorChoice;
+    if (
+      worker === undefined ||
+      choice === undefined ||
+      worker.coordinatorThreadId === undefined ||
+      worker.coordinator === true ||
+      this.#isPlanner(worker) ||
+      worker.lifecycle !== "active" ||
+      worker.completedAt !== undefined ||
+      worker.markedDoneAt !== undefined ||
+      worker.snooze !== undefined ||
+      // The person's own per-thread hand-off decides this thread's limits.
+      worker.usageLimitHandoff !== undefined
+    ) {
+      return "stays";
+    }
+    // Only the turn that stopped, on the model it ran on: a turn a person
+    // started since, or a model anyone picked since, owns the next step.
+    const operationId = stopped.operationId;
+    if (
+      this.#ports.latestTurnId(workerId) !== operationId ||
+      String(worker.providerInstanceId) !== stopped.providerInstanceId ||
+      String(worker.modelId) !== stopped.modelId ||
+      this.#ports.threadState(workerId) === "working" ||
+      this.#continuedStops.has(operationId)
+    ) {
+      return "stays";
+    }
+    // A first turn that failed before any work is still the start; the
+    // first-request watch moves it.
+    const watch = this.#firstTurns.get(workerId);
+    if (
+      watch?.operationId === operationId &&
+      this.#ports.firstTurnFailedBeforeWork?.(workerId, operationId) === true
+    ) {
+      return "stays";
+    }
+    const coordinator = this.#ports.readThread(String(worker.coordinatorThreadId));
+    const project = this.#ports.readProject(worker.projectId);
+    const roles = this.#ports.readRoles?.(worker.projectId);
+    if (
+      coordinator === undefined ||
+      !this.#readsAsCoordinator(coordinator) ||
+      project === undefined ||
+      roles === undefined ||
+      this.#ports.moveWorkerToModel === undefined
+    ) {
+      return "stays";
+    }
+    const failed = this.#ports.candidateFacts?.(project, worker);
+    const stop: WorkerStop | undefined =
+      availability ?? (failed?.usageLimit === undefined ? undefined : "usage-limit");
+    if (stop === undefined) return "stays";
+    this.#continuedStops.add(operationId);
+    if (this.#continuedStops.size > MAX_REMEMBERED_STOPS) {
+      const oldest = this.#continuedStops.values().next().value;
+      if (oldest !== undefined) this.#continuedStops.delete(oldest);
+    }
+    const failedProvider = String(worker.providerInstanceId);
+    if (stop === "down") this.#ports.markProviderDown?.(failedProvider);
+    // The model that stopped is out for this move; its siblings on the same
+    // account are judged by the host's own facts (the marks its failure
+    // left, the plan-usage reading), since some limits are per model.
+    const next = nextWorkerFallback(
+      roles,
+      this.#choiceFacts(project, roles, [candidateKey(worker)]),
+      { current: worker, choice },
+    );
+    if (next.kind !== "continue") return "stays";
+    const fromName = failed?.label ?? String(worker.modelId);
+    const fromAccount = failed?.providerName ?? failedProvider;
+    const to = this.#ports.candidateFacts?.(project, next.candidate);
+    const toName = to?.label ?? String(next.candidate.modelId);
+    const toAccount = to?.providerName ?? String(next.candidate.providerInstanceId);
+    const reason = `${fromName} (${fromAccount}) ${
+      stop === "usage-limit" ? "at usage limit" : "unavailable"
+    }; continued on ${toName} (${toAccount})`;
+    const nextChoice: CoordinatorWorkerChoice = {
+      role: next.role,
+      rank: next.rank,
+      reason: reason.slice(0, 400).trim(),
+      ...(choice.why === undefined ? {} : { why: choice.why }),
+      ...(choice.needsImages === true ? { needsImages: true as const } : {}),
+      ...(choice.reviewedProviderKind === undefined
+        ? {}
+        : { reviewedProviderKind: choice.reviewedProviderKind }),
+      move: "continued-on-fallback",
+    };
+    const moved = await this.#ports.moveWorkerToModel(worker, next.candidate, nextChoice);
+    if (moved !== "moved") return "stays";
+    this.#firstTurns.delete(workerId);
+    const prompt = continuedOnFallbackPrompt({
+      from: fromName,
+      fromAccount,
+      to: toName,
+      toAccount,
+      stop,
+    });
+    const turn = await this.#ports.startHostTurn(worker.id, prompt);
+    if (turn.status === "started") {
+      this.#ports.counts.recordHostTurn(workerId, {
+        operationId: turn.operationId,
+        hop: this.#ports.counts.hostTurn(workerId)?.hop ?? 0,
+      });
+    }
+    // The coordinator hears of the move whether the continuing turn was
+    // admitted or refused; a refusal leaves the worker idle on its new model.
+    const coordinatorId = String(coordinator.id);
+    const pending = this.#notices.get(coordinatorId) ?? new Map<string, PendingNotice>();
+    const notice: PendingNotice = {
+      state: "continued-on-fallback",
+      at: new Date(this.#ports.now()).toISOString(),
+      worker: workerId,
+    };
+    pending.set(continuedNoticeKey(workerId), notice);
+    this.#notices.set(coordinatorId, pending);
+    const hop = this.#hopFrom(workerId);
+    this.#noticeHops.set(coordinatorId, hop);
+    await this.#maybeWake(coordinatorId, workerId, hop, { kind: "notice", notice }).catch(
+      (error: unknown) => this.#ports.onError?.("A wake turn failed to start.", error),
+    );
+    return "continued";
   }
 
   async #maybeWake(
@@ -1017,6 +1223,7 @@ export class CoordinatorService {
       wakeTurnRunning: false,
       wakeTurnsInLastHour: this.#ports.counts.wakesSince(recipientId, now - HOUR_MS),
       bounds: this.#boundsFor(recipient),
+      defaults: this.#ports.messageWakeDefaults?.(),
     });
     if (decision.status !== "wake") return;
     this.#ports.counts.recordWake(recipientId, now);
@@ -1029,7 +1236,9 @@ export class CoordinatorService {
       senderThreadId: senderId,
       hop,
       ...(cause.kind === "notice" && cause.notice !== undefined
-        ? { notice: { workerThreadId: senderId, ...cause.notice } }
+        ? {
+            notice: { workerThreadId: senderId, state: cause.notice.state, at: cause.notice.at },
+          }
         : {}),
     });
     await this.#startWakeTurn(recipient.id, wakeId, senderId, hop, cause.kind);
@@ -1102,6 +1311,7 @@ export class CoordinatorService {
             hop: wake.hop,
             wakeTurnRunning: false,
             wakeTurnsInLastHour: 0,
+            defaults: this.#ports.messageWakeDefaults?.(),
           });
     if (recipient === undefined || decision?.status !== "wake") {
       this.#ports.wakes?.settled(wake.threadId, { wakeId: wake.wakeId, outcome: "dropped" });
@@ -1109,7 +1319,11 @@ export class CoordinatorService {
     }
     if (wake.notice !== undefined) {
       const pending = this.#notices.get(wake.threadId) ?? new Map<string, PendingNotice>();
-      pending.set(wake.notice.workerThreadId, { state: wake.notice.state, at: wake.notice.at });
+      const worker = wake.notice.workerThreadId;
+      pending.set(
+        wake.notice.state === "continued-on-fallback" ? continuedNoticeKey(worker) : worker,
+        { state: wake.notice.state, at: wake.notice.at, worker },
+      );
       this.#notices.set(wake.threadId, pending);
     }
     const turn = await this.#startWakeTurn(

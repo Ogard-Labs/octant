@@ -1,7 +1,8 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import { ChildResultCards } from "./ChildResultCards";
+import { decodeAgentRunId, decodeUtcTimestamp } from "@octant/contracts";
+import { ChildResultCards, SteeredChildResults } from "./ChildResultCards";
 import { isChildResultDelivery, parseChildResultDelivery } from "./childResultDelivery";
 
 const run = "0b9d3f40-5a52-4a1e-8c11-111111111111";
@@ -132,5 +133,39 @@ describe("ChildResultCards", () => {
       "aria-expanded",
       "true",
     );
+  });
+});
+
+describe("a child result steered into a running turn", () => {
+  it("shows the same attributed card, labelled as delivered into the running turn", () => {
+    const runId = decodeAgentRunId(run);
+    render(
+      <SteeredChildResults
+        steered={[
+          {
+            delivery: {
+              kind: "agent-result",
+              runId,
+              runIds: [runId],
+              runGenerations: [{ runId, generation: 2 }],
+            },
+            body: finished,
+            steeredAt: decodeUtcTimestamp("2026-11-15T12:00:00.000Z"),
+          },
+        ]}
+      />,
+    );
+    const delivered = screen.getByRole("article", {
+      name: "Subagent results delivered into the running turn",
+    });
+    expect(within(delivered).getByText("Delivered into the running turn")).toBeTruthy();
+    expect(
+      within(delivered).getByRole("article", { name: "Research subagent finished" }),
+    ).toHaveTextContent("MATRIX-A1");
+  });
+
+  it("shows nothing for a turn that took no steered result", () => {
+    const { container } = render(<SteeredChildResults steered={undefined} />);
+    expect(container.childElementCount).toBe(0);
   });
 });

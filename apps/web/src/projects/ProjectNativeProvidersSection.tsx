@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/providers";
 import { useState } from "react";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { keyProviderLabel } from "../providers/providerSettingsPresentation";
 
 type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
 
@@ -15,19 +16,13 @@ export interface ProjectNativeProvidersSectionProps {
   readonly disabled?: boolean;
 }
 
-const PROVIDER_NAMES: Readonly<Record<KeyProviderDriverKind, string>> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  opencode: "OpenCode",
-  "mistral-vibe": "Mistral Vibe",
-};
-
 /**
  * Which key providers this Project trusts to run as themselves here: each
  * one checked loads its own setup in this Project's threads and the
  * Project's own settings, hooks, MCP servers, plugins, and tools, at every
  * level but Plan. Unchecked, a provider loads none of the Project's code,
- * even at Full access. Only a window on this host can change it.
+ * even at Full access. Only the host's own person can change it, at a window
+ * on this host or on a device they paired.
  */
 export function ProjectNativeProvidersSection(props: ProjectNativeProvidersSectionProps) {
   const trusted = new Set(props.project.nativeProviders ?? []);
@@ -73,7 +68,7 @@ export function ProjectNativeProvidersSection(props: ProjectNativeProvidersSecti
               disabled={disabled}
               onChange={() => void toggle(kind)}
             />
-            <span>{PROVIDER_NAMES[kind]}</span>
+            <span>{keyProviderLabel(kind)}</span>
           </label>
         ))}
       </div>

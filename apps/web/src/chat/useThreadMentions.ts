@@ -261,7 +261,10 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     if (client === undefined || chips.length === 0) return threadIds;
     let resolved;
     try {
-      resolved = await client.resolve(newRequestId(), threadIds);
+      resolved =
+        readerThreadId === undefined
+          ? await client.resolve(newRequestId(), threadIds)
+          : await client.resolve(newRequestId(), threadIds, undefined, readerThreadId);
     } catch {
       if (mounted.current) {
         setStatusMessage("Mentioned threads could not be read. Nothing was included.");
@@ -288,7 +291,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
       );
     }
     return threadIds;
-  }, [chips, client, newRequestId]);
+  }, [chips, client, newRequestId, readerThreadId]);
 
   const canOpenSideChat = options.onSideChatOpened !== undefined;
   const composer = useMemo((): ChatComposerThreadMentions | undefined => {

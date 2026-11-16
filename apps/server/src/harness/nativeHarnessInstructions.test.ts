@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { nativeHarnessInstructions, nativeHarnessToolGuide } from "./nativeHarnessInstructions";
+import {
+  nativeHarnessInstructions,
+  nativeHarnessToolGuide,
+  windowsShellInstruction,
+} from "./nativeHarnessInstructions";
 
 const chatText = () =>
   nativeHarnessInstructions("chat")
@@ -7,6 +11,35 @@ const chatText = () =>
     .join("\n");
 
 describe("native harness instructions", () => {
+  it.each([
+    [undefined, /Windows PowerShell 5\.1/],
+    ["powershell", /Windows PowerShell 5\.1/],
+    ["pwsh", /PowerShell 7/],
+    ["cmd", /Command Prompt batch script under cmd\.exe/],
+  ] as const)(
+    "tells a Work or Code lead on a Windows host which shell runs its commands (%s)",
+    (windowsShell, named) => {
+      for (const mode of ["work", "code"] as const) {
+        const texts = nativeHarnessInstructions(mode, { platform: "win32", windowsShell }).map(
+          (block) => block.text,
+        );
+        expect(texts).toContain(windowsShellInstruction(windowsShell));
+        expect(texts.at(-1)).toMatch(named);
+      }
+    },
+  );
+
+  it("says nothing of a Windows shell to a Chat lead or on another host", () => {
+    const shellTexts = (["powershell", "pwsh", "cmd"] as const).map((shell) =>
+      windowsShellInstruction(shell),
+    );
+    for (const blocks of [
+      nativeHarnessInstructions("chat", { platform: "win32", windowsShell: "cmd" }),
+      nativeHarnessInstructions("code", { platform: "darwin", windowsShell: "cmd" }),
+    ])
+      for (const block of blocks) expect(shellTexts).not.toContain(block.text);
+  });
+
   it("tells a Chat lead what the thread lacks and sends it to the tool list for what it has", () => {
     const text = chatText();
     expect(text).toContain("no filesystem and no shell");
