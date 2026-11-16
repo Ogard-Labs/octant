@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { FileText, X } from "lucide-react";
 import type { WorkComposerImages } from "./useWorkComposerImages";
 import { OctantButton } from "../../ui/base/OctantButton";
 
@@ -20,14 +20,22 @@ export function WorkImageAttachmentChips(props: {
   const message = props.withMessage === false ? undefined : images.message;
   if (images.staged.length === 0 && message === undefined) return null;
   return (
-    <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached images">
+    <div className="composer-chips work-composer-adapter__attachments" aria-label="Attached files">
       {images.staged.map((attachment) => (
         <span className="chip work-composer-adapter__attachment" key={attachment.id}>
-          <img
-            alt={attachment.displayName}
-            className="work-composer-adapter__attachment-thumb"
-            src={attachment.previewUrl}
-          />
+          {attachment.previewUrl === "" ? (
+            <FileText
+              aria-hidden="true"
+              className="work-composer-adapter__attachment-thumb"
+              size={16}
+            />
+          ) : (
+            <img
+              alt={attachment.displayName}
+              className="work-composer-adapter__attachment-thumb"
+              src={attachment.previewUrl}
+            />
+          )}
           <span className="work-composer-adapter__attachment-name">{attachment.displayName}</span>
           <OctantButton
             aria-label={`Remove ${attachment.displayName}`}

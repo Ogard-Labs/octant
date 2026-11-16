@@ -210,6 +210,16 @@ export interface ClaudeOpenQueryInput {
   /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
   readonly ownMemory?: true;
   /**
+   * The thread's attachments folder: a Plan launch's confinement binds it
+   * read-only, as the command sandbox reads it below Full access.
+   */
+  readonly attachmentsFolder?: string;
+  /**
+   * The account's own MCP servers this Plan session starts, the person's
+   * marks (`planReadOnlyToolServers`); absent or empty starts none.
+   */
+  readonly planMcpServers?: ReadonlyArray<string>;
+  /**
    * The auto-compact window for this query alone, from the person's
    * compaction point; absent leaves the runtime its own.
    */
@@ -791,6 +801,8 @@ export interface ClaudeFlagSettings {
   readonly disableAllHooks?: true;
   readonly autoMemoryEnabled?: false;
   readonly autoCompactWindow?: number;
+  readonly allowedMcpServers?: ReadonlyArray<{ readonly serverName: string }>;
+  readonly disableClaudeAiConnectors?: true;
 }
 
 export interface ClaudeNativeQueryOptions {
@@ -828,9 +840,31 @@ export interface ClaudeNativeQueryOptions {
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
   ownMemory = false,
+  planMcpServers: ReadonlyArray<string> = [],
 ): ClaudeNativeQueryOptions {
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
+  }
+  // A Plan session whose person marked some of the account's servers
+  // "Read-only — allowed in Plan" (`planReadOnlyToolServers`) reads them from
+  // home settings like any other, and a flag allowlist starts those alone:
+  // Claude Code applies `allowedMcpServers` to every scope and an empty list
+  // to none, and the merged list keeps any narrower one the person set. Octant's
+  // own server is named so the allowlist never drops it. The claude.ai
+  // connectors are not the person's marked servers, so they stay off.
+  const planServers = !setup.toolServers && !setup.projectCode ? planMcpServers : [];
+  if (planServers.length > 0) {
+    return {
+      settingSources: ["user"],
+      skills: setup.skills ? "all" : [],
+      strictMcpConfig: false,
+      settings: {
+        allowedMcpServers: [...planServers, "octant"].map((serverName) => ({ serverName })),
+        disableClaudeAiConnectors: true,
+        ...(setup.hooks ? {} : { disableAllHooks: true as const }),
+        ...(ownMemory ? {} : { autoMemoryEnabled: false as const }),
+      },
+    };
   }
   const readsHome = setup.skills || setup.hooks || setup.toolServers || setup.projectCode;
   const settingSources: ClaudeSettingSource[] = [];
@@ -1406,6 +1440,9 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ? {}
               : { extraFolders: input.additionalDirectories }),
             executionPolicy: input.executionPolicy,
+            ...(input.attachmentsFolder === undefined
+              ? {}
+              : { readOnlyFolders: [input.attachmentsFolder] }),
             runsCommands: input.tools.includes("Bash"),
             ...(input.network === undefined ? {} : { network: input.network }),
           });
@@ -1584,7 +1621,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
-            const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
+            const native = claudeNativeQueryOptions(
+              input.nativeSetup,
+              input.ownMemory === true,
+              input.planMcpServers,
+            );
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is

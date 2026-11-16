@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -91,6 +91,41 @@ function turnAttachmentSuite<
       expect(reference.displayName).not.toContain("/");
       expect(reference.digest).toMatch(/^[a-f0-9]{64}$/);
       await expect(store.read(thread, reference)).resolves.toEqual(bytes);
+    });
+
+    it("makes the thread's attachments folder before any file is attached, so a runtime launched first can bind it", async () => {
+      const thread = mode.threadId(12);
+      const folder = store.threadFolder(thread);
+      expect(folder).toBe(join(root, mode.scopesDirectory, String(thread)));
+      const status = await lstat(folder ?? "");
+      expect(status.isDirectory() && !status.isSymbolicLink()).toBe(true);
+      // A link planted in its place is not a folder Octant grants.
+      const planted = mode.threadId(13);
+      await symlink(tmpdir(), join(root, mode.scopesDirectory, String(planted)));
+      expect(store.threadFolder(planted)).toBeUndefined();
+    });
+
+    it("opens a file of any type by its own name inside the thread's folder under the data directory, never anywhere else", async () => {
+      const thread = mode.threadId(11);
+      const bytes = new Uint8Array([37, 80, 68, 70]);
+      const reference = await store.stage({
+        threadId: thread,
+        attachmentId: mode.attachmentId(11),
+        displayName: "report.pdf",
+        mediaType: "application/pdf" as MediaType,
+        bytes,
+      });
+      const folder = store.threadFolder(thread);
+      expect(folder).toBe(join(root, mode.scopesDirectory, String(thread)));
+      const path = await store.readablePath(thread, reference);
+      expect(path.startsWith(`${folder}/`)).toBe(true);
+      expect(path.endsWith("/report.pdf")).toBe(true);
+      await expect(readFile(path)).resolves.toEqual(Buffer.from(bytes));
+      // Asked again it is the same file; a name that is not it is refused.
+      await expect(store.readablePath(thread, reference)).resolves.toBe(path);
+      await rm(path);
+      await writeFile(path, "planted");
+      await expect(store.readablePath(thread, reference)).rejects.toThrow();
     });
 
     it("refuses an image the turn never staged, and only spends an id once", async () => {

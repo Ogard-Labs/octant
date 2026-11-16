@@ -4,17 +4,20 @@ import {
   MAX_CODE_TURN_ATTACHMENTS,
   decodeCodeAttachmentId,
   type CodeAttachmentId,
-  type CodeAttachmentMediaType,
   type CodeAttachmentReference,
   type CodeThreadId,
 } from "@octant/contracts";
 import type { CodeClient } from "@octant/client-runtime";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { attachmentMediaType, isImageAttachment } from "../composer/attachmentMediaType";
 
 export interface StagedCodeAttachment {
   /** Exactly what the host answered with, so the turn sends what it accepted. */
   readonly reference: CodeAttachmentReference;
-  /** A local object URL for the thumbnail; revoked when the chip goes away. */
+  /**
+   * A local object URL for an image's thumbnail, revoked when the chip goes
+   * away; empty for any other file, whose chip shows its name alone.
+   */
   readonly previewUrl: string;
 }
 
@@ -59,12 +62,9 @@ export interface CodeAttachments {
   readonly takeForSend: () => ReadonlyArray<CodeAttachmentReference>;
 }
 
-const SUPPORTED = new Set<string>(CODE_ATTACHMENT_MEDIA_TYPES);
+const IMAGES = new Set<string>(CODE_ATTACHMENT_MEDIA_TYPES);
 
-function supportedMediaType(file: File): CodeAttachmentMediaType | undefined {
-  const mediaType = file.type.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  return SUPPORTED.has(mediaType) ? (mediaType as CodeAttachmentMediaType) : undefined;
-}
+export { attachmentMediaType, isImageAttachment };
 
 /**
  * The images a Code composer is holding for its next turn.
@@ -139,33 +139,33 @@ export function useCodeAttachments(input: {
 
   const attach = useCallback(
     async (files: ReadonlyArray<File>): Promise<string | undefined> => {
-      if (threadId === undefined || files.length === 0) return "Image attachments are unavailable.";
-      const images = files.filter((file) => supportedMediaType(file) !== undefined);
-      if (images.length === 0) {
-        const reason = "Only PNG, JPEG, WebP, and GIF images can be attached.";
-        setMessage(reason);
-        return reason;
-      }
+      if (threadId === undefined || files.length === 0) return "Attachments are unavailable.";
       let attached = false;
       let refusal: string | undefined;
       setBusy(true);
       inFlight.current += 1;
       try {
-        for (const file of images) {
-          const mediaType = supportedMediaType(file);
-          if (mediaType === undefined) continue;
-          if (file.size === 0 || file.size > MAX_CODE_ATTACHMENT_BYTES) {
-            refusal = `${file.name || "Image"} is too large to attach.`;
+        for (const file of files) {
+          const mediaType = attachmentMediaType(file);
+          const image = IMAGES.has(mediaType);
+          if (file.size === 0) {
+            refusal = `${file.name || "The file"} is empty.`;
+            setMessage(refusal);
+            continue;
+          }
+          if (file.size > MAX_CODE_ATTACHMENT_BYTES) {
+            refusal = `${file.name || "The file"} is too large to attach.`;
             setMessage(refusal);
             continue;
           }
           if (current.current.length >= MAX_CODE_TURN_ATTACHMENTS) {
-            refusal = `A turn carries at most ${MAX_CODE_TURN_ATTACHMENTS} images.`;
+            refusal = `A turn carries at most ${MAX_CODE_TURN_ATTACHMENTS} attachments.`;
             setMessage(refusal);
             break;
           }
           const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
-          const displayName = file.name.trim() === "" ? "Pasted image" : file.name;
+          const displayName =
+            file.name.trim() === "" ? (image ? "Pasted image" : "Pasted file") : file.name;
           const bytes = new Uint8Array(await file.arrayBuffer());
           const reference = await client.putAttachment({
             threadId,
@@ -174,14 +174,14 @@ export function useCodeAttachments(input: {
             mediaType,
             bytes,
           });
-          const previewUrl = URL.createObjectURL(file);
-          previews.current.add(previewUrl);
+          const previewUrl = image ? URL.createObjectURL(file) : "";
+          if (image) previews.current.add(previewUrl);
           apply((list) => [...list, { reference, previewUrl }]);
           attached = true;
           setMessage(undefined);
         }
       } catch {
-        refusal = "The image could not be attached.";
+        refusal = "The file could not be attached.";
         setMessage(refusal);
       } finally {
         inFlight.current = Math.max(0, inFlight.current - 1);

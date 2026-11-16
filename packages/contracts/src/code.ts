@@ -1,4 +1,5 @@
 import { ConversationInputPolicy } from "./conversationInputs";
+import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./attachmentMediaType";
 import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -69,18 +70,14 @@ export const CodeAttachmentId = brandedUuid("CodeAttachmentId");
 export type CodeAttachmentId = typeof CodeAttachmentId.Type;
 
 /**
- * Code attachments are images only. Everything a repository holds already
- * reaches a Code turn through the checkout the thread is bound to, so the one
- * thing a path cannot carry is a picture the user is looking at — a screenshot,
- * a mockup, a photographed whiteboard.
+ * Code attachments are files of any type (maintainer decision, 2026-11-16). An
+ * image in {@link CODE_ATTACHMENT_MEDIA_TYPES} goes to a model that reads images
+ * as a picture; any other file stays in the thread's attachments folder, which
+ * the session reads at every level and never writes, and the turn names its
+ * path for the agent to open with its own tools.
  */
-export const CODE_ATTACHMENT_MEDIA_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-] as const;
-export const CodeAttachmentMediaType = Schema.Literal(...CODE_ATTACHMENT_MEDIA_TYPES);
+export const CODE_ATTACHMENT_MEDIA_TYPES = NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES;
+export const CodeAttachmentMediaType = AnyAttachmentMediaType;
 export type CodeAttachmentMediaType = typeof CodeAttachmentMediaType.Type;
 export const MAX_CODE_ATTACHMENT_BYTES = 10_485_760;
 export const MAX_CODE_TURN_ATTACHMENTS = 8;

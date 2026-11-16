@@ -3,6 +3,7 @@ import {
   MAX_WORK_TURN_ATTACHMENTS,
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
+import { isImageAttachment } from "../../composer/attachmentMediaType";
 import type { PickerGroup } from "@octant/domain";
 import {
   useCallback,
@@ -65,8 +66,6 @@ export interface WorkComposerImages {
   readonly consumePaste: (clipboard: DataTransfer | null) => boolean;
 }
 
-const SUPPORTED = new Set<string>(WORK_ATTACHMENT_MEDIA_TYPES);
-
 /**
  * Images the Work composer is holding until the thread exists.
  *
@@ -83,7 +82,7 @@ function stagePersistedFiles(files: ReadonlyArray<File>): ReadonlyArray<StagedWo
     id: globalThis.crypto.randomUUID(),
     file,
     displayName: pastedImageName(file),
-    previewUrl: URL.createObjectURL(file),
+    previewUrl: isImageAttachment(file) ? URL.createObjectURL(file) : "",
   }));
 }
 
@@ -168,28 +167,24 @@ export function useWorkComposerImages(): WorkComposerImages {
 
   const attach = useCallback(
     (files: ReadonlyArray<File>): string | undefined => {
-      if (files.length === 0) return "No image was given.";
-      const images = files.filter((file) => SUPPORTED.has(file.type));
-      if (images.length === 0) {
-        const reason = "Only PNG, JPEG, WebP, and GIF images can be attached.";
-        setMessage(reason);
-        return reason;
-      }
+      if (files.length === 0) return "No file was given.";
+      // Any file may be attached (maintainer decision, 2026-11-16): an image
+      // goes to the model as a picture, any other file by its path.
       let attached = false;
       let refusal: string | undefined;
-      for (const file of images) {
+      for (const file of files) {
         if (file.size === 0 || file.size > MAX_WORK_ATTACHMENT_BYTES) {
-          refusal = `${pastedImageName(file)} is too large to attach.`;
+          refusal = `${pastedImageName(file)} is ${file.size === 0 ? "empty" : "too large to attach"}.`;
           setMessage(refusal);
           continue;
         }
         if (current.current.length >= MAX_WORK_TURN_ATTACHMENTS) {
-          refusal = `A turn carries at most ${MAX_WORK_TURN_ATTACHMENTS} images.`;
+          refusal = `A turn carries at most ${MAX_WORK_TURN_ATTACHMENTS} attachments.`;
           setMessage(refusal);
           break;
         }
-        const previewUrl = URL.createObjectURL(file);
-        previews.current.add(previewUrl);
+        const previewUrl = isImageAttachment(file) ? URL.createObjectURL(file) : "";
+        if (previewUrl !== "") previews.current.add(previewUrl);
         apply((list) => [
           ...list,
           {

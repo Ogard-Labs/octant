@@ -31,7 +31,7 @@ import {
   type RemoteRequestProofService,
   type RemoteSessionFacts,
 } from "../remoteRequestProofService";
-import type { RemoteRouteDefinition } from "../remoteRoutePolicy";
+import { routeAcceptsAttachmentType, type RemoteRouteDefinition } from "../remoteRoutePolicy";
 import type { PushNotificationTokenStore } from "./pushNotificationTokenStore";
 import { withAdmissionRelease } from "./remoteAdmissionPolicy";
 import type {
@@ -1236,7 +1236,11 @@ async function authenticateRequest(
     const allowed = route?.allowedContentTypes;
     if (
       contentType === undefined ||
-      !(allowed === undefined ? BODY_CONTENT_TYPES.has(contentType) : allowed.includes(contentType))
+      !(allowed === undefined
+        ? BODY_CONTENT_TYPES.has(contentType)
+        : route?.acceptsAnyAttachmentType === true
+          ? routeAcceptsAttachmentType(route, contentType)
+          : allowed.includes(contentType))
     ) {
       throw new RemoteHttpAuthFailure(400, "invalid");
     }

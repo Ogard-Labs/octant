@@ -51,6 +51,36 @@ describe("Code composer attachment ownership", () => {
     }
   });
 
+  it("attaches a file of any type under its own media type, with a name chip and no thumbnail", async () => {
+    const putAttachment = vi.fn(async (input: { mediaType: string; displayName: string }) => ({
+      attachmentId: "40000000-0000-4000-8000-0000000000f1" as never,
+      displayName: input.displayName,
+      mediaType: input.mediaType,
+      byteLength: 3,
+      digest: "b".repeat(64) as never,
+    }));
+    const createObjectURL = vi.spyOn(URL, "createObjectURL");
+    const { result } = renderHook(() =>
+      useCodeAttachments({
+        client: { putAttachment, discardAttachment: vi.fn(async () => undefined) },
+        threadId,
+      }),
+    );
+    await act(async () => {
+      await result.current.attach([
+        new File([new Uint8Array([1, 2, 3])], "report.pdf", { type: "application/pdf" }),
+        new File([new Uint8Array([1, 2, 3])], "data.bin", { type: "" }),
+      ]);
+    });
+    expect(putAttachment.mock.calls.map(([input]) => input.mediaType)).toEqual([
+      "application/pdf",
+      "application/octet-stream",
+    ]);
+    expect(result.current.staged.map((entry) => entry.previewUrl)).toEqual(["", ""]);
+    expect(createObjectURL).not.toHaveBeenCalled();
+    createObjectURL.mockRestore();
+  });
+
   it("discards detached host bytes when a refused message has been superseded", async () => {
     const reference: CodeAttachmentReference = {
       attachmentId: "40000000-0000-4000-8000-000000000002" as never,
