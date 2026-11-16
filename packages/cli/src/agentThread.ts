@@ -81,6 +81,8 @@ export interface AgentThreadSnapshot {
   readonly providerInstanceId: string;
   readonly modelId: string;
   readonly version: number;
+  /** The checkout bound to a Code thread, for host-authorized review. */
+  readonly checkoutId?: string;
   /** The thread's turns, oldest first: all of them, or its newest when `hasEarlier`. */
   readonly turns: ReadonlyArray<AgentThreadTurn>;
   /** The thread has turns older than the first in `turns`. */
@@ -472,6 +474,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         id: threadId,
         mode: "code",
         title: current.thread.title,
+        checkoutId: String(current.checkout.id),
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
         version: current.thread.version,

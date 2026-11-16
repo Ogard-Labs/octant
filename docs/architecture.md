@@ -10300,7 +10300,12 @@ the model at another size.
   events — and only uses it as a wake-up: every redraw still reads the
   thread through the mode's routes, so the stream never becomes a second
   source of truth. Harness questions and approvals have no stream and are
-  picked up by a one-second fallback read. A Browser site ask is not a
+  picked up by a one-second fallback read. On a Code thread `/diff` observes
+  the bound checkout through the host and resolves its bounded diff evidence.
+  The view labels this as current checkout changes, which may include work
+  outside the thread, and names truncation and changed paths without diff text.
+  Escape returns to the transcript; a pending question or approval also closes
+  review so that the request is visible. A Browser site ask is not a
   harness approval, so `agentSiteApprovals.ts` reads it on the same tick
   from the route the app's thread view uses: `/api/browser/approvals` for
   Work, and for Code the `/api/pending-requests` approvals that carry

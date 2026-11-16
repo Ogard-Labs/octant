@@ -84,6 +84,7 @@ import {
 } from "./agentTuiModel";
 import type { ChatNavigationThread } from "@octant/contracts";
 import type { OpenedLocalControlSession } from "./localControl";
+import { readAgentDiff, type AgentDiff } from "./agentDiff";
 
 export interface RunAgentTuiInput {
   readonly session: OpenedLocalControlSession;
@@ -199,6 +200,7 @@ class AgentScreen {
   #childLines: ReadonlyArray<string> = [];
   /** The goal ledger the Goal panel shows, read when /goal opened it. */
   #goalLines: ReadonlyArray<string> = [];
+  #diff: Extract<AgentDiff, { kind: "ready" }> | undefined;
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -336,7 +338,10 @@ class AgentScreen {
           if (again || !isAgentSnapshotRunning(this.#thread)) resolve(0);
           else void this.#interrupt();
         } else if (key.name === "escape") {
-          void this.#interrupt();
+          if (this.#diff !== undefined) {
+            this.#diff = undefined;
+            this.#draw();
+          } else void this.#interrupt();
         } else if (key.ctrl && key.name === "p") {
           void this.#pauseOrResume();
         } else if (key.ctrl && key.name === "e") {
@@ -503,6 +508,7 @@ class AgentScreen {
   }
 
   async #switchThread(threadId: string, mode: OctantMode = "chat"): Promise<void> {
+    this.#diff = undefined;
     this.#threadId = threadId;
     this.#mode = mode;
     this.#port = agentThreadPort(this.#input.session, mode, threadId);
@@ -637,19 +643,61 @@ class AgentScreen {
     const pending =
       session?.questions.find((question) => question.status === "pending") ??
       this.#thread?.pendingQuestion;
-    const digest = JSON.stringify([
-      entries,
-      pending?.id,
-      this.#pendingFollowUp?.suggestionId,
-      session?.steering,
-      this.#verbose,
-      this.#showReasoning,
-    ]);
+    // A new ask must not be hidden behind review.
+    if (
+      pending !== undefined ||
+      session?.approvals?.some((entry) => entry.status === "pending") ||
+      this.#siteApproval !== undefined
+    )
+      this.#diff = undefined;
+    const digest = JSON.stringify(
+      this.#diff === undefined
+        ? [
+            entries,
+            pending?.id,
+            this.#pendingFollowUp?.suggestionId,
+            session?.steering,
+            this.#verbose,
+            this.#showReasoning,
+          ]
+        : ["checkout-diff", this.#diff],
+    );
     const live = entries.some((entry) => entry.kind === "lead" && entry.live !== undefined);
-    if (digest !== this.#drawn || live) {
+    if (digest !== this.#drawn || (live && this.#diff === undefined)) {
       this.#drawn = digest;
       for (const child of this.#transcript.getChildren()) child.destroyRecursively();
-      for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
+      if (this.#diff === undefined) {
+        for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
+      } else {
+        const diff = this.#diff;
+        const lines = [
+          `Current checkout changes${diff.branch === undefined ? "" : ` · ${diff.branch}`}`,
+          "May include changes from outside this thread. Esc or /diff returns.",
+          ...(diff.truncated ? ["Diff truncated by the host; later changes may be missing."] : []),
+          ...diff.missingPaths.map((path) => `No diff text available: ${path}`),
+          ...(diff.text.length === 0 && diff.missingPaths.length === 0
+            ? ["No uncommitted changes."]
+            : diff.text.split("\n")),
+        ];
+        const chunks = lines.map((line, i) => {
+          const color =
+            line.startsWith("+") && !line.startsWith("+++")
+              ? p.success
+              : line.startsWith("-") && !line.startsWith("---")
+                ? p.danger
+                : line.startsWith("@@")
+                  ? p.accent
+                  : p.textSecondary;
+          return fg(color)(`${line}${i === lines.length - 1 ? "" : "\n"}`);
+        });
+        this.#transcript.add(
+          new this.#tui.TextRenderable(this.#renderer, {
+            content: new this.#tui.StyledText(chunks),
+            wrapMode: "word",
+          }),
+        );
+        this.#transcript.scrollTo(0);
+      }
     }
 
     const tasks = tasksFrom(this.#thread, session);
@@ -714,6 +762,7 @@ class AgentScreen {
           "Ctrl+E       show / hide diffs and output  Ctrl+R  show / hide reasoning",
           "Ctrl+P       pause / resume the run        PgUp/PgDn · Ctrl+Home/End  scroll",
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
+          "/diff        review current checkout changes · Esc returns",
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
           "/notes       show retained notes · /notes copy · /notes discard",
@@ -1096,6 +1145,32 @@ class AgentScreen {
     }
     if (text === "/quit" || text === "/exit") {
       this.#resolveExit?.(0);
+      return;
+    }
+    if (text === "/diff") {
+      if (this.#diff !== undefined) this.#diff = undefined;
+      else if (this.#thread?.mode !== "code" || this.#thread.checkoutId === undefined)
+        this.#note = "Checkout review is available on Code threads.";
+      else if (
+        this.#session?.approvals?.some((entry) => entry.status === "pending") ||
+        this.#session?.questions.some((entry) => entry.status === "pending") ||
+        this.#siteApproval !== undefined
+      )
+        this.#note = "Answer the pending request before opening checkout review.";
+      else {
+        const threadId = this.#threadId;
+        const diff = await readAgentDiff(this.#input.session, threadId, this.#thread.checkoutId);
+        if (threadId === this.#threadId) {
+          if (diff.kind === "refused") this.#note = diff.message;
+          else {
+            this.#diff = diff;
+            this.#listing = undefined;
+            this.#suggestions = undefined;
+            this.#showHelp = false;
+          }
+        }
+      }
+      this.#draw();
       return;
     }
     if (text === "/pause" || text === "/resume") {
