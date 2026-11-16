@@ -260,7 +260,9 @@ def main():
             "-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/init panic=-1",
             timeout=155, cwd=root, output=output)
     log = (root / "guest.log").read_text(errors="replace")
-    print(log[-20000:])
+    # Retain every native receipt in job output; later runtime failures must
+    # not hide the earlier security counterexample and its positive controls.
+    print(log)
     cases = []
     ordered = []
     runtime_receipts = []

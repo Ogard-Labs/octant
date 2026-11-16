@@ -128,9 +128,18 @@ static struct octant_cred *octant_cred(const struct cred *cred)
 	return cred->security + octant_blobs.lbs_cred;
 }
 
+/* Filesystem overrides change access-check credentials, not the actor whose
+ * effects are restricted. OverlayFS backing reads otherwise borrow the
+ * unconfined mounter's credentials and escape their enrolled process scope.
+ * The current task pins its real credentials throughout this kernel entry. */
+static struct octant_context *current_context(void)
+{
+	return octant_cred(current_real_cred())->context;
+}
+
 bool octant_mediation_restricted(void)
 {
-	return initialized && octant_cred(current_cred())->context;
+	return initialized && current_context();
 }
 
 static struct octant_task *octant_task(void)
@@ -191,7 +200,7 @@ static bool broker_authorized(struct octant_context *context)
 {
 	return task_tgid(current) == context->broker_pid &&
 		current_cred() == context->broker_cred &&
-		!octant_cred(current_cred())->context;
+		!current_context();
 }
 
 static bool broker_alive(struct octant_context *context)
@@ -250,7 +259,7 @@ static void free_cred(struct cred *cred)
 static int admit_request_wait(struct octant_mediation_request *request,
 	const struct path *source, const struct path *destination, bool socket_cleanup)
 {
-	struct octant_context *context = octant_cred(current_cred())->context;
+	struct octant_context *context = current_context();
 	struct octant_pending *pending = NULL;
 	unsigned long flags;
 	long waited;
@@ -374,7 +383,7 @@ struct octant_metadata_scope octant_metadata_begin(struct dentry *dentry, u32 op
 	scope.identity = ++metadata->next_scope;
 	metadata->scope = scope.identity;
 	metadata->owner = current;
-	metadata->context = octant_cred(current_cred())->context;
+	metadata->context = current_context();
 	metadata->active = true;
 	metadata->prepared = false;
 	scope.error = admit_inode_request(inode, operation, &request);
@@ -411,7 +420,7 @@ static int check_metadata_decision(struct dentry *dentry, u32 operation, bool co
 	bool valid;
 	if (!octant_mediation_restricted() || !guarded_inode(inode))
 		return 0;
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	metadata = &octant_task()->metadata;
 	spin_lock_irqsave(&context->lock, flags);
 	spin_lock(&namespace_lock);
@@ -574,7 +583,7 @@ struct octant_creation_scope octant_creation_begin(u32 operation, const struct p
 		scope.error = -EACCES;
 		return scope;
 	}
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	scope.identity = ++creation->next_scope;
 	creation->scope = scope.identity;
 	creation->owner = current;
@@ -618,7 +627,7 @@ int octant_creation_check(u32 operation, struct inode *parent, struct dentry *na
 		return 0;
 	task = octant_task();
 	creation = &task->creation;
-	context = octant_cred(current_cred())->context;
+	context = current_context();
 	result = creation_identity(&actual, operation, parent, name ? &name->d_name : NULL, source);
 	if (result) {
 		creation->prepared = false;
@@ -713,8 +722,8 @@ static int check_namespace(u32 operation, struct inode *source, struct dentry *n
 		return result;
 	spin_lock_irqsave(&namespace_lock, flags);
 	valid = task->has_approved && !namespace_overflow &&
-		!READ_ONCE(octant_cred(current_cred())->context->dead) &&
-		broker_alive(octant_cred(current_cred())->context) &&
+		!READ_ONCE(current_context()->dead) &&
+		broker_alive(current_context()) &&
 		task->approved.operation == actual.operation &&
 		task->approved.flags == actual.flags &&
 		!memcmp(&task->approved.source, &actual.source, sizeof(actual.source)) &&
@@ -828,25 +837,25 @@ static int check_exec(struct linux_binprm *bprm)
  * an inherited ordinary FD later passed between peers of the same policy. */
 int octant_mediation_receive_scm(const struct cred *sender)
 {
-	struct octant_context *ours = octant_cred(current_cred())->context;
+	struct octant_context *ours = current_context();
 	return ours && (!sender || octant_cred(sender)->context != ours) ? -EACCES : 0;
 }
 
 static int receive_file(struct file *file)
 {
-	return octant_cred(current_cred())->context && io_is_uring_fops(file) ? -EACCES : 0;
+	return current_context() && io_is_uring_fops(file) ? -EACCES : 0;
 }
 
 #ifdef CONFIG_IO_URING
 static int allow_uring(void)
 {
-	return octant_cred(current_cred())->context ? -ENOSYS : 0;
+	return current_context() ? -ENOSYS : 0;
 }
 #endif
 
 static int may_read_process(struct task_struct *target, unsigned int mode)
 {
-	struct octant_context *ours = octant_cred(current_cred())->context;
+	struct octant_context *ours = current_context();
 	const struct cred *theirs;
 	int result;
 	if (!ours)
@@ -999,7 +1008,7 @@ static long enroll(struct file *file, unsigned int command, unsigned long argume
 	if (command != OCTANT_MEDIATION_ENROLL || argument)
 		return -EINVAL;
 	if (!task_no_new_privs(current) || !uid_eq(current_euid(), context->uid) ||
-	    octant_cred(current_cred())->context || READ_ONCE(context->dead))
+	    current_context() || READ_ONCE(context->dead))
 		return -EPERM;
 	/* A trusted single-thread bootstrap must finish before untrusted code can
 	 * share its address space or descriptor table with an unenrolled peer. */
@@ -1095,7 +1104,7 @@ static long broker_ioctl(struct file *file, unsigned int command, unsigned long 
 	}
 	if (command != OCTANT_MEDIATION_ENROLL_FD || argument)
 		return -EINVAL;
-	if (octant_cred(current_cred())->context || !uid_eq(current_euid(), context->uid))
+	if (current_context() || !uid_eq(current_euid(), context->uid))
 		return -EPERM;
 	enrollment = kzalloc(sizeof(*enrollment), GFP_KERNEL);
 	if (!enrollment)
@@ -1115,7 +1124,7 @@ static int open_broker(struct inode *inode, struct file *file)
 {
 	struct octant_context *context;
 	int i;
-	if (octant_cred(current_cred())->context)
+	if (current_context())
 		return -EPERM;
 	if (atomic_inc_return(&contexts) > 64) {
 		atomic_dec(&contexts);

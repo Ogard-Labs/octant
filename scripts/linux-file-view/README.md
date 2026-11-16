@@ -53,6 +53,15 @@ exit, unmount and cleanup. This is a direct synthetic backing-file case,
 not production launch or complete stacked-filesystem coverage. All existing
 copy-up, capsule, runtime and lifetime cases remain mandatory.
 
+The baseline native run denied the direct private read but allowed its
+OverlayFS alias, with the ordinary overlay read successful and independent
+unchanged-state/unmount receipts. Restriction lookup now follows the current
+task's real credentials; broker ownership still additionally checks its exact
+subjective credential identity and held process identity. Credential copying
+and native filesystem access credentials are unchanged. The fixed native case
+must pass before this correction is credited; it does not prove internal
+metadata/mutation scope lifetimes or all stacked filesystem routes.
+
 ### OverlayFS copy-up ordering
 
 The pinned Linux 6.18 source has a pre-admission copy-up path: OverlayFS may
@@ -118,7 +127,7 @@ composition rather than a reconstruction of Bubblewrap flags. Its result is
 separate from the direct native broker cases and never implies complete parity.
 The SCM controls also queue a foreign FD before enrollment and reap a same-policy
 sender before receiving its queued FD; send-time credentials must survive both
-transitions. The same actual Bubblewrap scenario runs three times to check
+transitions. The same actual Bubblewrap scenario runs twelve times to check
 the previously observed UID-map timing failure; it is not a broader acceptance
 matrix. The kernel delivers the oldest undelivered request identity rather than
 reused array-slot order, preserving the broker's strict monotonic/replay guard.
