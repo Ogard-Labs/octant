@@ -12,7 +12,14 @@ export interface ProviderApprovalPromptProps {
    * the level it would move to from the next turn, and the plan it asks the
    * person to approve when it asks to leave Plan.
    */
-  readonly levelChange?: { readonly to: ProviderExecutionPolicy; readonly plan?: string };
+  readonly levelChange?: LevelChange;
+}
+
+interface LevelChange {
+  readonly to: ProviderExecutionPolicy;
+  readonly plan?: string;
+  /** The level's name in the thread's own picker words; absent names the posture. */
+  readonly toLabel?: string;
 }
 
 export function ProviderApprovalPrompt(props: ProviderApprovalPromptProps) {
@@ -55,10 +62,10 @@ export function ProviderApprovalPrompt(props: ProviderApprovalPromptProps) {
 function LevelChangePrompt(props: {
   readonly summary: string;
   readonly onAnswer: (decision: "approved" | "denied") => void;
-  readonly levelChange: { readonly to: ProviderExecutionPolicy; readonly plan?: string };
+  readonly levelChange: LevelChange;
 }) {
   const entering = props.levelChange.to === "plan";
-  const level = EXECUTION_POLICY_LABEL[props.levelChange.to];
+  const level = props.levelChange.toLabel ?? EXECUTION_POLICY_LABEL[props.levelChange.to];
   return (
     <OctantApprovalCard
       actions={

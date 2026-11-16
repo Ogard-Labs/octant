@@ -441,9 +441,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               current?.lifecycle === "active" &&
               String(current.providerInstanceId) === String(owner.providerInstanceId) &&
               String(current.modelId) === String(owner.modelId) &&
+              // A thread moved to Plan stops an owner composed outside it.
               !(
-                "executionPolicy" in current &&
-                current.executionPolicy === "plan" &&
+                ("executionPolicy" in current
+                  ? current.executionPolicy === "plan"
+                  : "access" in current && current.access === "plan") &&
                 owner.executionPolicy !== "plan"
               ) &&
               browserAuthority.canAccessWindow(

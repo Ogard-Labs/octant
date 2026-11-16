@@ -53,7 +53,7 @@ function fixture(answer: OwnerActionResult, automatic = false, work = false) {
   return { spoke, changePosture, listPostures };
 }
 describe("owner Code recovery controls", () => {
-  it("offers only Work's four levels and sends its exact target and version without Code persistence", async () => {
+  it("offers Work's five levels, Plan included, and sends its exact target and version without Code persistence", async () => {
     const { spoke, changePosture } = fixture({ status: "done", body: {} }, false, true);
     const user = userEvent.setup();
     render(<OwnerPostureSection spokes={[spoke]} />);
@@ -62,8 +62,8 @@ describe("owner Code recovery controls", () => {
     await user.click(await screen.findByRole("option", { name: "Work thread: Work task" }));
     await user.click(screen.getByLabelText("Requested level"));
     await screen.findByRole("option", { name: "Auto" });
-    expect(screen.queryByRole("option", { name: "Plan (read only)" })).toBeNull();
-    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getByRole("option", { name: "Plan (read only)" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(5);
     await user.click(screen.getByRole("option", { name: "Auto" }));
     await user.click(screen.getByRole("button", { name: "Apply level" }));
     expect(changePosture).toHaveBeenCalledWith({

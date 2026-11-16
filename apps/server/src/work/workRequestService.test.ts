@@ -20,7 +20,11 @@ import {
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 import { EventActor } from "@octant/contracts/events";
 import { WorkRequestProjection } from "./workRequestProjection";
-import { WorkRequestService, type WorkRequestProjectPort } from "./workRequestService";
+import {
+  WorkRequestService,
+  type WorkRequestLevelChangePort,
+  type WorkRequestProjectPort,
+} from "./workRequestService";
 
 const ids = {
   request: decodeWorkRequestId("11111111-1111-4111-8111-111111111111"),
@@ -70,6 +74,7 @@ function createService(
         readonly kind: "approval" | "user-input";
       }) => Promise<void>;
     }>;
+    levelChanges?: WorkRequestLevelChangePort;
     eventStore?: {
       append(input: {
         readonly requestId: WorkRequestId;
@@ -127,6 +132,7 @@ function createService(
     ...(options.providerSessions === undefined
       ? {}
       : { providerSessions: options.providerSessions }),
+    ...(options.levelChanges === undefined ? {} : { levelChanges: options.levelChanges }),
   } as never);
   return { service, projection, clock };
 }
@@ -1632,4 +1638,105 @@ describe("owner Work approval admission", () => {
       }
     },
   );
+});
+
+describe("an agent's ask to plan first or to leave Plan", () => {
+  const exitPlan = {
+    ...approvalDetail,
+    action: "ExitPlanMode",
+    description: "Claude finished planning and asks to leave Plan.",
+    levelChange: { to: "auto-accept-edits", plan: "1. Edit src/main.ts" },
+  } as const;
+
+  function recordLevelChange(service: WorkRequestService) {
+    const recorded = service.record({
+      requestId: ids.request,
+      projectId: ids.project,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      providerCallbackId: "exit-plan-1",
+      detail: exitPlan,
+    });
+    if (recorded.status !== "ok") throw new Error("setup failed");
+    return recorded.request;
+  }
+
+  it("moves the thread as the person who answered before the provider hears yes, then ends the turn", async () => {
+    const order: Array<string> = [];
+    const paired = Schema.decodeUnknownSync(EventActor)({
+      kind: "remote-device",
+      actorId: ids.actor,
+      deviceId: "99999999-9999-4999-8999-999999999999",
+    });
+    const { service } = createService({
+      providerSessions: {
+        answerApproval: async (input) => {
+          order.push(`provider:${String(input.approved)}`);
+        },
+      },
+      levelChanges: {
+        change: (input) => {
+          order.push(`level:${input.kind}:${input.actor.kind}`);
+          return { status: "changed" };
+        },
+        endTurn: () => order.push("end-turn"),
+      },
+    });
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve(
+      {
+        kind: "resolve-work-request",
+        requestId: request.requestId,
+        expectedVersion: request.version,
+        resolution: { kind: "approval", approved: true },
+      },
+      undefined,
+      paired,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(order).toEqual(["level:exit-plan:remote-device", "provider:true", "end-turn"]);
+  });
+
+  it("leaves the ask waiting when the host cannot change the level, and tells the provider nothing", async () => {
+    const answerApproval = vi.fn(async () => undefined);
+    const { service, projection } = createService({
+      providerSessions: { answerApproval },
+      levelChanges: {
+        change: () => ({ status: "refused", message: "The thread's level could not be changed." }),
+        endTurn: () => undefined,
+      },
+    });
+    const request = recordLevelChange(service);
+
+    const result = await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: true },
+    });
+
+    expect(result).toMatchObject({ status: "failure", failure: { code: "conflict" } });
+    expect(answerApproval).not.toHaveBeenCalled();
+    expect(projection.lookup(request.requestId)?.request.status).toBe("pending");
+  });
+
+  it("keeps the level and the turn when the person says no", async () => {
+    const change = vi.fn(() => ({ status: "changed" as const }));
+    const endTurn = vi.fn();
+    const { service } = createService({ levelChanges: { change, endTurn } });
+    const request = recordLevelChange(service);
+
+    await service.resolve({
+      kind: "resolve-work-request",
+      requestId: request.requestId,
+      expectedVersion: request.version,
+      resolution: { kind: "approval", approved: false },
+    });
+
+    expect(change).not.toHaveBeenCalled();
+    expect(endTurn).not.toHaveBeenCalled();
+  });
 });

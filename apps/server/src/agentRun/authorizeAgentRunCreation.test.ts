@@ -413,6 +413,41 @@ describe("authorizeAgentRunCreation", () => {
     });
   });
 
+  it("gives the helpers of a Work parent in Plan a read-only grant, at admission and on a scheduled resume", () => {
+    const thread = decodeWorkThread({ ...workThread(), access: "plan" });
+    const workspace = withSurface(
+      {
+        ...defaultWindowWorkspace(ids.window),
+        contextByMode: {
+          ...defaultWindowWorkspace(ids.window).contextByMode,
+          work: contextKeyForProject("work", LOCAL_HOST_ID, ids.project, "/home/folder"),
+        },
+      },
+      "work",
+      decodeWorkspaceTab({
+        kind: "work-thread",
+        id: ids.tab,
+        threadId: thread.id,
+        mode: "work",
+        title: thread.title,
+      }),
+    );
+    const facts = authorize({
+      workspace,
+      work: thread,
+      project: workProject(),
+      parentThreadId: String(thread.id),
+    });
+    expect(facts?.liveAuthority).toMatchObject({ executionPolicy: "plan", shell: false });
+    expect(
+      scheduledAgentRunLiveAuthority({
+        persistence: { readCodeThread: () => undefined },
+        run: { parentThreadId: thread.id as never, routingReceipt: { mode: "work" } },
+        readWorkThread: () => thread,
+      }),
+    ).toMatchObject({ executionPolicy: "plan" });
+  });
+
   it("lets a Full access Work thread that read outside content hand work to another spoke unasked", () => {
     const thread = decodeWorkThread({ ...workThread(), access: "full-access" });
     const workspace = withSurface(

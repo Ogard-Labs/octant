@@ -6,7 +6,7 @@ import {
   loadMobileDefaultLevels,
   mobileDefaultLevel,
   mobileProjectLevel,
-  mobileThreadLevelChoices,
+  mobileDefaultLevelChoices,
   type MobileDefaultLevels,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
@@ -71,7 +71,7 @@ export function DefaultLevelsPanel(props: DefaultLevelsPanelProps) {
     );
   }
   const { project, defaults } = levels;
-  const choices = mobileThreadLevelChoices(mode);
+  const choices = mobileDefaultLevelChoices(mode);
   return (
     <View style={{ gap: mobileSpacing.md }} testID="mobile-default-levels">
       {project === undefined ? null : (

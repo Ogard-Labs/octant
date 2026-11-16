@@ -295,6 +295,7 @@ export function startOctantServer(
       browserAuthority,
       options,
       persistence,
+      workThreadProjection,
     });
     const {
       agentRunInteractions,
@@ -522,6 +523,7 @@ export function startOctantServer(
       runningWorkTurnSandbox,
       runningWorkTurns,
       workRequestRuntime,
+      workLevelChangeHolder,
       workRequestService,
       workShieldHolder,
     } = wireWorkRequestState({
@@ -1162,6 +1164,7 @@ export function startOctantServer(
       workTurnProjection,
       threadAwaitsHarnessApproval,
       threadAwaitsHarnessQuestion,
+      workLevelChangeHolder,
       workRequestRuntime,
       workRequestService,
       onWindowRevoked,

@@ -1,4 +1,4 @@
-import type { ProviderRegistrySnapshot, WorkAccess } from "@octant/contracts";
+import type { ProviderRegistrySnapshot, WorkDefaultAccess } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -9,7 +9,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FULL_ACCESS_WARNING, useFullAccessWarning } from "../code/FullAccessWarning";
 
-const ACCESS_NOTES: Readonly<Record<WorkAccess, string>> = {
+const ACCESS_NOTES: Readonly<Record<WorkDefaultAccess, string>> = {
   auto: "The provider's own reviewer approves each command and file change. Providers without a reviewer ask first.",
   "ask-first": "The agent asks before it runs a command or changes a file in the Project folder.",
   "auto-accept-edits":
@@ -105,7 +105,7 @@ export function WorkSettingsView(props: {
           scope="host"
           settingId="work-default-access"
         >
-          <OctantToggleGroup<WorkAccess>
+          <OctantToggleGroup<WorkDefaultAccess>
             aria-label="Default Work access"
             disabled={props.controller.busy}
             onValueChange={(value) => {

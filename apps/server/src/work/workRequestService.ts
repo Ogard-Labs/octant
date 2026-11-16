@@ -83,11 +83,27 @@ export interface WorkRequestProviderSessionPort {
   }): Promise<void>;
 }
 
+/**
+ * Carries out an approved level change: the agent's own ask to plan first or
+ * to leave Plan. The thread's level changes as the person's own choice, and
+ * the turn that asked ends once the provider has the answer.
+ */
+export interface WorkRequestLevelChangePort {
+  change(input: {
+    readonly threadId: WorkThreadId;
+    readonly kind: "enter-plan" | "exit-plan";
+    readonly actor: typeof EventActor.Type;
+  }): { readonly status: "changed" } | { readonly status: "refused"; readonly message: string };
+  endTurn(threadId: WorkThreadId): void;
+}
+
 export interface WorkRequestServiceOptions {
   readonly projects: WorkRequestProjectPort;
   readonly projection: WorkRequestProjection;
   readonly eventStore: WorkRequestEventStorePort;
   readonly providerSessions?: Partial<WorkRequestProviderSessionPort>;
+  /** Absent, an approved level change is refused rather than left unapplied. */
+  readonly levelChanges?: WorkRequestLevelChangePort;
   readonly actor: typeof EventActor.Type;
   readonly clock: () => string;
 }
@@ -135,6 +151,7 @@ export class WorkRequestService {
   readonly #projection: WorkRequestProjection;
   readonly #eventStore: WorkRequestEventStorePort;
   readonly #providerSessions: WorkRequestProviderSessionPort;
+  readonly #levelChanges: WorkRequestLevelChangePort | undefined;
   readonly #userActor: typeof EventActor.Type;
   readonly #systemActor: typeof EventActor.Type;
   readonly #clock: () => string;
@@ -159,6 +176,7 @@ export class WorkRequestService {
       cancel: async () => undefined,
       ...options.providerSessions,
     };
+    this.#levelChanges = options.levelChanges;
     this.#clock = options.clock;
     try {
       this.#userActor = Schema.decodeUnknownSync(EventActor)(options.actor);
@@ -355,6 +373,25 @@ export class WorkRequestService {
         );
       }
     }
+    // An approved level change moves the thread before the provider hears
+    // the answer, so an agent told "approved" never finds the old level; a
+    // change the host cannot make leaves the request pending for the person.
+    const levelChange =
+      entry.request.detail.kind === "approval" &&
+      entry.request.detail.levelChange !== undefined &&
+      command.resolution.kind === "approval" &&
+      command.resolution.approved &&
+      entry.request.delivery === undefined
+        ? entry.request.detail.levelChange
+        : undefined;
+    if (levelChange !== undefined) {
+      const changed = this.#levelChanges?.change({
+        threadId: entry.request.threadId,
+        kind: levelChange.to === "plan" ? "enter-plan" : "exit-plan",
+        actor: answeredBy,
+      }) ?? { status: "refused", message: "This host cannot change the thread's level." };
+      if (changed.status === "refused") return failure("conflict", changed.message);
+    }
     const delivery: WorkRequestDelivery = { kind: "resolve", resolution: command.resolution };
     const prepared = this.#prepareDelivery(
       entry.request,
@@ -394,12 +431,14 @@ export class WorkRequestService {
       }
       const confirmed = this.#confirmDelivery(prepared.request, answeredBy);
       if (confirmed.status !== "ok") return confirmed;
-      return this.#settle(
+      const settled = this.#settle(
         confirmed.request,
         "resolved",
         { resolution: command.resolution },
         answeredBy,
       );
+      if (levelChange !== undefined) this.#levelChanges?.endTurn(entry.request.threadId);
+      return settled;
     } finally {
       this.#releaseActiveDelivery(prepared.request);
     }

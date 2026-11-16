@@ -439,7 +439,7 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
     expect(change).toMatchObject({ access: "full-access", fullAccessSandbox: true });
   });
 
-  it("refuses --access plan for a Work thread, which has no Plan overlay", async () => {
+  it("moves a new Work thread to Plan through the composer's access command", async () => {
     const fake = workHost();
 
     const result = await createAgentThread(fake.session, {
@@ -449,9 +449,11 @@ describe("starting a Work thread from the terminal with an asked-for access", ()
       access: "plan",
     });
 
-    expect(result).toMatchObject({ kind: "refused" });
-    // Refused before anything is created, so no stray thread is left behind.
-    expect(fake.workCommands()).toEqual([]);
+    expect(result).toMatchObject({ kind: "created", mode: "work" });
+    const change = fake
+      .workCommands()
+      .find((command) => command.kind === "change-work-thread-access");
+    expect(change).toMatchObject({ access: "plan", expectedVersion: 1 });
   });
 
   it("refuses --access on a Chat thread", async () => {
