@@ -1,4 +1,4 @@
-import { boundPrincipalIsRestricted } from "./principalRouteContext";
+import { boundPrincipalIsRestricted, boundPrincipalIsAgent } from "./principalRouteContext";
 import { principalActsAsHostPerson } from "./clientPrincipal";
 import {
   decodeMemoryCommand,
@@ -300,7 +300,9 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
         boundPrincipalIsRestricted(request) &&
         (command.kind === "change-code-project-permission-mode" ||
           command.kind === "change-work-project-permission-mode") &&
-        (command.strict !== undefined || command.fullAccessSandbox !== undefined)
+        ((command.strict !== undefined &&
+          (command.strict !== true || boundPrincipalIsAgent(request))) ||
+          command.fullAccessSandbox !== undefined)
       ) {
         return response(
           {
@@ -326,6 +328,31 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           {
             category: "unauthorized",
             message: "A Code Project's access grant is decided on the host.",
+          },
+          403,
+          origin,
+        );
+      }
+      // A Project's Strict default turned off widens what its threads'
+      // providers may do; a restricted principal may turn it on, never off,
+      // and leaving it out returns the Project to Settings, which may be off.
+      if (
+        (command.kind === "change-code-project-permission-mode" ||
+          command.kind === "change-work-project-permission-mode") &&
+        command.strict !== true &&
+        boundPrincipalIsRestricted(request) &&
+        (command.strict === false ||
+          (await dependencies.service.search("")).some(
+            (project) =>
+              String(project.id) === String(command.projectId) &&
+              project.type !== "chat" &&
+              project.defaultStrict === true,
+          ))
+      ) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "A Project's Strict default is turned off on the host.",
           },
           403,
           origin,
@@ -415,14 +442,16 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
           origin,
         );
       }
-      // Letting an agent merge, comment, or push to the default branch without
-      // asking each time is the person's standing permission, so only a window
-      // on this host sets it, and a paired device cannot widen it on their
-      // behalf.
+      // Letting an agent merge, comment, push to the default branch, or write
+      // Project memory without asking each time is the person's standing
+      // permission, so only the host's own person sets it: at a window on this
+      // host or on a device they paired, which is that person. A device the
+      // hub's roster introduced cannot widen it on their behalf.
       if (
         (command.kind === "change-code-project-agent-merge" ||
           command.kind === "change-code-project-agent-pull-request-comments" ||
-          command.kind === "change-code-project-agent-default-branch-push") &&
+          command.kind === "change-code-project-agent-default-branch-push" ||
+          command.kind === "change-project-agent-memory-writes") &&
         principal !== undefined &&
         !principalActsAsHostPerson(principal)
       ) {
@@ -434,24 +463,9 @@ export function createProjectRouteHandler(dependencies: ProjectRouteDependencies
                 ? "Whether agents may merge is set on the host."
                 : command.kind === "change-code-project-agent-pull-request-comments"
                   ? "Whether agents may comment on pull requests is set on the host."
-                  : "Whether agents may push to the default branch is set on the host.",
-          },
-          403,
-          origin,
-        );
-      }
-      // Memory reaches every later turn in the Project, so letting agents
-      // write it unreviewed is the person's standing permission: a paired
-      // device cannot give it on their behalf.
-      if (
-        command.kind === "change-project-agent-memory-writes" &&
-        principal !== undefined &&
-        principal.kind !== "local-window"
-      ) {
-        return response(
-          {
-            category: "unauthorized",
-            message: "Whether agents may write Project memory without asking is set on the host.",
+                  : command.kind === "change-code-project-agent-default-branch-push"
+                    ? "Whether agents may push to the default branch is set on the host."
+                    : "Whether agents may write Project memory without asking is set on the host.",
           },
           403,
           origin,

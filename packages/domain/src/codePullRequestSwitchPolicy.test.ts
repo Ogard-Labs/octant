@@ -87,6 +87,23 @@ describe("pull-request Auto-fix policy", () => {
     ).toEqual({ kind: "stop", reason: "attempt-limit" });
   });
 
+  it("keeps trying past three attempts when Settings allows more", () => {
+    const fold = replay([
+      enabled,
+      woke("a1", [lint], 1),
+      woke("a2", [lint], 2),
+      woke("a3", [lint], 3),
+    ]).autoFix;
+    expect(
+      decidePullRequestAutoFix({
+        fold,
+        observation: { state: "open", headSha: "a4", failures: [lint] },
+        ...quiet,
+        maxAttempts: 5,
+      }),
+    ).toMatchObject({ kind: "wake", attempt: 4 });
+  });
+
   it("counts attempts per distinct failure, so a new failure starts its own count", () => {
     const fold = replay([enabled, woke("a1", [lint], 1), woke("a2", [lint], 2)]).autoFix;
     expect(
@@ -427,6 +444,24 @@ describe("pull-request watch policy", () => {
     expect(
       decide([watchEnabled(), ...wakes], observation({ headSha: "b1", checks: "failed" })),
     ).toEqual({ kind: "stop", reason: "wake-limit" });
+  });
+
+  it("follows the wake count and lifetime set in Settings", () => {
+    const wakes = Array.from({ length: 10 }, (_, index) =>
+      watchWoke(`a${index}`, [{ kind: "checks-failed", key: `a${index}` }], index + 1),
+    );
+    expect(
+      decidePullRequestWatch({
+        fold: replay([watchEnabled(), ...wakes]).watch,
+        observation: observation({ headSha: "b1", checks: "failed" }),
+        now,
+        turnActive: false,
+        personTyping: false,
+        maxWakes: 20,
+      }),
+    ).toMatchObject({ kind: "wake", wake: 11 });
+    const fold = replay([watchEnabled()]).watch;
+    expect(pullRequestWatchExpired(fold, "2026-11-04T10:00:00.000Z", 7 * 86_400_000)).toBe(false);
   });
 
   it("starts with a fresh budget when the watch is turned on again, and does nothing once off", () => {

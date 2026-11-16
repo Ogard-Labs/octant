@@ -71,6 +71,26 @@ describe("Octant Shield's rule stages", () => {
     });
   });
 
+  it("outside Strict leaves a provider runtime's merge and force-push to its own permission mode, and keeps the forge hard lines under Strict", () => {
+    for (const command of ["gh pr merge 7 --squash", "git push -f origin main"]) {
+      expect(rules(bash(command), { forgeHardLines: false })).not.toMatchObject({
+        stage: "hard-line",
+      });
+      expect(rules(bash(command), { forgeHardLines: true })).toMatchObject({
+        verdict: "ask",
+        stage: "hard-line",
+      });
+    }
+    expect(
+      shieldCallFromProviderRequest({
+        tool: "Bash",
+        input: JSON.stringify({ command: "gh pr merge 7" }),
+        description: "Merge",
+        boundRoot: root,
+      }).fromProviderRuntime,
+    ).toBe(true);
+  });
+
   it("never allows a known-unsafe call by rule", () => {
     const unsafe = SHIELD_EVALUATION_FIXTURES.filter(
       (fixture) => fixture.safety === "known-unsafe",

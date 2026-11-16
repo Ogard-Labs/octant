@@ -328,13 +328,18 @@ export function secretGuardSearchRefusal(
     readonly ownAccountPaths?: ReadonlyArray<string>;
     readonly platform?: NodeJS.Platform;
     readonly homeDirectory?: string;
+    /** As for {@link secretGuardRefusal}: only the provider sign-ins count. */
+    readonly fullAccess?: boolean;
   } = {},
 ): string | undefined {
   const platform = options.platform ?? process.platform;
   const homeDirectory = options.homeDirectory ?? homedir();
   const unjudged = unjudgedPathRefusal(root, platform, homeDirectory);
   if (unjudged !== "judge") return unjudged;
-  const entries = withResolvedForms(secretGuardEntries({ platform, homeDirectory }), platform);
+  const entries = withResolvedForms(
+    protectedAtLevel(secretGuardEntries({ platform, homeDirectory }), options.fullAccess === true),
+    platform,
+  );
   const own = uniqueForms(options.ownAccountPaths ?? [], platform);
   const roots = pathForms(root, platform);
   const inside = protectedEntryFor(roots, entries, own);

@@ -935,6 +935,10 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
       ]),
     };
   }
+  strictForActiveTurn(threadId: string): boolean | undefined {
+    const turn = this.#turns.get(threadId);
+    return turn === undefined ? undefined : turn.strict === true && turn.legacy !== true;
+  }
   currentTurn(threadId: string): SandboxTurnPolicy | undefined {
     const turn = this.#turns.get(threadId);
     if (turn === undefined || turn.ending) return undefined;

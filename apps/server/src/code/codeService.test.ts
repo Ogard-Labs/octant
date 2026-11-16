@@ -2332,7 +2332,7 @@ describe("CodeService commands", () => {
         expectedVersion: 1 as never,
         executionPolicy: "full-access",
         permissionPersistence: "current-session",
-        strict: "inherit",
+        strict: null,
       });
       if (!("thread" in result)) throw new Error("No updated thread");
       expect(result.thread).not.toHaveProperty("strict");
@@ -2369,6 +2369,39 @@ describe("CodeService commands", () => {
       expect(
         "thread" in result && result.thread !== undefined
           ? (result.thread as { fullAccessSandbox?: boolean }).fullAccessSandbox
+          : "missing",
+      ).toBeUndefined();
+    });
+
+    it("keeps a Code thread's Strict choice across a mode change and drops it when the change returns the thread to its defaults", async () => {
+      const kept = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const unchanged = await kept.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      });
+      expect(unchanged).toMatchObject({ thread: { strict: false } });
+
+      const reset = serviceFixture({
+        threads: [thread({ executionPolicy: "approval-gated", strict: false })],
+        approve: false,
+      });
+      const result = await reset.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        strict: null,
+      });
+      expect(
+        "thread" in result && result.thread !== undefined
+          ? (result.thread as { strict?: boolean }).strict
           : "missing",
       ).toBeUndefined();
     });

@@ -919,10 +919,18 @@ export function claudeFileToolSecretRefusal(
   projectRoot: string,
   searchesRunUnguarded: boolean,
   homeDirectory?: string,
+  /**
+   * Whether the launch is Strict. Outside Strict Claude's own tools may use
+   * the files Octant protects, as Claude Code does on its own; only another
+   * provider's sign-in stays refused, since one provider never receives
+   * another's credentials.
+   */
+  strict = true,
 ): string | undefined {
   const options = {
     ownAccountPaths,
     ...(homeDirectory === undefined ? {} : { homeDirectory }),
+    ...(strict ? {} : { fullAccess: true }),
   };
   if (CLAUDE_SEARCH_TOOLS.has(toolName)) {
     // Under Plan the runtime runs inside Octant's profile, so
@@ -3477,12 +3485,16 @@ function makeConnection(
         // first turn, and a rejected initialization fails that turn instead.
         void initialized.promise.catch(() => undefined);
         const terminalResult = deferred<void>();
+        // Read at each launch, like every other choice here: outside Strict the
+        // runtime gets the host's environment and its own channel settings.
+        const strict = input.strict !== false;
         const environment = await runSetupEffect(
           environmentFactory(options.authentication, {
             ...(apiKey !== undefined ? { apiKey } : {}),
             ...(options.configDirectory === undefined
               ? {}
               : { configDirectory: options.configDirectory }),
+            ...(strict ? {} : { strict: false }),
           }).pipe(Effect.provideService(Scope.Scope, scope)),
           signal,
         );
@@ -3631,7 +3643,7 @@ function makeConnection(
           authentication: options.authentication,
           artifactDelivery: options.artifactDelivery?.() === true,
           threadChoseArtifacts: input.nativeArtifacts === true,
-          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment),
+          hostTrafficDisabled: disablesNonessentialTraffic(environment.environment, strict),
           mode,
           executionPolicy: input.executionPolicy,
         });
@@ -4029,13 +4041,15 @@ function makeConnection(
           const secretRefusal =
             sandboxedFullAccess ||
             input.strict === true ||
-            (input.strict !== false && claudeSecretGuardApplies(input.executionPolicy))
+            claudeSecretGuardApplies(input.executionPolicy)
               ? claudeFileToolSecretRefusal(
                   request.toolName,
                   requestInput,
                   ownClaudeAccountPaths,
                   request.projectRoot,
                   claudeSearchesRunUnguarded(input.executionPolicy),
+                  undefined,
+                  sandboxedFullAccess || strict,
                 )
               : undefined;
           if (secretRefusal !== undefined) return deny(secretRefusal);
@@ -4336,7 +4350,7 @@ function makeConnection(
           ...claudeGitIdentityEnvironment(gitIdentity),
         };
         const artifactEnvironment = offersArtifacts
-          ? claudeArtifactLaunchEnvironment(launchEnvironment)
+          ? claudeArtifactLaunchEnvironment(launchEnvironment, strict)
           : launchEnvironment;
         // Read at each launch, like the artifact switch: the next turn after
         // the person turns the account's memory off launches guarded again.
@@ -4673,6 +4687,7 @@ function makeConnection(
               ...(input.fullAccessSandbox === undefined
                 ? {}
                 : { fullAccessSandbox: input.fullAccessSandbox }),
+              ...(input.strict === false ? { strict: false } : {}),
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(input.modelOptionValues === undefined
                 ? {}

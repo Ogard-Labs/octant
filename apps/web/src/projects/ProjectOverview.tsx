@@ -621,11 +621,11 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                     ? {}
                     : { onOpenSandboxRestrictions: props.onOpenSandboxRestrictions })}
                   disabled={archived || connectionStale}
-                  onChange={async (mode, fullAccessSandbox) =>
+                  onChange={async (mode, strict) =>
                     (await props.onPermissionModeChange?.(
                       props.project.id,
                       mode,
-                      fullAccessSandbox ?? "keep",
+                      strict ?? "keep",
                     )) ?? false
                   }
                   project={props.project}

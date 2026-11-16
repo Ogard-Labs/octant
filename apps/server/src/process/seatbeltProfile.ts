@@ -50,6 +50,7 @@ import { homedir, release } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildBubblewrapLaunch, DEFAULT_BWRAP_PATH } from "./linuxConfinement";
 import {
+  protectedAtLevel,
   secretGuardEntries,
   secretGuardPersonRules,
   secretGuardSeatbeltRules,
@@ -166,6 +167,15 @@ export interface SeatbeltProfileInput {
   readonly ownAccountPaths?: ReadonlyArray<string>;
   /** Fixed credential recipients never inherit a provider's own-account exemption. */
   readonly ownAccountAccess?: "none";
+  /**
+   * Which protected files the launch is refused. Absent is every one on the
+   * list. `provider-sign-ins` refuses only other providers' sign-ins: a
+   * provider runtime outside Strict reads and writes the rest with its own
+   * tools, as it does on its own, and one provider never receives another's
+   * credentials (Architecture: "Octant adds no restrictions of its own
+   * unless Strict is on").
+   */
+  readonly protectedFiles?: "provider-sign-ins";
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
   readonly usersDirectory?: string;
@@ -226,6 +236,8 @@ export interface ProcessConfinementPrepareInput {
   readonly ownAccountPaths?: ReadonlyArray<string>;
   /** See {@link SeatbeltProfileInput.ownAccountAccess}. */
   readonly ownAccountAccess?: "none";
+  /** See {@link SeatbeltProfileInput.protectedFiles}. */
+  readonly protectedFiles?: "provider-sign-ins";
   readonly extraRules?: ReadonlyArray<string>;
   /**
    * Whether this launch is an interactive shell on a pseudo-terminal, and where
@@ -784,10 +796,14 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
           ...(input.usersDirectory === undefined ? {} : { usersDirectory: input.usersDirectory }),
         });
 
-  const guardEntries = secretGuardEntries({
+  const listedGuardEntries = secretGuardEntries({
     platform: "darwin",
     homeDirectory: input.homeDirectory,
   });
+  const guardEntries =
+    input.protectedFiles === "provider-sign-ins"
+      ? protectedAtLevel(listedGuardEntries, true)
+      : listedGuardEntries;
   const lines = [
     "(version 1)",
     "(deny default)",
@@ -1284,6 +1300,7 @@ function prepareSeatbeltLaunch(
     privateHomeAllowPaths,
     ...(input.ownAccountPaths === undefined ? {} : { ownAccountPaths: input.ownAccountPaths }),
     ...(input.ownAccountAccess === undefined ? {} : { ownAccountAccess: input.ownAccountAccess }),
+    ...(input.protectedFiles === undefined ? {} : { protectedFiles: input.protectedFiles }),
     ...(input.extraRules === undefined && input.terminal === undefined
       ? {}
       : {

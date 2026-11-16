@@ -1,5 +1,6 @@
 import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
 import type { Questionnaire } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import { isAbsolute } from "node:path";
 import {
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
@@ -259,6 +260,8 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /** Strict for this launch, as the host resolved it; absent is Strict. */
+  readonly strict?: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
   /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
@@ -341,7 +344,7 @@ export interface CodeTurnRunnerOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -357,7 +360,7 @@ export interface CodeTurnRunnerOptions {
 export class CodeTurnRunner {
   readonly #maxEvents: number | undefined;
   readonly #toolStepLimit: (fullAccess: boolean) => number | undefined;
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
 
@@ -529,8 +532,8 @@ export class CodeTurnRunner {
           ? {}
           : { modelOptionValues: input.thread.modelOptionValues }),
         executionPolicy: input.thread.executionPolicy,
-        ...(sandboxTurn.strict !== undefined && sandboxTurn.legacy !== true
-          ? { strict: sandboxTurn.strict }
+        ...(sandboxTurn.strict !== undefined
+          ? { strict: sandboxTurn.legacy === true ? false : sandboxTurn.strict }
           : {}),
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         ...((sandboxTurn.strict ?? input.thread.fullAccessSandbox) === true ||
@@ -570,7 +573,13 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      const idle = yield* makeIdleTimeout(
+        stalledTurnLimitMs({
+          fullAccess: input.thread.executionPolicy === "full-access",
+          strict: input.strict !== false,
+        }),
+        providerToolCallPauseLimitMs(),
+      );
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({

@@ -846,6 +846,7 @@ function makeConnection(
       readonly modelId: string;
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
       readonly tools: ReadonlyArray<ProviderToolDefinition>;
     }) =>
       request(() => {
@@ -880,6 +881,9 @@ function makeConnection(
             // A runtime launched open never serves a sandboxed session, nor
             // the reverse: the wall is fixed when the process starts.
             input.executionPolicy === "full-access" && input.fullAccessSandbox === true,
+            // Strict changes the launch's environment, channels and protected
+            // files, so a warm runtime never crosses a change of it.
+            input.strict,
             tools,
           ]);
           let runtime =
@@ -956,6 +960,7 @@ function makeConnection(
                     mode,
                     executionPolicy: input.executionPolicy,
                     ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+                    ...(input.strict === false ? { strict: false } : {}),
                     modelProvider: selection.provider,
                     ...(tools.length === 0 ? {} : { tools }),
                     ...(managedTools === undefined ? {} : { toolBridge: managedTools.config }),
@@ -1174,6 +1179,7 @@ function makeConnection(
           modelId: identity.modelId,
           executionPolicy: input.executionPolicy,
           ...(input.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+          ...(input.strict === false ? { strict: false } : {}),
           // A Plan resume with no caller-supplied set fails closed to no tools,
           // not the full catalogue the session was first opened with.
           tools: input.tools ?? (input.executionPolicy === "plan" ? [] : identity.tools),

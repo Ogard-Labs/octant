@@ -159,6 +159,7 @@ import {
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { OctantLimitsSettings } from "../settings/OctantLimitsSettings";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { VoiceSettingsView } from "../settings/VoiceSettingsView";
@@ -1290,6 +1291,22 @@ function ActiveSectionContent({
                   />
                 </SettingRow>
                 <SettingRow
+                  description="The stalled-turn limit for a Work or Code turn at Full access, from the next turn. Off by default, since Full access adds no limit of Octant's own; a thread under Strict keeps the stalled-turn limit above at every level."
+                  focused={focusedSetting === settingId("full-access-stalled-turn-limit")}
+                  label="Stalled-turn limit at Full access"
+                  scope="host"
+                  settingId="full-access-stalled-turn-limit"
+                >
+                  <StalledTurnLimitSelect
+                    id="full-access-stalled-turn-limit"
+                    label="Stalled-turn limit at Full access"
+                    minutes={props.settings.fullAccessStalledTurnLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ fullAccessStalledTurnLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
+                <SettingRow
                   description="Pauses the stalled-turn limit for at most this long while one tool call the provider reports as running has not finished, from the next turn."
                   focused={focusedSetting === settingId("provider-tool-call-pause-limit")}
                   label="Tool-call pause limit"
@@ -1828,6 +1845,11 @@ function ActiveSectionContent({
               </SettingRow>
             </div>
           </SettingsSection>
+          <OctantLimitsSettings
+            focusedSetting={focusedSetting}
+            onSettingsChange={props.onSettingsChange}
+            settings={props.settings}
+          />
           {props.canvasClient?.publicLinkSettings === undefined ? null : (
             <SettingsSection title="Public links">
               <div className="setgroup">
@@ -2395,6 +2417,8 @@ const STALLED_TURN_LIMIT_CHOICES: ReadonlyArray<number> = [5, 15, 30, 60, 120, 2
 function StalledTurnLimitSelect(props: {
   readonly minutes: number | null;
   readonly onChange: (minutes: number | null) => void;
+  readonly label?: string;
+  readonly id?: string;
 }) {
   const choices =
     props.minutes === null || STALLED_TURN_LIMIT_CHOICES.includes(props.minutes)
@@ -2402,8 +2426,8 @@ function StalledTurnLimitSelect(props: {
       : [...STALLED_TURN_LIMIT_CHOICES, props.minutes].sort((left, right) => left - right);
   return (
     <OctantSelectField
-      aria-label="Stalled-turn limit"
-      id="stalled-turn-limit"
+      aria-label={props.label ?? "Stalled-turn limit"}
+      id={props.id ?? "stalled-turn-limit"}
       onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
       options={[
         ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),

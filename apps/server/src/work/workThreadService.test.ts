@@ -731,7 +731,7 @@ describe("WorkThreadService", () => {
       threadId: ids.thread,
       expectedVersion: 1,
       access: "full-access",
-      strict: "inherit",
+      strict: null,
     });
     if (!("kind" in result) || result.kind !== "thread-updated")
       throw new Error("No updated thread");

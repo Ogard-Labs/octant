@@ -307,9 +307,26 @@ describe("turn budget", () => {
   });
 
   it("reads the stalled-turn limit from the host setting, Off included", () => {
-    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 30 })).toBe(30 * 60_000);
-    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: 5 })).toBe(5 * 60_000);
-    expect(stalledTurnLimitMs({ stalledTurnLimitMinutes: null })).toBeNull();
+    const guarded = { fullAccess: false, strict: false };
+    const settings = (minutes: number | null) => ({
+      stalledTurnLimitMinutes: minutes,
+      fullAccessStalledTurnLimitMinutes: null,
+    });
+    expect(stalledTurnLimitMs(settings(30), guarded)).toBe(30 * 60_000);
+    expect(stalledTurnLimitMs(settings(5), guarded)).toBe(5 * 60_000);
+    expect(stalledTurnLimitMs(settings(null), guarded)).toBeNull();
+  });
+
+  it("leaves a Full access turn outside Strict uncut by default, and Strict keeps the stalled-turn limit", () => {
+    const settings = { stalledTurnLimitMinutes: 30, fullAccessStalledTurnLimitMinutes: null };
+    expect(stalledTurnLimitMs(settings, { fullAccess: true, strict: false })).toBeNull();
+    expect(stalledTurnLimitMs(settings, { fullAccess: true, strict: true })).toBe(30 * 60_000);
+    expect(
+      stalledTurnLimitMs(
+        { ...settings, fullAccessStalledTurnLimitMinutes: 60 },
+        { fullAccess: true, strict: false },
+      ),
+    ).toBe(60 * 60_000);
   });
 
   it("reads the longest provider tool-call pause from the host setting, Off included", () => {

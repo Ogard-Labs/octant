@@ -140,7 +140,10 @@ describe("automation contracts", () => {
       }),
     ).toThrow();
     expect(() => decodeAutomationTrigger({ ...trigger, timeZone: "not/a-time-zone" })).toThrow();
-  });
+    // The time-zone check builds an `Intl.DateTimeFormat`, and the first one in
+    // a cold Windows test worker loads the ICU zone data: on the CI runner this
+    // test took about 7.6 s that way and 0.6 s warm, past the 5 s default.
+  }, 30_000);
 
   it("decodes a bounded definition and fails closed on a mode its binding does not match, excess, and unconfirmed targets", () => {
     expect(decodeAutomationDefinition(definition)).toEqual(definition);

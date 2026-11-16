@@ -4,6 +4,7 @@ import {
   coordinatorStartingFor,
   decideCoordinatorRole,
   decideCoordinatorStart,
+  coordinatorTurnPosture,
   decideMessageWake,
   readsAsCoordinator,
 } from "./coordinatorPolicy";
@@ -48,6 +49,23 @@ describe("coordinator role", () => {
     expect(decideCoordinatorRole({ thread, make: true, coordinatorsInProject: 3 }).status).toBe(
       "allowed",
     );
+  });
+
+  it("holds a Project to the number of coordinators set in Settings", () => {
+    expect(
+      decideCoordinatorRole({ thread, make: true, coordinatorsInProject: 4, coordinatorLimit: 6 })
+        .status,
+    ).toBe("allowed");
+    expect(
+      decideCoordinatorRole({ thread, make: true, coordinatorsInProject: 1, coordinatorLimit: 1 }),
+    ).toMatchObject({ status: "refused", message: expect.stringContaining("at most 1") });
+  });
+
+  it("runs a coordinator's own turn read-only below Full access and at the level at Full access", () => {
+    expect(coordinatorTurnPosture("full-access")).toBe("full-access");
+    for (const level of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(coordinatorTurnPosture(level)).toBe("plan");
+    }
   });
 
   it("always lets a person stop a coordinator, even an archived one", () => {
@@ -251,6 +269,22 @@ describe("waking for a message", () => {
       status: "carry",
       reason: "hourly",
     });
+  });
+
+  it("holds a thread no coordinator bounds to the message-wake bounds set in Settings", () => {
+    const defaults = { rounds: 3, wakesPerHour: 5 };
+    expect(decideMessageWake({ ...wake, defaults, hop: 3 })).toEqual({
+      status: "carry",
+      reason: "hops",
+    });
+    expect(decideMessageWake({ ...wake, defaults, wakeTurnsInLastHour: 5 })).toEqual({
+      status: "carry",
+      reason: "hourly",
+    });
+    // A coordinator's own bounds still win over Settings.
+    expect(decideMessageWake({ ...wake, defaults, bounds: { rounds: 8 }, hop: 5 }).status).toBe(
+      "wake",
+    );
   });
 
   it("notices a worker finishing, waiting, or Done, not starting to work", () => {

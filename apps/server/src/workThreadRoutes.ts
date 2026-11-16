@@ -26,6 +26,7 @@ import { isAgentGrantSession, principalActsAsHostPerson } from "./clientPrincipa
 import {
   authenticateRouteWindowId,
   boundPrincipalIsRestricted,
+  boundPrincipalIsAgent,
   readPrincipalRouteContext,
 } from "./principalRouteContext";
 import { eventActorForPrincipal } from "./principalEventActor";
@@ -220,11 +221,16 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       if (
         boundPrincipalIsRestricted(request) &&
         ((command.kind === "change-work-thread-access" &&
-          (command.strict !== undefined || command.fullAccessSandbox !== undefined)) ||
+          ((command.strict !== undefined &&
+            (command.strict !== true || boundPrincipalIsAgent(request))) ||
+            command.fullAccessSandbox !== undefined)) ||
           (command.kind === "create-work-thread" &&
-            (command.strict !== undefined || command.fullAccessSandbox !== undefined)) ||
+            ((command.strict !== undefined &&
+              (command.strict !== true || boundPrincipalIsAgent(request))) ||
+              command.fullAccessSandbox !== undefined)) ||
           (command.kind === "update-work-settings" &&
-            (command.defaultStrict !== undefined ||
+            ((command.defaultStrict !== undefined &&
+              (command.defaultStrict !== true || boundPrincipalIsAgent(request))) ||
               command.defaultFullAccessSandbox !== undefined)))
       )
         return failureResponse(
@@ -271,6 +277,15 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
       if (raisesWorkToFullAccess(command) && refusesFullAccessRaise(request)) {
         return failureResponse(
           { category: "unauthorized", message: WORK_FULL_ACCESS_LOCAL_ONLY },
+          403,
+          origin,
+        );
+      }
+      // Turning Strict off widens what a provider may do, so it follows the
+      // same rule: the person, at a window or on a device they paired.
+      if (loosensWorkStrict(command) && refusesFullAccessRaise(request)) {
+        return failureResponse(
+          { category: "unauthorized", message: WORK_STRICT_LOCAL_ONLY },
           403,
           origin,
         );
@@ -477,6 +492,23 @@ function raisesWorkToFullAccess(command: WorkThreadCommand): boolean {
       return command.access === "full-access";
     case "update-work-settings":
       return command.defaultAccess === "full-access";
+    default:
+      return false;
+  }
+}
+
+const WORK_STRICT_LOCAL_ONLY =
+  "Strict is turned off in the Octant window on this host or on a device you paired.";
+
+/** Whether a command could turn Strict off for a Work thread or as Work's default. */
+function loosensWorkStrict(command: WorkThreadCommand): boolean {
+  switch (command.kind) {
+    case "create-work-thread":
+      return command.strict === false;
+    case "change-work-thread-access":
+      return command.strict === false || command.strict === null;
+    case "update-work-settings":
+      return command.defaultStrict === false;
     default:
       return false;
   }

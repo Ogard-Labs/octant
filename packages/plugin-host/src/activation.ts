@@ -87,13 +87,14 @@ export function isExtensionComponentModeSafe(
 }
 
 /**
- * Whether a host may ever run a stored component's process. A stored
- * provider-driver component is an outside driver, and only macOS confines one
- * (deny-default Seatbelt with no network, exec, or fork). Extension processes
- * have no Linux or Windows confinement, so there the component is
+ * Whether a host may ever run a stored component's process. Only macOS
+ * confines one (deny-default Seatbelt with no network, exec, or fork). A
+ * stored provider-driver component is an outside driver, which Linux also
+ * runs, unconfined and labelled ({@link outsideDriverHostLaunch}). Any other
+ * component with a process, and every component on Windows, is
  * `host-prohibited` rather than started unconfined.
  */
-export function isExtensionComponentHostConfined(
+export function isExtensionComponentHostAdmitted(
   platform: string,
   component: ExtensionComponent,
 ): boolean {
@@ -101,15 +102,29 @@ export function isExtensionComponentHostConfined(
   // no launch class yet confines a process that needs that network reach, so
   // no platform runs one from a stored package.
   if (component.kind === "cloud-machine-target") return false;
-  return (
-    (component.kind !== "provider-driver" && component.kind !== "canvas-export-target") ||
-    isOutsideDriverHostConfined(platform)
-  );
+  if (component.kind === "provider-driver") {
+    return outsideDriverHostLaunch(platform) !== "prohibited";
+  }
+  return component.kind !== "canvas-export-target" || isOutsideDriverHostConfined(platform);
 }
 
 /** Whether this platform confines an outside provider driver's process. */
 export function isOutsideDriverHostConfined(platform: string): boolean {
   return platform === "darwin";
+}
+
+/**
+ * How this platform runs an outside provider driver's process. macOS confines
+ * it under the driver profile. Linux has no extension-process confinement, and
+ * a driver the person installed, trusted and enabled runs there without one,
+ * which its provider row says (maintainer decision, 2026-11-16). Windows runs
+ * none.
+ */
+export type OutsideDriverHostLaunch = "confined" | "unconfined" | "prohibited";
+
+export function outsideDriverHostLaunch(platform: string): OutsideDriverHostLaunch {
+  if (isOutsideDriverHostConfined(platform)) return "confined";
+  return platform === "linux" ? "unconfined" : "prohibited";
 }
 
 export interface ExtensionActivationContext extends ExtensionActivationState {
@@ -169,7 +184,7 @@ export function resolveOutsideDriverActivation(input: {
   readonly compatible: boolean;
   readonly driver: OutsideDriverActivationTarget;
 }): ExtensionEffectiveState {
-  if (!isOutsideDriverHostConfined(input.platform)) {
+  if (outsideDriverHostLaunch(input.platform) === "prohibited") {
     return { kind: "blocked", reason: "host-prohibited" };
   }
   const packageState = input.packageState;

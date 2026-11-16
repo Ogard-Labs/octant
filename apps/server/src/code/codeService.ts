@@ -737,6 +737,8 @@ export interface CodeServiceOptions {
     thread: CodeThread,
   ) => { readonly root: string; readonly reader: Pick<GitHistoryPort, "read"> } | undefined;
   readonly persistence: CodePersistencePort;
+  /** How many coordinators a Code Project may hold, read from Settings at each change; absent is 4. */
+  readonly coordinatorsPerProject?: () => number;
   readonly access: CodeWindowAccessPort;
   readonly checkouts: CodeCheckoutObservationPort;
   readonly roots: CodeFileRootAuthorityPort;
@@ -926,14 +928,28 @@ function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
 function withoutAccessChoices(
   thread: CodeThread,
 ): Omit<CodeThread, "autoApprove" | "fullAccessSandbox" | "planReturnPolicy" | "strict"> {
+  // Strict is dropped too, so the change's own choice (or null, returning
+  // the thread to its Project's and Settings' default) is all that stays.
   const {
     autoApprove: _autoApprove,
-    strict: _strict,
     fullAccessSandbox: _fullAccessSandbox,
     planReturnPolicy: _planReturnPolicy,
+    strict: _strict,
     ...rest
   } = thread;
   return rest;
+}
+
+/**
+ * The thread's own Strict choice after a mode change: the command's, else the
+ * thread's; null clears it so the thread follows its Project and Settings.
+ */
+function threadStrictChoice(
+  requested: boolean | null | undefined,
+  current: boolean | undefined,
+): { readonly strict?: boolean } {
+  const chosen = requested === undefined ? current : requested;
+  return chosen === null || chosen === undefined ? {} : { strict: chosen };
 }
 
 /**
@@ -1032,6 +1048,7 @@ export class CodeServiceError extends Error {
 
 export class CodeService {
   readonly #persistence: CodePersistencePort;
+  readonly #coordinatorsPerProject: (() => number) | undefined;
   readonly #access: CodeWindowAccessPort;
   readonly #checkouts: CodeCheckoutObservationPort;
   readonly #roots: CodeFileRootAuthorityPort;
@@ -1093,6 +1110,7 @@ export class CodeService {
 
   constructor(options: CodeServiceOptions) {
     this.#persistence = options.persistence;
+    this.#coordinatorsPerProject = options.coordinatorsPerProject;
     this.#access = options.access;
     this.#checkouts = options.checkouts;
     this.#roots = options.roots;
@@ -2056,6 +2074,9 @@ export class CodeService {
             current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           ...((command.androidEmulatorSnapshotBoot ?? current.androidEmulatorSnapshotBoot) === true
             ? { androidEmulatorSnapshotBoot: true }
             : {}),
@@ -2841,14 +2862,14 @@ export class CodeService {
                             : {}),
                           // Kept from the command, else from the thread; the
                           // guardrail stamp drops it below Full access.
-                          ...(command.strict === "inherit" ||
-                          (command.strict ?? current.strict) === undefined
-                            ? {}
-                            : { strict: command.strict ?? current.strict }),
                           ...(command.strict === undefined &&
                           (command.fullAccessSandbox ?? current.fullAccessSandbox) === true
                             ? { fullAccessSandbox: true }
                             : {}),
+                          // Strict holds at every level: kept from the
+                          // command, else from the thread; null returns the
+                          // thread to its Project's and Settings' default.
+                          ...threadStrictChoice(command.strict, current.strict),
                           version: command.expectedVersion + 1,
                           updatedAt,
                         }
@@ -4333,6 +4354,9 @@ export class CodeService {
       },
       make: command.coordinator,
       coordinatorsInProject,
+      ...(this.#coordinatorsPerProject === undefined
+        ? {}
+        : { coordinatorLimit: this.#coordinatorsPerProject() }),
     });
     if (decision.status === "refused") throw this.#failure("invalid", decision.message);
     if (decision.status === "unchanged") return current;

@@ -235,6 +235,58 @@ describe("Work thread routes", () => {
     expect(local?.status).toBe(200);
   });
 
+  it("refuses a hub-introduced device turning Strict off for a Work thread or as Work's default, and lets it turn Strict on", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "73000000-0000-4000-8000-000000000030";
+    const fromDevice = (command: Record<string, unknown>) => {
+      const remote = request("/api/work/threads/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(command),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "73000000-0000-4000-8000-000000000031" as never,
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    const strict = (value: boolean | null) => ({
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "ask-first",
+      strict: value,
+    });
+
+    for (const loosen of [
+      strict(false),
+      strict(null),
+      {
+        kind: "update-work-settings",
+        expectedVersion: 1,
+        defaultAccess: "ask-first",
+        defaultStrict: false,
+      },
+    ]) {
+      const refused = await route(fromDevice(loosen));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+
+    expect((await route(fromDevice(strict(true))))?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("lets a device the host's own person paired change Strict, restart continuation and account choices, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: thread() }));
     const route = routeFixture({ execute });
@@ -251,7 +303,7 @@ describe("Work thread routes", () => {
         kind: "update-work-settings",
         expectedVersion: 1,
         defaultAccess: "ask-first",
-        defaultStrict: true,
+        defaultStrict: false,
       },
       {
         kind: "set-work-thread-restart-continuation",

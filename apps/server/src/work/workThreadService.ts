@@ -687,6 +687,9 @@ export class WorkThreadService {
             current.defaultFullAccessSandbox) === true
             ? { defaultFullAccessSandbox: true }
             : {}),
+          ...((command.defaultStrict ?? current.defaultStrict) === true
+            ? { defaultStrict: true }
+            : {}),
           // Absent reads as on, so only a stored off needs a value.
           ...((command.restartContinuation ?? current.restartContinuation) === false
             ? { restartContinuation: false }
@@ -862,6 +865,9 @@ export class WorkThreadService {
             defaultFullAccessSandboxFor({ project, settings: this.#currentSettings() }))
             ? { fullAccessSandbox: true }
             : {}),
+          // Strict is stored only when the request chose; otherwise the
+          // thread follows its Project and Settings at each launch.
+          ...(command.strict === undefined ? {} : { strict: command.strict }),
           version: 1,
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
@@ -1287,13 +1293,13 @@ export class WorkThreadService {
           ...unsandboxed
         } = current;
         const sandboxed =
-          command.strict !== "inherit" &&
+          command.strict !== null &&
           command.access === "full-access" &&
           (command.strict ?? currentStrict ?? command.fullAccessSandbox ?? currentSandbox) === true;
         const updated = decodeWorkThread({
           ...unsandboxed,
           access: command.access,
-          ...(command.strict === "inherit" || (command.strict ?? currentStrict) === undefined
+          ...(command.strict === null || (command.strict ?? currentStrict) === undefined
             ? {}
             : { strict: command.strict ?? currentStrict }),
           ...(sandboxed ? { fullAccessSandbox: true } : {}),
@@ -1713,6 +1719,7 @@ export class WorkThreadService {
         defaultFullAccessSandboxFor({ settings: this.#currentSettings() }))
         ? { fullAccessSandbox: true }
         : {}),
+      ...(command.strict === undefined ? {} : { strict: command.strict }),
       version: 1,
       createdAt: decodeTimestamp(this.#clock()),
       updatedAt: decodeTimestamp(this.#clock()),

@@ -132,10 +132,13 @@ export function WorkSettingsView(props: {
         </SettingRow>
         <SettingRow
           description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
-          focused={props.focusedSetting === "work-full-access-sandbox"}
+          focused={
+            props.focusedSetting === "work-strict" ||
+            props.focusedSetting === "work-full-access-sandbox"
+          }
           label="Strict"
           scope="host"
-          settingId="work-full-access-sandbox"
+          settingId="work-strict"
         >
           <StrictPreferenceControl
             value={strictPreferenceValue(settings)}

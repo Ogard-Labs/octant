@@ -19,8 +19,9 @@ import { whileAwaitingToolApproval } from "../toolEffects/toolEffectLedger";
  * account's. A grant is recorded only from a person's approval of that
  * prompt, so nothing a model, a tool, or a route sends can create one.
  *
- * On a thread that has taken in outside content a network server asks once
- * more, and that approval holds for the server on that thread alone. It is
+ * Under Strict, on a thread that has taken in outside content a network
+ * server asks once more, and that approval holds for the server on that
+ * thread alone. It is
  * journaled beside the grants, so a restarted host does not ask that thread
  * again, and it ends when the package's grants end.
  */
@@ -38,7 +39,10 @@ export function createExtensionToolCallAuthorizer(options: {
    * prompt is approved once and never remembered, whoever answers it.
    */
   readonly isPairedDeviceScope: (windowId: WindowId) => boolean;
-  /** Whether the thread has taken in outside content, from the journal's taint. */
+  /**
+   * Whether the thread has taken in outside content, from the journal's
+   * taint, under Strict: outside Strict the mark adds no ask.
+   */
   readonly threadTainted: (threadId: string) => boolean;
   /** The sources that marked the thread, which its prompt names. */
   readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;

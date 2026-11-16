@@ -464,7 +464,7 @@ describe("Code routes", () => {
         expectedVersion: 1,
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
-        defaultStrict: true,
+        defaultStrict: false,
       },
       {
         kind: "set-code-thread-restart-continuation",

@@ -661,10 +661,11 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "work access ask first auto-accept accept edits approvals files permissions",
         },
         {
-          id: settingId("work-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
+          id: settingId("work-strict"),
+          label: "Strict",
           scope: "host",
-          keywords: "work full access sandbox seatbelt confinement secrets network prompts",
+          keywords:
+            "work strict octant limits environment telemetry secret files outside content provider own rules",
         },
         {
           id: settingId("work-restart-continuation"),
@@ -754,11 +755,11 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "auto reviewer octant shield provider review approvals approve automatic judge",
         },
         {
-          id: settingId("code-full-access-sandbox"),
-          label: "Keep the sandbox at Full access",
+          id: settingId("code-strict"),
+          label: "Strict",
           scope: "app",
           keywords:
-            "full access sandbox seatbelt confinement secrets network prompts codex harness",
+            "strict octant limits environment telemetry secret files outside content provider own rules",
         },
         {
           id: settingId("code-terminal-shell"),
@@ -841,6 +842,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "stalled turn limit silent silence no provider event inactivity idle timeout timed out cut off stop minutes hours off never long tool call",
+        },
+        {
+          id: settingId("full-access-stalled-turn-limit"),
+          label: "Stalled-turn limit at Full access",
+          scope: "host",
+          keywords:
+            "stalled turn limit full access strict silent silence idle timeout cut off off never",
         },
         {
           id: settingId("provider-tool-call-pause-limit"),
@@ -1050,6 +1058,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Custom image sources",
           scope: "app",
           keywords: "custom image sources provider endpoint",
+        },
+        {
+          id: settingId("image-profile-full-access"),
+          label: "Image profile at Full access",
+          scope: "host",
+          keywords: "image generation profile default full access ask card without asking",
         },
         {
           id: settingId("default-model"),
@@ -1334,6 +1348,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           ["sandbox-policy-blocked-actions", "Blocked actions"],
           ["sandbox-policy-network", "Sandbox network"],
           ["sandbox-policy-services", "Sandbox host services"],
+          ["sandbox-policy-local-services", "Local service exceptions"],
           ["sandbox-policy-credentials", "Sandbox credentials"],
         ].map(([id, label]) => ({
           id: settingId(id ?? "sandbox-restrictions"),
@@ -1436,6 +1451,78 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Files per upload",
           scope: "host",
           keywords: "browser upload files per upload count limit cap agents send page how many",
+        },
+        {
+          id: settingId("thread-wakeups-waiting"),
+          label: "Wake-ups waiting per thread",
+          scope: "host",
+          keywords: "wake-ups wakeup scheduled cron recurring waiting per thread limit cap agent",
+        },
+        {
+          id: settingId("thread-wakeups-run-missed"),
+          label: "Run missed wake-ups on return",
+          scope: "host",
+          keywords: "wake-ups missed catch up run on return asleep off host restart",
+        },
+        {
+          id: settingId("message-wakes-per-hour"),
+          label: "Message wakes per hour",
+          scope: "host",
+          keywords: "message wake thread turns hour limit agents talking",
+        },
+        {
+          id: settingId("message-wake-rounds"),
+          label: "Rounds of replies that wake",
+          scope: "host",
+          keywords: "message wake rounds hops replies agents answer each other",
+        },
+        {
+          id: settingId("thread-messages-per-turn"),
+          label: "Thread messages per turn",
+          scope: "host",
+          keywords: "thread messages ask mentioned chat per turn limit coordination",
+        },
+        {
+          id: settingId("coordinators-per-project"),
+          label: "Coordinators per Project",
+          scope: "host",
+          keywords: "coordinators coordinator threads per project planner limit count",
+        },
+        {
+          id: settingId("pull-request-watch-wakes"),
+          label: "Wakes per pull-request watch",
+          scope: "host",
+          keywords: "pull request watch wakes limit github",
+        },
+        {
+          id: settingId("pull-request-watch-days"),
+          label: "Days a pull-request watch lasts",
+          scope: "host",
+          keywords: "pull request watch days lifetime expire github",
+        },
+        {
+          id: settingId("auto-fix-attempts"),
+          label: "Auto-fix tries per failure",
+          scope: "host",
+          keywords: "auto-fix attempts tries failure pull request checks",
+        },
+        {
+          id: settingId("browser-wait-limit"),
+          label: "Longest Browser wait",
+          scope: "host",
+          keywords: "browser wait minutes limit timeout page agent",
+        },
+        {
+          id: settingId("child-run-wait-limit"),
+          label: "Longest wait for a helper",
+          scope: "host",
+          keywords: "helper agent child subagent wait seconds limit timeout",
+        },
+        {
+          id: settingId("agent-routines-start-active"),
+          label: "Start agent-created routines active at Full access",
+          scope: "host",
+          keywords: "routines automation agent created paused enabled active full access",
         },
         {
           id: settingId("tool-approvals"),

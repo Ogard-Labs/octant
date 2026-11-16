@@ -52,6 +52,7 @@ import {
   refreshNewestTurns,
   startedConversationPickerGroups,
   type PickerGroup,
+  resolveStrict,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import {
@@ -510,6 +511,8 @@ export interface WorkThreadWorkspaceProps {
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** Work's Strict default in Settings, which a thread and Project that did not choose follow. */
+  readonly workDefaultStrict?: boolean;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -943,7 +946,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         access,
-        ...(strict === undefined ? {} : { strict }),
+        ...(strict === undefined ? {} : { strict: strict === "inherit" ? null : strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -3307,7 +3310,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     warningScope={{ projectId: String(thread.projectId) }}
                     strict={
                       thread.strict ??
-                      (thread.fullAccessSandbox === true && thread.access === "full-access")
+                      (thread.fullAccessSandbox === true && thread.access === "full-access"
+                        ? true
+                        : resolveStrict({
+                            project: project?.type === "work" ? project : undefined,
+                            settings: { defaultStrict: props.workDefaultStrict },
+                          }))
                     }
                     legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                     fullAccessSandboxSupported={threadKeepsFullAccessSandbox(

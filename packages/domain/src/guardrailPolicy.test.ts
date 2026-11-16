@@ -16,6 +16,7 @@ import {
   permissionModeOf,
   permissionModeOfWorkAccess,
   refusesFullAccessSandbox,
+  resolveStrict,
   clampWorkAccess,
   chosenAutoReviewer,
   resolveAutoReviewer,
@@ -162,6 +163,24 @@ describe("guardrail levels", () => {
         settings: { defaultFullAccessSandbox: true },
       }),
     ).toBe(false);
+  });
+
+  it("takes Strict from the thread's own choice, else its Project's, else Settings', else off", () => {
+    expect(resolveStrict({})).toBe(false);
+    expect(resolveStrict({ settings: { defaultStrict: true } })).toBe(true);
+    expect(
+      resolveStrict({ project: { defaultStrict: false }, settings: { defaultStrict: true } }),
+    ).toBe(false);
+    expect(
+      resolveStrict({
+        thread: { strict: true },
+        project: { defaultStrict: false },
+        settings: { defaultStrict: false },
+      }),
+    ).toBe(true);
+    expect(resolveStrict({ thread: { strict: false }, project: { defaultStrict: true } })).toBe(
+      false,
+    );
   });
 
   it("runs Full access with no sandbox for every runtime, wrapped or not", () => {

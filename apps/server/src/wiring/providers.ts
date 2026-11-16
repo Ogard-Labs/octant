@@ -132,6 +132,7 @@ import { makePiProcessLive, type PiProcessPort } from "../providers/piProcess";
 import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { ThreadNativeSetupStore } from "../providers/threadNativeSetupStore";
 import { readThreadProjectCode } from "../providers/threadProjectCode";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
@@ -658,7 +659,10 @@ export type ProvidersDependencies = Pick<
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+  >;
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
@@ -685,6 +689,8 @@ export function wireProviders(deps: ProvidersDependencies) {
     workThreadProjection,
     workRequestRuntime,
   } = deps;
+  // The trust a person already gave a Project's folder in Claude Code or Codex.
+  const providerCliProjectTrust = hostProviderCliProjectTrust();
   return Effect.gen(function* () {
     const codeThreadDrivers = new Map<
       string,
@@ -1096,9 +1102,11 @@ export function wireProviders(deps: ProvidersDependencies) {
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
           isPairedDeviceScope: isRestrictedDeviceScope,
+          // The mark adds a network server's ask only under Strict; outside it
+          // the remembered grants decide as they did before the mark.
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
-              .externalContentIngested,
+              .externalContentIngested && deps.resolveThreadStrict(threadId),
           outsideContent: (threadId) =>
             readApprovalOutsideContent(persistence.connection, threadId),
           verifiedPublisherKey: (version) =>
@@ -1970,6 +1978,7 @@ export function wireProviders(deps: ProvidersDependencies) {
               readCodeThread: (threadId) => persistence.readCodeThread(threadId),
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
+              readProviderCliTrust: providerCliProjectTrust,
             },
             request,
           ),

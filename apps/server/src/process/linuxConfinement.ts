@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { secretGuardEntries, secretGuardLinuxPaths } from "./secretGuard";
+import { protectedAtLevel, secretGuardEntries, secretGuardLinuxPaths } from "./secretGuard";
 import {
   confinedExecutableExecPaths,
   ownAccountRoots,
@@ -650,8 +650,12 @@ export function buildBubblewrapLaunch(
   // The secret guard's files inside a bound root (a home folder opened as a
   // Project) are covered like any read denial. A protected file outside every
   // bound root is already absent from the capsule.
+  const listedGuardEntries = secretGuardEntries({ platform: "linux" });
   for (const path of secretGuardLinuxPaths({
-    entries: secretGuardEntries({ platform: "linux" }),
+    entries:
+      input.protectedFiles === "provider-sign-ins"
+        ? protectedAtLevel(listedGuardEntries, true)
+        : listedGuardEntries,
     ownAccountPaths: ownAccountRoots(
       input,
       input.readRoots ?? [],

@@ -180,6 +180,9 @@ export async function changeMobileProjectLevel(input: {
       ...(project.defaultFullAccessSandbox === undefined
         ? {}
         : { fullAccessSandbox: project.defaultFullAccessSandbox }),
+      // The command returns an unmentioned Strict choice to Settings, so a
+      // level change keeps the Project's own.
+      ...(project.defaultStrict === undefined ? {} : { strict: project.defaultStrict }),
     },
     ["code-project-access-changed", "work-project-permission-mode-changed"],
     PROJECT_REFUSED,

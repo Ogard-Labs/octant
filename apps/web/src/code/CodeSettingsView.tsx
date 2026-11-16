@@ -512,10 +512,13 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           </SettingRow>
           <SettingRow
             description="Strict keeps provider sign-ins, SSH keys and cloud credentials protected. It applies at every access level and preserves required approvals. Changes apply to the next turn."
-            focused={props.focusedSetting === "code-full-access-sandbox"}
+            focused={
+              props.focusedSetting === "code-strict" ||
+              props.focusedSetting === "code-full-access-sandbox"
+            }
             label="Strict"
             scope="mode"
-            settingId="code-full-access-sandbox"
+            settingId="code-strict"
           >
             <StrictPreferenceControl
               value={strictPreference}

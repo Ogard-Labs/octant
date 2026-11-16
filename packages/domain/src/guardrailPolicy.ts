@@ -599,6 +599,24 @@ export function defaultFullAccessSandboxFor(input: {
 }
 
 /**
+ * Whether Strict is on for one launch or call: the thread's own choice, else
+ * its Project's, else Settings', else off. Read at each launch and each call,
+ * never stamped on the thread, so a thread that never chose follows its
+ * Project and Settings as they are now. Strict restores the protections Octant
+ * adds beside a provider's own (Architecture: "Octant adds no restrictions of
+ * its own unless Strict is on"); off, the provider's own settings decide.
+ */
+export function resolveStrict(input: {
+  readonly thread?: { readonly strict?: boolean | undefined } | undefined;
+  readonly project?: { readonly defaultStrict?: boolean | undefined } | undefined;
+  readonly settings?: { readonly defaultStrict?: boolean | undefined } | undefined;
+}): boolean {
+  return (
+    input.thread?.strict ?? input.project?.defaultStrict ?? input.settings?.defaultStrict ?? false
+  );
+}
+
+/**
  * The mode a new Work thread starts in: the Project's own choice, else Work's
  * default in Settings, else Ask first.
  */

@@ -281,7 +281,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     )
       return true;
     const sandboxField = {
-      ...(strict === "keep" ? {} : { strict }),
+      ...(strict === "keep" ? {} : { strict: strict === "inherit" ? null : strict }),
       ...(strict === "inherit" || project.defaultFullAccessSandbox === undefined
         ? {}
         : { fullAccessSandbox: project.defaultFullAccessSandbox }),

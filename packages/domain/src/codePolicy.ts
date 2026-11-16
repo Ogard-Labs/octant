@@ -151,21 +151,25 @@ export function harnessAsksUnderSessionFullAccess(input: {
  * The flag is orthogonal to the posture: it changes who answers a prompt, not
  * what the sandbox permits. It is effective only when the posture produces
  * prompts (`approval-gated` or `auto-accept-edits`), the provider reports the
- * capability, and the thread has not ingested untrusted content. Taint still
- * wins: a tainted thread cannot delegate, so irreversible classes come back
- * to the user.
+ * capability, and, under Strict, the thread has not ingested untrusted
+ * content. Under Strict taint still wins: a tainted thread cannot delegate,
+ * so irreversible classes come back to the user. Outside Strict outside
+ * content marks the thread and the provider's own reviewer keeps answering,
+ * as it does on its own (Architecture: "Octant adds no restrictions of its
+ * own unless Strict is on").
  */
 export function harnessAutoReviewEffective(input: {
   readonly autoApprove: boolean;
   readonly posture: ProviderExecutionPolicy;
   readonly externalContentIngested: boolean;
+  readonly strict: boolean;
   readonly capabilitySupported: boolean;
 }): boolean {
   return (
     input.autoApprove &&
     input.capabilitySupported &&
     decidesCodeEffectsByApproval(input.posture) &&
-    !input.externalContentIngested
+    !(input.externalContentIngested && input.strict)
   );
 }
 

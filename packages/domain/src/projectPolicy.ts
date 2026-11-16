@@ -261,13 +261,13 @@ export function changeWorkProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
-  strict?: boolean | "inherit",
+  strict?: boolean | null,
 ): WorkProject {
   if (project.type !== "work") {
     reject("binding-not-allowed", "Only Work Projects take a Work default mode");
   }
-  const nextStrict = strict === "inherit" ? undefined : (strict ?? project.defaultStrict);
-  const compatibleSandbox = strict === "inherit" ? undefined : (nextStrict ?? fullAccessSandbox);
+  const nextStrict = strict === null ? undefined : (strict ?? project.defaultStrict);
+  const compatibleSandbox = strict === null ? undefined : (nextStrict ?? fullAccessSandbox);
   if (project.lifecycle === "archived") {
     reject("invalid-lifecycle", "Archived Projects are read-only");
   }
@@ -326,13 +326,13 @@ export function changeCodeProjectPermissionMode(
   updatedAt: UtcTimestamp,
   /** The sandbox at Full access for new threads; absent returns it to Settings. */
   fullAccessSandbox?: boolean,
-  strict?: boolean | "inherit",
+  strict?: boolean | null,
 ): CodeProject {
   if (project.type !== "code") {
     reject("binding-not-allowed", "Only Code Projects have a default mode");
   }
-  const nextStrict = strict === "inherit" ? undefined : (strict ?? project.defaultStrict);
-  const compatibleSandbox = strict === "inherit" ? undefined : (nextStrict ?? fullAccessSandbox);
+  const nextStrict = strict === null ? undefined : (strict ?? project.defaultStrict);
+  const compatibleSandbox = strict === null ? undefined : (nextStrict ?? fullAccessSandbox);
   const codeAccessPersistence: CodeAccessPersistence =
     permissionMode === "full-access" ? "project-default" : "current-session";
   // A Project that remembered Full access before Project modes existed has no
@@ -673,10 +673,14 @@ export function changeProjectImageGenerationChoice(
   if (unchanged) {
     reject("invalid-lifecycle", "Project image generation choice is already selected");
   }
-  const { imageGenerationChoice: _dropped, ...rest } = project;
+  const { imageGenerationChoice: _dropped, imageGenerationAskAgain: _asked, ...rest } = project;
   return {
     ...rest,
-    ...(choice === undefined ? {} : { imageGenerationChoice: choice }),
+    // Dropping the choice is the person's Ask again: the next call asks, at
+    // Full access too, until a choice is kept again.
+    ...(choice === undefined
+      ? { imageGenerationAskAgain: true as const }
+      : { imageGenerationChoice: choice }),
     version: nextVersion(project),
     updatedAt,
   };

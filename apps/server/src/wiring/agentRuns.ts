@@ -106,7 +106,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { ThreadStandingAnswerStore } from "../context/threadStandingAnswerStore";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
-import { windowAdmitsProject } from "@octant/domain/shell-policy";
+import { defaultShellSettings, windowAdmitsProject } from "@octant/domain/shell-policy";
 import { outsideContentRefusesDelegation } from "@octant/domain/untrusted-content-policy";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
@@ -499,6 +499,7 @@ function outsideContentGatesHelpers(
   turnLevels: {
     readonly runningWorkTurnAccess: (threadId: string) => WorkAccess | undefined;
     readonly codeParentActiveTurn: CodeParentActiveTurn;
+    readonly resolveThreadStrict: (threadId: string) => boolean;
   },
   parentThreadId: string,
 ): boolean {
@@ -509,6 +510,7 @@ function outsideContentGatesHelpers(
       { persistence, workThreadProjection, ...turnLevels },
       parentThreadId,
     ),
+    strict: turnLevels.resolveThreadStrict(parentThreadId),
   });
 }
 
@@ -600,6 +602,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "selectCodeConversation"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "resolveThreadStrict"
   > & {
     /** Wired by wireProviders; read only after startup. */
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
@@ -610,6 +613,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
 export function wireAgentRuns(deps: AgentRunsDependencies) {
   const inputSource = conversationInputSource(deps.persistence, deps.workThreadProjection);
   const {
+    resolveThreadStrict,
     agentRunInteractions,
     agentRunPersistence,
     agentRunParentAuthority,
@@ -1055,7 +1059,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             outsideContentGatesHelpers(
               persistence,
               workThreadProjection,
-              { runningWorkTurnAccess, codeParentActiveTurn },
+              { runningWorkTurnAccess, codeParentActiveTurn, resolveThreadStrict },
               String(waiter.parentThreadId),
             ) && !threadStandingAnswers.covers(String(waiter.parentThreadId), "delegation", true),
           parentThread: (waiter) =>
@@ -1329,6 +1333,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
             return true;
           };
     return createAgentsManagedTools({
+      waitLimitMs: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .childRunWaitLimitSeconds * 1_000,
       admission: agentRunAdmission,
       orchestration: agentRunOrchestration,
       persistence: agentRunPersistence,
@@ -1379,7 +1386,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         outsideContentGatesHelpers(
           persistence,
           workThreadProjection,
-          { runningWorkTurnAccess, codeParentActiveTurn },
+          { runningWorkTurnAccess, codeParentActiveTurn, resolveThreadStrict },
           input.parentThreadId,
         ) && !threadStandingAnswers.covers(input.parentThreadId, "delegation", true),
       ...(askMarkedDelegation === undefined ? {} : { askMarkedDelegation }),

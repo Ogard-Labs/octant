@@ -262,17 +262,21 @@ function shannonBitsPerCharacter(text: string): number {
 
 /**
  * Whether outside content on a thread stops it starting, resuming, or
- * continuing to wait on a helper agent. Below Full access it does: the
- * content may be steering the lead, and a helper would carry that further
- * unreviewed. At Full access the mark is recorded and follows into the
- * helper without gating anything, because the lead already acts unasked and
- * a helper never holds more authority than its parent.
+ * continuing to wait on a helper agent. Under Strict below Full access it
+ * does: the content may be steering the lead, and a helper would carry that
+ * further unreviewed. At Full access, and outside Strict at every level, the
+ * mark is recorded and follows into the helper without gating anything: at
+ * Full access the lead already acts unasked and a helper never holds more
+ * authority than its parent, and outside Strict the provider's own rules and
+ * the level decide as they did before the mark (Architecture: "Octant adds no
+ * restrictions of its own unless Strict is on").
  */
 export function outsideContentRefusesDelegation(input: {
   readonly externalContentIngested: boolean;
   readonly fullAccessThread: boolean;
+  readonly strict: boolean;
 }): boolean {
-  return input.externalContentIngested && !input.fullAccessThread;
+  return input.externalContentIngested && !input.fullAccessThread && input.strict;
 }
 
 /**

@@ -467,6 +467,48 @@ describe("Project routes", () => {
     },
   );
 
+  it.each([
+    { kind: "change-code-project-agent-merge", agentMerge: "enabled" },
+    {
+      kind: "change-code-project-agent-pull-request-comments",
+      agentPullRequestComments: "enabled",
+    },
+    { kind: "change-code-project-agent-default-branch-push", agentDefaultBranchPush: "enabled" },
+    { kind: "change-project-agent-memory-writes", agentMemoryWrites: "enabled" },
+  ] as const)(
+    "lets a device the host's own person paired turn on $kind, journaled with the device as actor",
+    async (setting) => {
+      const executeProject = vi.fn(() => ({ kind: "project-agent-memory-writes-changed" }));
+      const route = routeFixture({ executeProject });
+      const deviceId = "55000000-0000-4000-8000-000000000001";
+      const remote = new Request("http://127.0.0.1/api/projects/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...setting, projectId, expectedVersion: 1 }),
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: {
+          kind: "remote-device",
+          hostId: "11111111-1111-4111-8111-111111111111",
+          deviceId,
+          credentialGeneration: 1,
+          origin: "https://remote.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "55000000-0000-4000-8000-0000000000aa",
+          admittedBy: "host-person",
+        } as never,
+        scopeId: deviceId as never,
+      });
+      expect((await route(remote))?.status).toBe(200);
+      expect(executeProject).toHaveBeenCalledWith(
+        deviceId,
+        expect.objectContaining({ kind: setting.kind }),
+        { kind: "remote-device", actorId: deviceId, deviceId },
+      );
+    },
+  );
+
   it("refuses a paired device's desktop recipe change while a local window keeps the route", async () => {
     const executeProject = vi.fn(() => ({ kind: "code-project-desktop-recipe-changed" }));
     const route = routeFixture({ executeProject });

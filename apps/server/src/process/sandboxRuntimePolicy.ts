@@ -35,6 +35,7 @@ export type SandboxTurnAdmission =
   | { readonly status: "admitted"; readonly turn: SandboxTurnPolicy }
   | { readonly status: "refused"; readonly message: string };
 export interface SandboxRestrictionsAuthority {
+  readonly strictForActiveTurn?: (threadId: string) => boolean | undefined;
   readonly commandState?: (threadId: string) => SandboxCommandState;
   readonly currentTurn?: (threadId: string) => SandboxTurnPolicy | undefined;
   readonly recordLaunch?: (
@@ -94,6 +95,9 @@ export function beginSandboxTurn(request: SandboxTurnRequest): SandboxTurnAdmiss
 }
 export function activeSandboxPolicy(threadId: string): SandboxPolicySelection | undefined {
   return authority?.active(threadId);
+}
+export function activeSandboxStrict(threadId: string): boolean | undefined {
+  return authority?.strictForActiveTurn?.(threadId);
 }
 
 /** A host command borrows a running turn's immutable boundary or owns a fresh one. */

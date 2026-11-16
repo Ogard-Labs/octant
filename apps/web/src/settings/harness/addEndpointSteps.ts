@@ -76,11 +76,12 @@ export const ENDPOINT_KINDS: ReadonlyArray<EndpointKindPresentation> = [
   {
     kind: "ollama",
     title: "Local (Ollama)",
-    detail: "Models already installed in Ollama on this computer. No key.",
+    detail: "Models already installed in Ollama, on this computer or your network. No key.",
     key: "none",
     urlLabel: "Ollama address",
     urlPlaceholder: "http://127.0.0.1:11434",
-    urlHint: "Octant connects to Ollama you already run; it doesn't install or start it.",
+    urlHint:
+      "Octant connects to Ollama you already run; it doesn't install or start it. Another computer on your network works over HTTP; a public address needs HTTPS.",
     defaultName: "Ollama",
     defaultUrl: "http://127.0.0.1:11434",
   },

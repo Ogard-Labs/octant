@@ -237,6 +237,8 @@ export interface CodeThreadWorkspaceProps {
    * false or absent Auto is shown disabled with the reason.
    */
   readonly harnessAutoReviewSupported?: boolean;
+  /** Strict as the thread's Project and Settings set it, for a thread that did not choose. */
+  readonly strictDefault?: boolean;
   /** Who answers the thread's prompts at Auto, or why nobody can. */
   readonly autoReview?: AutoReview;
   readonly threadId: CodeThreadId;
@@ -1582,7 +1584,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         expectedVersion: thread.version,
         executionPolicy: thread.executionPolicy,
         permissionPersistence: thread.permissionPersistence,
-        strict,
+        strict: strict === "inherit" ? null : strict,
       });
     } finally {
       setAccessChanging(false);
@@ -2933,7 +2935,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   value={permissionModeOf(thread)}
                   strict={
                     thread.strict ??
-                    (thread.fullAccessSandbox === true && thread.executionPolicy === "full-access")
+                    (thread.fullAccessSandbox === true && thread.executionPolicy === "full-access"
+                      ? true
+                      : props.strictDefault === true)
                   }
                   legacyStrict={thread.strict === undefined && thread.fullAccessSandbox === true}
                   fullAccessSandboxSupported={threadKeepsFullAccessSandbox(

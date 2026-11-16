@@ -196,6 +196,11 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly readFullAccessSandbox?: (threadId: string) => boolean;
   /**
+   * Whether Strict is on for a thread now (`createStrictResolver`), read each
+   * time a decision is made. Absent reads as Strict.
+   */
+  readonly readStrict?: (threadId: string) => boolean;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -534,6 +539,7 @@ export function createNativeHarnessComposition(
             ...facts,
             tainted: options.readThreadTaint(input.threadId),
             fullAccess: input.fullAccess(),
+            strict: options.readStrict?.(input.threadId) ?? true,
           });
     };
     return {

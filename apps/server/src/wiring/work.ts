@@ -152,6 +152,7 @@ import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import { hostProviderCliProjectTrust } from "../providers/providerCliProjectTrust";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Sees images; absent on a host started without one. */
@@ -268,6 +269,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "workArtifactProjection"
     | "workThreadProjection"
     | "workTurnProjection"
+    | "resolveThreadStrict"
     | "threadWakeups"
   > & {
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
@@ -277,6 +279,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 export function wireWork(deps: WorkDependencies) {
   const imageDescriber = deps.imageDescriber;
   const {
+    resolveThreadStrict,
     conversationInputTransfer,
     agentRunPersistence,
     agentsManagedToolsFor,
@@ -537,6 +540,9 @@ export function wireWork(deps: WorkDependencies) {
         createRoutineProposalTools({
           ...routineTurn,
           proposals: routineProposalService,
+          startsActiveAtFullAccess: () =>
+            (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+              .agentRoutinesStartActiveAtFullAccess,
           readPosture: () => {
             const access = runningWorkTurns.get(String(input.thread.id))?.access;
             return access === undefined ? undefined : workThreadAccessOf(access).executionPolicy;
@@ -579,8 +585,11 @@ export function wireWork(deps: WorkDependencies) {
       stopKeptSession: (threadId) => outlivingWorkSessions.stopThread(workSessionKey(threadId)),
       turnRuntime: new WorkTurnRuntime({
         outlivingSessions: outlivingWorkSessions,
-        stalledTurnLimitMs: () =>
-          stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+        stalledTurnLimitMs: (turn) =>
+          stalledTurnLimitMs(
+            persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+            turn,
+          ),
         providerToolCallPauseLimitMs: () =>
           providerToolCallPauseLimitMs(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -612,6 +621,7 @@ export function wireWork(deps: WorkDependencies) {
       },
       runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: resolveThreadStrict,
       forgeChanges: runtimeForgeChanges,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
@@ -624,6 +634,7 @@ export function wireWork(deps: WorkDependencies) {
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
+        readProviderCliTrust: hostProviderCliProjectTrust(),
         readProviderModel: (providerInstanceId, modelId) =>
           persistence
             .readProviderCatalog?.(providerInstanceId)
@@ -840,6 +851,9 @@ export function wireWork(deps: WorkDependencies) {
               readImageGenerationCustomSources: () =>
                 (persistence.readShellSettings()?.settings ?? defaultShellSettings())
                   .imageGeneration.customSources,
+              defaultProfileInstanceId: () =>
+                (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+                  .imageGeneration.defaultProfileInstanceId,
               readsImages: () =>
                 providerRuntimeRegistry
                   .observedState(input.thread.providerInstanceId)
@@ -1929,6 +1943,10 @@ export function wireWork(deps: WorkDependencies) {
     // thread, counted in the store Code's wakes use so a restart keeps the
     // hourly and round bounds.
     const workMessageWake = new WorkMessageWake({
+      messageWakeDefaults: () => {
+        const settings = persistence.readShellSettings()?.settings ?? defaultShellSettings();
+        return { wakesPerHour: settings.messageWakesPerHour, rounds: settings.messageWakeRounds };
+      },
       readThread: (threadId) => {
         let thread: ReturnType<typeof workThreadProjection.read>;
         try {
@@ -2005,19 +2023,28 @@ export function wireWork(deps: WorkDependencies) {
       windowAuthorityStore,
     });
     // A wake-up is read and cancelled where its thread can be opened: a
-    // window holding the Work Project, or reaching the Code Project.
+    // window holding the Work Project, or reaching the Code Project. A device
+    // the host's own person paired holds no workspace and reaches a thread as
+    // its own send would: any Work Project's, any active Code Project's.
     const threadWakeupRoutes = createThreadWakeupRouteHandler({
       service: () => threadWakeups.service,
       windowAuthorityStore,
       canOpenThread: (windowId, mode, threadId) => {
-        if (isPairedDeviceScope(windowId)) return false;
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
         try {
           if (mode === "work") {
             const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
-            return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+            if (thread === undefined) return false;
+            return device
+              ? persistence.readProject(thread.projectId)?.type === "work"
+              : windowHoldsProject(windowId, thread.projectId, "work");
           }
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
         } catch {
           return false;
         }

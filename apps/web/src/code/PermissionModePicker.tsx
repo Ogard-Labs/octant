@@ -138,7 +138,7 @@ export interface PermissionModePickerProps {
 }
 
 const SANDBOX_DETAIL =
-  "Strict protects personal files and credentials, and keeps writes in allowed folders. Some actions still require approval.";
+  "Strict restores Octant's protection rules and required approvals. Some workflows that work in the provider's own app remain unavailable under Strict.";
 const SANDBOX_UNSUPPORTED_DETAIL =
   "This provider can't keep the sandbox at Full access yet. Use Claude, Codex or an Octant Harness model.";
 

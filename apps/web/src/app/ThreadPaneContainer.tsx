@@ -186,6 +186,8 @@ export interface ThreadPaneContainerProps {
   readonly chatReadCursorStore: ReturnType<typeof createChatReadCursorStore>;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
   readonly codeBoardProjects: ReadonlyArray<{ readonly id: ProjectId; readonly name: string }>;
+  /** Work's Strict default in Settings. */
+  readonly workDefaultStrict?: boolean;
   readonly codeController: CodeController;
   readonly codeDefaultPermissionMode: PermissionMode;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
@@ -289,6 +291,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     chatController,
     chatReadCursorStore,
     codeBoardProjects,
+    workDefaultStrict,
     codeController,
     codeDefaultPermissionMode,
     codeProviderChoices,
@@ -611,6 +614,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 <ThreadStatsDetailDialog />
                 <WorkspaceView
                   threadHeader={threadHeader}
+                  {...(workDefaultStrict === true ? { workDefaultStrict: true } : {})}
                   octantInstructionsClient={props.clients.octantInstructionsClient}
                   threadMenuItems={threadMenuItems}
                   sandboxRestrictionsClient={props.clients.sandboxRestrictionsClient}
