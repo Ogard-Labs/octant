@@ -86,10 +86,10 @@ export function codeParentActiveTurnFrom(
 }
 
 export type AuthorityDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority">;
+  Pick<FoundationsWiring, "browserAuthority" | "workThreadProjection">;
 
 export function wireAuthority(deps: AuthorityDependencies) {
-  const { browserAuthority, options, persistence } = deps;
+  const { browserAuthority, options, persistence, workThreadProjection } = deps;
 
   const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
   const processAuthorityClock = new ProcessAuthorityClock();
@@ -323,6 +323,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
       executionWindows: agentRunExecutionWindows,
       codeSessionAuthority,
       windowAuthorityStore,
+      readWorkThread: (threadId) => workThreadProjection.read(threadId),
     });
   const browserCaptureStore = new BrowserCaptureStore(persistence.dataDirectory);
   const browserCaptures = new BrowserCaptureService({

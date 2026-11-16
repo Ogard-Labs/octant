@@ -255,6 +255,23 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
           origin,
         );
       }
+      // The per-run Full access flag is typed by the person on `octant agent`
+      // at this host; no device and no agent grant sets it.
+      if (
+        command.kind === "change-work-thread-access" &&
+        command.fullAccessRunFlag === true &&
+        readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+      ) {
+        return failureResponse(
+          {
+            category: "unauthorized",
+            message:
+              "The per-run Full access flag is set by the person on `octant agent` on this host.",
+          },
+          403,
+          origin,
+        );
+      }
       // Turning Strict off widens what a provider may do, so it follows the
       // same rule: the person, at a window or on a device they paired.
       if (loosensWorkStrict(command) && refusesFullAccessRaise(request)) {

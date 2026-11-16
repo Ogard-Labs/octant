@@ -40,9 +40,13 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
+import {
+  PERMISSION_MODE_LABEL,
+  PermissionModePicker,
+  threadKeepsFullAccessSandbox,
+} from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
@@ -51,6 +55,7 @@ import {
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
+  workThreadAccessOf,
   type PickerGroup,
   resolveStrict,
 } from "@octant/domain";
@@ -2793,6 +2798,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               }
               if (row.kind === "request") {
                 if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                  const levelChange = row.request.detail.levelChange;
                   return (
                     <ProviderApprovalPrompt
                       onAnswer={(decision) => {
@@ -2802,6 +2808,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         });
                       }}
                       summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                      {...(levelChange === undefined
+                        ? {}
+                        : {
+                            levelChange: {
+                              to: workThreadAccessOf(levelChange.to).executionPolicy,
+                              toLabel: PERMISSION_MODE_LABEL[workModeOf(levelChange.to)],
+                              ...(levelChange.plan === undefined ? {} : { plan: levelChange.plan }),
+                            },
+                          })}
                     />
                   );
                 }
@@ -3306,11 +3321,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <PermissionModePicker
                     autoSupported={autoSupported}
                     disabled={accessChanging || creating || completionLocked}
-                    modes={WORK_PERMISSION_MODES}
-                    onChange={(mode) => {
-                      const access = workAccessOfMode(mode);
-                      if (access !== undefined) void changeAccess(access);
-                    }}
+                    onChange={(mode) => void changeAccess(workAccessOfMode(mode))}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
                     fullAccessSandbox={thread.fullAccessSandbox === true}

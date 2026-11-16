@@ -14,7 +14,7 @@ const optionsFor = (modes: ReadonlyArray<(typeof PERMISSION_MODE_OPTIONS)[number
   ...modes.map((option) => ({ id: option.id, label: option.label })),
 ];
 const CODE_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS);
-// Work shares Code's levels and has no Plan overlay.
+// Work shares Code's levels; Plan is a thread's own level, never where one starts.
 const WORK_OPTIONS = optionsFor(PERMISSION_MODE_OPTIONS.filter((option) => option.id !== "plan"));
 
 const SANDBOX_OPTIONS = [

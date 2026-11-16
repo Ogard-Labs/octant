@@ -277,6 +277,8 @@ export function wireAutomation(deps: AutomationDependencies) {
     projection: persistence.automationProjection,
     hostId: String(LOCAL_HOST_ID),
     clock: () => new Date().toISOString(),
+    readChildren: (threadId) =>
+      agentRunOrchestration.parentSummary(decodeAgentRunParentThreadId(threadId)),
   });
   // The one host-local durable scheduler (A3) plus the ordinary-thread
   // dispatcher (A4). Claims stay journaled; the dispatcher revalidates

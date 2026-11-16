@@ -136,8 +136,8 @@ describe("owner unlock contracts", () => {
 });
 
 describe("owner administration session, posture, and sign-in copy contracts", () => {
-  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"])(
-    "accepts the Work level %s without inventing Code persistence or Plan authority",
+  it.each(["ask-first", "auto-accept-edits", "auto", "plan", "full-access"])(
+    "accepts the Work level %s without inventing Code persistence",
     (posture) => {
       const change = {
         subject: { kind: "work-thread", threadId: uuid },
@@ -145,7 +145,6 @@ describe("owner administration session, posture, and sign-in copy contracts", ()
         posture,
       };
       expect(decodeOwnerPostureChangeRequest(change)).toEqual(change);
-      expect(() => decodeOwnerPostureChangeRequest({ ...change, posture: "plan" })).toThrow();
       expect(() =>
         decodeOwnerPostureChangeRequest({ ...change, persistence: "project-default" }),
       ).toThrow();
