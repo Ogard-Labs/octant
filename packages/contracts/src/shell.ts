@@ -882,6 +882,16 @@ export const ShellSettings = Schema.Struct({
     default: () => DEFAULT_STALLED_TURN_LIMIT_MINUTES,
   }),
   /**
+   * The stalled-turn limit for a Work or Code turn at Full access outside
+   * Strict. `null`, the default, means never, since at Full access Octant
+   * adds no limit of its own; a turn under Strict keeps
+   * {@link stalledTurnLimitMinutes} at every level. A store persisted before
+   * the setting existed decodes to Off.
+   */
+  fullAccessStalledTurnLimitMinutes: Schema.optionalWith(Schema.NullOr(StalledTurnLimitMinutes), {
+    default: () => null,
+  }),
+  /**
    * The longest a provider tool call that has reported a start and no finish
    * pauses the stalled-turn clock, in minutes. `null` means no bound: such a
    * call pauses the clock until it finishes or the person stops the turn. A

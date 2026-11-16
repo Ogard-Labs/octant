@@ -26,6 +26,8 @@ export interface DelegationParentRules {
    * is approval-gated whatever the thread's level.
    */
   readonly runsAtFullAccess: (threadId: string) => boolean;
+  /** Whether Strict is on for the parent now; outside it the mark adds no ask. */
+  readonly strict: (threadId: string) => boolean;
   /**
    * Whether the person answered for this thread, after it read outside
    * content, that it may start helpers: the same `delegation` answer a helper
@@ -67,14 +69,16 @@ export function checkDelegationParent(
     return { status: "refused", kind: "subagents-not-allowed" };
   }
   const policy = parent.liveAuthority.executionPolicy;
-  // Below Full access a thread that read outside content (a delegated result
-  // counts) starts a helper on another host only once its person has answered
+  // Under Strict below Full access a thread that read outside content (a
+  // delegated result counts) starts a helper on another host only once its
+  // person has answered
   // for the thread, as a helper on this host does. The agent's tool call asks
   // before reaching here; Plan has no ask, so it stays refused.
   if (
     outsideContentRefusesDelegation({
       externalContentIngested: rules.externalContentIngested(input.threadId),
       fullAccessThread: rules.runsAtFullAccess(input.threadId),
+      strict: rules.strict(input.threadId),
     }) &&
     !rules.standingAnswerCovers(input.threadId)
   ) {

@@ -52,7 +52,7 @@ describe("the one-time offer of Claude artifacts in a thread", () => {
     const onChoose = vi.fn();
     render(<ThreadArtifactsOffer onChoose={onChoose} pending={false} />);
     expect(screen.getByText("Use Claude artifacts for this thread instead?")).toBeVisible();
-    expect(screen.getByText(/usage telemetry to Anthropic for this thread/)).toBeVisible();
+    expect(screen.getByText(/under Strict, this thread’s turns run with it on/)).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Use Claude artifacts" }));
     await userEvent.click(screen.getByRole("button", { name: "Keep Canvas" }));
     expect(onChoose.mock.calls).toEqual([["native-artifacts"], ["canvas"]]);

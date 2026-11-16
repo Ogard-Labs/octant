@@ -15,16 +15,16 @@ export interface ClaudeArtifactDeliverySettingProps {
 
 /** What enabling the setting changes, said the same way under the switch and in the dialog. */
 export const CLAUDE_ARTIFACTS_TELEMETRY_WARNING =
-  "Enabling Claude artifacts also turns on Claude Code’s usage telemetry to Anthropic for this account’s Work and Code threads that use them. Error reports and conversation uploads stay off.";
+  "Claude artifacts need Claude Code’s usage telemetry to Anthropic. Outside Strict it follows your own Claude Code settings, as it does on its own. Under Strict, enabling Claude artifacts turns that telemetry on for this account’s Work and Code threads that use them; error reports and conversation uploads stay off.";
 
 /**
  * The person's setting that makes Claude's own Artifact tool available to
  * this account's Work and Code threads. Off unless they enable it, and only
  * from a window on this host (the server refuses others). Canvas stays the
  * default: each thread then chooses artifacts for itself. Enabling it is a
- * privacy decision, because a thread that uses artifacts runs with Claude
- * Code's usage telemetry on, so the warning stays under the switch and
- * enabling asks again in a dialog that repeats it.
+ * privacy decision, because a thread that uses artifacts under Strict runs
+ * with Claude Code's usage telemetry on, so the warning stays under the
+ * switch and enabling asks again in a dialog that repeats it.
  */
 export function ClaudeArtifactDeliverySetting(props: ClaudeArtifactDeliverySettingProps) {
   const [confirming, setConfirming] = useState(false);

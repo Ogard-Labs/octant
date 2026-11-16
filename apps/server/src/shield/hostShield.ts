@@ -71,6 +71,8 @@ export interface HostShieldDependencies {
   ) => ReadonlyArray<{ readonly id: ProviderModelId; readonly displayName: string }> | undefined;
   readonly resolveDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly tainted: (threadId: string) => boolean;
+  /** Whether Strict is on for the thread now; absent reads as Strict. */
+  readonly strict?: (threadId: string) => boolean;
   /** What the Watcher found in what the thread read: kinds only, never text. */
   readonly watcherLabels: (threadId: string) => ReadonlyArray<ShieldWatcherLabel>;
   /** The thread's own turn prompts, oldest first: what the person wrote. */
@@ -229,6 +231,7 @@ export function createHostShield(deps: HostShieldDependencies): HostShield {
         };
       },
       tainted: deps.tainted,
+      ...(deps.strict === undefined ? {} : { strict: deps.strict }),
       watcherLabels: deps.watcherLabels,
       personMessages: (threadId) => {
         const thread = readThread(threadId);

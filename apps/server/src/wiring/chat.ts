@@ -184,7 +184,10 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     readonly workTurnService: () => WorkTurnService;
     /** Threads a move holds: frozen here while leaving, or arriving and not yet committed. */
     readonly threadMoveHolds: ThreadMoveHolds;
-  } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
+  } & Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "conversationInputTransfer" | "resolveThreadStrict"
+  >;
 
 export function wireChat(deps: ChatDependencies) {
   const imageDescriber = deps.imageDescriber;
@@ -415,8 +418,11 @@ export function wireChat(deps: ChatDependencies) {
       return hidden;
     };
     const chatService = new ChatService({
-      stalledTurnLimitMs: () =>
-        stalledTurnLimitMs(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      stalledTurnLimitMs: (turn) =>
+        stalledTurnLimitMs(
+          persistence.readShellSettings()?.settings ?? defaultShellSettings(),
+          turn,
+        ),
       providerToolCallPauseLimitMs: () =>
         providerToolCallPauseLimitMs(
           persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -449,6 +455,7 @@ export function wireChat(deps: ChatDependencies) {
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
+      resolveStrict: deps.resolveThreadStrict,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (attachmentPurgeGuards.length === 0)

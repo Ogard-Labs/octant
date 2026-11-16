@@ -52,6 +52,7 @@ import {
   refreshNewestTurns,
   startedConversationPickerGroups,
   type PickerGroup,
+  resolveStrict,
 } from "@octant/domain";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import {
@@ -510,6 +511,8 @@ export interface WorkThreadWorkspaceProps {
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
+  /** Work's Strict default in Settings, which a thread and Project that did not choose follow. */
+  readonly workDefaultStrict?: boolean;
   readonly onDisplayReadyChange?: (ready: boolean) => void;
   readonly changeRevision?: number;
   readonly threadClient: WorkThreadClient;
@@ -931,9 +934,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const [accessChanging, setAccessChanging] = useState(false);
   // Work and Code share one set of levels; the composer moves this thread to
   // another one, and its next turn runs at it.
-  const changeAccess = async (access: WorkAccess, fullAccessSandbox?: boolean) => {
+  const changeAccess = async (
+    access: WorkAccess,
+    fullAccessSandbox?: boolean,
+    strict?: boolean,
+  ) => {
     if (thread === undefined || accessChanging) return;
-    if (access === thread.access && fullAccessSandbox === undefined) return;
+    if (access === thread.access && fullAccessSandbox === undefined && strict === undefined) return;
     setAccessChanging(true);
     setErrorMessage(undefined);
     setToolCatalogHandoffRequired(false);
@@ -944,6 +951,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         expectedVersion: thread.version,
         access,
         ...(fullAccessSandbox === undefined ? {} : { fullAccessSandbox }),
+        ...(strict === undefined ? {} : { strict }),
       });
       if (!("kind" in result) || result.kind !== "thread-updated") {
         setErrorMessage("This task’s mode could not be saved.");
@@ -3313,6 +3321,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     onFullAccessSandboxChange={(sandboxed) =>
                       void changeAccess("full-access", sandboxed)
                     }
+                    strict={
+                      thread.strict ??
+                      resolveStrict({
+                        project: project?.type === "work" ? project : undefined,
+                        settings: { defaultStrict: props.workDefaultStrict },
+                      })
+                    }
+                    onStrictChange={(strict) => void changeAccess(thread.access, undefined, strict)}
                   />
                 )}
               </>

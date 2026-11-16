@@ -8459,6 +8459,9 @@ function LaunchedShell(
                       chatReadCursorStore={chatReadCursorStore}
                       clients={launchedClients}
                       codeBoardProjects={codeBoardProjects}
+                      {...(workSettings.settings?.defaultStrict === true
+                        ? { workDefaultStrict: true }
+                        : {})}
                       codeController={codeController}
                       codeDefaultPermissionMode={codeDefaultPermissionMode}
                       codeProviderChoices={codeProviderChoices}

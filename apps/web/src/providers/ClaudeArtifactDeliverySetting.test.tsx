@@ -29,7 +29,7 @@ const label = "Enable Claude artifacts for Claude personal";
 const telemetry = /usage telemetry to Anthropic/;
 
 describe("Enable Claude artifacts", () => {
-  it("starts off and warns under the switch that it turns on Claude Code's usage telemetry", () => {
+  it("starts off and warns under the switch that Strict turns Claude Code's usage telemetry on and otherwise leaves it to the person", () => {
     render(
       <ClaudeArtifactDeliverySetting
         disabled={false}
@@ -40,7 +40,10 @@ describe("Enable Claude artifacts", () => {
     const toggle = screen.getByRole("switch", { name: label });
     expect(toggle).not.toBeChecked();
     expect(screen.getByText(telemetry)).toBeVisible();
-    expect(screen.getByText(/Error reports and conversation uploads stay off/)).toBeVisible();
+    expect(
+      screen.getByText(/Outside Strict it follows your own Claude Code settings/),
+    ).toBeVisible();
+    expect(screen.getByText(/error reports and conversation uploads stay off/)).toBeVisible();
     expect(toggle).toHaveAccessibleDescription(telemetry);
   });
 

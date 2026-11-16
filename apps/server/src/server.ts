@@ -249,6 +249,8 @@ export function startOctantServer(
       workTurnProjection,
       workTurnsCutOffByRestart,
       threadWakeups,
+      resolveThreadStrict,
+      resolveProjectStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -346,6 +348,7 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
+      resolveThreadStrict,
       readResourceMemory,
       agentRunParentAuthority,
       agentRunPersistence,
@@ -446,6 +449,7 @@ export function startOctantServer(
       stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
+      resolveThreadStrict,
       // Deferred: Work's running turns are wired later in this scope.
       runningWorkTurnAccess: (threadId) => runningWorkTurnAccess(threadId),
       onWindowRevoked,
@@ -577,6 +581,7 @@ export function startOctantServer(
       skillDiscoveryService,
       providerAvailabilityMarks,
     } = yield* wireProviders({
+      resolveThreadStrict,
       hostResourceBudget,
       serverRegistry,
       providerRuntimeNetwork,
@@ -636,6 +641,7 @@ export function startOctantServer(
       observeTurnEnded,
       threadWork,
     } = wireHarness({
+      resolveThreadStrict,
       providerAvailabilityMarks,
       isProjectPolicyTargetAllowed,
       toolEffectLedger,
@@ -880,6 +886,7 @@ export function startOctantServer(
       terminalProcessPort,
     } = yield* wireCodeRuntime({
       imageDescriber,
+      resolveThreadStrict,
       isPairedDeviceScope,
       windowAuthorityStore,
       threadWakeups,
@@ -1016,6 +1023,8 @@ export function startOctantServer(
       remoteServerGrantLocalRoutes,
       remoteServerGrants,
     } = yield* wireCodeTooling({
+      resolveThreadStrict,
+      resolveProjectStrict,
       onWindowRevoked,
       desktopLeases,
       installDesktopPreviewRequest,
@@ -1066,6 +1075,7 @@ export function startOctantServer(
       workspacePresetRoutes,
     } = yield* wireChat({
       imageDescriber,
+      resolveThreadStrict,
       verifyModelToolsOnFirstUse,
       threadMoveHolds,
       conversationInputTransfer,
@@ -1144,6 +1154,7 @@ export function startOctantServer(
       workflowService,
     } = yield* wireWork({
       imageDescriber,
+      resolveThreadStrict,
       machineChangeFeed,
       threadWakeups,
       codeProjectAccess,
@@ -1935,6 +1946,7 @@ export function startOctantServer(
       remoteHost,
       threadRetention,
     } = wireRemote({
+      resolveThreadStrict,
       restartRecovery,
       agentGrantRouteSlot,
       pairedDeviceRouteSlot,

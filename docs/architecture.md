@@ -251,7 +251,8 @@ The design rests on a small set of invariants that every package obeys:
   (Claude outside Plan) and relies on the runtime's own sandbox, per the confinement matrix in
   [Security and authority](#security-and-authority). A provider with a
   sandbox of its own is to run in it below Full access, with Octant's sandbox
-  as the opt-in Strict setting and the fallback (designed, not built;
+  as the opt-in Strict setting and the fallback (the Strict setting is
+  built; the provider's own sandbox outside Strict is designed, not built;
   [Providers run in their own sandbox](#security-and-authority)). Every driver starts a
   Work session with its shell and Git at the thread's level, as in Code, and
   Work threads reach Full access
@@ -3196,9 +3197,9 @@ hold for every action in it:
   pull requests" stands in for the per-post ask on a thread that has read no
   outside content; a thread that has read outside content still asks before
   posting, switch on or off (maintainer decision, 2026-11-12; outside Strict
-  the mark is to stop adding this ask under
+  the mark stops adding this ask under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority),
-  designed, not built); with the switch off the agent
+  built); with the switch off the agent
   drafts the post by asking, and the approval shows the whole text
   (maintainer request, 2026-11-12). The level is the one the turn runs at, and
   a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
@@ -3287,7 +3288,9 @@ Which path reaches the forge depends on the thread's
   writes are an ordinary ask, as they are in the runtime on its own
   (maintainer decision, 2026-11-14): at Guarded and Accept edits the person
   approves the pending command, and at Reviewed Shield decides it, its forge
-  hard lines included, or hands it to the person. Octant's structured
+  hard lines included under Strict (outside Strict a provider runtime's own
+  merge or force-push follows its own permission mode, so Shield judges it
+  without them; built), or hands it to the person. Octant's structured
   pull-request tools, with their repository, branch, revision, consent,
   required-check and live-authority checks, stay an option the agent may
   use, not a requirement. The Octant Harness, whose shell is Octant's own,
@@ -12236,6 +12239,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     server after the mark, then runs for the rest of that thread, because its
     arguments can carry out what the thread has read and one answer says the
     person accepts that for this server (maintainer decision, 2026-11-12).
+    That ask is Strict's: outside Strict the mark adds no question and the
+    remembered grants decide as before it (built).
     A Project's or the account's grant does not spare that question, and
     every MCP result marks its thread, so a network server asks once more
     after that thread's first tool result. The answer covers no other
@@ -13789,7 +13794,7 @@ mechanisms are:
        pull-request merge rules and the Project's "Agents may merge"
        switch. A provider's own commands are not on the list outside
        Strict ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
-       designed, not built).
+       built for Octant Shield's forge hard lines).
     3. Computer use: the first action in each application asks, once per
        thread, because it drives the person's real desktop.
     4. The Browser on a signed-in profile: a site approval per origin and
@@ -14259,10 +14264,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; partly built: slash commands, Project
-  trust from Claude Code and Codex, the default level, image generation and
-  the resource queue below are built; Strict and the rest are designed, not
-  built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: slash commands, the
+  Strict setting, Project trust from Claude Code and Codex, the default
+  level, image generation, the resource queue and the items marked built
+  below). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14273,32 +14278,53 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Environment.** A provider receives the host's environment (proxies,
     custom certificate authorities, `ANTHROPIC_BASE_URL`, Bedrock and Vertex
     routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
-    providers' keys. Today Claude Code receives a fixed list of variables;
-    Strict keeps that list.
+    providers' keys. Strict keeps each runtime's fixed list. Built for
+    Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
+    received the host's environment. Not built yet for Codex: its
+    environment is fixed per account and shared by every lease, and opening
+    it would hand Codex the host's AWS credentials, which the Codex sign-ins
+    item below decides.
   - **Outside content.** Reading outside content still marks the thread
     and shows it, but no longer withdraws the provider's own web search or
     turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
-    keeps today's withdrawal.
+    keeps today's withdrawal. Built: Code's Auto keeps the provider's
+    reviewer (`harnessAutoReviewEffective`), and an Octant Harness turn
+    keeps its provider's own search for the whole turn
+    (`decideHarnessProviderSearch`).
   - **Protected files.** A provider's own tools may read and write the
     files Octant protects (`~/.aws`, kube, docker, npm and `gh`
     configuration, `.netrc`) at every level, as on its own, so `aws`,
     `kubectl`, `docker push`, private registries and `gh` work. Octant's own
     file tools keep refusing them below Full access, and provider sign-ins
-    at Full access. Strict refuses them for every tool.
+    at Full access. Strict refuses them for every tool. Built for Claude
+    Code's own file tools (its gate refuses only another provider's sign-in
+    outside Strict) and for the confinement of Pi and the ACP agents
+    (`protectedFiles: "provider-sign-ins"`), read at each launch. Not built
+    yet for Codex and OpenCode, whose processes are shared per posture and do
+    not yet key on Strict. Until
+    [Providers run in their own sandbox](#security-and-authority) is built, a
+    wrapped runtime's wall still keeps files outside the Project's folders
+    unreadable, so outside Strict the narrowing reaches the protected files
+    inside them (a home folder opened as a Project).
   - **Denials.** A denied request goes back to the model, which adjusts, as
-    on its own; three denials no longer end a Code turn, in Strict too.
+    on its own; no count of denials ends a Code turn, in Strict too (built:
+    the runtime answers every Deny and the turn keeps running).
   - **Git and pull requests.** A provider's own `git push`, `gh` writes,
     merge, force-push and push to the default branch follow its own
     permission mode, and at Full access run unasked; the journal still
     records each one with the hard line it crossed. Octant's own
     pull-request tool and Octant Harness keep the merge rules and the
     Project's "Agents may merge" switch. Strict asks for the provider's
-    commands too, as today.
+    commands too, as today. Built: Octant Shield's forge hard lines judge a
+    provider runtime's call only under Strict, and at Full access a
+    provider's command runs unasked and is journaled
+    (`shield-forge-changes.observed@1`) with the hard line it crossed.
   - **Provider channels.** Telemetry, error reports, `/bug`, `/feedback`
     and marketplace installs follow the person's own provider settings.
     Self-update stays off, because Octant installs and updates provider
     CLIs itself. Strict turns every channel off, as today. Octant itself
-    still sends nothing.
+    still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build
+    and Kimi Code; Codex and OpenCode set no channel guard of Octant's.
   - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
     or exported credentials. Strict refuses them, as today.
   - **Slash commands.** A provider's own slash commands run in every mode
@@ -14336,16 +14362,17 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Project terminal.** The person's own Project terminal runs unconfined
     by default, as the person's shell does outside Octant, and a Work
     Project's terminal no longer runs at the approval-gated posture. Octant's
-    sandbox applies to it only under Strict. Today it runs under a Code
-    thread terminal's confinement
-    ([Project terminals](#security-and-authority)).
+    sandbox applies to it only under Strict, where it runs under a Code
+    thread terminal's confinement as before (built;
+    [Project terminals](#security-and-authority)).
   - **After outside content.** Below Full access a thread that has read
     outside content is still marked, but the mark no longer makes a network
     MCP server ask again, every Computer action ask again, delegation ask
     once, or a pull-request comment or review reply ask whatever the Project's
     "Agents may comment on pull requests" switch says; the remembered grants,
     the switch and the level decide as they did before the mark. Strict keeps
-    each of those asks, as today.
+    each of those asks, as today. Built for all four, each read at the call
+    from the effective Strict value.
   - **Image generation.** At Full access, with several image profiles ready
     and no kept choice, the card is skipped and the image is made on a default
     profile (the one the person names in Settings, else the first ready one)
@@ -14377,7 +14404,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     refuses the home folder, as today.
   - **Stalled-turn limit.** At Full access the stalled-turn limit defaults
     to Off; below Full access it stays 30 minutes, and the person may set
-    either. Strict keeps 30 minutes at every level.
+    either. Strict keeps 30 minutes at every level (built: Settings ›
+    Providers & Models › Stalled-turn limit at Full access,
+    `fullAccessStalledTurnLimitMinutes`, Off by default; a Full access turn
+    under Strict, and every turn below Full access, takes the stalled-turn
+    limit).
   - **Opt-in extras.** A per-person list of provider tools to block, and in
     Strict a notice saying what Strict withheld.
 
@@ -15107,7 +15138,20 @@ approval-gated` command that undoes it. The terminal shows no one-time
     sign-ins, `~/.ssh` and cloud keys unreadable. A provider inside
     Octant's profile has no native escalation, so a command that needs to
     leave fails; Claude Code keeps its own request to leave its sandbox,
-    asked every time (below).
+    asked every time (below). The setting is built: a thread's choice
+    (`CodeThread.strict`, `WorkThread.strict`, changed with the mode), a
+    Project's default (`defaultStrict`, changed with the Project's default
+    mode) and the Code and Work defaults in Settings (`defaultStrict`; a
+    Chat thread, which has neither, is Strict when either Settings default
+    is), each shown with the trade-off it makes. The host reads it at each
+    launch and each call through one resolver (`createStrictResolver`),
+    never stamping it on the thread, so a thread that never chose follows
+    its Project and Settings as they are now; a launch that does not carry
+    the resolved value is Strict. A device the host's own person paired
+    turns it on or off as a local window does; a hub-introduced device and
+    an agent grant may turn it on, never off. Not built yet: the provider's
+    own sandbox outside Strict, so today every provider still runs in the
+    sandbox the table below shows whether Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -15347,7 +15391,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   the umbrella on every launch, and one that exports a truthy
   `DISABLE_TELEMETRY` or `DO_NOT_TRACK` keeps `DO_NOT_TRACK=1` on every
   launch; only those disabling values cross (the runtime then withholds
-  `Artifact` as well).
+  `Artifact` as well). Everything in this paragraph is the launch under
+  Strict. Outside Strict (built, under
+  [Octant adds no restrictions of its own unless Strict is on](#security-and-authority))
+  a Claude launch gets the host's environment less Octant's own variables
+  (`OCTANT_*`) and every other model provider's credential
+  (`providerHostEnvironment`); the account's own sign-in still decides
+  which account a turn runs as, so no host Anthropic key or token crosses,
+  Octant's account directory is applied, and an API-key account gets its
+  broker key. It sets only the self-update, auto-memory and built-in-agents
+  switches (`OPEN_CLAUDE_LAUNCH_GUARDS`); telemetry, error reports, `/bug`,
+  `/feedback`, the survey and marketplace auto-install follow the person's
+  own Claude Code settings, and the Claude artifacts switch below lifts
+  nothing, because nothing of Octant's sits on telemetry there. Pi's
+  telemetry and the ACP agents' channel guards (Mistral Vibe, Grok Build,
+  Kimi Code; `channelGuards`) follow the person's own settings the same way,
+  and those launches get the host's environment on the same terms. OpenCode
+  already launches with the host's environment and sets no channel guard.
   **Claude artifacts (a person-authorized external publish and an opt-in
   telemetry exception).** The one place a Claude launch sends Project content
   to Anthropic other than as inference, and the one place it sends the
@@ -16036,7 +16096,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   device is refused outright: a remote Code terminal is gated as an agent,
   and a Project terminal has no thread to hold that approval. The shell runs under the posture a new thread
   in the Project starts with, approval-gated or Full access where a Code
-  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Decided: the terminal is to run unconfined outside Strict, a Work Project's included ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority); designed, not built). The owning
+  Project remembers it (a Work Project's terminal is approval-gated); Plan never applies, because nothing plans in it. Built: outside Strict the terminal runs unconfined, a Work Project's included, read at each start from the task's Strict value for a terminal opened for a Work task, else the Project's (its own default, else its mode's Settings default); a terminal on a Plan checkout stays read-only ([Octant adds no restrictions of its own unless Strict is on](#security-and-authority)). The owning
   window, Project, and binding revision are checked before every command, and
   another window cannot attach. Its lifecycle is journaled on its own
   `project-terminal` aggregate (`code.project-terminal-started@1`,
@@ -18955,7 +19015,7 @@ permissions), with credential-shaped text redacted and cut to 8 KB; a write's
 contents, a tool's output, and the runtime's own reason stay out. Codex's
 request to widen its own sandbox is a privilege change, which Shield hands to
 the person. An allow or deny goes straight back to the runtime for that one
-call and does not count toward the three refusals that end a turn; an ask is
+call; an ask is
 the ordinary approval. Every automatic answer, and every answer on a child
 run's behalf, carries the seam's one-call scope (`ProviderApprovalAnswer.scope:
 "once"`): no driver remembers it for the session or the Project or asks the

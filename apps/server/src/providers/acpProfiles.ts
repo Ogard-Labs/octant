@@ -72,6 +72,13 @@ export interface AcpProcessProfile {
   readonly npmPackageName?: string;
   readonly passthroughVariables: ReadonlyArray<string>;
   readonly guards: Readonly<Record<string, string>>;
+  /**
+   * The guards that close one of the agent's own channels to its vendor
+   * (telemetry, trace uploads, feedback). Under Strict they are set as today;
+   * outside Strict they follow the person's own settings. Self-update guards
+   * are not channels and stay set.
+   */
+  readonly channelGuards?: ReadonlyArray<string>;
   /** User-owned configuration files the provider needs to read, never write. */
   readonly hostReadPaths?: ReadonlyArray<string>;
   /** The CLI starts a same-binary stdio server before serving ACP messages. */
@@ -274,7 +281,7 @@ export interface AcpProviderProfile {
   readonly process: AcpProcessProfile;
 }
 
-const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
+export const HOST_PASSTHROUGH_VARIABLES: ReadonlyArray<string> = [
   "COLORTERM",
   "HOME",
   "LANG",
@@ -763,6 +770,7 @@ const vibeProfile: AcpProviderProfile = {
       /^vibe-acp (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
     minimumVersion: [2, 24, 1],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    channelGuards: ["VIBE_ENABLE_TELEMETRY"],
     guards: {
       VIBE_ENABLE_TELEMETRY: "false",
       VIBE_ENABLE_UPDATE_CHECKS: "false",
@@ -983,6 +991,12 @@ const grokProfile: AcpProviderProfile = {
       /^grok (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)? \([0-9a-f]+\)(?: \[[a-zA-Z]+\])?\r?\n?$/,
     minimumVersion: [1, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    channelGuards: [
+      "GROK_TELEMETRY_ENABLED",
+      "GROK_TELEMETRY_TRACE_UPLOAD",
+      "GROK_TELEMETRY_MIXPANEL_ENABLED",
+      "GROK_FEEDBACK_ENABLED",
+    ],
     guards: {
       GROK_TELEMETRY_ENABLED: "0",
       GROK_TELEMETRY_TRACE_UPLOAD: "0",
@@ -1598,6 +1612,7 @@ const kimiProfile: AcpProviderProfile = {
       ...HOST_PASSTHROUGH_VARIABLES.filter((name) => name !== "HOME"),
       "FORCE_COLOR",
     ],
+    channelGuards: ["KIMI_DISABLE_TELEMETRY"],
     guards: {
       KIMI_DISABLE_TELEMETRY: "1",
       KIMI_CODE_NO_AUTO_UPDATE: "1",
