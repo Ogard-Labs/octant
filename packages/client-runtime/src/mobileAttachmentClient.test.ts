@@ -70,16 +70,15 @@ describe("what a phone may attach to a thread", () => {
     });
   });
 
-  it("offers Work and Code threads images only, and only when the thread's model takes them", () => {
-    const images = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+  it("offers Work and Code threads any file, and the camera only when the thread's model takes images", () => {
     for (const mode of ["work", "code"] as const) {
       expect(mobileAttachmentOffer(mode, option(["image", "document"]))).toEqual({
         sources: ["camera", "library", "file"],
-        mediaTypes: images,
+        mediaTypes: ["*/*"],
       });
       expect(mobileAttachmentOffer(mode, option(["document"]))).toEqual({
-        sources: [],
-        mediaTypes: [],
+        sources: ["file"],
+        mediaTypes: ["*/*"],
       });
     }
   });
@@ -170,8 +169,8 @@ describe("uploading a phone attachment to the thread's own route", () => {
         transport,
         threadId,
         attachmentId,
-        displayName: "notes.pdf",
-        mediaType: "application/pdf",
+        displayName: "notes",
+        mediaType: "not a media type",
         bytes: photo,
       }),
     ).rejects.toMatchObject({ category: "rejected" });

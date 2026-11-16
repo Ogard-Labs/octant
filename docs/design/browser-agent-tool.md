@@ -1420,21 +1420,25 @@ Several threads of one Project may each drive their own page at the same time.
 ## Bounded page scripts
 
 `run-script` reaches the same owned native page as the fixed actions when a
-local Code or Work thread has Full access, or a local Code thread has a scoped
-script permission (Work at Full access: maintainer request, 2026-11-12). It
+local Code or Work thread has Full access, or holds a scoped script permission
+(Work at Full access: maintainer request, 2026-11-12). It
 takes `source` and the
 `expectedObservationRevision` from a fresh page read. It opens no page or
 profile and takes no additional script approval at Full access. Existing site,
-profile, model, window, Project and thread authority still apply. Work below
-Full access, headless, paired, routine, managed-subagent and terminal-grant callers are
-currently refused (decided: Work below Full access is to get Code's one-use
-script permission below, under
-[Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority); designed, not built). A Work turn runs a script only while the thread still holds
-the Full access its turn began with: a level changed mid-turn, either way,
-refuses the script and withholds a result already on its way. Scripts cannot enter `steps` or saved/replayed flows.
+profile, model, window, Project and thread authority still apply. Headless,
+paired, routine, managed-subagent and terminal-grant callers are refused. Work
+below Full access asks Code's one-use script permission below (under
+[Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority);
+built): both tools ask through one shared function, so the card, who may be
+asked and what invalidates the answer cannot differ, and Work's
+`oneUsePermission` is where Strict will keep Work refused. A Work turn runs a
+script only while the thread still holds the level its turn began with: a
+level changed mid-turn, either way, refuses the script and withholds a result
+already on its way. Scripts cannot enter `steps` or saved/replayed flows.
 
-Below Full access, a local Code task (and, once built, a Work task) may
-request a separate one-use script permission. The prompt shows the exact source and HTTPS origin, names the task
+Below Full access, a local Code or Work task may request a separate one-use
+script permission; the page's own site and profile approval must already
+stand. The prompt shows the exact source and HTTPS origin, names the task
 and selected profile, and explains that it grants the page's account authority,
 even in Private or when sign-in state is unknown. It is never remembered as a
 site grant and cannot change host filesystem, process or network confinement.

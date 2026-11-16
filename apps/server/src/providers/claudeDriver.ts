@@ -91,7 +91,7 @@ import {
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
-import { providerOwnMemoryLaunches } from "@octant/domain";
+import { planReadOnlyToolServers, providerOwnMemoryLaunches } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
@@ -431,10 +431,14 @@ export function claudeExecutionOptions(
     ...policyOptions,
     fullToolSet: policyOptions.fullToolSet && (mode === "work" || mode === "code"),
   };
-  // A Code Plan turn may run read-only commands where its sandbox can hold the
-  // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
-  // the sandbox, not a person, is what keeps those commands read-only.
-  if (policy === "plan" && mode === "code" && claudePlanRunsCommands(platform)) {
+  // A Work or Code Plan turn may run read-only commands where its sandbox can
+  // hold the shell to them (see `claudePlanRunsCommands`). Plan has no
+  // approvals, so the sandbox, not a person, is what keeps them read-only.
+  if (
+    policy === "plan" &&
+    (mode === "code" || mode === "work") &&
+    claudePlanRunsCommands(platform)
+  ) {
     return { ...options, tools: [...options.tools, "Bash"] };
   }
   return options;
@@ -518,6 +522,20 @@ function claudeNativeToolAnswer(
     return "ask";
   }
   return undefined;
+}
+
+/** Claude's answer to a Plan call of an account MCP server the person did not mark. */
+export const CLAUDE_PLAN_MCP_SERVER_REFUSAL =
+  'This MCP server is not allowed in Plan. Mark it "Read-only — allowed in Plan" in Settings to use it here.';
+
+/**
+ * The account MCP server a tool belongs to (`mcp__<server>__<tool>`), or
+ * undefined for any other tool and for Octant's own server.
+ */
+function claudeAccountMcpServer(toolName: string): string | undefined {
+  if (!toolName.startsWith("mcp__") || toolName.startsWith("mcp__octant__")) return undefined;
+  const end = toolName.indexOf("__", "mcp__".length);
+  return end <= "mcp__".length ? undefined : toolName.slice("mcp__".length, end);
 }
 
 /**
@@ -749,6 +767,7 @@ export function claudeSandboxSettings(
   fullAccessSandbox = false,
   strict = false,
   selectedPolicy?: SandboxPolicySelection,
+  readOnlyFolders: ReadonlyArray<string> = [],
 ): ClaudeSandboxSettings | undefined {
   if (process.platform === "win32" && !strict && !fullAccessSandbox) return undefined;
   if (!claudeRunsSandbox(policy, fullAccessSandbox)) return undefined;
@@ -770,6 +789,7 @@ export function claudeSandboxSettings(
       allowRead: [
         projectRoot,
         ...extraFolders,
+        ...readOnlyFolders,
         ...(selectedPolicy?.policy.filesystem.readOnlyRoots ?? []),
         ...(selectedPolicy?.policy.filesystem.readWriteRoots ?? []),
         ...(strict ? claudeSandboxToolchainReads() : []),
@@ -1032,6 +1052,10 @@ function claudeToolPathIsInKeychainFolder(candidate: string): boolean {
   return target === folder || target.startsWith(`${folder}/`);
 }
 
+/** Claude's answer to a file tool that would change a file the person attached. */
+export const CLAUDE_ATTACHMENTS_READ_ONLY =
+  "Attached files are read-only. Copy one into the Project to change it.";
+
 /** Claude's message when Chat or Plan refuses a write into its own memory. */
 export const CLAUDE_MEMORY_WRITE_REFUSAL =
   "Claude's memory is read-only in Chat and Plan. Save a memory from a Work or Code thread outside Plan.";
@@ -1217,6 +1241,11 @@ export interface ClaudeDriverOptions {
    * launch. Absent is off.
    */
   readonly ownMemory?: () => boolean;
+  /**
+   * The account's own MCP servers the person marked "Read-only — allowed in
+   * Plan" on this host, read at each launch. Absent starts none in Plan.
+   */
+  readonly planMcpServers?: () => ReadonlyArray<string>;
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   /** Where the command sandbox sends its network below Full access; absent keeps the sandbox's own rules. */
@@ -2662,14 +2691,26 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
     forkSession: (input) => forkClaudeSession(options, input),
-    acquire: ({ instanceId, projectRoot, mode, extraFolders = [], workRequest, sandboxPolicy }) => {
+    acquire: ({
+      instanceId,
+      projectRoot,
+      mode,
+      extraFolders = [],
+      attachmentsFolder,
+      workRequest,
+      sandboxPolicy,
+    }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
           failure("invalid-configuration", "Provider instance does not match driver."),
         );
       }
       if (
-        [projectRoot, ...extraFolders].some((root) => !isAbsolute(root) || resolve(root) !== root)
+        [
+          projectRoot,
+          ...extraFolders,
+          ...(attachmentsFolder === undefined ? [] : [attachmentsFolder]),
+        ].some((root) => !isAbsolute(root) || resolve(root) !== root)
       ) {
         return Effect.fail(
           failure(
@@ -2689,6 +2730,7 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
         mode,
         factories,
         workRequest === undefined ? undefined : String(workRequest.threadId),
+        attachmentsFolder,
       );
     },
   };
@@ -2703,6 +2745,8 @@ function makeConnection(
   factories: ConnectionFactories,
   /** The Work thread this connection serves, which names it to the network reviewer. */
   workThreadId?: string,
+  /** The thread's attachments folder, which the session reads and never writes. */
+  attachmentsFolder?: string,
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
@@ -3606,6 +3650,13 @@ function makeConnection(
                   : {}),
               }
             : input.nativeSetup;
+        // The account's own MCP servers a Plan session starts: the person's
+        // marks, read at each launch, and no other.
+        const planMcpServers = planReadOnlyToolServers({
+          executionPolicy: input.executionPolicy,
+          setup: nativeSetup,
+          marked: options.planMcpServers?.() ?? [],
+        });
         const policyExecutionOptions = claudeExecutionOptions(
           input.executionPolicy,
           input.autoApprove,
@@ -3712,6 +3763,7 @@ function makeConnection(
                 sandboxedFullAccess,
                 input.strict === true,
                 input.strict === true ? options.sandboxPolicy : undefined,
+                attachmentsFolder === undefined ? [] : [attachmentsFolder],
               );
         let callbackState: SessionState | undefined;
         const insideFolder = (root: string, candidate: string): boolean => {
@@ -3986,12 +4038,23 @@ function makeConnection(
             return deny("Claude tool authority state was exhausted.");
           }
           expireClaudePreToolGrants(activeState, factories.authorityNow());
+          // In Plan only the account's servers the person marked start. A call
+          // to any other is refused with what to do about it.
+          const planServer = claudeAccountMcpServer(request.toolName);
+          if (
+            input.executionPolicy === "plan" &&
+            planServer !== undefined &&
+            !planMcpServers.includes(planServer)
+          ) {
+            return deny(CLAUDE_PLAN_MCP_SERVER_REFUSAL);
+          }
           if (
             !claudeOffersTool(
               {
                 tools: executionOptions.tools,
                 ...(withheldTools === undefined ? {} : { withheldTools }),
                 ...(nativeSetup === undefined ? {} : { nativeSetup }),
+                planMcpServers,
               },
               request.toolName,
             ) ||
@@ -4072,6 +4135,15 @@ function makeConnection(
                 })
               : undefined;
           if (memoryRefusal !== undefined) return deny(memoryRefusal);
+          // The thread's attached files are the person's, kept by Octant: a
+          // file tool reads them at every level and writes them at none.
+          const inAttachments =
+            attachmentsFolder !== undefined &&
+            typeof memoryTarget === "string" &&
+            insideFolder(attachmentsFolder, memoryTarget);
+          if (inAttachments && !CLAUDE_READ_TOOLS.has(request.toolName)) {
+            return deny(CLAUDE_ATTACHMENTS_READ_ONLY);
+          }
           // Full access with its sandbox keeps the Project's folders, where
           // the sandbox holds every command, so a worktree outside them is
           // refused there rather than held.
@@ -4174,6 +4246,11 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          // A marked server's call in Plan is put to the person, whatever
+          // their own rules allow: Plan runs nothing that writes unasked.
+          if (input.executionPolicy === "plan" && planServer !== undefined) {
+            return askThroughGrant();
+          }
           // The person's own Claude tools name no file to confine: a subagent
           // start and a skill read act inside the session, and a web read or
           // an MCP server call asks below Full access.
@@ -4221,6 +4298,9 @@ function makeConnection(
           ) {
             return deny("Claude tool request is outside the Project.");
           }
+          // A read of the thread's attached files runs unasked at every
+          // level, Plan included: the person attached them for this thread.
+          if (inAttachments && candidate === memoryTarget) return settledUnasked();
           const configuredFolders =
             input.strict === true ? options.sandboxPolicy?.policy.filesystem : undefined;
           if (
@@ -4399,6 +4479,7 @@ function makeConnection(
               binaryPath: options.binaryPath,
               projectRoot,
               ...(extraFolders.length === 0 ? {} : { additionalDirectories: extraFolders }),
+              ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
               authEnvironment: withServerAccess(
                 claudeNativeLaunchEnvironment(
                   keepsOwnMemory
@@ -4410,6 +4491,7 @@ function makeConnection(
               ),
               ...(ownNetwork === undefined ? {} : { network: ownNetwork }),
               ...(keepsOwnMemory ? { ownMemory: true as const } : {}),
+              ...(planMcpServers.length === 0 ? {} : { planMcpServers }),
               model: input.modelId,
               ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,

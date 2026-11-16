@@ -3437,6 +3437,23 @@ describe("Claude running as itself", () => {
     });
   });
 
+  test("starts in Plan only the account servers the person marked, with Octant's own, and no claude.ai connector", () => {
+    const planSetup = { ...ownSetup, hooks: false } as const;
+    expect(claudeNativeQueryOptions(planSetup, false, ["docs-search"])).toEqual({
+      settingSources: ["user"],
+      skills: "all",
+      strictMcpConfig: false,
+      settings: {
+        allowedMcpServers: [{ serverName: "docs-search" }, { serverName: "octant" }],
+        disableClaudeAiConnectors: true,
+        disableAllHooks: true,
+        autoMemoryEnabled: false,
+      },
+    });
+    // Nothing marked: no server of the account's starts in Plan.
+    expect(claudeNativeQueryOptions(planSetup, false, []).strictMcpConfig).toBe(true);
+  });
+
   test("loads the person's enabled plugins with home settings and runs none of their hooks with hooks off", () => {
     // Enabled plugins load through the `user` source; the empty `plugins`
     // option adds no session plugin folder of Octant's.

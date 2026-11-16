@@ -79,7 +79,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts, type SplitWorkspaceProps } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
-import type { ProjectChange } from "../projects/useProjectController";
+import type { ExtraFolderChange, ProjectChange } from "../projects/useProjectController";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
 import { CoordinatorProposalCards } from "../code/CoordinatorProposalCards";
 import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
@@ -480,7 +480,8 @@ export interface WorkspaceViewProps {
   readonly onAddProjectExtraFolder?: (
     projectId: ProjectId,
     receiptId: string,
-  ) => Promise<ProjectChange>;
+    confirmHomeFolder?: boolean,
+  ) => Promise<ExtraFolderChange>;
   readonly onRemoveProjectExtraFolder?: (
     projectId: ProjectId,
     canonicalRoot: string,

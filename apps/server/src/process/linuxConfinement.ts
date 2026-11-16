@@ -397,7 +397,9 @@ export function buildBubblewrapLaunch(
   // this one, and a root host's nested capsule cannot map its uid (measured
   // on bwrap 0.9.0: "setting up uid map: Operation not permitted") and never
   // starts the command.
-  if (!nestedForProcessDenial) args.push("--ro-bind", "/proc/sys", "/proc/sys");
+  if (!nestedForProcessDenial && input.startsNestedCapsules !== true) {
+    args.push("--ro-bind", "/proc/sys", "/proc/sys");
+  }
 
   if (input.networkEgress === "allow" && existsSync("/run/systemd/resolve")) {
     args.push("--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve");

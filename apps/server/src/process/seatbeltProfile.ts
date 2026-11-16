@@ -219,6 +219,14 @@ export interface ProcessConfinementPrepareInput {
   readonly interpreterSearchPath?: string;
   readonly allowProcessExec?: boolean;
   readonly allowProcessFork?: boolean;
+  /**
+   * Linux only: the launch starts Bubblewrap capsules of its own (a Plan
+   * turn's shell commands, see `linuxPlanShellCapsule`). The kernel refuses a
+   * nested capsule's `/proc` while anything covers part of this one, so this
+   * capsule leaves `/proc/sys` uncovered and each nested capsule covers its
+   * own. Ignored on macOS.
+   */
+  readonly startsNestedCapsules?: boolean;
   readonly allowFileReadStar?: boolean;
   readonly writeBoundRoot?: boolean;
   /** See {@link SeatbeltProfileInput.allowSimulatorControl}. */

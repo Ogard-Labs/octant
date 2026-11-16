@@ -404,6 +404,23 @@ describe("remote route policy", () => {
     ).toBeUndefined();
   });
 
+  it("forwards agent grant commands for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const post = await fixture.route(
+      request("/api/agent-grants/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(1);
+    expect(
+      classifyProductAction(new Request(`${origin}/api/agent-grants/commands`, { method: "POST" })),
+    ).toBeUndefined();
+  });
+
   it("forwards a thread's wake-ups for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const read = await fixture.route(
@@ -1374,7 +1391,7 @@ describe("remote route policy", () => {
     expect(grants.status).toBe(415);
   });
 
-  it("gives each mode's attachment upload its own body budget and only the media that mode takes", async () => {
+  it("gives each mode's attachment upload its own body budget and only the media that mode takes, any file in Work and Code", async () => {
     const { route, authenticatedProduct } = handler();
     const upload = async (path: string, method: string, contentType: string, body: BodyInit) => {
       const response = await route(
@@ -1398,14 +1415,17 @@ describe("remote route policy", () => {
     expect((await upload("/api/code/attachments", "PUT", "image/webp", photo)).status).toBe(200);
     expect(authenticatedProduct).toHaveBeenCalledTimes(4);
 
-    // Work and Code take images only, and no other product route takes an image.
+    // Work and Code take a file of any type, named as `type/subtype`; a body
+    // with no such type is refused, and no other product route takes a file.
     expect((await upload("/api/work/attachments", "PUT", "application/pdf", photo)).status).toBe(
-      415,
+      200,
     );
-    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(415);
+    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(200);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(6);
+    expect((await upload("/api/code/attachments", "PUT", "not a type", photo)).status).toBe(415);
     expect((await upload("/api/chat/commands", "POST", "image/jpeg", "{}")).status).toBe(415);
     expect((await upload("/api/work/turns", "PUT", "image/jpeg", "{}")).status).toBe(405);
-    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(6);
 
     const tooLarge = await route(
       request("/api/chat/attachments", {

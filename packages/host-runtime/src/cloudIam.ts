@@ -2,6 +2,14 @@ import { randomUUID } from "node:crypto";
 import { CredentialStoreFailure, type CredentialStore } from "./credentialStore";
 import { issuerRequestDeadline } from "./issuerRequest";
 import { sigV4Date, signSigV4 } from "./sigV4";
+import {
+  AWS_PROFILE_NAME_PATTERN,
+  isAwsAccessKeyPair,
+  resolveAwsProfileCredentials,
+  type AwsCredentials,
+  type AwsProfilePorts,
+  type AwsProfileRefusal,
+} from "./awsProfileCredentials";
 
 /**
  * Cloud-IAM request signing in the host credential broker.
@@ -18,6 +26,9 @@ import { sigV4Date, signSigV4 } from "./sigV4";
  */
 
 const GRANT_KIND = "host-cloud-iam-grant";
+// A grant whose source is the person's own AWS profile or a long-lived key
+// pair they entered, rather than a portal session the broker signed in to.
+const PROFILE_GRANT_KIND = "host-cloud-iam-profile-grant";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 // The client the broker registers with the portal's OIDC service for each
 // sign-in. The scope asks for a refresh token, so a session lasts as long as
@@ -165,6 +176,29 @@ export type CloudIamSignResult =
   | { readonly kind: "outside-scope" }
   | { readonly kind: "unavailable" };
 
+/**
+ * A source the person already holds: one of their AWS profiles, which the
+ * broker reads in place on every renewal, or a long-lived access key pair,
+ * which the broker keeps and Settings warns about.
+ */
+export type CloudIamProfileSource =
+  | { readonly kind: "aws-profile"; readonly profileName: string }
+  | {
+      readonly kind: "access-keys";
+      readonly accessKeyId: string;
+      readonly secretAccessKey: string;
+    };
+
+export type CloudIamConnectRefusal =
+  | "invalid"
+  | "terms-required"
+  | "unavailable"
+  | Exclude<AwsProfileRefusal, "unavailable">;
+
+export type CloudIamConnectResult =
+  | { readonly kind: "signed-in"; readonly credentialRef: string }
+  | { readonly kind: "refused"; readonly reason: CloudIamConnectRefusal };
+
 export type CloudIamRevokeResult = { readonly kind: "revoked" } | { readonly kind: "unavailable" };
 
 export interface CloudIamRuntime {
@@ -174,6 +208,17 @@ export interface CloudIamRuntime {
     readonly termsAcknowledgedAt: string;
   }) => Promise<CloudIamBeginResult>;
   readonly status: (attemptId: string) => CloudIamPublicState;
+  /**
+   * Store a grant from the person's own AWS profile or key pair, after one
+   * resolution proves it yields credentials. Nothing it holds is answered.
+   */
+  readonly connect: (input: {
+    readonly descriptorId: string;
+    readonly source: CloudIamProfileSource;
+    readonly scope: CloudIamScope;
+    readonly actorId: string;
+    readonly termsAcknowledgedAt: string;
+  }) => Promise<CloudIamConnectResult>;
   readonly sign: (input: {
     readonly credentialRef: string;
     readonly request: CloudIamSignRequest;
@@ -215,6 +260,15 @@ interface StoredGrant {
   readonly role?: RoleCredentials;
 }
 
+interface StoredProfileGrant {
+  readonly kind: typeof PROFILE_GRANT_KIND;
+  readonly version: 1;
+  readonly source: CloudIamProfileSource;
+  readonly scope: CloudIamScope;
+  /** The last credentials the profile yielded; absent until the first renewal for a profile. */
+  readonly credentials?: AwsCredentials;
+}
+
 interface Attempt {
   status: CloudIamPublicState;
   closed: boolean;
@@ -226,7 +280,7 @@ interface Attempt {
 export function isCloudIamGrantMaterial(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value);
-    return isRecord(parsed) && parsed.kind === GRANT_KIND;
+    return isRecord(parsed) && (parsed.kind === GRANT_KIND || parsed.kind === PROFILE_GRANT_KIND);
   } catch {
     return false;
   }
@@ -249,6 +303,8 @@ export function createCloudIamRuntime(options: {
   readonly fetch?: typeof fetch;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** How the broker reads the person's AWS profile; absent, profile grants are unavailable. */
+  readonly profiles?: Omit<AwsProfilePorts, "mintSsoRoleCredentials" | "now">;
 }): CloudIamRuntime {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const now = options.now ?? Date.now;
@@ -563,8 +619,143 @@ export function createCloudIamRuntime(options: {
     };
   };
 
+  const resolveProfile = async (
+    source: CloudIamProfileSource,
+  ): Promise<
+    | { readonly kind: "credentials"; readonly credentials: AwsCredentials }
+    | { readonly kind: "refused"; readonly reason: AwsProfileRefusal }
+  > => {
+    if (source.kind === "access-keys") {
+      return isAwsAccessKeyPair(source.accessKeyId, source.secretAccessKey)
+        ? {
+            kind: "credentials",
+            credentials: {
+              accessKeyId: source.accessKeyId,
+              secretAccessKey: source.secretAccessKey,
+            },
+          }
+        : { kind: "refused", reason: "unavailable" };
+    }
+    const ports = options.profiles;
+    if (ports === undefined) return { kind: "refused", reason: "unavailable" };
+    return resolveAwsProfileCredentials(source.profileName, {
+      ...ports,
+      now,
+      mintSsoRoleCredentials: async (sso) => {
+        const minted = await mintRoleCredentials(
+          fetchImpl,
+          {
+            startUrl: "",
+            ssoRegion: sso.ssoRegion,
+            accountId: sso.accountId,
+            roleName: sso.roleName,
+          },
+          sso.accessToken,
+        );
+        return minted;
+      },
+    });
+  };
+
+  const connect: CloudIamRuntime["connect"] = async (input) => {
+    if (closed) return { kind: "refused", reason: "unavailable" };
+    if (!UUID_PATTERN.test(input.actorId) || input.termsAcknowledgedAt.trim().length === 0) {
+      return { kind: "refused", reason: "terms-required" };
+    }
+    const source = readProfileSource(input.source);
+    const scope = readScope(input.scope);
+    if (
+      source === undefined ||
+      scope === undefined ||
+      !DESCRIPTOR_ID_PATTERN.test(input.descriptorId)
+    )
+      return { kind: "refused", reason: "invalid" };
+    const resolved = await resolveProfile(source);
+    if (resolved.kind === "refused") {
+      return {
+        kind: "refused",
+        reason: resolved.reason === "unavailable" ? "unavailable" : resolved.reason,
+      };
+    }
+    const grant: StoredProfileGrant = {
+      kind: PROFILE_GRANT_KIND,
+      version: 1,
+      source,
+      scope,
+      // A key pair's keys are its source; a profile's are cached until they near expiry.
+      ...(source.kind === "aws-profile" ? { credentials: resolved.credentials } : {}),
+    };
+    const credentialRef = randomUUID();
+    try {
+      await options.store.set(credentialRef, JSON.stringify(grant));
+    } catch {
+      return { kind: "refused", reason: "unavailable" };
+    }
+    return { kind: "signed-in", credentialRef };
+  };
+
+  /** Sign with a profile grant, reading the profile again once its credentials near expiry. */
+  const signWithProfile = async (
+    credentialRef: string,
+    grant: StoredProfileGrant,
+    request: CloudIamSignRequest,
+    renewCredentials: boolean,
+  ): Promise<CloudIamSignResult> => {
+    if (!withinScope(request, grant.scope)) return { kind: "outside-scope" };
+    let credentials = grant.credentials;
+    if (grant.source.kind === "access-keys") {
+      credentials = {
+        accessKeyId: grant.source.accessKeyId,
+        secretAccessKey: grant.source.secretAccessKey,
+      };
+    } else if (
+      renewCredentials ||
+      credentials === undefined ||
+      (credentials.expiresAt !== undefined && credentials.expiresAt - ROLE_RENEW_SKEW_MS <= now())
+    ) {
+      const resolved = await resolveProfile(grant.source);
+      if (resolved.kind === "refused") {
+        if (resolved.reason === "not-authorized") return { kind: "not-authorized" };
+        // The person signs in again with the AWS CLI; the grant itself stays.
+        if (resolved.reason === "sso-sign-in-needed" || resolved.reason === "profile-missing")
+          return { kind: "sign-in-again", reason: "expired" };
+        return { kind: "unavailable" };
+      }
+      credentials = resolved.credentials;
+      try {
+        await options.store.set(credentialRef, JSON.stringify({ ...grant, credentials }));
+      } catch {
+        // Signing with fresh credentials does not depend on caching them.
+      }
+    }
+    const signed = signSigV4({
+      request: {
+        method: request.method,
+        host: request.host,
+        path: request.path,
+        query: request.query,
+        headers: lowercaseKeys(request.headers),
+        payloadHash: request.payloadHash,
+      },
+      credentials: {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey,
+        ...(credentials.sessionToken === undefined
+          ? {}
+          : { sessionToken: credentials.sessionToken }),
+      },
+      region: grant.scope.region,
+      service: grant.scope.service,
+      amzDate: sigV4Date(now()),
+    });
+    return { kind: "signed", headers: signed.headers };
+  };
+
   const sign: CloudIamRuntime["sign"] = async (input) => {
     if (closed || !UUID_PATTERN.test(input.credentialRef)) return { kind: "unavailable" };
+    const profile = await readProfileGrant(options.store, input.credentialRef);
+    if (profile !== undefined)
+      return signWithProfile(input.credentialRef, profile, input.request, input.renewCredentials);
     const read = await readGrant(input.credentialRef);
     if (read.kind === "missing") return { kind: "sign-in-again", reason: "expired" };
     if (read.kind === "foreign") return { kind: "outside-scope" };
@@ -634,6 +825,7 @@ export function createCloudIamRuntime(options: {
     begin,
     status: (attemptId: string): CloudIamPublicState =>
       attempts.get(attemptId)?.status ?? { kind: "unknown" },
+    connect,
     sign,
     revoke,
     close: async () => {
@@ -1038,6 +1230,79 @@ function readScope(value: unknown): CloudIamScope | undefined {
   return { partition, region, service, host, pathPrefix, method };
 }
 
+async function readProfileGrant(
+  store: CredentialStore,
+  credentialRef: string,
+): Promise<StoredProfileGrant | undefined> {
+  let raw: string;
+  try {
+    raw = await store.resolve(credentialRef);
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || parsed.kind !== PROFILE_GRANT_KIND || parsed.version !== 1) {
+    return undefined;
+  }
+  const source = readProfileSource(parsed.source);
+  const scope = readScope(parsed.scope);
+  if (source === undefined || scope === undefined) return undefined;
+  const credentials = readAwsCredentials(parsed.credentials);
+  return {
+    kind: PROFILE_GRANT_KIND,
+    version: 1,
+    source,
+    scope,
+    ...(credentials === undefined ? {} : { credentials }),
+  };
+}
+
+function readProfileSource(value: unknown): CloudIamProfileSource | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "aws-profile") {
+    return hasExactKeys(value, ["kind", "profileName"]) &&
+      typeof value.profileName === "string" &&
+      AWS_PROFILE_NAME_PATTERN.test(value.profileName)
+      ? { kind: "aws-profile", profileName: value.profileName }
+      : undefined;
+  }
+  if (value.kind === "access-keys") {
+    return hasExactKeys(value, ["kind", "accessKeyId", "secretAccessKey"]) &&
+      typeof value.accessKeyId === "string" &&
+      typeof value.secretAccessKey === "string" &&
+      isAwsAccessKeyPair(value.accessKeyId, value.secretAccessKey)
+      ? {
+          kind: "access-keys",
+          accessKeyId: value.accessKeyId,
+          secretAccessKey: value.secretAccessKey,
+        }
+      : undefined;
+  }
+  return undefined;
+}
+
+function readAwsCredentials(value: unknown): AwsCredentials | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.accessKeyId !== "string" ||
+    typeof value.secretAccessKey !== "string" ||
+    (value.sessionToken !== undefined && typeof value.sessionToken !== "string") ||
+    (value.expiresAt !== undefined && typeof value.expiresAt !== "number")
+  )
+    return undefined;
+  return {
+    accessKeyId: value.accessKeyId,
+    secretAccessKey: value.secretAccessKey,
+    ...(typeof value.sessionToken === "string" ? { sessionToken: value.sessionToken } : {}),
+    ...(typeof value.expiresAt === "number" ? { expiresAt: value.expiresAt } : {}),
+  };
+}
+
 function decodeGrant(raw: string): StoredGrant | undefined {
   let parsed: unknown;
   try {
@@ -1141,6 +1406,32 @@ export async function handleCloudIamBrokerRoute(
           source,
           scope,
         },
+        actorId,
+        termsAcknowledgedAt,
+      }),
+    );
+  }
+  if (pathname === "/v1/cloud-iam/connect") {
+    // The person's own profile or key pair: a source and a signing scope, and
+    // nothing comes back but a reference.
+    if (!hasExactKeys(value, ["descriptorId", "source", "scope", "actorId", "termsAcknowledgedAt"]))
+      return failure("invalid-request", 400);
+    const { descriptorId, source, scope, actorId, termsAcknowledgedAt } = value;
+    const profileSource = readProfileSource(source);
+    const signingScope = readScope(scope);
+    if (
+      typeof descriptorId !== "string" ||
+      typeof actorId !== "string" ||
+      typeof termsAcknowledgedAt !== "string" ||
+      profileSource === undefined ||
+      signingScope === undefined
+    )
+      return failure("invalid-request", 400);
+    return answer(
+      await runtime.connect({
+        descriptorId,
+        source: profileSource,
+        scope: signingScope,
         actorId,
         termsAcknowledgedAt,
       }),

@@ -941,6 +941,20 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
+          // The per-run Full access flag is typed by the person on `octant
+          // agent` at this host. Another agent (an agent grant, or any
+          // device) never sets it, whatever level its own grant allows.
+          if (
+            command?.kind === "create-code-thread" &&
+            command.thread.fullAccessRunFlag === true &&
+            (callerKind !== "local-window" || agentGrantSession)
+          ) {
+            return failureResponse(
+              { category: "unauthorized", message: FULL_ACCESS_RUN_FLAG_PERSON_ONLY },
+              403,
+              origin,
+            );
+          }
           if (
             command !== undefined &&
             (command.kind === "create-code-thread" ||
@@ -1023,6 +1037,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
                 authenticatedWindowId,
                 callerAuthority,
                 command,
+                callerActor,
               ),
             ),
             200,
@@ -3380,6 +3395,8 @@ class CodeRouteRejected extends Error {
 const AUTOMATIC_MODEL_LOCAL_ONLY =
   "The model for automatic calls is chosen in the Octant window on this host.";
 const FULL_ACCESS_LOCAL_ONLY = "Full access is chosen in the Octant window on this host.";
+const FULL_ACCESS_RUN_FLAG_PERSON_ONLY =
+  "The per-run Full access flag is set by the person on `octant agent` on this host.";
 
 function raisesToFullAccess(command: CodeCommand): boolean {
   switch (command.kind) {

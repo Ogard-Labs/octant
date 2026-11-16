@@ -6,6 +6,7 @@ import {
   AutomationBlocked,
   AutomationCancellationTombstone as AutomationCancellationTombstoneSchema,
   AutomationFileSourceObserved,
+  AutomationFileSourceWindowChanged,
   type AutomationFileSourceCheckpoint,
   type AutomationFileSourceReview,
   AutomationDefinitionCreated,
@@ -58,6 +59,7 @@ export const AUTOMATION_DEFINITION_AGGREGATE_TYPE = "automation-definition";
 export const AUTOMATION_RUN_AGGREGATE_TYPE = "automation-run";
 
 export const AUTOMATION_FILE_SOURCE_OBSERVED = "automation-file-source-observed@1";
+export const AUTOMATION_FILE_SOURCE_WINDOW_CHANGED = "automation-file-source-window-changed@1";
 export const AUTOMATION_EVENT_SOURCE_OBSERVED = "automation-event-source-observed@1";
 export const AUTOMATION_DEFINITION_CREATED = "automation-definition-created@1";
 export const AUTOMATION_DEFINITION_UPDATED = "automation-definition-updated@1";
@@ -82,6 +84,7 @@ const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeFileSourceObserved = Schema.decodeUnknownSync(AutomationFileSourceObserved);
+const decodeFileSourceWindowChanged = Schema.decodeUnknownSync(AutomationFileSourceWindowChanged);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -109,6 +112,7 @@ export function registerAutomationEvents(registry: EventRegistry): EventRegistry
   return registry
     .register(AUTOMATION_EVENT_SOURCE_OBSERVED, 1, AutomationEventSourceObserved)
     .register(AUTOMATION_FILE_SOURCE_OBSERVED, 1, AutomationFileSourceObserved)
+    .register(AUTOMATION_FILE_SOURCE_WINDOW_CHANGED, 1, AutomationFileSourceWindowChanged)
     .register(AUTOMATION_DEFINITION_CREATED, 1, AutomationDefinitionCreated)
     .register(AUTOMATION_DEFINITION_UPDATED, 1, AutomationDefinitionUpdated)
     .register(AUTOMATION_DEFINITION_LIFECYCLE_CHANGED, 1, AutomationDefinitionLifecycleChanged)
@@ -173,6 +177,16 @@ export interface AppendAutomationDefinitionLifecycleChangedInput {
   readonly fileSourceReview?: AutomationFileSourceReview;
   readonly previousLifecycle: AutomationLifecycle;
   readonly expectedVersion: number;
+}
+
+export interface AppendAutomationFileSourceWindowChangedInput {
+  readonly actor?: typeof EventActor.Type;
+  readonly automationId: AutomationId;
+  readonly definitionRevision: number;
+  readonly change: "raised" | "cleared";
+  readonly checkpoint: AutomationFileSourceCheckpoint;
+  readonly expectedVersion: number;
+  readonly at: UtcTimestamp;
 }
 
 export interface AppendAutomationRunCreatedInput {
@@ -312,6 +326,7 @@ const AUTOMATION_AGGREGATE_TYPES: ReadonlySet<string> = new Set([
 const DEFINITION_EVENT_NAMES: ReadonlySet<string> = new Set([
   AUTOMATION_EVENT_SOURCE_OBSERVED,
   AUTOMATION_FILE_SOURCE_OBSERVED,
+  AUTOMATION_FILE_SOURCE_WINDOW_CHANGED,
   AUTOMATION_DEFINITION_CREATED,
   AUTOMATION_DEFINITION_UPDATED,
   AUTOMATION_DEFINITION_LIFECYCLE_CHANGED,
@@ -475,6 +490,43 @@ export class AutomationEventStore {
       payload,
       aggregateVersion: expectedVersion + 1,
       label: "Automation definition lifecycle change",
+      ...(input.actor === undefined ? {} : { actor: input.actor }),
+    });
+  }
+
+  /** The person's raise or clear of a file routine's activity window. */
+  appendFileSourceWindowChanged(
+    input: AppendAutomationFileSourceWindowChangedInput,
+  ): EventEnvelope {
+    let payload: AutomationFileSourceWindowChanged;
+    let aggregateId: typeof AggregateId.Type;
+    let expectedVersion: typeof AggregateVersion.Type;
+    try {
+      expectedVersion = decodeAggregateVersion(input.expectedVersion);
+      payload = decodeFileSourceWindowChanged({
+        automationId: input.automationId,
+        definitionRevision: input.definitionRevision,
+        change: input.change,
+        checkpoint: input.checkpoint,
+        recordedAt: input.at,
+      });
+      validateAutomationFileCheckpoint(payload.checkpoint);
+      aggregateId = decodeAggregateId(payload.automationId);
+    } catch {
+      throw new AutomationEventStoreError(
+        "invalid",
+        "Automation file source window append is invalid.",
+      );
+    }
+    return this.#appendOne({
+      aggregateType: AUTOMATION_DEFINITION_AGGREGATE_TYPE,
+      aggregateId,
+      expectedVersion,
+      eventName: AUTOMATION_FILE_SOURCE_WINDOW_CHANGED,
+      occurredAt: input.at,
+      payload,
+      aggregateVersion: expectedVersion + 1,
+      label: "Automation file source window change",
       ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
   }

@@ -1,3 +1,4 @@
+import { nodeAwsProfilePorts } from "./awsProfileCredentials";
 import { Schema } from "effect";
 import { CredentialRequestReference } from "@octant/contracts/credential-request";
 import { decodeCommandCredentialHostRequest } from "@octant/contracts/command-credentials";
@@ -122,6 +123,7 @@ const ROUTES = new Set([
   "/v1/oauth/github-actions-source",
   "/v1/oauth/revoke",
   "/v1/cloud-iam/begin",
+  "/v1/cloud-iam/connect",
   "/v1/cloud-iam/status",
   "/v1/cloud-iam/sign",
   "/v1/cloud-iam/revoke",
@@ -270,6 +272,7 @@ export async function startCredentialBroker(
   // OAuth runner: a cloud grant is one more entry the raw resolve refuses.
   const cloudIam = createCloudIamRuntime({
     store,
+    profiles: nodeAwsProfilePorts(),
     ...(oauth?.fetch === undefined ? {} : { fetch: oauth.fetch }),
     ...(oauth?.now === undefined ? {} : { now: oauth.now }),
     ...(oauth?.sleep === undefined ? {} : { sleep: oauth.sleep }),

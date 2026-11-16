@@ -109,7 +109,9 @@ describe("native harness authority for a Work thread on a server", () => {
       workThreads: { read: () => workThread },
       readThreadTaint: () => ({ externalContentIngested: false }) as never,
       holdsServerWorkThread: () => holds,
+      runningWorkTurnAccess: () => running,
     });
+  let running: "plan" | "full-access" | undefined;
 
   it("holds its Project's derived binding, and nothing when the Project is not a server Work Project", () => {
     expect(harness(true).resolve(threadId, "work")).toMatchObject({
@@ -119,5 +121,34 @@ describe("native harness authority for a Work thread on a server", () => {
     });
     expect(harness(false).resolve(threadId, "work")).toBeUndefined();
     expect(harness(true).resolve(threadId, "code")).toBeUndefined();
+  });
+
+  it("refuses a Work turn's file writes and shell in Plan, even on a Full access thread", () => {
+    running = "plan";
+    const decide = (tool: "write" | "bash", args: Readonly<Record<string, unknown>>) => {
+      const authority = harness(true).resolve(threadId, "work");
+      if (authority === undefined) throw new Error("the fixture thread holds no authority");
+      return harness(true).service.authorize({
+        threadId,
+        request: decodeToolActionRequest({
+          actionId: "00000000-0000-4000-8000-0000000000f1",
+          correlationId: "00000000-0000-4000-8000-0000000000f2",
+          capability: { id: nativeHarnessToolCapabilityId(tool), version: 1 },
+          authority,
+          intent: `${tool} in Plan`,
+          approval: { kind: "not-required" },
+        }),
+        arguments: args,
+      });
+    };
+    expect(decide("write", { path: "notes.md", content: "hello" })).toMatchObject({
+      kind: "deny",
+    });
+    expect(decide("bash", { command: "touch notes.md" })).toMatchObject({ kind: "deny" });
+    running = "full-access";
+    expect(decide("write", { path: "notes.md", content: "hello" })).toMatchObject({
+      kind: "allow",
+    });
+    expect(decide("bash", { command: "touch notes.md" })).toMatchObject({ kind: "allow" });
   });
 });

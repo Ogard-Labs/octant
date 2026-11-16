@@ -433,7 +433,7 @@ export type WorkProjectDeveloperTools = typeof WorkProjectDeveloperTools.Type;
 
 /**
  * The modes a Work Project can start new threads in. Work shares Code's
- * levels and has no Plan overlay.
+ * levels; Plan is a thread's own level and never where a thread starts.
  */
 export const WorkProjectPermissionMode = Schema.Literal(
   "auto",
@@ -772,6 +772,12 @@ export const ProjectCommand = Schema.Union(
     kind: Schema.Literal("add-project-extra-folder"),
     ...ProjectCommandFields,
     receiptId: BindingReceiptId,
+    /**
+     * The person confirmed the home folder warning. A home folder sent
+     * without it is not added: the host answers with the warning and a fresh
+     * receipt for the same folder, which a confirmed resend spends.
+     */
+    confirmHomeFolder: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("remove-project-extra-folder"),
@@ -942,6 +948,18 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-extra-folder-added"),
     project: BoundProject,
+  }).annotations(strict),
+  /**
+   * Nothing was added: the picked folder is the home folder, and the person
+   * must confirm the warning first. `receiptId` names the same folder for this
+   * window, once, until it expires.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("project-extra-folder-needs-confirmation"),
+    project: BoundProject,
+    canonicalRoot: ProjectFolderPath,
+    receiptId: BindingReceiptId,
+    warning: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_000)),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("project-extra-folder-removed"),

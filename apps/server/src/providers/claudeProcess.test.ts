@@ -781,7 +781,10 @@ describe("Claude runtime confinement", () => {
     const target = fixture();
     const confinement = recordingConfinement();
     for (const runsCommands of [false, true]) {
-      const child = makePort(target, { confinement: confinement.port }).spawn({
+      const child = makePort(target, {
+        confinement: confinement.port,
+        linuxPlanShellCapsule: () => false,
+      }).spawn({
         projectRoot: target.root,
         executionPolicy: "plan",
         runsCommands,
@@ -808,6 +811,44 @@ describe("Claude runtime confinement", () => {
     }
     expect(withShell?.allowProcessExec).toBe(false);
   });
+
+  it.runIf(process.platform === "linux")(
+    "runs a Linux Plan launch's commands through a nested capsule program it cannot rewrite",
+    () => {
+      const target = fixture();
+      const confinement = recordingConfinement();
+      for (const nests of [false, true]) {
+        const child = makePort(target, {
+          confinement: confinement.port,
+          linuxPlanShellCapsule: () => nests,
+        }).spawn({ projectRoot: target.root, executionPolicy: "plan", runsCommands: true })({
+          command: target.binaryPath,
+          args: ["sdk-test"],
+          cwd: target.root,
+          env: { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+          signal: new AbortController().signal,
+        });
+        child.kill("SIGTERM");
+      }
+      const [cannotNest, nested] = confinement.prepared;
+      // A host that cannot nest a capsule offers no shell: the runtime keeps
+      // its process filter.
+      expect(cannotNest?.allowProcessExec).toBe(false);
+      expect(cannotNest?.startsNestedCapsules).toBeFalsy();
+      // One that can lets the runtime start the shell and the nested
+      // Bubblewrap, leaves `/proc/sys` for the nested capsule to cover, and
+      // binds the program's folder read-only, never as a write root.
+      expect(nested?.allowProcessExec).toBe(true);
+      expect(nested?.allowProcessFork).toBe(true);
+      expect(nested?.startsNestedCapsules).toBe(true);
+      const shellFolder = nested?.readRoots?.find((root) =>
+        root.includes("octant-claude-plan-shell-"),
+      );
+      expect(shellFolder).toBeDefined();
+      expect(nested?.additionalWriteRoots ?? []).not.toContain(shellFolder);
+      expect(shellFolder?.startsWith(`${nested?.temporaryDirectory ?? ""}/`)).toBe(false);
+    },
+  );
 
   it("checks a confined launch's sign-in inside that launch's confinement", async () => {
     const target = fixture();

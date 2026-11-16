@@ -46,6 +46,10 @@ import {
 } from "../process/confinedVersionProbe";
 import { prepareConfinedReadinessProbe } from "../process/confinedReadinessProbe";
 import {
+  linuxPlanShellCapsuleAvailable,
+  writeLinuxPlanShellPrefix,
+} from "../process/linuxPlanShellCapsule";
+import {
   confinedExecutableExecPaths,
   DEFAULT_SANDBOX_PATH,
   escapeSeatbeltPath,
@@ -81,11 +85,16 @@ export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
   /** The Project's extra folders, which Plan reads as it reads the root. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * Folders a Plan launch and its commands read and never write: the
+   * thread's attachments folder.
+   */
+  readonly readOnlyFolders?: ReadonlyArray<string>;
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
    * Whether this launch offers the Bash tool. A Plan launch gets the shell and
-   * read-only programs only then: Chat, Work and the readiness probes run the
-   * same posture without a shell, and hiding the tool from the model would not
+   * read-only programs only then: Chat and the readiness probes run the same
+   * posture without a shell, and hiding the tool from the model would not
    * take the fork and exec grants away from the process.
    */
   readonly runsCommands?: boolean;
@@ -137,6 +146,11 @@ export interface ClaudeProcessOptions {
   readonly shutdownTimeoutMs?: number;
   /** Called for each detached runtime child so the server can persist ownership. */
   readonly onProcessStarted?: ProviderProcessStartedListener;
+  /**
+   * Whether this Linux host can nest the capsule a Plan command runs in.
+   * Read from the host once by default (`linuxPlanShellCapsuleAvailable`).
+   */
+  readonly linuxPlanShellCapsule?: () => boolean;
 }
 
 const DEFAULT_PROBE_OUTPUT_BYTES = 4_096;
@@ -156,6 +170,7 @@ interface ResolvedClaudeProcessOptions {
   readonly runtimeStderrBytes: number;
   readonly shutdownTimeoutMs: number;
   readonly onProcessStarted: ClaudeProcessOptions["onProcessStarted"];
+  readonly linuxPlanShellCapsule: (() => boolean) | undefined;
 }
 
 interface BoundedCapture {
@@ -767,14 +782,25 @@ export function claudeLoginKeychainPath(): string {
 /**
  * Whether a Plan turn's runtime may run read-only commands on this platform.
  *
- * Only the Seatbelt profile can name the programs a shell may start. Linux
- * Plan launches load the seccomp filter that refuses every process-creating
- * fork, so a shell there could start nothing and the Bash tool is not
- * offered.
+ * macOS holds the shell with Seatbelt rules judged by the program asking.
+ * Linux runs each command in a capsule nested inside the runtime's (see
+ * `linuxPlanShellCapsule`), which keeps it from the runtime's network,
+ * account folder and sign-in; a Linux host that cannot nest a capsule offers
+ * Plan no shell, and any other platform offers none.
  */
-export function claudePlanRunsCommands(platform: NodeJS.Platform = process.platform): boolean {
-  return platform === "darwin";
+export function claudePlanRunsCommands(
+  platform: NodeJS.Platform = process.platform,
+  linuxNestedCapsule: () => boolean = () => linuxPlanShellCapsuleAvailable(DEFAULT_BWRAP_PATH),
+): boolean {
+  if (platform === "darwin") return true;
+  return platform === "linux" && linuxNestedCapsule();
 }
+
+/**
+ * The shell a Linux Plan turn's commands run in, inside the nested capsule.
+ * Bash ships with every distribution Octant supports; zsh often does not.
+ */
+const CLAUDE_LINUX_PLAN_SHELL = "/bin/bash";
 
 /**
  * The shell a Plan turn's Bash tool runs in.
@@ -1176,9 +1202,11 @@ function confineClaudeLaunch(
       "Claude runtime confinement could not create a private temporary directory.",
     );
   }
+  let shellFolder: string | undefined;
   const release = () => {
     try {
       rmSync(temporaryDirectory, { recursive: true, force: true });
+      if (shellFolder !== undefined) rmSync(shellFolder, { recursive: true, force: true });
     } catch {
       // Nothing reads the directory again; an entry the operating system holds
       // open is left to it.
@@ -1232,7 +1260,10 @@ function confineClaudeLaunch(
     const runsCommands =
       confinement.executionPolicy === "plan" &&
       confinement.runsCommands === true &&
-      claudePlanRunsCommands();
+      (options.linuxPlanShellCapsule === undefined
+        ? claudePlanRunsCommands()
+        : claudePlanRunsCommands(process.platform, options.linuxPlanShellCapsule));
+    const linuxShell = runsCommands && process.platform === "linux";
     const runtimePrograms = [
       ...new Set(
         [spawnOptions.env.PATH, process.env.PATH].flatMap((searchPath) =>
@@ -1240,13 +1271,14 @@ function confineClaudeLaunch(
         ),
       ),
     ];
-    const commands = runsCommands
-      ? planCommandPrograms(spawnOptions.env, [
-          boundRoot,
-          temporaryDirectory,
-          ...stateRoots.writeRoots,
-        ])
-      : undefined;
+    const commands =
+      runsCommands && !linuxShell
+        ? planCommandPrograms(spawnOptions.env, [
+            boundRoot,
+            temporaryDirectory,
+            ...stateRoots.writeRoots,
+          ])
+        : undefined;
     const commandRules =
       commands === undefined
         ? []
@@ -1273,6 +1305,44 @@ function confineClaudeLaunch(
         return [];
       }
     });
+    const readOnlyFolders = (confinement.readOnlyFolders ?? []).flatMap((folder) => {
+      try {
+        return [realpathSync(folder)];
+      } catch {
+        return [];
+      }
+    });
+    // On Linux each command runs through a program that starts it in a capsule
+    // of its own. The program sits in a folder of its own, read-only in the
+    // runtime's capsule, so neither the runtime nor a command can rewrite it.
+    let shellPrefix: string | undefined;
+    if (linuxShell) {
+      const socket =
+        confinement.network?.endpoint.kind === "unix-socket"
+          ? confinement.network.endpoint.path
+          : undefined;
+      if (socket !== undefined && socket.startsWith(`${temporaryDirectory}${sep}`)) {
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          "Claude Plan commands cannot share a folder with the runtime's network socket.",
+        );
+      }
+      try {
+        shellFolder = realpathSync(mkdtempSync(join(temporaryRoot, "octant-claude-plan-shell-")));
+        shellPrefix = writeLinuxPlanShellPrefix(shellFolder, {
+          bwrapPath: DEFAULT_BWRAP_PATH,
+          shell: CLAUDE_LINUX_PLAN_SHELL,
+          readRoots: [boundRoot, ...extraFolders, ...readOnlyFolders],
+          temporaryDirectory,
+        });
+      } catch (error) {
+        if (error instanceof ProcessConfinementError) throw error;
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          "Claude Plan confinement could not prepare the capsule its commands run in.",
+        );
+      }
+    }
     const launch = options.confinement.prepare({
       sandboxProviderChannel: true,
       executable: spawnOptions.command,
@@ -1284,12 +1354,20 @@ function confineClaudeLaunch(
       extraBoundRoots: extraFolders,
       temporaryDirectory,
       additionalWriteRoots: stateRoots.writeRoots,
-      readRoots: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
+      readRoots: [
+        boundRoot,
+        temporaryDirectory,
+        ...stateRoots.readRoots,
+        ...readOnlyFolders,
+        ...(shellFolder === undefined ? [] : [shellFolder]),
+      ],
       privateHomeAllowPaths: [
         boundRoot,
         ...extraFolders,
         temporaryDirectory,
         ...stateRoots.readRoots,
+        ...readOnlyFolders,
+        ...(shellFolder === undefined ? [] : [shellFolder]),
       ],
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default. This driver
@@ -1313,7 +1391,9 @@ function confineClaudeLaunch(
       writeBoundRoot:
         confinement.sandboxPolicy !== undefined && confinement.executionPolicy !== "plan",
       allowProcessExec:
-        confinement.sandboxPolicy !== undefined && confinement.executionPolicy !== "plan",
+        (confinement.sandboxPolicy !== undefined && confinement.executionPolicy !== "plan") ||
+        linuxShell,
+      startsNestedCapsules: linuxShell,
       allowProcessFork:
         confinement.sandboxPolicy !== undefined || readsSignInFromKeychain || runsCommands,
       allowFileReadStar: true,
@@ -1333,9 +1413,11 @@ function confineClaudeLaunch(
           ...confinement.network?.environment,
           TMPDIR: temporaryDirectory,
           CLAUDE_CODE_TMPDIR: temporaryDirectory,
-          ...(runsCommands
-            ? { CLAUDE_CODE_SHELL: CLAUDE_PLAN_SHELL, ...CLAUDE_PLAN_GIT_ENVIRONMENT }
-            : {}),
+          ...(shellPrefix !== undefined
+            ? { CLAUDE_CODE_SHELL: CLAUDE_LINUX_PLAN_SHELL, CLAUDE_CODE_SHELL_PREFIX: shellPrefix }
+            : runsCommands
+              ? { CLAUDE_CODE_SHELL: CLAUDE_PLAN_SHELL, ...CLAUDE_PLAN_GIT_ENVIRONMENT }
+              : {}),
           ...(searchPath === undefined ? {} : { PATH: searchPath }),
         },
       },
@@ -1497,6 +1579,7 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
     runtimeStderrBytes: options.runtimeStderrBytes ?? DEFAULT_RUNTIME_STDERR_BYTES,
     shutdownTimeoutMs: options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS,
     onProcessStarted: options.onProcessStarted,
+    linuxPlanShellCapsule: options.linuxPlanShellCapsule,
   };
 
   return {

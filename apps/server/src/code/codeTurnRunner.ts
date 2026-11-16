@@ -225,6 +225,8 @@ export interface CodeTurnRunnerInput {
   readonly providerRoot?: string;
   /** The Project's extra folders, granted what the checkout is granted. */
   readonly extraFolders?: ReadonlyArray<string>;
+  /** The thread's attachments folder, which the session reads and never writes. */
+  readonly attachmentsFolder?: string;
   readonly prompt: string;
   readonly resumeCursor?: ProviderResumeCursor;
   readonly onSessionReady?: (handle: ProviderSessionHandle) => Effect.Effect<void, CodeTurnFailure>;
@@ -505,6 +507,9 @@ export class CodeTurnRunner {
           ...(input.extraFolders === undefined || input.extraFolders.length === 0
             ? {}
             : { extraFolders: input.extraFolders }),
+          ...(input.attachmentsFolder === undefined
+            ? {}
+            : { attachmentsFolder: input.attachmentsFolder }),
           permissionPersistence: input.thread.permissionPersistence,
         })
         .pipe(Effect.catchAll((providerFailure) => failForProvider(providerFailure, fail)));

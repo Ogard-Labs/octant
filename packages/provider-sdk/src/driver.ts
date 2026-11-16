@@ -54,6 +54,14 @@ export interface ProviderAcquireInput {
    * wraps it in. Commands still start in `projectRoot`. Absent means none.
    */
   readonly extraFolders?: ReadonlyArray<string>;
+  /**
+   * The Octant-owned folder that holds the files the person attached to this
+   * thread, under the host's data directory and never inside the Project. The
+   * runtime reads it at every level, Plan and Chat included, in its own
+   * sandbox and in any profile the host wraps it in, and never writes it.
+   * Absent means the thread has none.
+   */
+  readonly attachmentsFolder?: string;
   readonly mode?: "chat" | "work" | "code";
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {

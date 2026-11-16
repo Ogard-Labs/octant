@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { attachAllowingFiles, attachmentMediaType } from "../composer/attachmentMediaType";
 import {
   ProjectMemoryProposalPrompt,
   type ProjectMemoryProposalClient,
@@ -40,9 +41,13 @@ import {
 } from "@octant/contracts";
 import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
-import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermissionModes";
+import { workAccessOfMode, workModeOf } from "./workPermissionModes";
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
+import {
+  PERMISSION_MODE_LABEL,
+  PermissionModePicker,
+  threadKeepsFullAccessSandbox,
+} from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
@@ -51,6 +56,7 @@ import {
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
+  workThreadAccessOf,
   type PickerGroup,
   resolveStrict,
 } from "@octant/domain";
@@ -2011,7 +2017,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             threadId: props.threadId,
             attachmentId,
             displayName: file.name.trim() === "" ? "Pasted image" : file.name,
-            mediaType: decodeWorkAttachmentMediaType(file.type),
+            mediaType: decodeWorkAttachmentMediaType(attachmentMediaType(file)),
             bytes: new Uint8Array(await file.arrayBuffer()),
           });
           attachmentIds.push(attachmentId);
@@ -2257,10 +2263,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     hostId: props.hostId,
     refused: serverWorkProject !== undefined || creating || completionLocked,
-    onFiles: (files) => {
-      if (imageSupport === false) images.refuse("Choose an image-capable model to attach images.");
-      else images.attach(files);
-    },
+    onFiles: (files) =>
+      void attachAllowingFiles(
+        files,
+        imageSupport,
+        images.attach,
+        images.refuse,
+        "Choose an image-capable model to attach images.",
+      ),
   });
   // A picture marked up in this thread's Browser arrives here as a file and
   // meets the same checks as one dropped on the composer.
@@ -2788,6 +2798,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
               }
               if (row.kind === "request") {
                 if (props.requestClient !== undefined && row.request.detail.kind === "approval") {
+                  const levelChange = row.request.detail.levelChange;
                   return (
                     <ProviderApprovalPrompt
                       onAnswer={(decision) => {
@@ -2797,6 +2808,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                         });
                       }}
                       summary={`${row.request.detail.action}: ${row.request.detail.description}`}
+                      {...(levelChange === undefined
+                        ? {}
+                        : {
+                            levelChange: {
+                              to: workThreadAccessOf(levelChange.to).executionPolicy,
+                              toLabel: PERMISSION_MODE_LABEL[workModeOf(levelChange.to)],
+                              ...(levelChange.plan === undefined ? {} : { plan: levelChange.plan }),
+                            },
+                          })}
                     />
                   );
                 }
@@ -3261,17 +3281,22 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             attach:
               props.turnClient === undefined && taskActions.length === 0 ? undefined : (
                 <ComposerAttachButton
-                  accept="image/png,image/jpeg,image/webp,image/gif"
                   busy={creating || completionLocked}
                   refusedReason={
                     props.turnClient === undefined
                       ? "Attachments need a connected host."
-                      : imageSupport === false
-                        ? "The selected model does not accept images. Choose an image-capable model."
-                        : undefined
+                      : undefined
                   }
                   onRefused={images.refuse}
-                  onFileSelected={(file) => images.attach([file])}
+                  onFileSelected={(file) =>
+                    attachAllowingFiles(
+                      [file],
+                      imageSupport,
+                      images.attach,
+                      images.refuse,
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    )
+                  }
                   threadActions={taskActions}
                 />
               ),
@@ -3301,11 +3326,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   <PermissionModePicker
                     autoSupported={autoSupported}
                     disabled={accessChanging || creating || completionLocked}
-                    modes={WORK_PERMISSION_MODES}
-                    onChange={(mode) => {
-                      const access = workAccessOfMode(mode);
-                      if (access !== undefined) void changeAccess(access);
-                    }}
+                    onChange={(mode) => void changeAccess(workAccessOfMode(mode))}
                     value={workModeOf(thread.access)}
                     warningScope={{ projectId: String(thread.projectId) }}
                     strict={

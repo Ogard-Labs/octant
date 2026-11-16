@@ -153,8 +153,10 @@ Scope hold: bots take no new scope until
   integration-event routines accept only `new-thread`, and Full access
   routines need an opt-in. D-18 lets bot routines use every Work trigger and
   run at the bot's level.
-- **Work has no Plan.** Bot conversations are Work threads, so bots have no
-  Plan level; Plan rules in other specifications do not apply to them.
+- **Plan in bot conversations.** Bot conversations are Work threads, and
+  Work threads take the Plan level (maintainer decision, 2026-11-16), so a
+  bot conversation's Plan follows the Work Plan rules in the other
+  specifications.
 - **Work can be turned off.** Bots run whether or not the Work mode is shown
   (D-19).
 

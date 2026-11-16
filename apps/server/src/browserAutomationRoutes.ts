@@ -1,4 +1,5 @@
 import type { EventActor } from "@octant/contracts";
+import { principalActsAsHostPerson } from "./clientPrincipal";
 import { eventActorForPrincipal } from "./principalEventActor";
 import { boundPrincipalIsRestricted } from "./principalRouteContext";
 import {
@@ -241,6 +242,9 @@ export function createBrowserAutomationRouteHandler(
 
     let windowId;
     let callerKind: "local-window" | "remote-device";
+    // A device the host's own person paired, judged as the person where a
+    // route says so; it stays the principal and the actor.
+    let actsAsHostPerson: boolean;
     // Who the journal names for what this request changes: the device, when a
     // device asked.
     let actor: EventActor;
@@ -252,6 +256,7 @@ export function createBrowserAutomationRouteHandler(
       });
       windowId = principal.scopeId;
       callerKind = principal.principal.kind;
+      actsAsHostPerson = principalActsAsHostPerson(principal.principal);
       actor = eventActorForPrincipal(principal.principal);
     } catch {
       return failure(
@@ -411,9 +416,34 @@ export function createBrowserAutomationRouteHandler(
           );
         }
         const command = decodeProjectBrowserCommand(decoded.value);
+        // A device the host's own person paired opens the person's own
+        // Project page as a window does; its page belongs to its scope. A
+        // profile page opens in the desktop's native Browser with the
+        // person's sign-ins, so from a device it waits for profile pages over
+        // the remote channel, and only a Private page opens.
+        if (
+          callerKind === "remote-device" &&
+          actsAsHostPerson &&
+          command.kind === "open" &&
+          command.profile !== undefined &&
+          command.profile !== "private"
+        ) {
+          return success(
+            decodeProjectBrowserResult({
+              kind: "project-browser-refused",
+              reason: "profile-unavailable",
+              message: "A profile page opens at a window on this computer.",
+            }),
+            origin,
+          );
+        }
         return success(
           decodeProjectBrowserResult(
-            await dependencies.projectBrowsers.execute(windowId, callerKind, command),
+            await dependencies.projectBrowsers.execute(
+              windowId,
+              actsAsHostPerson ? "local-window" : callerKind,
+              command,
+            ),
           ),
           origin,
         );

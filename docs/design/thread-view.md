@@ -566,8 +566,8 @@ person's message. The rules are in
 
 ## Plan-mode asks
 
-When a Code thread's agent asks to plan first (Work has no Plan, so a Work
-thread's agent never asks), the pending request reads
+When a Work or Code thread's agent asks to plan first, the pending request
+reads
 **Plan first**: the agent's sentence, then "This turn ends; the next one
 runs in Plan, read-only.", with **Switch to Plan** and **Keep working**.
 When it asks to leave Plan, the request reads **Approve the plan**: the

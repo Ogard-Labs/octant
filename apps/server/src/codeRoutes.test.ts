@@ -655,6 +655,52 @@ describe("Code routes", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("refuses the per-run Full access flag from any caller but a window on this host", async () => {
+    const execute = vi.fn(async () => ({ kind: "thread-created" }));
+    const route = routeFixture({ execute });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000952";
+    const body = JSON.stringify({
+      kind: "create-code-thread",
+      thread: { ...thread, executionPolicy: "full-access", fullAccessRunFlag: true },
+    });
+    const fromDevice = (origin: string) => {
+      const remote = request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
+      bindPrincipalRouteContext(remote, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin,
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "00000000-0000-4000-8000-000000000953" as never,
+          admittedBy: "host-person",
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return remote;
+    };
+    for (const origin of [AGENT_ACCESS_ORIGIN, "https://octant.invalid"]) {
+      const refused = await route(fromDevice(origin));
+      expect(refused?.status).toBe(403);
+      expect(await refused?.json()).toMatchObject({ category: "unauthorized" });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    const local = await route(
+      request("/api/code/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      }),
+    );
+    expect(local?.status).toBe(200);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("never lets a paired device ask for a terminal Browser grant as the person", async () => {
     // The host mints a grant only for the person at a local window; a request
     // that reaches it as anything else is refused and starts no terminal.
@@ -733,7 +779,12 @@ describe("Code routes", () => {
       reason: "unavailable",
       message: "No start.",
     });
-    expect(execute).toHaveBeenCalledWith(windowId, "local-window", command);
+    expect(execute).toHaveBeenCalledWith(
+      windowId,
+      "local-window",
+      command,
+      expect.objectContaining({ kind: "local-user" }),
+    );
 
     // A caller cannot name the window or point the shell at a folder.
     expect((await route(post({ ...command, windowId })))?.status).toBe(400);
@@ -767,7 +818,35 @@ describe("Code routes", () => {
       scopeId: remoteDeviceId as never,
     });
     await route(remoteRequest);
-    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "remote-device", command);
+    expect(execute).toHaveBeenLastCalledWith(
+      remoteDeviceId,
+      "remote-device",
+      command,
+      expect.objectContaining({ kind: "remote-device" }),
+    );
+
+    // A device the host's own person paired is judged as the person, and its
+    // shell is journaled as that device.
+    const pairedRequest = post(command);
+    bindPrincipalRouteContext(pairedRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000924" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    await route(pairedRequest);
+    expect(execute).toHaveBeenLastCalledWith(remoteDeviceId, "local-window", command, {
+      kind: "remote-device",
+      actorId: remoteDeviceId,
+      deviceId: remoteDeviceId,
+    });
   });
 
   it("reports Project terminals unavailable on a host without them", async () => {
@@ -2470,6 +2549,78 @@ describe("Code planner routes", () => {
     expect(designation?.status).toBe(401);
     expect(resolution?.status).toBe(401);
     expect(executePlanner).not.toHaveBeenCalled();
+    expect(executePlannerProposal).not.toHaveBeenCalled();
+  });
+
+  it("lets a device the person paired approve and decline a coordinator's proposal, journaled as the device", async () => {
+    const proposalId = "00000000-0000-4000-8000-000000000910";
+    const executePlannerProposal = vi.fn(async () => ({
+      status: "declined",
+      proposal: {
+        id: proposalId,
+        projectId,
+        plannerThreadId: threadId,
+        fromCoordinator: true,
+        title: "Worker",
+        intent: "Do the work.",
+        status: "declined",
+        proposedAt: "2026-11-10T00:00:00.000Z",
+        resolvedAt: "2026-11-10T00:00:01.000Z",
+      },
+    }));
+    const route = routeFixture({ executePlannerProposal });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000917";
+    const remoteRequest = request("/api/code/planner/proposals/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "decline-planner-work-proposal",
+        proposalId,
+        expectedVersion: 1,
+      }),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000918" as never,
+        admittedBy: "host-person",
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    const response = await route(remoteRequest);
+
+    expect(response?.status).toBe(200);
+    expect(executePlannerProposal).toHaveBeenCalledWith(
+      remoteDeviceId,
+      { kind: "decline-planner-work-proposal", proposalId, expectedVersion: 1 },
+      expect.anything(),
+      { kind: "remote-device", actorId: remoteDeviceId, deviceId: remoteDeviceId },
+    );
+  });
+
+  it("refuses a coordinator proposal decision from a caller with no session", async () => {
+    const executePlannerProposal = vi.fn();
+    const route = routeFixture({ executePlannerProposal });
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/code/planner/proposals/commands", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "decline-planner-work-proposal",
+          proposalId: "00000000-0000-4000-8000-000000000910",
+          expectedVersion: 1,
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
     expect(executePlannerProposal).not.toHaveBeenCalled();
   });
 
