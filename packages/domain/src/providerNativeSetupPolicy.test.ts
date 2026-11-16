@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   accountKeepsOwnMemory,
   providerNativeSetupIsOn,
+  planReadOnlyToolServers,
   providerOwnMemoryLaunches,
   resolveProviderNativeSetup,
   providerRunsAsItself,
@@ -326,5 +327,46 @@ describe("a provider's own memory", () => {
         }),
       ).toBe(false);
     }
+  });
+});
+
+describe("the provider's own MCP servers in Plan", () => {
+  it("starts only the servers the person marked, and none where the account runs nothing of its own", () => {
+    const planSetup = resolveProviderNativeSetup({
+      driverKind: "claude",
+      mode: "code",
+      executionPolicy: "plan",
+      accountAllows: true,
+      projectTrusts: false,
+    });
+    // Plan leaves the account's tool servers off; the mark lets one back in.
+    expect(planSetup?.toolServers).toBe(false);
+    expect(
+      planReadOnlyToolServers({
+        executionPolicy: "plan",
+        setup: planSetup,
+        marked: ["docs-search", "docs-search"],
+      }),
+    ).toEqual(["docs-search"]);
+    // An unmarked server stays withheld: nothing marked, nothing started.
+    expect(
+      planReadOnlyToolServers({ executionPolicy: "plan", setup: planSetup, marked: [] }),
+    ).toEqual([]);
+    // An account turned off loads none of its setup, marks included.
+    expect(
+      planReadOnlyToolServers({
+        executionPolicy: "plan",
+        setup: undefined,
+        marked: ["docs-search"],
+      }),
+    ).toEqual([]);
+    // Outside Plan the setup decides as before.
+    expect(
+      planReadOnlyToolServers({
+        executionPolicy: "approval-gated",
+        setup: everything,
+        marked: ["docs-search"],
+      }),
+    ).toEqual([]);
   });
 });

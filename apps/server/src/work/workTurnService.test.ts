@@ -1,4 +1,5 @@
 import { decodeStartWorkThreadTurnCommand } from "@octant/contracts";
+import { SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL } from "../attachments/attachedFiles";
 import { continueWorkTurns } from "../wiring/continuation";
 import { RESTART_CONTINUATION_PROMPT } from "../harness/restartContinuation";
 import { threadRestartContinuationId } from "../harness/threadRestartContinuation";
@@ -6239,6 +6240,52 @@ describe("a Work turn in a Project on a server", () => {
     expect(resolveAppManagedTools).not.toHaveBeenCalled();
     expect(observe).not.toHaveBeenCalled();
     expect(fixture.workingDirectories.resolve).not.toHaveBeenCalled();
+  });
+
+  it("refuses before anything starts a file its server could not open, since the attachments folder is on this host", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-0000000000a1");
+    await store.stage({
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      bytes: new Uint8Array([37, 80, 68, 70]),
+    });
+    const run = vi.fn<WorkTurnRuntimePort["run"]>(async () => ({
+      kind: "completed",
+      response: "Done there",
+    }));
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => true,
+      serverProjects: {
+        holds: () => true,
+        bind: () => ({
+          status: "bound",
+          folder: "/srv/notes",
+          tools: {
+            definitions: [],
+            execute: async () => ({ result: {} }),
+            close: async () => undefined,
+          },
+        }),
+      },
+      turnRuntime: { run },
+      turnFileObserver: { observe: vi.fn(() => undefined) } as never,
+    });
+    fixture.persistence.readProject.mockReturnValue(undefined as never);
+    fixture.projects.bootstrap.mockResolvedValue({ active: [] });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        attachmentIds: [attachmentId],
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unsupported", message: SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL },
+    });
+    expect(run).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("refuses before anything starts when its turn cannot bind there", async () => {

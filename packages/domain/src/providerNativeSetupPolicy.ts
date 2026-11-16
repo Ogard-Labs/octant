@@ -93,6 +93,25 @@ export function resolveProviderNativeSetup(
 }
 
 /**
+ * The provider's own MCP servers a Plan session starts: exactly the ones the
+ * person marked "Read-only — allowed in Plan" on this host, and only where the
+ * session loads the person's setup at all. Plan leaves the account's tool
+ * servers off because a server's tools can write; the person's mark is what
+ * lets one back in, never the server's own `readOnlyHint`, which is the
+ * server's claim. Outside Plan the setup's `toolServers` decides as before, so
+ * the mark adds nothing there. Each marked server's tools still meet the
+ * thread's ask rules.
+ */
+export function planReadOnlyToolServers(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly setup: ProviderNativeSetup | undefined;
+  readonly marked: ReadonlyArray<string>;
+}): ReadonlyArray<string> {
+  if (input.executionPolicy !== "plan" || input.setup === undefined) return [];
+  return [...new Set(input.marked)];
+}
+
+/**
  * Whether a setup loads anything of the person's own configuration: rules,
  * skills, tool servers, hooks, subagents, or a Project's code. The runtime's
  * web tools alone do not, so a session with only those on is not running as

@@ -3220,6 +3220,27 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(beta, "edit")).toBe("deny");
   });
 
+  it("asks in Plan for the tools of a server the person marked and keeps every other server's tools denied", () => {
+    const own = {
+      rules: [],
+      toolServers: false,
+      planServers: ["docs-search"],
+      webTools: true,
+    } as const;
+    const legacy = permissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluatePermission(legacy, "docs-search_query")).toBe("ask");
+    expect(evaluatePermission(legacy, "writer_save")).toBe("deny");
+    const beta = betaSessionPermissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluateV2Permission(beta, "docs-search_query")).toBe("ask");
+    expect(evaluateV2Permission(beta, "writer_save")).toBe("deny");
+    // With nothing marked, every server stays withheld as before.
+    const unmarked = betaSessionPermissionRules("plan", "code", undefined, [], false, {
+      ...own,
+      planServers: [],
+    });
+    expect(evaluateV2Permission(unmarked, "docs-search_query")).toBe("deny");
+  });
+
   it("lets a session reach a Project's extra folder, asks for every other outside folder, and denies them in Plan", () => {
     for (const policy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
       const outsideRule = policy === "plan" ? "deny" : "ask";

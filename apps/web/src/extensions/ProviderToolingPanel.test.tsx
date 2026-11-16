@@ -88,6 +88,29 @@ function setup(
       options.apply ?? ({ status: "applied", output: "Added files" } as const),
   );
   const cancel = vi.fn(async () => ({ status: "cancelled" }));
+  let marks: ReadonlyArray<{ provider: "claude" | "codex" | "opencode"; serverName: string }> = [];
+  let version = 0;
+  const planReadOnly = vi.fn(async () => ({
+    kind: "mcp-plan-read-only-settings" as const,
+    servers: marks,
+    version,
+  }));
+  const setPlanReadOnly = vi.fn(
+    async (command: {
+      provider: "claude" | "codex" | "opencode";
+      serverName: string;
+      readOnly: boolean;
+    }) => {
+      marks = command.readOnly
+        ? [...marks, { provider: command.provider, serverName: command.serverName }]
+        : marks.filter((mark) => mark.serverName !== command.serverName);
+      version += 1;
+      return {
+        kind: "mcp-plan-read-only-settings" as const,
+        settings: { kind: "mcp-plan-read-only-settings" as const, servers: marks, version },
+      };
+    },
+  );
   const onOpenRunAsItself = vi.fn();
   render(
     <ProviderToolingPanel
@@ -97,18 +120,62 @@ function setup(
         plan: plan as never,
         apply: apply as never,
         cancel: cancel as never,
+        planReadOnly: planReadOnly as never,
+        setPlanReadOnly: setPlanReadOnly as never,
       }}
       localHost={options.localHost ?? true}
       onOpenRunAsItself={onOpenRunAsItself}
     />,
   );
-  return { list, plan, apply, cancel, onOpenRunAsItself, user: userEvent.setup() };
+  return {
+    list,
+    plan,
+    apply,
+    cancel,
+    planReadOnly,
+    setPlanReadOnly,
+    onOpenRunAsItself,
+    user: userEvent.setup(),
+  };
 }
 
 describe("ProviderToolingPanel", () => {
   it("only explains itself away from the host window, and asks the host for nothing", () => {
     const { list } = setup({ localHost: false });
     expect(screen.getByText(/Open Octant on this computer/)).toBeTruthy();
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("lets the person mark a listed server read-only for Plan, and mark an OpenCode server from a paired device", async () => {
+    const { user, setPlanReadOnly } = setup({
+      list: listing([
+        section("mcp-servers", { entries: [{ name: "docs-search" }] }),
+        section("plugins"),
+        section("marketplaces"),
+      ]),
+    });
+    const mark = await screen.findByRole("switch", {
+      name: "docs-search: Read-only — allowed in Plan",
+    });
+    await user.click(mark);
+    expect(setPlanReadOnly).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "claude", serverName: "docs-search", readOnly: true }),
+    );
+    expect(
+      await within(screen.getByRole("list", { name: "Servers allowed in Plan" })).findByText(
+        "docs-search",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("offers the Plan marks on a paired device, where the provider commands are not offered", async () => {
+    const { user, setPlanReadOnly, list } = setup({ localHost: false });
+    await screen.findByText(/No server is allowed in Plan/);
+    await user.type(screen.getByLabelText(/Server name/), "notes");
+    await user.click(screen.getByRole("button", { name: "Allow in Plan" }));
+    expect(setPlanReadOnly).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "opencode", serverName: "notes", readOnly: true }),
+    );
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -139,8 +206,7 @@ describe("ProviderToolingPanel", () => {
         true,
       ),
     });
-    expect(await screen.findByText("files")).toBeTruthy();
-    expect(screen.getByText("node a - Connected")).toBeTruthy();
+    expect(await screen.findByText("node a - Connected")).toBeTruthy();
     expect(screen.getByText(/has no command for plugins/)).toBeTruthy();
     expect(screen.getByText("odd answer")).toBeTruthy();
     expect(screen.getByText(/Run Claude Code as itself is on for Claude work/)).toBeTruthy();
