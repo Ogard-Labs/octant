@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readdirSync } from "node:fs";
 import {
   access,
   chmod,
@@ -268,12 +268,28 @@ export class ManagedAttachmentStore {
   }
 
   /**
-   * The folder that holds every attachment of one scope (a thread). A
-   * provider session reads it to open an attached file by path; nothing else
+   * The folder that holds every attachment of one scope (a thread), made if
+   * it is missing, or undefined when it cannot be made as a plain directory.
+   * A provider session reads it to open an attached file by path; nothing else
    * lives in it, so granting it reveals only that thread's own attachments.
+   *
+   * It exists before any runtime launches: a sandbox binds only a folder that
+   * exists, and a runtime started for a turn with no attachment is reused by
+   * later turns, so a folder made only by a later upload would name a path
+   * that runtime cannot see.
    */
-  scopeFolder(scopeId: string): string {
-    return join(this.#root, this.#options.decodeScopeId(scopeId));
+  scopeFolder(scopeId: string): string | undefined {
+    const folder = join(this.#root, this.#options.decodeScopeId(scopeId));
+    try {
+      mkdirSync(folder, { recursive: true, mode: 0o700 });
+      for (const path of [this.#root, folder]) {
+        const status = lstatSync(path);
+        if (status.isSymbolicLink() || !status.isDirectory()) return undefined;
+      }
+      return folder;
+    } catch {
+      return undefined;
+    }
   }
 
   /**

@@ -2,6 +2,7 @@ import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurn
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
+  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
 import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
@@ -1583,6 +1584,9 @@ export class WorkTurnService {
       (reference) => this.#takesFileNatively?.(command.authority, reference.mediaType) === true,
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
+    if (server !== undefined && filesByPath.length > 0) {
+      throw this.#failure("unsupported", SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL);
+    }
     const attachedFileTexts: string[] = [];
     if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
@@ -2292,6 +2296,11 @@ export class WorkTurnService {
               if (!folderCurrent())
                 controller.abort("Working folder is unavailable; nothing is redirected.");
             }, 250);
+      // Made before the runtime launches, so its sandbox binds it even when
+      // this turn carries no file and a later one reuses the runtime. A server
+      // thread's runtime is on its server, where this folder is not.
+      const attachmentsFolder =
+        server === undefined ? this.#attachments?.threadFolder(command.threadId) : undefined;
       const launch = this.#runTurn({
         command,
         ...(thread === undefined ? {} : { thread }),
@@ -2306,9 +2315,7 @@ export class WorkTurnService {
         extraFolders,
         // A server thread's runtime runs on its server, where this host's
         // attachments folder is not.
-        ...(server !== undefined || this.#attachments === undefined
-          ? {}
-          : { attachmentsFolder: this.#attachments.threadFolder(command.threadId) }),
+        ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
         ...(server === undefined ? {} : { serverTools: server.tools }),
         driver,
         ...(preparedTools === undefined ? {} : { preparedTools }),

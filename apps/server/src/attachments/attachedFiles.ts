@@ -18,6 +18,16 @@ export interface AttachedFileByPath {
   readonly path: string;
 }
 
+/**
+ * Why a server Project's turn refuses a file it would name by path. A server
+ * thread's agent works with the server's own file tools, and the thread's
+ * attachments folder is on this host, so a path there names nothing the agent
+ * can open; no transfer to the server exists, so the turn is refused before it
+ * is accepted rather than sent with a path that cannot be read.
+ */
+export const SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL =
+  "This thread works on a server, which cannot open a file attached here. Attach images only, or copy the file to the server's folder and name it in the message.";
+
 /** Splits a turn's attachments into the images it sends as pictures and every other file. */
 export function partitionAttachedFiles<Reference extends { readonly mediaType: string }>(
   references: ReadonlyArray<Reference>,

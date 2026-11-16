@@ -2,6 +2,7 @@ import type { EventActor } from "@octant/contracts";
 import {
   attachedFilesMessage,
   partitionAttachedFiles,
+  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
   type AttachedFileByPath,
 } from "../attachments/attachedFiles";
 import type { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -2003,6 +2004,26 @@ export class CodeOperationService {
                   if (inputCurrent === undefined || admissionCurrent?.() === false)
                     turnRefusal = admissionRefusal();
                 }
+              }
+              // A server thread's agent works with the server's file tools, and
+              // this host's attachments folder is not there: a file the turn
+              // would name by path is refused before the start is journaled.
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined &&
+                this.#options.holdsServerThread?.(turnThread) === true &&
+                partitionAttachedFiles(starting.attachments).files.some(
+                  (reference) =>
+                    this.#options.takesFileNatively?.(turnThread, reference.mediaType) !== true,
+                )
+              ) {
+                turnRefusal = this.#failed(
+                  command.operationId,
+                  "unsupported",
+                  SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+                  "refused",
+                );
               }
               // Images for a model that cannot read them are described before
               // the start is journaled, so the start records who described
@@ -6358,6 +6379,14 @@ export class CodeOperationService {
       (reference) => this.#options.takesFileNatively?.(thread, reference.mediaType) === true,
     );
     const filesByPath = files.filter((reference) => !nativeFiles.includes(reference));
+    if (serverThread && filesByPath.length > 0) {
+      return this.#failed(
+        command.operationId,
+        "unsupported",
+        SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL,
+        "refused",
+      );
+    }
     if (filesByPath.length > 0) {
       const named = await this.#attachedFilePaths(command.threadId, filesByPath);
       if (named === undefined) {
@@ -6481,6 +6510,12 @@ export class CodeOperationService {
       supportsImages,
       current: () => admissionCurrent?.() !== false,
     });
+    // Made before the runtime launches, so its sandbox binds it even when this
+    // turn carries no file and a later one reuses the runtime. A server
+    // thread's runtime is on its server, where this folder is not.
+    const attachmentsFolder = serverThread
+      ? undefined
+      : this.#options.attachments?.threadFolder(command.threadId);
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -6496,9 +6531,7 @@ export class CodeOperationService {
         ? {}
         : { sentContext }),
       ...(attachments.length === 0 ? {} : { attachments }),
-      ...(this.#options.attachments === undefined
-        ? {}
-        : { attachmentsFolder: this.#options.attachments.threadFolder(command.threadId) }),
+      ...(attachmentsFolder === undefined ? {} : { attachmentsFolder }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
       ...(routineRun === undefined ? {} : { routineRun }),

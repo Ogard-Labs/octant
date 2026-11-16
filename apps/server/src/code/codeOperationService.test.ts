@@ -18,6 +18,7 @@ import {
   type CodeTerminalLiveFrame,
   type WindowId,
 } from "@octant/contracts";
+import { SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL } from "../attachments/attachedFiles";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -2895,6 +2896,62 @@ describe("CodeOperationService", () => {
       failure: { category: "unavailable" },
     });
     expect(fixture.turns.start).toHaveBeenCalledOnce();
+  });
+
+  it("refuses before journaling a server Project's turn that carries a file its server could not open, and still sends its images", async () => {
+    const file = {
+      attachmentId: "40000000-0000-4000-8000-000000000041",
+      displayName: "report.pdf",
+      mediaType: "application/pdf",
+      byteLength: 3,
+      digest: "f".repeat(64),
+    };
+    const image = {
+      ...file,
+      attachmentId: "40000000-0000-4000-8000-000000000042",
+      displayName: "shot.png",
+      mediaType: "image/png",
+    };
+    let staged = [file];
+    const attachments = {
+      peek: () => ({ status: "ok" as const, attachments: staged }),
+      release: vi.fn(),
+      read: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      readablePath: vi.fn(async () => "/octant-data/code-threads/thread/report.pdf"),
+      threadFolder: () => "/octant-data/code-threads/thread",
+    };
+    const fixture = providerTurnFixture({
+      remoteRoot: true,
+      holdsServerThread: () => true,
+      attachments: attachments as never,
+      supportsAttachments: () => true,
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    const journalled = () =>
+      fixture.events.append.mock.calls
+        .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+        .filter((event) => event.kind === "conversation-turn-started");
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        attachmentIds: [file.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unsupported", message: SERVER_PROJECT_FILE_ATTACHMENT_REFUSAL },
+    });
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+    expect(journalled()).toHaveLength(0);
+    expect(attachments.readablePath).not.toHaveBeenCalled();
+
+    staged = [image];
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId("70000000-0000-4000-8000-000000000042"),
+        attachmentIds: [image.attachmentId],
+      } as never),
+    ).resolves.toMatchObject({ kind: "provider-turn-state" });
   });
 
   it("runs a server Project's Git panel with Git on its server, and refuses it when the server has none", async () => {

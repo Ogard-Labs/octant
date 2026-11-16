@@ -241,8 +241,11 @@ export class TurnAttachmentStore<
     });
   }
 
-  /** The thread's attachments folder, which a provider session may read. */
-  threadFolder(threadId: ThreadId): string {
+  /**
+   * The thread's attachments folder, which a provider session may read, made
+   * if missing; undefined when it cannot be made.
+   */
+  threadFolder(threadId: ThreadId): string | undefined {
     return this.#store.scopeFolder(String(threadId));
   }
 

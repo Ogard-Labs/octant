@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -91,6 +91,18 @@ function turnAttachmentSuite<
       expect(reference.displayName).not.toContain("/");
       expect(reference.digest).toMatch(/^[a-f0-9]{64}$/);
       await expect(store.read(thread, reference)).resolves.toEqual(bytes);
+    });
+
+    it("makes the thread's attachments folder before any file is attached, so a runtime launched first can bind it", async () => {
+      const thread = mode.threadId(12);
+      const folder = store.threadFolder(thread);
+      expect(folder).toBe(join(root, mode.scopesDirectory, String(thread)));
+      const status = await lstat(folder ?? "");
+      expect(status.isDirectory() && !status.isSymbolicLink()).toBe(true);
+      // A link planted in its place is not a folder Octant grants.
+      const planted = mode.threadId(13);
+      await symlink(tmpdir(), join(root, mode.scopesDirectory, String(planted)));
+      expect(store.threadFolder(planted)).toBeUndefined();
     });
 
     it("opens a file of any type by its own name inside the thread's folder under the data directory, never anywhere else", async () => {

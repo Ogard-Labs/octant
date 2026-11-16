@@ -14664,8 +14664,15 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     file under its own name, and the agent reads it with its own tools. The
     Work and Code composers and a paired phone accept any file by choosing or
     dropping it and show it as an attachment chip; a paired device's upload
-    of any `type/subtype` is admitted on those routes. Not built: Chat keeps
-    its image, text and PDF types.
+    of any `type/subtype` is admitted on those routes. The folder is made
+    before the runtime launches, so a runtime started for a turn with no
+    file, which a later turn may reuse, already binds it. A thread in a
+    server Project works with the server's own file tools and this host's
+    folder is not there, and no transfer to the server exists, so a turn
+    carrying a file it would name by path is refused before it is accepted,
+    with a sentence saying to attach images or copy the file to the server;
+    images and natively taken files still go. Not built: Chat keeps its
+    image, text and PDF types.
 
   Rationale: Plan's and Chat's limits are what the person relies on, not
   the absence of a tool; each of these keeps the limit at the boundary that
