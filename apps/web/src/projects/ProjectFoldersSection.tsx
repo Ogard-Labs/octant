@@ -3,10 +3,11 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { homeRelativePath } from "../lib/homeRelativePath";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { FolderPicker } from "./FolderPicker";
-import type { ProjectChange } from "./useProjectController";
+import type { ExtraFolderChange, ProjectChange } from "./useProjectController";
 
 type BoundProjectSummary = Extract<ProjectSummary, { readonly type: "work" | "code" }>;
 
@@ -17,7 +18,8 @@ export interface ProjectFoldersSectionProps {
   readonly folderBrowseClient?: FolderBrowseClient;
   readonly hostId?: string;
   /** Absent when the host cannot accept the change; folders are then listed read-only. */
-  readonly onAdd?: (receiptId: string) => Promise<ProjectChange>;
+  /** `confirmHomeFolder` resends a home folder the person confirmed after its warning. */
+  readonly onAdd?: (receiptId: string, confirmHomeFolder?: boolean) => Promise<ExtraFolderChange>;
   readonly onRemove?: (canonicalRoot: string) => Promise<ProjectChange>;
   /** True for an archived Project or a stale snapshot: the folders are listed, never changed. */
   readonly disabled?: boolean;
@@ -50,6 +52,11 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
   const [notice, setNotice] = useState<Notice>(NO_NOTICE);
   const [pending, setPending] = useState(false);
   const [picking, setPicking] = useState(false);
+  // The host stopped at the home folder warning; Confirm spends its fresh receipt.
+  const [homeWarning, setHomeWarning] = useState<
+    | { readonly canonicalRoot: string; readonly receiptId: string; readonly warning: string }
+    | undefined
+  >();
   const extras = props.project.extraFolders ?? [];
   const mode = props.project.type === "code" ? "code" : "work";
   const editable = props.disabled !== true;
@@ -63,11 +70,20 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
     };
   }, []);
 
-  async function settle(change: Promise<ProjectChange>, done: string) {
+  async function settle(change: Promise<ExtraFolderChange>, done: string) {
     setPending(true);
     try {
       const outcome = await change;
       if (!alive.current) return;
+      if (outcome.status === "needs-confirmation") {
+        setHomeWarning({
+          canonicalRoot: outcome.canonicalRoot,
+          receiptId: outcome.receiptId,
+          warning: outcome.warning,
+        });
+        setNotice(NO_NOTICE);
+        return;
+      }
       setNotice(
         outcome.status === "changed"
           ? { kind: "done", message: done }
@@ -87,9 +103,10 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
     }
   }
 
-  async function add(receiptId: string) {
+  async function add(receiptId: string, confirmHomeFolder = false) {
     if (onAdd === undefined) return;
-    await settle(onAdd(receiptId), "Folder added.");
+    setHomeWarning(undefined);
+    await settle(confirmHomeFolder ? onAdd(receiptId, true) : onAdd(receiptId), "Folder added.");
   }
 
   async function choose() {
@@ -163,6 +180,36 @@ export function ProjectFoldersSection(props: ProjectFoldersSectionProps) {
           </OctantButton>
         </div>
       ) : null}
+      {homeWarning === undefined ? null : (
+        <OctantAlert
+          action={
+            <div className="project-folders__actions">
+              <OctantButton
+                disabled={pending}
+                onClick={() => void add(homeWarning.receiptId, true)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Confirm
+              </OctantButton>
+              <OctantButton
+                disabled={pending}
+                onClick={() => setHomeWarning(undefined)}
+                size="sm"
+                type="button"
+                variant="ghost"
+              >
+                Cancel
+              </OctantButton>
+            </div>
+          }
+          title="Add your home folder?"
+          tone="warning"
+        >
+          {homeWarning.warning}
+        </OctantAlert>
+      )}
       <p
         aria-live={failed ? "assertive" : "polite"}
         className="project-folders__status"

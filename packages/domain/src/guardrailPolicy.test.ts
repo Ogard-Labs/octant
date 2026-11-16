@@ -27,6 +27,8 @@ import {
   workAccessOfPermissionMode,
   workThreadAccessOf,
   workTurnCapabilityFacts,
+  workLevelChangeTarget,
+  workThreadAccessOfMode,
 } from "./guardrailPolicy";
 
 const claudeOrCodex = { providerReview: true, providerSandbox: true } as const;
@@ -275,14 +277,15 @@ describe("Work levels", () => {
     expect(workThreadAccessOf("auto")).toEqual(threadAccessOf("auto"));
     expect(workThreadAccessOf("auto-accept-edits")).toEqual(threadAccessOf("accept-edits"));
     expect(workThreadAccessOf("full-access")).toEqual(threadAccessOf("full-access"));
+    expect(workThreadAccessOf("plan")).toEqual(threadAccessOf("plan"));
     expect(workAccessOfPermissionMode("plan")).toBeUndefined();
+    expect(workThreadAccessOfMode("plan")).toBe("plan");
     expect(workAccessOfPermissionMode("accept-edits")).toBe("auto-accept-edits");
   });
 
   it("maps each Work level back to the Code mode that stands for it", () => {
-    for (const mode of ["auto", "ask-first", "accept-edits", "full-access"] as const) {
-      const access = workAccessOfPermissionMode(mode);
-      expect(access === undefined ? undefined : permissionModeOfWorkAccess(access)).toBe(mode);
+    for (const mode of ["auto", "ask-first", "accept-edits", "plan", "full-access"] as const) {
+      expect(permissionModeOfWorkAccess(workThreadAccessOfMode(mode))).toBe(mode);
     }
   });
 
@@ -312,6 +315,34 @@ describe("Work levels", () => {
     expect(clampWorkAccess("auto", "auto-accept-edits")).toBe("ask-first");
     expect(clampWorkAccess("ask-first", "full-access")).toBe("ask-first");
     expect(clampWorkAccess("auto", "auto")).toBe("auto");
+    expect(clampWorkAccess("plan", "full-access")).toBe("plan");
+    expect(clampWorkAccess("full-access", "plan")).toBe("plan");
+  });
+
+  it("records a Plan turn with neither shell nor Git", () => {
+    expect(workTurnCapabilityFacts("plan")).toMatchObject({
+      shell: "denied",
+      git: "denied",
+      confinement: "project-root-confined",
+    });
+  });
+
+  it("returns an approved plan to the level the thread left, never to Full access", () => {
+    expect(workLevelChangeTarget({ access: "auto-accept-edits" }, "enter-plan")).toEqual({
+      to: "plan",
+      planReturnAccess: "auto-accept-edits",
+    });
+    expect(workLevelChangeTarget({ access: "full-access" }, "enter-plan")).toEqual({
+      to: "plan",
+      planReturnAccess: "ask-first",
+    });
+    expect(
+      workLevelChangeTarget({ access: "plan", planReturnAccess: "auto" }, "exit-plan"),
+    ).toEqual({ to: "auto" });
+    expect(workLevelChangeTarget({ access: "plan" }, "exit-plan")).toEqual({ to: "ask-first" });
+    expect(
+      workLevelChangeTarget({ access: "plan", planReturnAccess: "full-access" }, "exit-plan"),
+    ).toEqual({ to: "ask-first" });
   });
 });
 

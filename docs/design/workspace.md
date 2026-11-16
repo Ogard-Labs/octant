@@ -298,9 +298,12 @@ while checkouts and Git stay in the main folder (a terminal or saved action
 can start in any folder), and **Add folder…**, which opens the native folder
 picker on desktop and the host folder browser elsewhere), then the folder's
 availability as a dot and a word, then one line on what the binding grants
-(said once; the Git sentence is not repeated). A refused folder (the home folder or
-above it, a system or credential folder, one inside or around another folder
-of the Project) shows the host's reason on the card. A thread's environment
+(said once; the Git sentence is not repeated). A refused folder (one above home, a
+system or credential folder, one inside or around another folder of the
+Project) shows the host's reason on the card. The home folder itself shows the
+host's warning, naming that threads may read and change every file in it while
+its credential folders stay protected, with **Confirm** and **Cancel**;
+Confirm adds it. A thread's environment
 panel lists the Project's extra folders read-only, under the main folder, and
 shows nothing when there are none. The Files tool lists the extra folders'
 files after the main folder's, each file by its own name with its folder's

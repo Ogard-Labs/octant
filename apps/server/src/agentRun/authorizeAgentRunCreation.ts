@@ -2,12 +2,15 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  DEFAULT_WORK_ACCESS,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunParentThreadId,
   type CodeThread,
   type WindowId,
   type WorkAccess,
+  type WorkThread,
+  type WorkThreadId,
   type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import {
@@ -39,7 +42,14 @@ const chatParentLiveGrant = (): AgentRunAuthority =>
     permissionPersistence: "current-session",
   });
 
-const workParentLiveGrant = (): AgentRunAuthority =>
+type WorkThreadReader = (threadId: WorkThreadId) => Pick<WorkThread, "access"> | undefined;
+
+/**
+ * A Work parent's grant to its helpers: approval-gated, or Plan while the
+ * parent is in Plan, so a helper of a read-only thread is read-only too, as
+ * a Code parent's is.
+ */
+const workParentLiveGrant = (access: WorkAccess): AgentRunAuthority =>
   resolveAgentRunLiveParentGrant({
     mode: "work",
     filesystem: true,
@@ -48,7 +58,7 @@ const workParentLiveGrant = (): AgentRunAuthority =>
     network: false,
     tools: true,
     subagents: true,
-    executionPolicy: "approval-gated",
+    executionPolicy: access === "plan" ? "plan" : "approval-gated",
     permissionPersistence: "current-session",
   });
 
@@ -185,7 +195,7 @@ export function authorizeAgentRunCreation(input: {
     const revision = project.bindingHistory.at(-1);
     if (revision === undefined) return undefined;
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("work");
-    const liveAuthority = workParentLiveGrant();
+    const liveAuthority = workParentLiveGrant(workThread.access);
     return {
       parentMode: "work",
       parentAuthority,
@@ -263,11 +273,13 @@ export function boundAgentRunLiveAuthority(input: {
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
   readonly windowAuthorityStore: Pick<WindowAuthorityStore, "listWindowIds">;
   readonly activeTurn?: CodeParentActiveTurn;
+  readonly readWorkThread?: WorkThreadReader;
 }): AgentRunAuthority | undefined {
   const binding = input.executionWindows.get(input.run.requestId);
   return scheduledAgentRunLiveAuthority({
     persistence: input.persistence,
     run: input.run,
+    ...(input.readWorkThread === undefined ? {} : { readWorkThread: input.readWorkThread }),
     ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
     // Cached bindings do not extend a window's lifetime. The store's read
     // expires capabilities and revokes their session grants even when no
@@ -305,12 +317,23 @@ export function scheduledAgentRunLiveAuthority(input: {
     readonly codeSessionAuthority: CodeSessionAuthorityStore;
   };
   readonly activeTurn?: CodeParentActiveTurn;
+  /** A Work parent as it is stored now; absent, or unreadable, it reads as outside Plan. */
+  readonly readWorkThread?: WorkThreadReader;
 }): AgentRunAuthority | undefined {
   switch (input.run.routingReceipt.mode) {
     case "chat":
       return chatParentLiveGrant();
-    case "work":
-      return workParentLiveGrant();
+    case "work": {
+      let access: WorkAccess = DEFAULT_WORK_ACCESS;
+      try {
+        access =
+          input.readWorkThread?.(decodeWorkThreadId(String(input.run.parentThreadId)))?.access ??
+          DEFAULT_WORK_ACCESS;
+      } catch {
+        access = DEFAULT_WORK_ACCESS;
+      }
+      return workParentLiveGrant(access);
+    }
     case "code": {
       let codeThread;
       try {

@@ -1031,7 +1031,41 @@ describe("WorkThreadWorkspace", () => {
     expect(cancelFirstTurn).not.toHaveBeenCalled();
   });
 
-  it("moves the task to Full access from its composer's mode picker, which offers no Plan", async () => {
+  it("moves the task to Plan from its composer's mode picker, as a Code thread moves", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => ({
+      kind: "thread-updated" as const,
+      thread: workThread({ version: 2, access: "plan", planReturnAccess: "ask-first" }),
+    }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute,
+    } as unknown as WorkThreadClient;
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^Mode:/ }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /^Plan/ }));
+
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-work-thread-access",
+      threadId,
+      expectedVersion: 1,
+      access: "plan",
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Mode:/ })).toHaveAccessibleName("Mode: Plan"),
+    );
+  });
+
+  it("moves the task to Full access from its composer's mode picker", async () => {
     localStorage.setItem(
       "octant.full-access-warned.project.20000000-0000-4000-8000-000000000101",
       "1",
@@ -1058,7 +1092,6 @@ describe("WorkThreadWorkspace", () => {
     const mode = await screen.findByRole("button", { name: /^Mode:/ });
     expect(mode).toHaveAccessibleName("Mode: Ask first");
     await user.click(mode);
-    expect(screen.queryByRole("menuitemradio", { name: /^Plan/ })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("menuitemradio", { name: /^Full access/ }));
 
     expect(execute).toHaveBeenCalledWith({
@@ -1690,6 +1723,57 @@ describe("WorkThreadWorkspace", () => {
       threadId,
       expect.any(AbortSignal),
     );
+  });
+
+  it("shows the agent's plan whole on a level-change card and approves it as the return to the level it left", async () => {
+    const user = userEvent.setup();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({
+        threads: [workThread({ access: "plan", planReturnAccess: "auto-accept-edits" })],
+      })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = { transcript: vi.fn(async () => ({ threadId, turns: [] })) };
+    const plan = "1. Edit src/brief.md\n2. Export the PDF";
+    const requestClient = {
+      list: vi.fn(async () => ({
+        requests: [
+          {
+            requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            threadId,
+            status: "pending",
+            detail: {
+              kind: "approval",
+              action: "ExitPlanMode",
+              description: "Claude finished planning and asks to leave Plan.",
+              levelChange: { to: "auto-accept-edits", plan },
+            },
+            version: 1,
+          },
+        ],
+      })),
+      execute: vi.fn(async () => ({ kind: "work-request-resolved" })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Proposed plan")).toHaveTextContent("Edit src/brief.md");
+    await user.click(screen.getByRole("button", { name: "Approve plan · Accept edits" }));
+    expect(requestClient.execute).toHaveBeenCalledWith({
+      kind: "resolve-work-request",
+      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      expectedVersion: 1,
+      resolution: { kind: "approval", approved: true },
+    });
   });
 
   it("says why a turn failed instead of leaving the transcript silent", async () => {

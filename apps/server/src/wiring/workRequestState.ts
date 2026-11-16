@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { WorkRequestEventStore } from "../work/workRequestEventStore";
 import { WorkRequestProjection } from "../work/workRequestProjection";
 import { WorkRequestRuntime } from "../work/workRequestRuntime";
-import { WorkRequestService } from "../work/workRequestService";
+import { WorkRequestService, type WorkRequestLevelChangePort } from "../work/workRequestService";
 import type { RunningWorkTurnAccess } from "../work/workTurnService";
 import type { WorkAccess } from "@octant/contracts";
 import { workApprovalPostureOf } from "@octant/domain";
@@ -30,6 +30,9 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
     journal: persistence.journal,
     uuid: randomUUID,
   });
+  // Work's thread and turn services are built after this service; an
+  // approved level change reaches them once they exist, and is refused before.
+  const workLevelChangeHolder: { port?: WorkRequestLevelChangePort } = {};
   const workRequestService = new WorkRequestService({
     projects: {
       projectType: (projectId) => persistence.readProject(projectId)?.type ?? "unknown",
@@ -61,6 +64,14 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
       answerUserInput: (input) => workRequestRuntime.answerUserInput(input),
       cancel: (input) => workRequestRuntime.cancel(input),
     },
+    levelChanges: {
+      change: (input) =>
+        workLevelChangeHolder.port?.change(input) ?? {
+          status: "refused",
+          message: "Work is not ready to change the thread's level.",
+        },
+      endTurn: (threadId) => workLevelChangeHolder.port?.endTurn(threadId),
+    },
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
   });
@@ -71,6 +82,7 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
     requests: workRequestService,
     uuid: randomUUID,
     shield: () => workShieldHolder.port,
+    readThread: (threadId) => workThreadProjection.read(threadId),
   });
   workRequestService.hydrate();
   workRequestService.interruptOnRestart();
@@ -88,6 +100,7 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
     runningWorkTurnSandbox,
     runningWorkTurns,
     workRequestRuntime,
+    workLevelChangeHolder,
     workRequestService,
     workShieldHolder,
   };

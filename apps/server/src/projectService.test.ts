@@ -1354,6 +1354,84 @@ describe("ProjectService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
+  it("asks the person to confirm the home folder and adds it only from a confirmed resend in the same window", async () => {
+    let seed = 10;
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32, seed++));
+    const picked = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/Users/example" },
+      now: 0,
+    });
+    const fixture = fixtureService({
+      projects: [workProject()],
+      receipts,
+      nowMs: 1,
+      homeDirectory: "/Users/example",
+    });
+    const send = (receiptId: string, confirm: boolean, from = windowId) =>
+      fixture.service.executeProject(from, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 1,
+        receiptId: receiptId as never,
+        ...(confirm ? { confirmHomeFolder: true as const } : {}),
+      });
+    const held = await send(picked.receiptId, false);
+    expect(held).toMatchObject({
+      kind: "project-extra-folder-needs-confirmation",
+      canonicalRoot: "/Users/example",
+      warning: expect.stringMatching(/stay protected/),
+    });
+    expect(fixture.append).not.toHaveBeenCalled();
+    if (held.kind !== "project-extra-folder-needs-confirmation") throw new Error("not held");
+    expect(String(held.receiptId)).not.toBe(String(picked.receiptId));
+    // The first receipt is spent; the fresh one is this window's alone.
+    await expect(send(picked.receiptId, true)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    await expect(
+      send(held.receiptId, true, decodeWindowId("00000000-0000-4000-8000-000000000602")),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
+  it("adds the home folder from a confirmed resend", async () => {
+    let seed = 20;
+    const receipts = new BindingReceiptStore(() => Buffer.alloc(32, seed++));
+    const picked = receipts.issue({
+      windowId,
+      projectType: "work",
+      canonicalBinding: { canonicalRoot: "/Users/example" },
+      now: 0,
+    });
+    const fixture = fixtureService({
+      projects: [workProject()],
+      receipts,
+      nowMs: 1,
+      homeDirectory: "/Users/example",
+    });
+    const held = await fixture.service.executeProject(windowId, {
+      kind: "add-project-extra-folder",
+      projectId: workId,
+      expectedVersion: 1,
+      receiptId: picked.receiptId,
+    });
+    if (held.kind !== "project-extra-folder-needs-confirmation") throw new Error("not held");
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "add-project-extra-folder",
+        projectId: workId,
+        expectedVersion: 1,
+        receiptId: held.receiptId,
+        confirmHomeFolder: true,
+      }),
+    ).resolves.toMatchObject({
+      kind: "project-extra-folder-added",
+      project: { extraFolders: [{ canonicalRoot: "/Users/example" }] },
+    });
+  });
+
   it("refuses an extra folder that overlaps the main folder or names a secret folder", async () => {
     for (const canonicalRoot of ["/canonical/work/docs", "/canonical", "/Users/example/.ssh"]) {
       const receipts = new BindingReceiptStore(() => Buffer.alloc(32, 4));

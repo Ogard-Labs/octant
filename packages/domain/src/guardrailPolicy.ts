@@ -8,6 +8,8 @@ import type {
   ToolActionAuthority,
   ToolNetworkEgressPolicy,
   WorkAccess,
+  WorkDefaultAccess,
+  WorkPlanReturnAccess,
   WorkTurnCapabilityFacts,
 } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "./providerPolicy";
@@ -256,10 +258,10 @@ export function threadAccessOf(mode: PermissionMode): {
 /**
  * The posture a Work thread's access stores. Work and Code share one
  * capability set, so a Work level runs a session exactly as the same Code
- * mode does; Work has no Plan overlay.
+ * mode does, Plan included.
  */
 export function workThreadAccessOf(access: WorkAccess): {
-  readonly executionPolicy: Exclude<ProviderExecutionPolicy, "plan">;
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly autoApprove: boolean;
 } {
   switch (access) {
@@ -271,17 +273,21 @@ export function workThreadAccessOf(access: WorkAccess): {
       return { executionPolicy: "auto-accept-edits", autoApprove: false };
     case "full-access":
       return { executionPolicy: "full-access", autoApprove: false };
+    case "plan":
+      return { executionPolicy: "plan", autoApprove: false };
   }
 }
 
 /**
- * Whether `access` asks for no more than `ceiling`. Ask first is within
- * every level and Full access holds every level; Auto and Accept edits widen
- * different things (who answers, and which writes ask), so neither holds the
- * other.
+ * Whether `access` asks for no more than `ceiling`. Plan is within every
+ * level and holds only itself; Ask first is within every other level and
+ * Full access holds every level; Auto and Accept edits widen different things
+ * (who answers, and which writes ask), so neither holds the other.
  */
 export function workAccessWithin(access: WorkAccess, ceiling: WorkAccess): boolean {
-  return access === ceiling || access === "ask-first" || ceiling === "full-access";
+  if (access === ceiling || access === "plan") return true;
+  if (ceiling === "plan") return false;
+  return access === "ask-first" || ceiling === "full-access";
 }
 
 /**
@@ -295,8 +301,11 @@ export function clampWorkAccess(thread: WorkAccess, ceiling: WorkAccess): WorkAc
   return "ask-first";
 }
 
-/** The Work access a Code mode picker choice stands for; Plan has none. */
-export function workAccessOfPermissionMode(mode: PermissionMode): WorkAccess | undefined {
+/**
+ * The Work default (Settings › Work, a Work Project's start mode) a Code mode
+ * picker choice stands for; Plan has none, since no thread starts in Plan.
+ */
+export function workAccessOfPermissionMode(mode: PermissionMode): WorkDefaultAccess | undefined {
   switch (mode) {
     case "auto":
       return "auto";
@@ -311,6 +320,11 @@ export function workAccessOfPermissionMode(mode: PermissionMode): WorkAccess | u
   }
 }
 
+/** The level a Work thread's mode picker choice sets, Plan included. */
+export function workThreadAccessOfMode(mode: PermissionMode): WorkAccess {
+  return workAccessOfPermissionMode(mode) ?? "plan";
+}
+
 /** The Code mode picker choice a Work access stands for. */
 export function permissionModeOfWorkAccess(access: WorkAccess): PermissionMode {
   switch (access) {
@@ -322,12 +336,35 @@ export function permissionModeOfWorkAccess(access: WorkAccess): PermissionMode {
       return "accept-edits";
     case "full-access":
       return "full-access";
+    case "plan":
+      return "plan";
   }
 }
 
 /**
+ * Where an agent's ask to change a Work thread's level takes it, as
+ * `levelChangeTarget` does for Code: entering Plan remembers the level it
+ * left, never Full access, which only the person chooses; leaving Plan
+ * returns there, or to Ask first when nothing guarded was recorded.
+ */
+export function workLevelChangeTarget(
+  thread: { readonly access: WorkAccess; readonly planReturnAccess?: WorkAccess | undefined },
+  kind: "enter-plan" | "exit-plan",
+): { readonly to: WorkAccess; readonly planReturnAccess?: WorkPlanReturnAccess } {
+  if (kind === "enter-plan")
+    return { to: "plan", planReturnAccess: workPlanReturnOf(thread.access) };
+  return { to: workPlanReturnOf(thread.planReturnAccess ?? "ask-first") };
+}
+
+/** The guarded level a thread leaving `access` for Plan comes back to. */
+export function workPlanReturnOf(access: WorkAccess): WorkPlanReturnAccess {
+  return access === "full-access" || access === "plan" ? "ask-first" : access;
+}
+
+/**
  * What a Work turn records about the level it ran at: shell and Git follow
- * the level as they do in Code, and a Full access turn runs with no OS
+ * the level as they do in Code (Plan grants neither; at most a sandbox holds
+ * a shell to read-only programs), and a Full access turn runs with no OS
  * sandbox. Worktrees, pull requests and Code checkouts stay Code's.
  */
 export function workTurnCapabilityFacts(
@@ -335,12 +372,13 @@ export function workTurnCapabilityFacts(
   fullAccessSandbox = false,
 ): WorkTurnCapabilityFacts {
   const level = guardrailLevelOf(workThreadAccessOf(access));
+  const shell = access === "plan" ? "denied" : level;
   return {
     workspace: "project-backed",
     confinement:
       level === "full-access" && !fullAccessSandbox ? "unconfined" : "project-root-confined",
-    shell: level,
-    git: level,
+    shell,
+    git: shell,
     worktree: "denied",
     pullRequest: "denied",
     code: "denied",

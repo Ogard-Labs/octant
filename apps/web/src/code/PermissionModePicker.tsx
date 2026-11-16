@@ -135,8 +135,8 @@ export interface PermissionModePickerProps {
   readonly disabled?: boolean;
   readonly profileName?: string;
   /**
-   * The modes this thread can take, in picker order. Work threads share
-   * Code's levels but have no Plan overlay; absent lists every mode.
+   * The modes this picker offers, in picker order. A coordinator proposal
+   * caps them at the level it requested; absent lists every mode.
    */
   readonly modes?: ReadonlyArray<PermissionMode>;
   /**

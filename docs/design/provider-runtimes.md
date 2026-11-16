@@ -647,13 +647,13 @@ decision, 2026-11-14). `disallowedTools` withholds only what would break a
 rule the server enforces, and the decoder refuses a runtime or a call that
 names a withheld tool:
 
-| Withheld                                                 | Why                                                                                                                                                                                                                             |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's: both in a session whose host does not answer level changes (Work, child runs), and `ExitPlanMode` outside Plan everywhere; Plan's read-only list holds `ExitPlanMode` (see below) |
-| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                                                                                                          |
-| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                                                                                                                   |
-| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)                                                                                                    |
-| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                                                                                                                      |
+| Withheld                                                 | Why                                                                                                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EnterPlanMode`, `ExitPlanMode`                          | The thread's mode and level are the server's: both in a session whose host does not answer level changes (child runs), and `ExitPlanMode` outside Plan everywhere; Plan's read-only list holds `ExitPlanMode` (see below) |
+| `Agent`, `WebSearch`, `WebFetch`, `Skill`                | Only while the person's own setup has that feature off                                                                                                                                                                    |
+| `Workflow`                                               | Only while the person's own setup has subagents off: a workflow starts agents                                                                                                                                             |
+| `ScheduleWakeup`, `CronCreate`, `CronList`, `CronDelete` | Only in a session the host keeps no wake-up schedule for (a single-use session); Octant answers them everywhere else (below)                                                                                              |
+| `Artifact`                                               | Unless the session offers Claude artifacts                                                                                                                                                                                |
 
 Octant's gate keeps its own rules for the tools it names: reads run unasked
 inside the Project, `Edit`, `Write`, and `NotebookEdit` are file edits judged
@@ -1070,9 +1070,10 @@ with no anchor, or a failed copy goes back with the text handoff
 #### Plan mode as level changes
 
 Claude Code's own plan-then-approve works in Code (maintainer decision,
-2026-11-14). The thread's level stays the server's: the runtime never
-switches its own permission mode. A Code session starts with
-`levelChanges`, and then outside Plan holds `EnterPlanMode`; a Plan
+2026-11-14) and in Work (maintainer decision, 2026-11-16). The thread's
+level stays the server's: the runtime never switches its own permission
+mode. A Work or Code session starts with `levelChanges`, and then outside
+Plan holds `EnterPlanMode`; a Plan
 session's `ExitPlanMode`, which Plan holds to hand its plan over (see
 [Native plan capture](#native-plan-capture)), is then asked rather than only
 refused. Each call is put to the person at every level, Full access
@@ -1096,11 +1097,24 @@ is recorded as approval-gated, because only the person chooses Full access),
 and an approved plan returns the thread there, or to approval-gated when the
 person put the thread in Plan. A declined ask leaves the level and the turn
 as they were. Chat and child runs do not answer level changes yet, so their
-sessions hold neither tool. Work does not either, and by rule rather than as
-a gap: both asks move a thread into or out of Plan, and Work has no Plan
-([Guardrail levels](decisions.md#guardrail-levels)). Building them for Work
-first needs a Plan level in Work, a change to that decision; until then a
-Work session holds neither tool and the runtime cannot change its own mode. Changing the level inside the running turn, through the runtime's `setPermissionMode` as Claude Code does on its own, is decided and not built yet (maintainer decision, 2026-11-14): the port exposes the control, but a session's launch profile and tool set would still be the old level's, so the turn ends until a session can change them in place.
+sessions hold neither tool.
+
+A Work thread answers them through its pending-request card. The ask is
+recorded as a Work approval whose detail carries a structured `levelChange`:
+the level it would move to (Plan, or the guarded level the thread returns
+to) and, on leaving Plan, the plan whole. Unlike the request's own text,
+which keeps refusing paths and links, the plan keeps the paths it names,
+with known secret formats redacted before it is recorded, so the person
+approves exactly the plan the agent wrote. Octant Shield never screens a
+level change, and a provider's own reviewer never sees one. On approval the
+host moves the thread through the same rule as the Code access command,
+journaled as the person or paired device that answered, before the
+provider hears the answer; a change the host cannot make leaves the request
+pending. The turn that asked then ends, and the next one launches at the
+new level. Entering Plan records the level the thread left as its
+`planReturnAccess` (Full access is recorded as Ask first), whether the
+agent asked or the person chose Plan from the mode picker, and an approved
+plan returns the thread there, never to Full access. Changing the level inside the running turn, through the runtime's `setPermissionMode` as Claude Code does on its own, is decided and not built yet (maintainer decision, 2026-11-14): the port exposes the control, but a session's launch profile and tool set would still be the old level's, so the turn ends until a session can change them in place.
 
 #### Sessions started outside Octant
 
