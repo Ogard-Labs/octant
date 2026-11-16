@@ -135,7 +135,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -1389,15 +1389,18 @@ export class WorkTurnService {
       options?.accessCeiling === undefined
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
-    // Refuse unsupported Strict/retained confinement before journaling;
-    // ordinary Windows turns use native approvals at their effective level.
-    const sandboxRefusal = hostSandboxRefusal({
+    // Judged at that level, not only the thread's stored one, before anything
+    // is journaled or started: on a host without Octant's sandbox a turn below
+    // Full access runs with the provider's own approvals, and only Strict and
+    // a kept sandbox, which need Octant's sandbox, refuse.
+    const sandboxRefusal = hostProviderTurnRefusal({
       platform: process.platform,
       access: {
         ...workThreadAccessOf(turnAccess),
         ...(thread?.strict === undefined ? {} : { strict: thread.strict }),
         ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
       },
+      strict: this.#resolveStrict?.(String(command.threadId)) ?? true,
     });
     if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
@@ -2951,14 +2954,20 @@ export class WorkTurnService {
         strict: this.#resolveStrict?.(String(input.command.threadId)) ?? true,
         ...(artifactToolName === undefined ? {} : { nativeArtifacts: true }),
         ...nativeSetupOption(
-          sessionNativeSetup(this.#persistence, {
-            providerInstanceId: input.command.authority.providerInstanceId,
-            projectId: input.command.authority.projectId,
-            threadId: String(input.command.threadId),
-            mode: "work",
-            executionPolicy:
-              input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
-          }),
+          sessionNativeSetup(
+            {
+              ...this.#persistence,
+              readStrict: (threadId) => this.#resolveStrict?.(threadId) ?? true,
+            },
+            {
+              providerInstanceId: input.command.authority.providerInstanceId,
+              projectId: input.command.authority.projectId,
+              threadId: String(input.command.threadId),
+              mode: "work",
+              executionPolicy:
+                input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
+            },
+          ),
         ),
         ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),

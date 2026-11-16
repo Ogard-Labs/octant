@@ -3,9 +3,13 @@ import userEvent from "@testing-library/user-event";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderInstanceId } from "@octant/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { WINDOWS_STRICT_REFUSAL } from "@octant/domain/guardrail-policy";
 import { HostPlatformContext } from "../platform";
-import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
+import {
+  PermissionModePicker,
+  threadKeepsFullAccessSandbox,
+  WINDOWS_PROVIDER_APPROVALS_DETAIL,
+} from "./PermissionModePicker";
 
 afterEach(cleanup);
 
@@ -181,13 +185,14 @@ describe("the sandbox at Full access in the mode picker", () => {
 });
 
 describe("the mode picker on a Windows host", () => {
-  it("offers native Windows levels with Strict off and warns once before the first Full access pick", async () => {
+  it("offers every level outside Strict, says the provider's own approvals decide below Full access, and warns once before the first Full access pick", async () => {
     const onChange = vi.fn();
     render(
       <HostPlatformContext.Provider value="win32">
         <PermissionModePicker
           autoSupported
           onChange={onChange}
+          strict={false}
           value="ask-first"
           warningScope={{ projectId: `windows-${Math.random()}` }}
         />
@@ -197,6 +202,9 @@ describe("the mode picker on a Windows host", () => {
     for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/]) {
       const item = await screen.findByRole("menuitemradio", { name });
       expect(item).not.toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription(
+        expect.stringContaining(WINDOWS_PROVIDER_APPROVALS_DETAIL),
+      );
     }
     const full = screen.getByRole("menuitemradio", { name: /^Full access/ });
     expect(full).not.toHaveAttribute("aria-disabled", "true");
@@ -207,22 +215,24 @@ describe("the mode picker on a Windows host", () => {
     expect(onChange).toHaveBeenCalledWith("full-access");
   });
 
-  it("refuses only enabling Strict on Windows and explains the unavailable confinement", async () => {
+  it("shows every level unavailable on a Windows Strict thread, naming Strict", async () => {
     render(
       <HostPlatformContext.Provider value="win32">
         <PermissionModePicker
           autoSupported
-          strict={false}
-          value="ask-first"
           onChange={() => undefined}
-          onStrictChange={() => undefined}
+          strict
+          value="full-access"
+          warningScope={{ projectId: `windows-${Math.random()}` }}
         />
       </HostPlatformContext.Provider>,
     );
     await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
-    const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
-    expect(strict).toHaveAttribute("aria-disabled", "true");
-    expect(strict).toHaveAccessibleDescription(WINDOWS_SANDBOX_MISSING_REASON);
+    for (const name of [/^Auto/, /^Ask first/, /^Accept edits/, /^Plan/, /^Full access/]) {
+      const item = await screen.findByRole("menuitemradio", { name });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      expect(item).toHaveAccessibleDescription(WINDOWS_STRICT_REFUSAL);
+    }
   });
 
   it("keeps every level available on a Mac host", async () => {

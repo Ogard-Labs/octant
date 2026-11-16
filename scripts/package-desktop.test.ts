@@ -1086,7 +1086,10 @@ describe("desktop packaging boundary", () => {
       invocations.push({ argv, cwd: options.cwd });
     });
     expect(invocations).toEqual([
-      { argv: [process.execPath, "run", "build"], cwd: repositoryRoot },
+      {
+        argv: [process.execPath, "run", "build", "--log-order=stream", "--output-logs=full"],
+        cwd: repositoryRoot,
+      },
     ]);
   });
 

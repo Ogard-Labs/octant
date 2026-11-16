@@ -961,6 +961,13 @@ export const BrowserAutomationFailure = Schema.Union(
     reason: Schema.optional(
       Schema.Union(BrowserProfileRefusalReason, Schema.Literal("origin-not-approved")),
     ),
+    /**
+     * The site a refused move would have reached, as an origin only: never a
+     * path, query, or fragment, which can carry what that site was sent. A
+     * window words its own notice for the person from this; `message` stays
+     * the agent's recovery text.
+     */
+    refusedOrigin: Schema.optional(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   Schema.Struct({
     category: Schema.Literal("context-expired"),

@@ -1331,6 +1331,8 @@ function isNodeExecutablePath(path: string): boolean {
   return base === "node" || base === "node.exe";
 }
 
+const STREAMED_BUILD_OUTPUT = ["--log-order=stream", "--output-logs=full"] as const;
+
 export async function buildPackagedApps(
   repositoryRoot: string,
   run: (argv: ReadonlyArray<string>, options: { cwd: string }) => Promise<void> = (argv, options) =>
@@ -1339,8 +1341,12 @@ export async function buildPackagedApps(
   // Packaging assembles whatever the apps' dist/ directories already hold, and
   // stale output ships silently: a server bundle predating the checkout once
   // made every provider turn in the packaged app fail. Build first so the
-  // artifact always matches the checkout it claims to be.
-  await run([process.execPath, "run", "build"], { cwd: repositoryRoot });
+  // artifact always matches the checkout it claims to be. Turbo's output is
+  // streamed as each task writes it: on a GitHub runner turbo groups a task's
+  // output and prints it only once the task ends, and Windows packaging runs
+  // that failed mid-build (November 2026) printed no output from the task
+  // that failed, only turbo's exit code.
+  await run([process.execPath, "run", "build", ...STREAMED_BUILD_OUTPUT], { cwd: repositoryRoot });
 }
 
 async function packageDesktop(repositoryRoot: string): Promise<{

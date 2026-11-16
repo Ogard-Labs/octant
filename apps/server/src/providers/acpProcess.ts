@@ -33,6 +33,15 @@ import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } f
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
+  resolveWindowsProviderProgram,
+  windowsUnconfinedLaunch,
+} from "../process/windowsProviderProgram";
+import {
+  WINDOWS_SANDBOX_MISSING_REASON,
+  windowsProviderLaunch,
+  type WindowsProviderLaunch,
+} from "@octant/domain/guardrail-policy";
+import {
   makeProcessConfinementLive,
   ProcessConfinementError,
   seatbeltAllowLiteralReadRule,
@@ -177,6 +186,43 @@ export interface AcpProcessOptions {
   readonly runtimeNetwork?: ProviderRuntimeNetworkPort;
   /** The Project's registered servers, for the runtime's own `ssh` below Full access. */
   readonly serverAccess?: ProviderServerAccessPort;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
+  /**
+   * Whether a readiness check on a Windows host runs unconfined, because the
+   * host's new threads run with no Octant sandbox; read as each check starts.
+   * Absent, a Windows readiness check refuses.
+   */
+  readonly windowsCatalogUnconfined?: () => boolean;
+}
+
+/**
+ * How one ACP launch runs on Windows, from that launch's own authority. A
+ * readiness check serves no one thread, so it runs only for a host whose new
+ * threads run with no Octant sandbox.
+ */
+function acpWindowsLaunch(
+  input: {
+    readonly mode: AcpSessionMode;
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly fullAccessSandbox?: boolean;
+    readonly strict?: boolean;
+    readonly sandboxPolicy?: SandboxPolicySelection;
+    readonly purpose?: "probe" | "session";
+  },
+  catalogUnconfined: boolean,
+): WindowsProviderLaunch {
+  if (input.purpose === "probe") {
+    return catalogUnconfined
+      ? { status: "unconfined", approvals: "none" }
+      : { status: "refused", reason: WINDOWS_SANDBOX_MISSING_REASON };
+  }
+  return windowsProviderLaunch({
+    mode: input.mode,
+    executionPolicy: input.executionPolicy,
+    fullAccessSandbox: input.fullAccessSandbox,
+    strict: input.sandboxPolicy === undefined ? input.strict : true,
+  });
 }
 
 export interface AcpConfinementOptions {
@@ -524,8 +570,33 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
         // refuse protected paths, and secrets are redacted from what it records.
         // A thread that keeps the sandbox takes the Accept edits wall instead.
         const wall = acpWallPolicy(input);
+        if (platform === "win32") {
+          // Windows has no Octant sandbox: Full access, or a level below it
+          // outside Strict, where the agent's own mode asks Octant before each
+          // side effect and Plan keeps the agent's read-only mode, starts
+          // unconfined; anything else is refused by name. The process port
+          // admitted a readiness check already.
+          const form =
+            input.purpose === "probe"
+              ? ({ status: "unconfined", approvals: "none" } as const)
+              : acpWindowsLaunch(input, false);
+          if (form.status === "refused") {
+            return yield* Effect.fail(failure("incompatible", form.reason));
+          }
+          const environment = { ...input.environment, ...hostAuthentication.environment };
+          const program = resolveWindowsProviderProgram({
+            displayName: name,
+            executable: input.binaryPath,
+            args,
+            environment,
+          });
+          if (program.status === "refused") {
+            return yield* Effect.fail(failure("invalid-configuration", program.message));
+          }
+          return { command: program.command, args: [...program.args], cwd: root, environment };
+        }
         if (
-          (wall === "full-access" || platform === "win32") &&
+          wall === "full-access" &&
           input.sandboxPolicy === undefined &&
           input.fullAccessSandbox !== true
         ) {
@@ -1310,7 +1381,8 @@ function acquireConnection(
 }
 
 export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessPort {
-  const confinement = options.confinement ?? makeAcpConfinementLive();
+  const platform = options.platform ?? process.platform;
+  const confinement = options.confinement ?? makeAcpConfinementLive({ platform });
   const inheritedEnvironment = options.inheritedEnvironment ?? process.env;
   const startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
   const shutdownTimeoutMs = options.shutdownTimeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
@@ -1318,15 +1390,33 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
     start: (input) =>
       Effect.gen(function* () {
         const { profile } = input;
+        // On Windows the launch is decided from its own authority before
+        // anything runs; an admitted one reads its version unconfined, as it
+        // then runs, and takes no proxy or server folder, having no Octant
+        // wall to hold them to.
+        const windows =
+          platform === "win32"
+            ? acpWindowsLaunch(input, options.windowsCatalogUnconfined?.() === true)
+            : undefined;
+        if (windows?.status === "refused") {
+          return yield* Effect.fail(failure("incompatible", windows.reason));
+        }
         const probe = yield* probeAcpBinary(profile, input.binaryPath, {
           inheritedEnvironment,
           shutdownTimeoutMs,
           ...(input.onProcessStarted === undefined
             ? {}
             : { onProcessStarted: input.onProcessStarted }),
-          ...(options.versionProbeConfinement === undefined
-            ? {}
-            : { confinement: options.versionProbeConfinement }),
+          ...(windows === undefined
+            ? options.versionProbeConfinement === undefined
+              ? {}
+              : { confinement: options.versionProbeConfinement }
+            : {
+                confinement: windowsUnconfinedLaunch({
+                  displayName: profile.displayName,
+                  environment: inheritedEnvironment,
+                }),
+              }),
         });
         const environment = sanitizeAcpEnvironment(profile, inheritedEnvironment, {
           managedHome: input.managedHome,
@@ -1342,7 +1432,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         });
         const wall = acpWallPolicy(input);
         const network =
-          wall === "full-access"
+          wall === "full-access" || windows !== undefined
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 ...(input.sandboxPolicy === undefined
@@ -1356,7 +1446,7 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
                 environment,
               });
         const servers =
-          input.purpose === "probe"
+          input.purpose === "probe" || windows !== undefined
             ? undefined
             : yield* acquireProviderServerAccess(
                 input.sandboxPolicy?.policy.hostServices === "blocked"

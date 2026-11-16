@@ -253,6 +253,7 @@ export function startOctantServer(
       threadWakeups,
       resolveThreadStrict,
       resolveProjectStrict,
+      resolveHostStrict,
     } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
@@ -520,6 +521,7 @@ export function startOctantServer(
       options,
       persistence,
       providerRuntimeRegistry,
+      resolveProjectStrict,
       spendCeilingHolder,
       threadMoveState,
       windowAuthorityStore,
@@ -587,6 +589,7 @@ export function startOctantServer(
       providerAvailabilityMarks,
     } = yield* wireProviders({
       resolveThreadStrict,
+      resolveHostStrict,
       hostResourceBudget,
       serverRegistry,
       providerRuntimeNetwork,

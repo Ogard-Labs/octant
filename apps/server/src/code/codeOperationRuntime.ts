@@ -1483,6 +1483,7 @@ export function createCodeOperationRuntime(
   const readRuntimeWorks = options.persistence.readCodeRuntimeWorks;
   const service = new CodeOperationService({
     authority: authorityForTurn,
+    threadStrict: (thread: CodeThread) => options.resolveStrict?.(thread.id) ?? true,
     ...(readRuntimeWorks === undefined
       ? {}
       : {
@@ -2062,12 +2063,19 @@ export function createCodeOperationRuntime(
       let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
-        // Native Windows operations retain provider/tool approval rules;
-        // Strict and retained confinement need a supported host boundary.
-        const sandboxRefusal = hostSandboxRefusal({
-          platform: process.platform,
-          access: operationAccess(windowId, command),
-        });
+        // A thread's terminals, tests and other operations run on a host
+        // without Octant's sandbox only at the level that uses none, read from
+        // the posture a live turn narrows it to. An operation that names no
+        // thread has no level to read, so it refuses there. A provider turn
+        // runs below Full access with the provider's own approvals, so it is
+        // judged by its own rule at its own clamped level when it starts.
+        const sandboxRefusal =
+          command.kind === "start-provider-turn"
+            ? undefined
+            : hostSandboxRefusal({
+                platform: process.platform,
+                access: operationAccess(windowId, command),
+              });
         if (sandboxRefusal !== undefined)
           throw new CodeServiceError(
             decodeCodeFailure({ category: "unavailable", message: sandboxRefusal }),

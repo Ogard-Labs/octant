@@ -216,6 +216,14 @@ the page, the workspace, or the person is reached.
   desktop app's Browser, it instead offers `sign-in` so the person can finish
   the redirect chain. It reports only the refused origin, never that URL's
   path, query, or fragment.
+- That answer is the agent's. A window never shows it: the refusal also
+  carries the refused origin on its own (`refusedOrigin`, absent when the
+  refused request named no reachable site), and the Browser pane words the
+  notice for the person from it, saying which site the address leads to and
+  that typing that site's address opens it, or, with no origin, that the page
+  is open for one site only. The agent's recovery text was shown in the
+  window as it stood until 2026-11-16. The pane's words change nothing about
+  what was refused.
 - At Full access a Private page needs no site approval and may navigate
   across origins, so this refusal is left there to profile pages, which keep
   their site approval ([the Full access rule](../architecture.md#security-and-authority);
@@ -1430,8 +1438,9 @@ paired, routine, managed-subagent and terminal-grant callers are refused. Work
 below Full access asks Code's one-use script permission below (under
 [Octant adds no restrictions of its own unless Strict is on](../architecture.md#security-and-authority);
 built): both tools ask through one shared function, so the card, who may be
-asked and what invalidates the answer cannot differ, and Work's
-`oneUsePermission` is where Strict will keep Work refused. A Work turn runs a
+asked and what invalidates the answer cannot differ, and under the thread's
+Strict, read at the call, Work below Full access is refused as before
+(`script-needs-full-access`). A Work turn runs a
 script only while the thread still holds the level its turn began with: a
 level changed mid-turn, either way, refuses the script and withholds a result
 already on its way. Scripts cannot enter `steps` or saved/replayed flows.

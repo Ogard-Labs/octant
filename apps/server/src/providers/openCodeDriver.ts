@@ -1752,6 +1752,7 @@ function acquireRuntime(
               cwd: projectRoot,
               mode: probeMode,
               executionPolicy: probePolicy,
+              purpose: "probe",
               betaPermissions,
               ...(loopbackPorts.length === 0 ? {} : { loopbackPorts }),
               onProcessStarted: async (process) => {

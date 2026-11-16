@@ -1047,6 +1047,44 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(other.startCount()).toBe(1);
   });
 
+  it("never lets a Strict session reuse a process started outside Strict at the same level", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const f = fixture();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    const scopes: Scope.CloseableScope[] = [];
+    const open = async (id: typeof sessionId, strict: boolean | undefined) => {
+      const scope = await Effect.runPromise(Scope.make());
+      scopes.push(scope);
+      await Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId: id,
+              modelId: "gpt-5.4" as never,
+              executionPolicy: "approval-gated",
+              ...(strict === undefined ? {} : { strict }),
+            }),
+          ),
+          Effect.provideService(Scope.Scope, scope),
+        ),
+      );
+    };
+    await open(sessionId, false);
+    await open(secondSessionId, undefined);
+    expect(f.startCount()).toBe(2);
+    expect(f.authorities()).toEqual([
+      {
+        kind: "thread",
+        root: projectRoot,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: false,
+      },
+      { kind: "thread", root: projectRoot, mode: "code", executionPolicy: "approval-gated" },
+    ]);
+    await Promise.all(scopes.map((scope) => Effect.runPromise(Scope.close(scope, Exit.void))));
+  });
+
   it("reads the account and models through a process that carries no thread", async () => {
     const f = fixture();
     await Effect.runPromise(Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })));
@@ -2929,6 +2967,42 @@ describe("Codex execution authority and approvals", () => {
         networkAccess: "restricted",
       });
     }
+  });
+
+  it("keeps a Windows Plan session outside Strict in Codex's own read-only sandbox, not an external one", async () => {
+    // Windows has no Octant profile to hold Plan read-only, so naming the
+    // sandbox external would leave Codex's commands unconfined.
+    const planTurn = async (platform: NodeJS.Platform) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options({ platform })), "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          strict: false,
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+      );
+      await acquired.close();
+      return {
+        authority: f.authorities()[0],
+        thread: f.calls.find(({ method }) => method === "thread/start")?.input,
+        turn: f.calls.find(({ method }) => method === "turn/start")?.input,
+      };
+    };
+    const windows = await planTurn("win32");
+    expect(windows.authority).toMatchObject({
+      kind: "thread",
+      executionPolicy: "plan",
+      strict: false,
+    });
+    expect(windows.thread).toMatchObject({ sandbox: "read-only", approvalPolicy: "never" });
+    expect(windows.turn).toMatchObject({ sandboxPolicy: { type: "readOnly" } });
+    const linux = await planTurn("linux");
+    expect(linux.turn).toMatchObject({ sandboxPolicy: { type: "externalSandbox" } });
   });
 
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {

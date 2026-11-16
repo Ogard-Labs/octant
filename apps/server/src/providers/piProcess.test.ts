@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { ProviderExecutionPolicy, ProviderToolDefinition } from "@octant/contracts";
 import { Effect } from "effect";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   makePiConfinementLive,
@@ -254,6 +258,58 @@ describe("Pi process boundary", () => {
     ).toEqual(
       expect.arrayContaining(["--tools", "bash,edit,write,read,grep,find,ls,octant_browser"]),
     );
+  });
+
+  it("starts Pi on Windows at Full access and below it outside Strict with no sandbox, and refuses Strict and a kept sandbox by name", async () => {
+    const f = fixture();
+    const confinement = makePiConfinementLive({
+      platform: "win32",
+      credentialPath: f.auth,
+      modelsPath: f.models,
+      ownSetupPath: join(f.base, "own"),
+    });
+    const prepare = (level: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly fullAccessSandbox?: boolean;
+      readonly strict?: boolean;
+    }) =>
+      Effect.runPromise(
+        Effect.either(
+          confinement.prepare({
+            binaryPath: f.binary,
+            root: f.root,
+            piHome: f.home,
+            sessionDirectory: join(f.home, "sessions"),
+            sessionId: "session-1",
+            mode: "code",
+            environment: {},
+            ...level,
+          }),
+        ),
+      );
+    for (const level of [
+      { executionPolicy: "full-access" },
+      { executionPolicy: "approval-gated", strict: false },
+      { executionPolicy: "plan", strict: false },
+    ] as const) {
+      const started = await prepare(level);
+      expect(started).toMatchObject({ _tag: "Right", right: { command: f.binary, cwd: f.root } });
+      // Pi's own approval bridge still asks Octant below Full access.
+      if (started._tag === "Right")
+        expect(started.right.environment.OCTANT_PI_APPROVALS).toBe(
+          level.executionPolicy === "full-access" ? "disabled" : "enabled",
+        );
+    }
+    expect(await prepare({ executionPolicy: "approval-gated" })).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_STRICT_REFUSAL },
+    });
+    expect(
+      await prepare({ executionPolicy: "full-access", fullAccessSandbox: true, strict: false }),
+    ).toMatchObject({
+      _tag: "Left",
+      left: { category: "incompatible", message: WINDOWS_KEPT_SANDBOX_REFUSAL },
+    });
   });
 
   it("refuses resume when the exact native history is missing", async () => {

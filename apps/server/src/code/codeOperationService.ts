@@ -105,7 +105,7 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
-import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
+import { hostProviderTurnRefusal } from "@octant/domain/guardrail-policy";
 import {
   coordinatorTurnPosture,
   decideRunMerge,
@@ -1235,6 +1235,11 @@ export interface CodeOperationExecuteOptions {
 }
 
 export interface CodeOperationServiceOptions {
+  /**
+   * Whether Strict is on for a thread now, read as each provider turn starts.
+   * Absent reads as Strict.
+   */
+  readonly threadStrict?: (thread: CodeThread) => boolean;
   readonly prepareWorktree?: (
     thread: CodeThread,
     root: string,
@@ -1929,6 +1934,7 @@ export class CodeOperationService {
                       command,
                       recordedStart?.event.executionPolicy,
                       this.#options.isCoordinatorThread?.(String(scope.thread.id)) === true,
+                      () => this.#options.threadStrict?.(scope.thread) ?? true,
                     ),
                   )
                 : scope.thread;
@@ -2270,6 +2276,7 @@ export class CodeOperationService {
           command,
           recordedTurnAccessPosture(frames),
           this.#options.isCoordinatorThread?.(String(thread.id)) === true,
+          () => this.#options.threadStrict?.(thread) ?? true,
         ),
       );
       const held: StartingTurn = {
@@ -6271,8 +6278,14 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     // `thread` carries the level this turn runs at: the composer's, a
     // recorded start's, or a coordinator's Plan, clamped to the thread's own.
-    // Checked before the worktree is prepared or any runtime starts.
-    const sandboxRefusal = hostSandboxRefusal({ platform: process.platform, access: thread });
+    // Checked before the worktree is prepared or any runtime starts. Below
+    // Full access on a host without Octant's sandbox the provider's own
+    // approvals hold the turn, so only Strict and a kept sandbox refuse there.
+    const sandboxRefusal = hostProviderTurnRefusal({
+      platform: process.platform,
+      access: thread,
+      strict: this.#options.threadStrict?.(thread) ?? true,
+    });
     if (sandboxRefusal !== undefined)
       return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
@@ -7091,15 +7104,17 @@ function turnAccessPosture(
   command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   recorded: CodeThread["executionPolicy"] | undefined,
   coordinator: boolean,
+  strict: () => boolean,
 ): CodeThread["executionPolicy"] {
   const requested = recorded ?? command.executionPolicy;
   const posture = clampTurnAccessPosture({
     thread: thread.executionPolicy,
     ...(requested === undefined ? {} : { requested }),
   });
-  // A coordinator reads and its workers write: below Full access its turns
-  // run under Plan's read-only gate, whatever level the person gave the thread.
-  return coordinator ? coordinatorTurnPosture(posture) : posture;
+  // A coordinator reads and its workers write: below Full access, and at every
+  // level under Strict, its turns run under Plan's read-only gate, whatever
+  // level the person gave the thread.
+  return coordinator ? coordinatorTurnPosture(posture, strict()) : posture;
 }
 
 function threadForTurn(

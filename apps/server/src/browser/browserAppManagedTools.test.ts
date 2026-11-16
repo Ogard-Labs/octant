@@ -2334,7 +2334,8 @@ describe("a Work thread's bounded page script", () => {
       readonly approvals?: Record<string, unknown>;
       readonly profileCaller?: "terminal-grant";
       readonly mode?: "work" | "chat";
-      readonly oneUsePermission?: boolean;
+      /** The thread's Strict, read at each call; a function reads it as it changes. */
+      readonly strict?: boolean | (() => boolean);
       readonly approvedPage?: boolean;
     } = {},
   ) {
@@ -2377,7 +2378,10 @@ describe("a Work thread's bounded page script", () => {
         : {
             pageScript: {
               level: overrides.level ?? (() => "full-access" as const),
-              oneUsePermission: () => overrides.oneUsePermission ?? true,
+              strict: () =>
+                typeof overrides.strict === "function"
+                  ? overrides.strict()
+                  : (overrides.strict ?? false),
               run,
             },
           }),
@@ -2430,6 +2434,25 @@ describe("a Work thread's bounded page script", () => {
     expect(run.mock.calls[0]?.[0].scriptPermissionIsCurrent?.()).toBe(true);
   });
 
+  it("runs nothing below Full access when Strict turns on while the person's approval is pending", async () => {
+    let strict = false;
+    const { tools, run, request } = scriptTools({
+      level: () => "approval-gated" as const,
+      approvedPage: true,
+      strict: () => strict,
+    });
+    request.mockImplementation(async () => {
+      strict = true;
+      return "approved" as const;
+    });
+    expect(await tools.execute(call)).toEqual({
+      isError: true,
+      result: { error: "script-needs-full-access" },
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("runs nothing below Full access when the person declines the script", async () => {
     const { tools, run, request } = scriptTools({
       level: () => "approval-gated" as const,
@@ -2450,8 +2473,8 @@ describe("a Work thread's bounded page script", () => {
       "browser-approval-required",
     ],
     [
-      "below Full access where the one-use permission is withheld",
-      { level: () => "approval-gated" as const, approvedPage: true, oneUsePermission: false },
+      "below Full access under Strict, without asking the one-use permission",
+      { level: () => "approval-gated" as const, approvedPage: true, strict: true },
       "script-needs-full-access",
     ],
     [

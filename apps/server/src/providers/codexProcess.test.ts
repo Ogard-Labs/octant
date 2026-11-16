@@ -1,5 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import {
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_SANDBOX_MISSING_REASON,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
 import {
   accessSync,
   chmodSync,
@@ -960,68 +964,51 @@ describe("Codex launch confinement", () => {
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
   });
 
-  it("launches ordinary Windows levels natively and refuses a kept sandbox before any confinement is prepared", () => {
+  it("launches Windows Full access, and a guarded level outside Strict, unwrapped in the thread's folder, and refuses Strict and a kept sandbox by name before any confinement is prepared", () => {
     const prepare = vi.fn(() => {
       throw Error("No confinement may be prepared.");
     });
-    const full = prepareCodexLaunch({
-      binaryPath: "C:\\fixture\\codex.exe",
-      args: ["app-server"],
-      authority: {
-        kind: "thread",
-        root: "C:\\fixture\\project",
-        mode: "code",
-        executionPolicy: "full-access",
-      },
-      environment: { USERPROFILE: "C:\\Users\\fixture" },
-      confinement: { prepare },
-      platform: "win32",
-    });
-    expect(full).toMatchObject({
-      status: "prepared",
-      launch: {
-        command: "C:\\fixture\\codex.exe",
-        args: ["app-server"],
-        cwd: "C:\\fixture\\project",
-      },
-    });
-    for (const authority of [
-      { executionPolicy: "full-access", fullAccessSandbox: true },
+    for (const level of [
+      { executionPolicy: "full-access" },
+      { executionPolicy: "approval-gated", strict: false },
+      { executionPolicy: "auto-accept-edits", strict: false },
+      { executionPolicy: "plan", strict: false },
     ] as const) {
-      const guarded = prepareCodexLaunch({
+      const started = prepareCodexLaunch({
+        binaryPath: "C:\\fixture\\codex.exe",
+        args: ["app-server"],
+        authority: { kind: "thread", root: "C:\\fixture\\project", mode: "code", ...level },
+        environment: { USERPROFILE: "C:\\Users\\fixture" },
+        confinement: { prepare },
+        platform: "win32",
+      });
+      expect(started).toMatchObject({
+        status: "prepared",
+        launch: {
+          command: "C:\\fixture\\codex.exe",
+          args: ["app-server"],
+          cwd: "C:\\fixture\\project",
+        },
+      });
+    }
+    for (const [level, reason] of [
+      [{ executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [{ executionPolicy: "full-access", fullAccessSandbox: true }, WINDOWS_KEPT_SANDBOX_REFUSAL],
+    ] as const) {
+      const refused = prepareCodexLaunch({
         binaryPath: "C:\\fixture\\codex.exe",
         args: [],
-        authority: { kind: "thread", root: "C:\\fixture\\project", mode: "code", ...authority },
+        authority: { kind: "thread", root: "C:\\fixture\\project", mode: "code", ...level },
         environment: {},
         confinement: { prepare },
         platform: "win32",
       });
-      expect(guarded).toMatchObject({
-        status: "refused",
-        failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
-      });
-    }
-    for (const executionPolicy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
-      expect(
-        prepareCodexLaunch({
-          binaryPath: "C:\\fixture\\codex.exe",
-          args: ["app-server"],
-          authority: {
-            kind: "thread",
-            root: "C:\\fixture\\project",
-            mode: "code",
-            executionPolicy,
-          },
-          environment: {},
-          confinement: { prepare },
-          platform: "win32",
-        }),
-      ).toMatchObject({ status: "prepared", launch: { cwd: "C:\\fixture\\project" } });
+      expect(refused).toMatchObject({ status: "refused", failure: { message: reason } });
     }
     expect(prepare).not.toHaveBeenCalled();
   });
 
-  it("reads Windows metadata natively without making an enrollment decision", () => {
+  it("reads the Windows catalog unconfined only for a host whose new threads run with no Octant sandbox", () => {
     const prepare = vi.fn(() => {
       throw Error("No confinement may be prepared.");
     });
@@ -1033,12 +1020,14 @@ describe("Codex launch confinement", () => {
       confinement: { prepare },
       platform: "win32",
     });
-    expect(refused).toMatchObject({ status: "prepared" });
-    if (refused.status === "prepared") refused.launch.release();
+    expect(refused).toMatchObject({
+      status: "refused",
+      failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
+    });
     const read = prepareCodexLaunch({
       binaryPath: "C:\\fixture\\codex.exe",
       args: ["app-server"],
-      authority: { kind: "catalog", forOpenFullAccess: true },
+      authority: { kind: "catalog", unconfinedOnWindows: true },
       environment: {},
       confinement: { prepare },
       platform: "win32",

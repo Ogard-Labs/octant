@@ -12,6 +12,8 @@ import {
   decideUsageLimitHandoffSetting,
   projectExtraFolderRoots,
   readsAsCoordinator,
+  resolveStrict,
+  STRICT_REFUSES_FULL_ACCESS_RUN_FLAG,
   unsupportedModelOptionValues,
   withUsageLimitHandoff,
   withUsageLimitHandoffOutcome,
@@ -2271,6 +2273,17 @@ export class CodeService {
               "invalid",
               "The per-run Full access flag starts a thread at Full access only.",
             );
+          // The flag is a lift Octant made; Strict refuses it, read as the
+          // new thread would resolve it before anything is journaled.
+          const project = this.#persistence.readProject?.(thread.projectId);
+          if (
+            resolveStrict({
+              thread: command.thread,
+              project: project?.type === "code" ? project : undefined,
+              settings: this.#persistence.readCodeSettings()?.settings,
+            })
+          )
+            throw this.#failure("invalid", STRICT_REFUSES_FULL_ACCESS_RUN_FLAG);
         }
         if (
           this.#isProviderModelAllowed?.({

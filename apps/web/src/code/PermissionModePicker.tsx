@@ -2,7 +2,7 @@ import type { PermissionMode } from "@octant/contracts/providers";
 import {
   AUTO_UNSUPPORTED_REASON,
   fullAccessSandboxSupported,
-  hostSandboxRefusal,
+  hostProviderTurnRefusal,
   threadAccessOf,
 } from "@octant/domain/guardrail-policy";
 import type { ProviderInstanceId } from "@octant/contracts/providers";
@@ -137,6 +137,19 @@ export interface PermissionModePickerProps {
   readonly fullAccessSandboxSupported?: boolean;
 }
 
+/**
+ * The trade-off Strict makes, in the words the picker and Settings use: off,
+ * the provider behaves as it does on its own; on, Octant adds its own limits
+ * and some of the provider's workflows stop working.
+ */
+export const STRICT_DETAIL =
+  "Adds Octant's own limits on top of the provider's: a fixed environment, provider telemetry off, secret files closed to every tool, and asks again after outside content. Some workflows that work in the provider's own app stop working.";
+const STRICT_WINDOWS_DETAIL = "Strict needs a sandbox Windows doesn't have yet.";
+
+/** What a level below Full access runs with on Windows, said wherever it is offered. */
+export const WINDOWS_PROVIDER_APPROVALS_DETAIL =
+  "On Windows the provider's own approvals decide; Octant's sandbox does not run here.";
+
 const SANDBOX_DETAIL =
   "Strict restores Octant's protection rules and required approvals. Some workflows that work in the provider's own app remain unavailable under Strict.";
 const SANDBOX_UNSUPPORTED_DETAIL =
@@ -195,16 +208,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     props.autoReview?.status === "none" ? props.autoReview.reason : AUTO_UNSUPPORTED_REASON;
   const autoFallsBack = props.value === "auto" && !autoSupported;
   const warning = useFullAccessWarning(props.warningScope ?? "machine");
-  // A host without Octant's sandbox (Windows today) runs only Full access with
-  // the sandbox off. The host refuses the rest; the picker shows them
-  // unavailable with that reason rather than offering a choice it refuses.
+  // A host without Octant's sandbox (Windows today) runs the levels below Full
+  // access with the provider's own approvals and claims no sandbox there; it
+  // refuses only what needs Octant's sandbox (Strict below Full access, and
+  // Keep the sandbox). The picker shows those unavailable with the host's
+  // reason rather than offering a choice it refuses.
   const hostPlatform = useHostPlatform();
-  const hostRefusalOf = (mode: PermissionMode) =>
-    hostSandboxRefusal({ platform: hostPlatform, access: threadAccessOf(mode) });
-  const sandboxHostRefusal = hostSandboxRefusal({
-    platform: hostPlatform,
-    access: { executionPolicy: "full-access", fullAccessSandbox: true },
-  });
   const effectiveStrict =
     inheritedStrict !== undefined && inheritedStrict.threadId === sandboxThreadId
       ? inheritedStrict.value
@@ -218,6 +227,21 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
   const triggerLabel = effectiveStrict
     ? `${modeLabel} · ${legacyStrict ? "Legacy sandbox" : "Strict"}`
     : modeLabel;
+  const hostRefusalOf = (mode: PermissionMode) =>
+    hostProviderTurnRefusal({
+      platform: hostPlatform,
+      access: threadAccessOf(mode),
+      strict: effectiveStrict,
+    });
+  const sandboxHostRefusal = hostProviderTurnRefusal({
+    platform: hostPlatform,
+    access: { executionPolicy: "full-access", fullAccessSandbox: true },
+    strict: false,
+  });
+  const withoutOctantSandbox = (mode: PermissionMode, detail: string | undefined) =>
+    hostPlatform === "win32" && mode !== "full-access"
+      ? `${detail === undefined ? "" : `${detail} `}${WINDOWS_PROVIDER_APPROVALS_DETAIL}`
+      : detail;
   const detailOf = (id: PermissionMode) =>
     id === "auto"
       ? autoDetail(props.autoReview)
@@ -226,7 +250,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
     ? unsupportedReason
     : sandboxed
       ? SANDBOX_DETAIL
-      : detailOf(props.value);
+      : withoutOctantSandbox(props.value, detailOf(props.value));
   const sandboxSupported = props.fullAccessSandboxSupported !== false;
   const shownMode: PermissionMode = autoFallsBack ? "ask-first" : props.value;
   const ModeIcon = PERMISSION_MODE_ICON[shownMode];
@@ -286,7 +310,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                     hostRefusal ??
                     (option.id === "auto" && !autoSupported
                       ? unsupportedReason
-                      : detailOf(option.id));
+                      : withoutOctantSandbox(option.id, detailOf(option.id)));
                   return (
                     <OctantMenuRadioItem
                       aria-describedby={`${idPrefix}-${option.id}-note`}
@@ -331,7 +355,7 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                       <span>{legacyStrict ? "Legacy sandbox" : "Strict"}</span>
                       <span className="oct-menu-detail" id={`${idPrefix}-sandbox-note`}>
                         {sandboxHostRefusal ??
-                          (sandboxSupported ? SANDBOX_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
+                          (sandboxSupported ? STRICT_DETAIL : SANDBOX_UNSUPPORTED_DETAIL)}
                       </span>
                     </span>
                   </OctantMenuCheckboxItem>

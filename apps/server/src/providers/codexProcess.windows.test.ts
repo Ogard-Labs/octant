@@ -1,12 +1,7 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import {
-  decodeProviderInstanceId,
-  decodeProviderSessionId,
-  decodeProviderModelId,
-  type ProviderFailure,
-} from "@octant/contracts";
+import { dirname, join } from "node:path";
+import { decodeProviderInstanceId, type ProviderFailure } from "@octant/contracts";
 import { Effect, Either } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeCodexDriver } from "./codexDriver";
@@ -36,25 +31,25 @@ function running(pid: number): boolean {
   }
 }
 
-function port(catalogForOpenFullAccess: boolean) {
+function port(catalogUnconfined: boolean) {
   return makeCodexProcessLive({
     platform: "win32",
     octantVersion: "0.1.0-test",
     startupTimeoutMs: 20_000,
     shutdownTimeoutMs: 2_000,
-    windowsCatalogForOpenFullAccess: () => catalogForOpenFullAccess,
+    windowsCatalogUnconfined: () => catalogUnconfined,
   });
 }
 
 async function startAndStop(
   binaryPath: string,
   authority: CodexLaunchAuthority,
-  catalogForOpenFullAccess = false,
+  catalogUnconfined = false,
 ): Promise<Either.Either<{ readonly version: string; readonly pid: number }, ProviderFailure>> {
   return await Effect.runPromise(
     Effect.either(
       Effect.scoped(
-        port(catalogForOpenFullAccess)
+        port(catalogUnconfined)
           .start({ binaryPath, authority })
           .pipe(Effect.map((connection) => ({ version: connection.version, pid: connection.pid }))),
       ),
@@ -79,94 +74,21 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
       expect(running(started.right.pid)).toBe(false);
     }, 60_000);
 
-    it.each(["approval-gated", "auto-accept-edits", "plan"] as const)(
-      "starts a native Windows %s runtime and confirms its process stops",
-      async (executionPolicy) => {
-        const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-native-"));
-        directories.push(root);
-        const started = await startAndStop(fakeCodex ?? "", {
-          kind: "thread",
-          root,
-          mode: "code",
-          executionPolicy,
-        });
-        if (Either.isLeft(started)) throw new Error(started.left.message);
-        expect(started.right.version).toBe("0.144.4");
-        expect(running(started.right.pid)).toBe(false);
-      },
-      60_000,
-    );
+    it("starts a guarded level outside Strict with Codex's own approvals, and stops it", async () => {
+      const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-"));
+      directories.push(root);
+      const started = await startAndStop(fakeCodex ?? "", {
+        kind: "thread",
+        root,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: false,
+      });
+      if (Either.isLeft(started)) throw new Error(started.left.message);
+      expect(running(started.right.pid)).toBe(false);
+    }, 60_000);
 
-    it.each(["approval-gated", "auto-accept-edits", "plan"] as const)(
-      "carries %s native permissions through the production Windows driver without claiming an external sandbox",
-      async (executionPolicy) => {
-        const root = mkdtempSync(join(tmpdir(), "octant-codex-native-policy-"));
-        directories.push(root);
-        const registry = new ProviderRuntimeRegistry({ shutdownTimeoutMs: 10000 });
-        const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000071");
-        const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000072");
-        const nativeProcess = makeCodexProcessLive({ platform: "win32", startupTimeoutMs: 20000 });
-        const driver = makeCodexDriver({
-          instanceId,
-          binaryPath: fakeCodex ?? "",
-          runtimeRegistry: registry,
-          process: {
-            start: (input) =>
-              nativeProcess.start({
-                ...input,
-                environment: {
-                  PATH: process.env.PATH,
-                  SYSTEMROOT: process.env.SYSTEMROOT,
-                  TEMP: root,
-                  TMP: root,
-                  USERPROFILE: root,
-                  FAKE_CODEX_ROOT: root,
-                },
-              }),
-          },
-          idleLeaseMs: 0,
-        });
-        await Effect.runPromise(
-          Effect.scoped(
-            Effect.gen(function* () {
-              const connection = yield* driver.acquire({
-                instanceId,
-                projectRoot: root,
-                mode: "code",
-              });
-              yield* connection.start({
-                sessionId,
-                modelId: decodeProviderModelId("gpt-5.4"),
-                executionPolicy,
-              });
-              yield* connection.send({
-                sessionId,
-                prompt: "Inspect this project",
-                attachments: [],
-                tools: [],
-              });
-              yield* connection.stop(sessionId);
-            }),
-          ),
-        );
-        const records = readFileSync(join(root, "records.jsonl"), "utf8")
-          .trim()
-          .split("\n")
-          .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
-        const started = records.find((record) => record.method === "thread/start");
-        expect(started?.params).toMatchObject({
-          sandbox: executionPolicy === "plan" ? "read-only" : "workspace-write",
-          approvalPolicy: executionPolicy === "plan" ? "never" : "untrusted",
-        });
-        const turn = records.find((record) => record.method === "turn/start");
-        expect(turn?.params).toMatchObject({
-          sandboxPolicy: { type: executionPolicy === "plan" ? "readOnly" : "workspaceWrite" },
-        });
-      },
-      60000,
-    );
-
-    it("refuses a kept sandbox, naming the missing confinement, before Codex runs", async () => {
+    it("refuses Strict and a kept sandbox by name before Codex runs", async () => {
       const root = mkdtempSync(join(tmpdir(), "octant-codex-windows-"));
       directories.push(root);
       for (const level of [{ executionPolicy: "full-access", fullAccessSandbox: true }] as const) {
@@ -177,8 +99,30 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
           ...level,
         });
         expect(Either.isLeft(refused)).toBe(true);
-        if (Either.isLeft(refused)) expect(refused.left.message).toMatch(/sandbox|confine/i);
+        if (Either.isLeft(refused))
+          expect(refused.left.message).toMatch(/sandbox Windows doesn't have yet/);
       }
+    }, 60_000);
+
+    it("starts through an npm command shim by the program it names, with no shell", async () => {
+      const npm = mkdtempSync(join(tmpdir(), "octant-codex-npm-"));
+      directories.push(npm);
+      const program = join(npm, "node_modules", "@openai", "codex", "vendor", "codex.exe");
+      mkdirSync(dirname(program), { recursive: true });
+      copyFileSync(fakeCodex ?? "", program);
+      writeFileSync(
+        join(npm, "codex.cmd"),
+        '@ECHO off\r\n"%dp0%\\node_modules\\@openai\\codex\\vendor\\codex.exe"   %*\r\n',
+      );
+      const started = await startAndStop(join(npm, "codex.cmd"), {
+        kind: "thread",
+        root: npm,
+        mode: "code",
+        executionPolicy: "full-access",
+      });
+      if (Either.isLeft(started)) throw new Error(started.left.message);
+      expect(started.right.version).toBe("0.144.4");
+      expect(running(started.right.pid)).toBe(false);
     }, 60_000);
 
     it("reads the catalog through the production driver with each process's ownership receipt, and removes the receipt once it ends", async () => {
@@ -203,7 +147,7 @@ describe.runIf(process.platform === "win32" && fakeCodex !== undefined)(
       });
     }, 60_000);
 
-    it("reads native metadata independently of the default access level", async () => {
+    it("reads the catalog only for a host whose new threads run with no Octant sandbox", async () => {
       const refused = await startAndStop(fakeCodex ?? "", { kind: "catalog" }, false);
       if (Either.isLeft(refused)) throw new Error(refused.left.message);
       expect(refused.right.version).toBe("0.144.4");

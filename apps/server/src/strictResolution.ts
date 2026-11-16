@@ -54,11 +54,23 @@ export function createStrictResolver(reads: StrictReads): StrictResolver {
         settings: reads.workSettings(),
       });
     }
-    return (
-      resolveStrict({ settings: reads.codeSettings() }) ||
-      resolveStrict({ settings: reads.workSettings() })
-    );
+    return createHostStrictResolver(reads)();
   };
+}
+
+/**
+ * Strict for something the host runs for no one thread or Project, such as an
+ * outside provider driver's process: Strict when it is the default in Code or
+ * Work Settings, the same reading a Chat thread takes.
+ */
+export type HostStrictResolver = () => boolean;
+
+export function createHostStrictResolver(
+  reads: Pick<StrictReads, "codeSettings" | "workSettings">,
+): HostStrictResolver {
+  return () =>
+    resolveStrict({ settings: reads.codeSettings() }) ||
+    resolveStrict({ settings: reads.workSettings() });
 }
 
 /**

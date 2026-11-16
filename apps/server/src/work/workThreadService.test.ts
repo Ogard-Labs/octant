@@ -780,6 +780,34 @@ describe("WorkThreadService", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
   });
 
+  it("refuses the per-run Full access flag under Strict, from Settings or the thread's own choice, and accepts it once the thread turns Strict off", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+    await fixture.service.execute(ids.window, {
+      kind: "update-work-settings",
+      expectedVersion: 0,
+      defaultAccess: "ask-first",
+      defaultStrict: true,
+    });
+    const raise = (extra: { readonly strict?: boolean }) =>
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        access: "full-access",
+        fullAccessRunFlag: true,
+        ...extra,
+      });
+    await expect(raise({})).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    await expect(raise({ strict: true })).rejects.toMatchObject({
+      failure: { category: "invalid", message: expect.stringMatching(/Strict/) },
+    });
+    await expect(raise({ strict: false })).resolves.toMatchObject({
+      thread: { access: "full-access", fullAccessRunFlag: true },
+    });
+  });
+
   it("journals who lowered Work's default or a thread's level, from which level and at which scope", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
     await fixture.service.execute(ids.window, {

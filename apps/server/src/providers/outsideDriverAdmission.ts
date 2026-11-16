@@ -73,6 +73,13 @@ export interface OutsideDriverAdmissionOptions {
   readonly fetch?: OutsideDriverFetch;
   readonly limits?: Partial<OutsideDriverLimits>;
   readonly clock?: () => string;
+  /**
+   * The host's Strict, read at each admission: Strict as a Settings default
+   * in Code or Work, the reading a host-scope use with no thread takes. An
+   * instance serves every mode and no one thread, so no thread's own choice
+   * applies. Absent reads Strict.
+   */
+  readonly strict?: () => boolean;
 }
 
 const TOOL_CHECK_PROMPT = `Call the ${OCTANT_CAPABILITY_ECHO_TOOL_NAME} tool with echo set to "ready". Do not answer in text.`;
@@ -155,6 +162,7 @@ export class OutsideDriverAdmission {
   readonly #fetch: OutsideDriverFetch | undefined;
   readonly #limits: Partial<OutsideDriverLimits> | undefined;
   readonly #clock: (() => string) | undefined;
+  readonly #strict: () => boolean;
   readonly #running = new Map<string, RunningDriver>();
 
   constructor(options: OutsideDriverAdmissionOptions) {
@@ -168,6 +176,7 @@ export class OutsideDriverAdmission {
     this.#fetch = options.fetch;
     this.#limits = options.limits;
     this.#clock = options.clock;
+    this.#strict = options.strict ?? (() => true);
   }
 
   /** Where the instance's driver stands on the activation ladder, at its bound digest. */
@@ -180,6 +189,7 @@ export class OutsideDriverAdmission {
       platform: this.#platform,
       packageState,
       compatible: packageState === undefined || this.#isCompatible(packageState),
+      strict: this.#strict(),
       driver: {
         extensionId: String(driver.extensionId),
         packageId: String(driver.packageId),
@@ -240,6 +250,7 @@ export class OutsideDriverAdmission {
           platform: this.#platform,
           packageState,
           compatible: this.#isCompatible(packageState),
+          strict: this.#strict(),
           driver: {
             extensionId: String(driver.extensionId),
             packageId: String(driver.packageId),
@@ -386,6 +397,15 @@ export class OutsideDriverAdmission {
     const key = String(instance.id);
     const binding = JSON.stringify(instance.configuration);
     const existing = this.#running.get(key);
+    // Strict can turn on while a process runs, and no instance change follows
+    // to reconcile it, so every use asks again and ends a driver now refused.
+    if (!this.isAdmitted(instance)) {
+      if (existing !== undefined) {
+        this.#end(key, existing);
+        void this.#processes.stop(instance.id).catch(() => undefined);
+      }
+      return Promise.reject(notAdmitted());
+    }
     if (existing?.proxy !== undefined && existing.binding === binding && !existing.ended) {
       return existing.proxy;
     }
@@ -418,6 +438,10 @@ export class OutsideDriverAdmission {
     const driver = instance.configuration.driver;
     const located = await this.#entry(driver);
     if (located === undefined) throw notAdmitted();
+    // Strict can turn on, or trust be withdrawn, while the files are read;
+    // no instance change follows a Strict change, so decide once more with
+    // the values as they are now, before the process exists.
+    if (!this.isAdmitted(instance)) throw notAdmitted();
     if (running.ended) throw refusalFailure("start-failed");
     const started = await this.#processes.start({
       instanceId: instance.id,

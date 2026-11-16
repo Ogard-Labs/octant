@@ -1033,11 +1033,10 @@ export interface ExtraFolderJudgement {
   readonly candidate: string;
   /** The host user's home folder, canonical. */
   readonly homeDirectory: string;
-  /**
-   * The person confirmed adding the home folder itself after the warning.
-   * Strict is to refuse the home folder whatever this says.
-   */
+  /** The person confirmed adding the home folder itself after the warning. */
   readonly homeFolderConfirmed?: boolean;
+  /** The Project is Strict: the home folder is refused whatever the person confirmed. */
+  readonly strict?: boolean;
 }
 
 /** The warning a person confirms before their home folder becomes an extra folder. */
@@ -1063,6 +1062,11 @@ export function extraFolderRefusal(input: ExtraFolderJudgement): string | undefi
     return "Choose your home folder or a folder inside it, not one above it.";
   }
   const home = extraFolderIsHome(candidate, homeDirectory);
+  // Strict restores the limit the warning lifted: the home folder itself is
+  // never an extra folder there, confirmed or not.
+  if (home && input.strict === true) {
+    return "Strict keeps your home folder out of a Project. Choose a folder inside it.";
+  }
   if (home && input.homeFolderConfirmed !== true) {
     return "Adding your home folder needs your confirmation.";
   }
@@ -1107,6 +1111,7 @@ export interface AddProjectExtraFolderInput {
   readonly addedAt: UtcTimestamp;
   readonly homeDirectory: string;
   readonly homeFolderConfirmed?: boolean;
+  readonly strict?: boolean;
 }
 
 /** Adds a folder a person picked to a bound Project beside its main folder. */
@@ -1127,6 +1132,7 @@ export function addProjectExtraFolder(
     candidate: input.canonicalRoot,
     homeDirectory: input.homeDirectory,
     ...(input.homeFolderConfirmed === true ? { homeFolderConfirmed: true } : {}),
+    ...(input.strict === true ? { strict: true } : {}),
   });
   if (refusal !== undefined) reject("extra-folder-refused", refusal);
   const folder: ProjectExtraFolder = {

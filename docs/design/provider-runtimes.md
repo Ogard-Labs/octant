@@ -2409,6 +2409,52 @@ installs or updates anything.
   again, so a release that no longer passes a version floor or capability check
   shows its refusal reason instead of failing turns.
 
+## Windows launches
+
+On a Windows host every provider family launches with no Octant sandbox,
+decided per launch from that launch's own mode, level and Strict value
+(`windowsProviderLaunch` in the domain's `guardrailPolicy.ts`); the rule and
+its status are in
+[Architecture: Windows below Full access](../architecture.md#current-release-boundary).
+
+- **Full access** with the sandbox off starts unconfined and asks nothing, as
+  on every platform.
+- **Below Full access outside Strict** starts unconfined with the provider's
+  own approvals: Claude's permission modes (`default`, `acceptEdits`,
+  `plan`), Codex's own sandbox and approvals (`untrusted` in
+  `workspace-write` at Ask first and Accept edits, `on-request` in
+  `workspace-write` at Auto, `never` in `read-only` in Plan; never the
+  external sandbox Octant names when its own wall holds the process),
+  OpenCode's permission rules, Pi's approval bridge and an ACP agent's own
+  mode. Each ask reaches Octant's server, which answers and journals it.
+  Whatever the provider's own sandbox does on Windows is what its own CLI
+  does there. Claude Code has no command sandbox on Windows, so a Windows
+  launch carries no sandbox settings at all (the SDK port refuses one that
+  does): one asking for that sandbox with `failIfUnavailable` would leave
+  every command unable to run.
+- **Refused by name:** Strict below Full access ("Strict needs a sandbox
+  Windows doesn't have yet"), Full access with the sandbox kept, and a Chat
+  launch, whose no-folder, no-shell rule only Octant's sandbox holds. A
+  launch that does not carry its Strict value is Strict.
+- **Version and catalog reads.** An admitted launch reads its version
+  unconfined. A read that serves no one thread (Codex's catalog lease,
+  OpenCode's or an ACP agent's readiness check) runs unconfined only while the host's new
+  threads run with no Octant sandbox (`hostReadsProviderCatalogUnconfined`).
+- **Reuse.** A Codex lease or OpenCode server started outside Strict below
+  Full access is its own process: a Strict session at the same level never
+  reuses it.
+- **Programs.** A configured npm `.cmd` shim is read, not run
+  (`process/windowsProviderProgram.ts`): the program it names starts directly,
+  a `.js` script with the `node.exe` beside the shim or on `Path`; a shim with
+  no readable program, or a script with no `node.exe`, is refused naming the
+  `.exe` to point Settings at.
+- **Stop and receipts.** Every family's stop ends the whole process tree with
+  `taskkill /T /F`, and each launch keeps its ownership receipt (pid and
+  creation time), as on every platform.
+- **Not on Windows:** ACP app-managed tools, which reach their bridge through
+  a loopback rule in Octant's sandbox; a Windows launch takes no egress proxy
+  or registered-server folder.
+
 ## Verification
 
 - OpenCode: `apps/server/src/providers/openCodeDriver.test.ts`,
@@ -2429,6 +2475,12 @@ installs or updates anything.
   session: `apps/server/src/providers/heldTurnContext.benchmark.test.ts`
   (opt-in through `OCTANT_HELD_CONTEXT_MEASURE_CLAUDE=1` or
   `OCTANT_HELD_CONTEXT_MEASURE_CODEX=1`, run with `bun run test:evidence`).
+- Windows launches: `packages/domain/src/guardrailPolicy.test.ts`,
+  `apps/server/src/process/windowsProviderProgram.test.ts`, the Windows cases
+  in each family's process or driver test (run on Linux with the host's
+  platform set to Windows), and `codexProcess.windows.test.ts` and
+  `providerFamilies.windows.test.ts`, which the `server-windows` CI job runs
+  against compiled fake runtimes on `windows-2025`.
 - Sign-in dialects: `apps/server/src/providers/directEndpointSubscriptionOAuth.test.ts`,
   `chatGptPlanProfile.test.ts`, `packages/domain/src/subscriptionOAuthCatalog.test.ts`,
   and `packages/provider-sdk/src/subscriptionOAuthConformance.test.ts`.

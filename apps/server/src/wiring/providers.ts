@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { hostStartsThreadsAtOpenFullAccess } from "@octant/domain/guardrail-policy";
+import { hostReadsProviderCatalogUnconfined } from "@octant/domain/guardrail-policy";
 import { openAdmittedSqlite, openSqlite } from "../persistence/sqlitePort";
 import { ChildWorktreeSourceService } from "../code/childWorktreeSourceService";
 import { GitObservationPort } from "../code/gitObservationPort";
@@ -668,7 +668,7 @@ export type ProvidersDependencies = Pick<
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<
     FoundationsWiring,
-    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict" | "resolveHostStrict"
   >;
 
 export function wireProviders(deps: ProvidersDependencies) {
@@ -768,19 +768,24 @@ export function wireProviders(deps: ProvidersDependencies) {
         });
       },
     };
+    // On Windows a read that serves no one thread (a version or catalog read)
+    // runs unconfined only while the host's new threads run with no Octant
+    // sandbox; read as each such read starts.
+    const windowsCatalogUnconfined = () =>
+      hostReadsProviderCatalogUnconfined({
+        code: persistence.readCodeSettings()?.settings,
+        work: workThreadProjection.settings(),
+      });
     const openCodeProcess =
-      options.openCodeProcess ?? makeOpenCodeProcessLive({ runtimeNetwork, serverAccess });
+      options.openCodeProcess ??
+      makeOpenCodeProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
     const codexProcessPort =
       options.codexProcess ??
       makeCodexProcessLive({
         octantVersion: version,
         runtimeNetwork,
         serverAccess,
-        windowsCatalogForOpenFullAccess: () =>
-          hostStartsThreadsAtOpenFullAccess({
-            code: persistence.readCodeSettings()?.settings,
-            work: workThreadProjection.settings(),
-          }),
+        windowsCatalogUnconfined,
       });
     const codexProcess: CodexProcessPort = {
       start: (input) =>
@@ -794,7 +799,9 @@ export function wireProviders(deps: ProvidersDependencies) {
           }),
         ),
     };
-    const acpProcess = options.acpProcess ?? makeAcpProcessLive({ runtimeNetwork, serverAccess });
+    const acpProcess =
+      options.acpProcess ??
+      makeAcpProcessLive({ runtimeNetwork, serverAccess, windowsCatalogUnconfined });
     const piProcess = options.piProcess ?? makePiProcessLive({ runtimeNetwork, serverAccess });
     const ohMyPiProcess = options.ohMyPiProcess ?? makeOhMyPiProcessLive();
     // An outside driver runs on the runtime that runs this server and on
@@ -1758,6 +1765,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         ),
       processes: outsideDriverProcesses,
       runtimeRegistry: providerRuntimeRegistry,
+      strict: () => deps.resolveHostStrict(),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     });
     stopOutsideDriversOf = (extensionId) => outsideDriverAdmission.stopPackage(extensionId);
@@ -2006,6 +2014,7 @@ export function wireProviders(deps: ProvidersDependencies) {
               readProject: (projectId) => persistence.readProject(projectId),
               readProviderInstance: (id) => persistence.readProviderInstance(id),
               readProviderCliTrust: providerCliProjectTrust,
+              readStrict: (threadId) => deps.resolveThreadStrict(threadId),
             },
             request,
           ),

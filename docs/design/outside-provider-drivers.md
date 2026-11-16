@@ -410,8 +410,14 @@ the fail-closed option.
   "Outside driver · Runs without confinement" and its package facts say what
   that means (maintainer decision, 2026-11-16; built). No Bubblewrap launch is
   made for a driver: that would be a Linux confinement design of its own. A
-  Canvas export target, which shares the launch, stays macOS only. Not built
-  yet: Strict, once built, keeps a driver `host-prohibited` on Linux.
+  Canvas export target, which shares the launch, stays macOS only. Under the
+  host's Strict (the Code or Work default in Settings, since an instance
+  serves every mode and no one thread) a Linux driver is `host-prohibited`:
+  `resolveOutsideDriverActivation` takes the value, and the admission reads
+  it at each listing and use, so a driver already running is refused at its
+  next use (built). A start decides admission once more after the host
+  verifies the driver's files and just before the process starts, so Strict
+  turning on or trust withdrawn during that read starts nothing (built).
 - **One process per instance.** The supervisor keys a driver's runtime by its
   instance, so two instances of one driver never share a process. A second
   start for an instance whose process is running is refused as
@@ -1191,12 +1197,12 @@ alternatives considered and the reason for the choice follow it.
    Deferred: a curated driver catalog.
 5. **Platforms.** macOS only. Linux follows a Linux extension-process
    confinement design; until then Linux reports `host-prohibited`.
-   Revised (maintainer decision, 2026-11-16; built except Strict; see
+   Revised (maintainer decision, 2026-11-16; built; see
    [Provider reach Octant no longer narrows](../architecture.md#security-and-authority)):
    an outside driver is admitted on Linux under the same installation,
    trust and enablement steps as on macOS. Until a Linux extension-process
    confinement exists its process runs without one, and its Settings row says
-   so; Strict, once built, keeps it `host-prohibited` on Linux.
+   so; under the host's Strict it stays `host-prohibited` on Linux.
 6. **Driver runtime.** One `.mjs` ES module entry on the runtime that runs the
    server, with no executables: Bun in development, and in the packaged app
    the separately identified, same-version bundled Electron worker executable,

@@ -61,10 +61,16 @@ describe("coordinator role", () => {
     ).toMatchObject({ status: "refused", message: expect.stringContaining("at most 1") });
   });
 
-  it("runs a coordinator's own turn read-only below Full access and at the level at Full access", () => {
-    expect(coordinatorTurnPosture("full-access")).toBe("full-access");
+  it("runs a coordinator's own turn read-only below Full access and at the level at Full access outside Strict", () => {
+    expect(coordinatorTurnPosture("full-access", false)).toBe("full-access");
     for (const level of ["approval-gated", "auto-accept-edits", "plan"] as const) {
-      expect(coordinatorTurnPosture(level)).toBe("plan");
+      expect(coordinatorTurnPosture(level, false)).toBe("plan");
+    }
+  });
+
+  it("keeps a coordinator's own turn read-only at every level under Strict, Full access included", () => {
+    for (const level of ["full-access", "approval-gated", "auto-accept-edits", "plan"] as const) {
+      expect(coordinatorTurnPosture(level, true)).toBe("plan");
     }
   });
 

@@ -1058,6 +1058,8 @@ export interface ClaudeAgentSdkPortOptions {
   readonly spawnClaudeCodeProcess: ClaudeProcessPort["spawn"];
   readonly sdk?: ClaudeAgentSdkBridge;
   readonly inputCapacity?: number;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
 }
 
 const DEFAULT_INPUT_CAPACITY = 1;
@@ -1228,7 +1230,17 @@ function isValidSandboxNetwork(network: unknown, blocked = false): boolean {
   );
 }
 
-function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
+function hasValidSandbox(input: ClaudeOpenQueryInput, platform: NodeJS.Platform): boolean {
+  // Claude Code has no command sandbox on Windows, so a launch there carries
+  // none: one asking for it with `failIfUnavailable` would leave every
+  // command unable to run. Its permission modes hold the turn instead.
+  if (platform === "win32")
+    return (
+      input.sandbox === undefined &&
+      input.strict !== true &&
+      input.fullAccessSandbox !== true &&
+      input.sandboxPolicy === undefined
+    );
   try {
     const sandboxedFullAccess =
       input.executionPolicy === "full-access" &&
@@ -1504,6 +1516,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
   const sdk = options.sdk ?? liveBridge();
   const copySession = sdk.forkSession;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
+  const platform = options.platform ?? process.platform;
 
   return {
     openQuery: (input) => {
@@ -1533,7 +1546,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           ),
         );
       }
-      if (!hasValidSandbox(input)) {
+      if (!hasValidSandbox(input, platform)) {
         return Effect.fail(
           failure("invalid-configuration", "Claude sandbox configuration is invalid."),
         );

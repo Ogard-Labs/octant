@@ -554,6 +554,8 @@ export interface CodexClientPort {
 export interface CodexDriverOptions {
   readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   readonly binaryPath: string;
   readonly process: CodexProcessPort;
   readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
@@ -1131,7 +1133,7 @@ export function codexTurnExecutionSettings(
   // network claim follows the launch: `enabled` when the process launched
   // without Octant's egress proxy (Network limits off, the default), so
   // Codex tells the model what it really has; `restricted` behind the proxy.
-  if (sessionSandbox.kind === "native" && policy === "plan" && fullAccessSandbox !== true)
+  if (sessionSandbox.kind === "native" && (sandbox === "read-only" || (policy === "plan" && fullAccessSandbox !== true)))
     return { ...rest, sandboxPolicy: { type: "readOnly", networkAccess: networkOpen === true } };
   const sandboxPolicy =
     sandbox === "danger-full-access"
@@ -2003,6 +2005,17 @@ function makeConnection(
         return skills === undefined ? webConfig : { ...webConfig, skills };
       });
 
+    // Windows has no Octant profile to hold Plan read-only, so a Plan session
+    // there outside Strict keeps Codex's own read-only sandbox; Strict is
+    // refused there before the process starts.
+    const codexPlanRunsNativeSandbox = (input: {
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly strict?: boolean;
+    }) =>
+      (options.platform ?? process.platform) === "win32" &&
+      mode !== "chat" &&
+      input.executionPolicy === "plan" &&
+      input.strict === false;
     const sessionSandbox = (input: {
       readonly executionPolicy: ProviderExecutionPolicy;
       readonly strict?: boolean;
@@ -2012,7 +2025,7 @@ function makeConnection(
         mode: mode ?? "code",
         executionPolicy: input.executionPolicy,
         strict: input.strict,
-      })
+      }) || codexPlanRunsNativeSandbox(input)
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));

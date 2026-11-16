@@ -41,6 +41,10 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect } from "effect";
 
 import {
+  resolveWindowsProviderProgram,
+  windowsUnconfinedLaunch,
+} from "../process/windowsProviderProgram";
+import {
   prepareConfinedVersionProbe,
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
@@ -137,6 +141,8 @@ export interface ClaudeProcessPort {
 }
 
 export interface ClaudeProcessOptions {
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
   readonly confinement?: ProcessConfinementPort;
   readonly onDiagnostic?: (message: string) => void;
@@ -162,6 +168,7 @@ const VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?: \(Claude Code\)
 type ProbeKind = "authentication" | "version";
 
 interface ResolvedClaudeProcessOptions {
+  readonly platform: NodeJS.Platform;
   readonly inheritedEnvironment: NodeJS.ProcessEnv;
   readonly confinement: ProcessConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
@@ -1036,6 +1043,37 @@ function confineClaudeLaunch(
   confinement: ClaudeRuntimeConfinement,
   options: ResolvedClaudeProcessOptions,
 ): { readonly spawnOptions: SpawnOptions; readonly release: () => void } {
+  if (options.platform === "win32") {
+    if (confinement.strict === true || confinement.sandboxPolicy !== undefined)
+      throw new ProcessConfinementError(
+        "incompatible",
+        "Strict confinement is unavailable on Windows.",
+      );
+    // Windows has no Octant sandbox: the driver admitted this launch from its
+    // own level and Strict value, and Claude's own permission modes hold it,
+    // Plan's read-only included. The program an npm shim names is started
+    // instead of the shim, which Windows would run only through a shell.
+    const program = resolveWindowsProviderProgram({
+      displayName: "Claude",
+      executable: spawnOptions.command,
+      args: spawnOptions.args,
+      environment: spawnOptions.env,
+    });
+    if (program.status === "refused") {
+      throw new ProcessConfinementError("invalid-configuration", program.message);
+    }
+    return {
+      spawnOptions: {
+        ...spawnOptions,
+        command: program.command,
+        args: [...program.args],
+        ...(confinement.network === undefined
+          ? {}
+          : { env: { ...spawnOptions.env, ...confinement.network.environment } }),
+      },
+      release: () => undefined,
+    };
+  }
   if (confinement.strict === true && confinement.executionPolicy !== "plan") {
     const selection = confinement.sandboxPolicy;
     const authority = sandboxAuthorityDirectory();
@@ -1566,12 +1604,18 @@ function spawnOwnedClaudeProcess(
 }
 
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
+  const platform = options.platform ?? process.platform;
+  const inheritedEnvironment = { ...(options.inheritedEnvironment ?? process.env) };
   const resolved: ResolvedClaudeProcessOptions = {
-    inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
+    platform,
+    inheritedEnvironment,
+    // On Windows the version and sign-in reads run unconfined, as every
+    // admitted Claude launch there does; the confined reads have no Windows
+    // form.
     confinement:
       options.confinement ??
-      (process.platform === "win32"
-        ? { prepare: ({ executable, args }) => ({ command: executable, args }) }
+      (platform === "win32"
+        ? windowsUnconfinedLaunch({ displayName: "Claude", environment: inheritedEnvironment })
         : makeProcessConfinementLive()),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,
