@@ -31,7 +31,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | ------------------------------------------------------------------------------------- | --------- | ------- | ------------ | ------------------- |
 | [Principles and hard lines](#principles-and-hard-lines)                               | 7         | 5       | 2            | 0                   |
 | [Guardrails and review](#guardrails-and-review)                                       | 9         | 3       | 6            | 0                   |
-| [Key providers](#key-providers)                                                       | 9         | 0       | 1            | 8                   |
+| [Key providers](#key-providers)                                                       | 9         | 0       | 2            | 7                   |
 | [Release scope](#release-scope)                                                       | 8         | 2       | 4            | 2                   |
 | [Process topology and local trust](#process-topology-and-local-trust)                 | 7         | 6       | 1            | 0                   |
 | [App-managed tools](#app-managed-tools)                                               | 6         | 4       | 2            | 0                   |
@@ -68,7 +68,7 @@ The former decision archive is history in `docs/legacy/` and has no authority.
 | [Disposable desktops](#disposable-desktops)                                           | 4         | 1       | 3            | 0                   |
 | [Bots](#bots)                                                                         | 1         | 0       | 0            | 1                   |
 | [To-dos](#to-dos)                                                                     | 1         | 0       | 1            | 0                   |
-| **All areas**                                                                         | **279**   | **158** | **103**      | **18**              |
+| **All areas**                                                                         | **279**   | **158** | **104**      | **17**              |
 
 ## Principles and hard lines
 
@@ -428,7 +428,7 @@ A person who moves from a provider's own CLI to Octant keeps every workflow that
 - Opt-in extras: a per-person list of provider tools to block, and in Strict a notice saying what was withheld.
 - Kept: read-only Plan, Chat with no folder or shell, outside folders asking below Full access, refused secret questions and unjournaled secrets, Run as itself off keeping web tools off, and never handing one provider another's credentials.
 
-Status: Designed, not built. Since: 2026-11-16. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
+Status: Partly built. Since: 2026-11-16. Detail: [Architecture: Security and authority](../architecture.md#security-and-authority).
 
 ### Claude artifacts and Claude Design work as in Claude Code
 

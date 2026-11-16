@@ -14227,7 +14227,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: slash commands are built,
+  each other item below is designed, not built). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
