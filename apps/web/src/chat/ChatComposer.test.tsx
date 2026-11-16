@@ -5,6 +5,8 @@ import {
   decodePreviewContextSelectionId,
   decodePreviewTargetId,
 } from "@octant/contracts/previews";
+import { decodeProviderInstanceId } from "@octant/contracts";
+import type { PickerGroup } from "@octant/domain";
 import { useState, type ReactNode } from "react";
 import { CompactingThread } from "../context/compactionTestSupport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -574,6 +576,8 @@ describe("ChatComposer", () => {
   });
 });
 
+const CHAT_PROVIDER = decodeProviderInstanceId("84000000-0000-4000-8000-0000000000a1");
+
 /**
  * A caller-owned draft, exactly as the workspace owns it in production, so the
  * `/` affordance is exercised through real typing rather than rerenders.
@@ -583,6 +587,7 @@ function SlashHarness(props: {
   readonly onDraftChange?: (draft: string, caretIndex?: number) => void;
   readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
+  readonly providerGroups?: ReadonlyArray<PickerGroup>;
 }) {
   const [draft, setDraft] = useState("");
   return (
@@ -609,6 +614,12 @@ function SlashHarness(props: {
         {...(props.onResolveExtensionReference === undefined
           ? {}
           : { onResolveExtensionReference: props.onResolveExtensionReference })}
+        {...(props.providerGroups === undefined
+          ? {}
+          : {
+              providerGroups: props.providerGroups,
+              selectedProviderInstanceId: CHAT_PROVIDER,
+            })}
       />
     </OctantCommandProvider>
   );
@@ -679,6 +690,34 @@ describe("ChatComposer slash commands", () => {
     expect(onDraftChange).toHaveBeenLastCalledWith("", 0);
     expect(onCaretIndexChange).toHaveBeenCalledWith(0);
     expect(screen.getByLabelText("Message")).toHaveValue("");
+  });
+
+  it("lists the Chat thread's provider's own commands and writes the chosen one into the message", async () => {
+    const user = userEvent.setup();
+    const onResolveExtensionReference = vi.fn(async () => true);
+    const providerGroups: ReadonlyArray<PickerGroup> = [
+      {
+        driverLabel: "Claude Code",
+        instance: { id: CHAT_PROVIDER, displayName: "Claude" },
+        providerCommands: [{ name: "review", description: "Review a pull request" }],
+      },
+    ] as never;
+    render(
+      <SlashHarness
+        commands={hostCommands()}
+        onResolveExtensionReference={onResolveExtensionReference}
+        providerGroups={providerGroups}
+      />,
+    );
+
+    const draft = screen.getByLabelText("Message");
+    await user.type(draft, "/rev");
+    const option = screen.getByRole("option", { name: /\/review/ });
+    expect(option).toHaveTextContent("Claude Code's own · Review a pull request");
+    await user.click(option);
+
+    expect(draft).toHaveValue("/review ");
+    expect(onResolveExtensionReference).not.toHaveBeenCalled();
   });
 
   it("closes on Escape without running anything and keeps the draft as ordinary text", async () => {

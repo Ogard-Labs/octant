@@ -4392,17 +4392,16 @@ runtime's message, which holds whenever the turn carries no other context
 or Claude's prompt hook carries it. OpenCode 2 runs a listed command through
 its own command route rather than as text, with the turn's context admitted
 first as input that starts no run (detail in
-[Provider runtimes](design/provider-runtimes.md)). The host refuses, before the turn
-reaches any driver, a turn whose prompt opens with a command-shaped `/name`
-in Plan, which stays read-only, and in Chat, which keeps no folder and no
-shell, whenever the provider lists commands at all, whether or not the list
-the host holds names it: that list is the one a session last wrote for the
-provider, which may be another Project's. The refusal is the existing turn
-refusal, so a remote client meets it too; those composers still list the
-commands and say why they cannot run. An ACP agent with a reviewed command
-inventory (Kimi Code) keeps its probe check, refuses every leading slash in
-Plan and Chat, and elsewhere runs only a reviewed command its session
-listed. Codex lists none: its app-server
+[Provider runtimes](design/provider-runtimes.md)). Every mode and level
+forwards them, Chat and Plan included, and every composer lists them, a Chat
+thread's too (maintainer decision, 2026-11-16, under
+[Octant adds no restrictions of its own unless Strict is on](#security-and-authority);
+built): the host refuses no turn for opening with `/name`, because the runtime
+was launched under the level's tool rules, which decide what the command may
+then do, so a command in Plan still cannot write and one in Chat still has no
+folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
+keeps its probe check and, in every mode, runs only a reviewed command its
+session listed. Codex lists none: its app-server
 (rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
 and its slash commands are its terminal client's own. OpenCode 1.x lists
 none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
@@ -6812,8 +6811,8 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
   otherwise holds back, Kimi Code reads its home skills, servers, plugins,
   and hooks with the setup, Kilo its own skills, each agent's own subagents
   run in Work and Code outside Plan with an honest approval card for a
-  request naming no call Octant saw, and Kimi Code's own slash commands run
-  outside Plan; each reports only those features
+  request naming no call Octant saw, and Kimi Code's own reviewed slash
+  commands run in every mode; each reports only those features
   ([detail](design/provider-runtimes.md#acp-agents-run-as-themselves)).
   Every other provider keeps the deny rules for Project code and skills under
   [Extensions and skills](#extensions-and-skills) until it is promoted the
@@ -14262,7 +14261,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   it, so no approval leaves the server's authority.
 
   **Octant adds no restrictions of its own unless Strict is on**
-  (maintainer decision, 2026-11-16; designed, not built). A person who moves
+  (maintainer decision, 2026-11-16; partly built: slash commands are built,
+  each other item below is designed, not built). A person who moves
   from a provider's own CLI to Octant keeps every workflow that worked
   there, and Octant restricts a provider no more than any other agent
   workspace does. Outside Strict, the provider's own sandbox, permission
@@ -14303,7 +14303,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     or exported credentials. Strict refuses them, as today.
   - **Slash commands.** A provider's own slash commands run in every mode
     and level, Chat and Plan included; the level's tool rules decide what a
-    command may then do, so Plan stays read-only.
+    command may then do, so Plan stays read-only. Built: the host and the
+    drivers refuse no `/name` for the mode, and every composer lists the
+    provider's commands without a refusal row.
   - **Claude artifacts and Claude Design.** With the account's switch on,
     Claude's `Artifact` tool works as in Claude Code: every action (`publish`,
     `quickstart`, `read`, `list`, updates and publishing from a type), so
@@ -15225,8 +15227,8 @@ approval-gated` command that undoes it. The terminal shows no one-time
   person chose Claude artifacts, below: its launches go without
   `DISABLE_TELEMETRY` and so send the runtime's usage telemetry. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
-  person sends it from a Work or Code composer outside Plan, as in the
-  runtime's own terminal (the model cannot invoke one, and Octant itself
+  person sends it from a composer, as in the runtime's own terminal, under
+  the level's tool rules (the model cannot invoke one, and Octant itself
   sends none but `/compact`); a plugin's background `command`
   runs only where the person's own setup loads it: with that setup off the
   query is opened with no setting sources, plugins, skills, agents, or MCP

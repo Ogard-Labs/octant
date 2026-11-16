@@ -15,7 +15,6 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
   composerProviderCommands,
-  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
@@ -433,11 +432,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
-    provider: composerProviderCommands(
-      providerGroups,
-      props.selectedProviderInstanceId,
-      executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
-    ),
+    provider: composerProviderCommands(providerGroups, props.selectedProviderInstanceId),
   });
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique

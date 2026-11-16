@@ -16,36 +16,26 @@ export interface ComposerProviderCommands {
   /** The provider's name, so each row says whose command it is. */
   readonly label: string;
   readonly commands: ReadonlyArray<ProviderSlashCommand>;
-  /**
-   * Why this composer's thread cannot run them (Chat, Plan). The rows still
-   * show, saying so, and choosing one leaves the draft alone; the host
-   * refuses the same turn itself.
-   */
-  readonly refusal?: string;
 }
 
-/** The selected provider's own commands, as its picker group carries them. */
+/**
+ * The selected provider's own commands, as its picker group carries them.
+ * Every mode lists and runs them, Chat and Plan included; the thread's level
+ * decides on the host what a command may then do.
+ */
 export function composerProviderCommands(
   groups: ReadonlyArray<PickerGroup> | undefined,
   instanceId: ProviderInstanceId | undefined,
-  refusal?: string,
 ): ComposerProviderCommands | undefined {
   if (instanceId === undefined) return undefined;
   const group = groups?.find((candidate) => String(candidate.instance.id) === String(instanceId));
   const commands = group?.providerCommands;
   if (group === undefined || commands === undefined || commands.length === 0) return undefined;
-  return {
-    label: group.driverLabel,
-    commands,
-    ...(refusal === undefined ? {} : { refusal }),
-  };
+  return { label: group.driverLabel, commands };
 }
 
-/** Why Chat or Plan lists a provider's commands without running them. */
-export const CHAT_PROVIDER_COMMAND_REFUSAL = "Not in Chat: it keeps no folder and no shell";
-export const PLAN_PROVIDER_COMMAND_REFUSAL = "Not in Plan: Plan stays read-only";
-
-function providerCommandEntries(
+/** The provider's own commands as `/` menu rows, each writing `/name ` into the draft. */
+export function providerCommandEntries(
   provider: ComposerProviderCommands | undefined,
 ): ReadonlyArray<OctantCommand> {
   if (provider === undefined) return [];
@@ -53,11 +43,7 @@ function providerCommandEntries(
     id: `provider-command:${command.name}`,
     title: `/${command.name}`,
     group: "Provider commands",
-    detail: [
-      `${provider.label}'s own`,
-      provider.refusal ?? command.argumentHint,
-      provider.refusal === undefined ? command.description : undefined,
-    ]
+    detail: [`${provider.label}'s own`, command.argumentHint, command.description]
       .filter((part) => part !== undefined && part.length > 0)
       .join(" · "),
     keywords: [command.name, provider.label],
@@ -98,7 +84,6 @@ export function useComposerSlashCommands(input: {
   };
   const choose = (command: OctantCommand) => {
     if (token === undefined || !tokenIsCurrent) return;
-    if (command.action.kind === "address" && input.provider?.refusal !== undefined) return;
     const removed = applySlashCommandToken(input.draft, token);
     const reference = command.action.kind === "address" ? command.action.reference : "";
     const applied = {

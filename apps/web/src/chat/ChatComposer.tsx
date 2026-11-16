@@ -51,6 +51,10 @@ import { ComposerModelPicker, isComposerReasoningOption } from "../providers/Com
 import { useOctantCommands } from "../palette/CommandRegistry";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
+  composerProviderCommands,
+  providerCommandEntries,
+} from "../composer/useComposerSlashCommands";
+import {
   applySlashCommandToken,
   filterOctantCommands,
   parseSlashCommandToken,
@@ -259,8 +263,15 @@ export function ChatComposer(props: ChatComposerProps) {
   // `/` commands come from the host command registry mounted by the shell. A
   // skill only appears when this composer actually has the host's draft
   // resolution path, because that path — not this list — decides whether the
-  // reference is allowed.
-  const offeredCommands = useOctantCommands().filter((command) => command.action.kind === "run");
+  // reference is allowed. The thread's provider's own commands follow,
+  // labelled as its own; choosing one writes `/name ` into the draft, which is
+  // sent to the runtime as the prompt, as in Work and Code.
+  const offeredCommands = [
+    ...useOctantCommands().filter((command) => command.action.kind === "run"),
+    ...providerCommandEntries(
+      composerProviderCommands(props.providerGroups, props.selectedProviderInstanceId),
+    ),
+  ];
   const atMenu = useComposerAtMenu({
     draft: props.draft,
     onDraftChange: props.onDraftChange,
@@ -415,7 +426,15 @@ export function ChatComposer(props: ChatComposerProps) {
    */
   function chooseCommand(command: OctantCommand) {
     if (commandToken === undefined || extensionResolving) return;
-    const applied = applySlashCommandToken(props.draft, commandToken);
+    const removed = applySlashCommandToken(props.draft, commandToken);
+    const written = command.action.kind === "address" ? providerCommandText(command) : undefined;
+    const applied =
+      written === undefined
+        ? removed
+        : {
+            draft: `${removed.draft.slice(0, removed.caretIndex)}${written}${removed.draft.slice(removed.caretIndex)}`,
+            caretIndex: removed.caretIndex + written.length,
+          };
     props.onDraftChange(applied.draft, applied.caretIndex);
     rememberCaret(applied.caretIndex);
     setCommandToken(undefined);
@@ -431,6 +450,7 @@ export function ChatComposer(props: ChatComposerProps) {
       command.action.run();
       return;
     }
+    if (written !== undefined) return;
     void resolveExtensionReference(command.action.reference);
   }
 
@@ -1044,4 +1064,11 @@ function composeStatus(input: {
     notices,
     progress,
   };
+}
+
+/** The text a provider's own `/` row writes into the draft, or undefined for any other row. */
+function providerCommandText(command: OctantCommand): string | undefined {
+  return command.action.kind === "address" && command.id.startsWith("provider-command:")
+    ? command.action.reference
+    : undefined;
 }
