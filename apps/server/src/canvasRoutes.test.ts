@@ -2057,6 +2057,92 @@ describe("canvas routes", () => {
     });
   });
 
+  describe("importing an HTML page from a paired device", () => {
+    // A device has no workspace on the host: no window's active context
+    // answers for it, so the import names its Project itself.
+    const windowOnly: CanvasRouteDependencies["activeContextResolver"] = async (readerId) =>
+      String(readerId) === String(windowId) ? { mode: "chat", projectId } : undefined;
+    const importBody = () => {
+      const {
+        intent: _intent,
+        prompt: _prompt,
+        sourceManifest: _sources,
+        title: _title,
+        ...scope
+      } = createBody();
+      return {
+        ...scope,
+        kind: "canvas-html-import",
+        source: "paste",
+        title: "Pasted",
+        html: "<h1>Hi</h1>",
+      };
+    };
+    const fromDevice = (admittedBy: "host-person" | undefined) => {
+      const request = new Request("http://127.0.0.1/api/canvas/import-html", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(importBody()),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: remoteDeviceId as never,
+          credentialGeneration: 1,
+          origin: "https://octant.invalid",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: "17171717-1717-4171-8171-171717171717" as never,
+          ...(admittedBy === undefined ? {} : { admittedBy }),
+        }),
+        scopeId: remoteDeviceId as never,
+      });
+      return request;
+    };
+
+    it("imports into the Project a device the person paired names, journaled as that device", async () => {
+      let journal: Journal | undefined;
+      const route = createRevisionRoute(new CanvasProjection(), {
+        activeContextResolver: windowOnly,
+        journal: (opened) => {
+          journal = opened;
+        },
+      });
+      const response = await route(fromDevice("host-person"));
+      const result = decodeCanvasHtmlImportResult(JSON.parse(await response!.text()));
+      if (result.kind !== "imported") throw new Error(`expected an import, got ${result.kind}`);
+      const created = journal!.replayAggregate({
+        aggregateType: "canvas",
+        aggregateId: String(result.card.canvasId),
+        afterVersion: 0,
+        limit: 1,
+      });
+      expect(created[0]?.actor).toEqual({
+        kind: "remote-device",
+        actorId: remoteDeviceId,
+        deviceId: remoteDeviceId,
+      });
+      expect(result.card.title).toBe("Pasted");
+    });
+
+    it("refuses an import from a hub-introduced device and from no session, and writes no Canvas", async () => {
+      const projection = new CanvasProjection();
+      const route = createRevisionRoute(projection, { activeContextResolver: windowOnly });
+      const before = projection.byProject(projectId).length;
+      const refused = await route(fromDevice(undefined));
+      expect(decodeCanvasHtmlImportResult(JSON.parse(await refused!.text())).kind).toBe("denied");
+      const unauthenticated = await route(
+        new Request("http://127.0.0.1/api/canvas/import-html", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(importBody()),
+        }),
+      );
+      expect(unauthenticated?.status).toBe(401);
+      expect(projection.byProject(projectId)).toHaveLength(before);
+    });
+  });
+
   it("serves a Canvas owned by a Chat thread outside every Project to a Chat window with no Project, lists it on that thread, and files its exports under the host folder", async () => {
     const route = createRevisionRoute(new CanvasProjection(), { threadOwned: true });
     const headers = { "x-octant-window-capability": windowCapability };

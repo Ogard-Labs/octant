@@ -36,7 +36,7 @@ is a bot's permission ([Bots](bots.md)). This design uses:
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | FR-1  | An outside agent on another machine on the person's private network can start a Chat, Work, or Code thread in a Project its grant names, send further prompts, read the result, answer the thread's questions, and stop a turn.                                                                                                                                                  |
 | FR-2  | Telling a bot "open an agent in my repo in Octant and fix x" works with one tool call, as it does locally (`start_work` with a Project).                                                                                                                                                                                                                                         |
-| FR-3  | The person creates a grant, sees every grant with its last use, and revokes or changes it from a local window, the CLI or a device the host's own person paired (maintainer decision, 2026-11-12; not built yet: today a paired device can see and revoke grants but not create or widen them).                                                                                  |
+| FR-3  | The person creates a grant, sees every grant with its last use, and revokes or changes it from a local window, the CLI or a device the host's own person paired (maintainer decision, 2026-11-12; built: a device the host's own person paired creates and changes grants over `/api/agent-grants/commands`; any other paired device sees and revokes them).                     |
 | FR-4  | Approvals and other requests a thread raises wait on the person in Octant's Needs you list, named as coming from the agent's thread, and reach the person's phone like any other.                                                                                                                                                                                                |
 | SEC-1 | An outside agent never exceeds its grant, and a grant never carries remembered answers, approvals, administration, terminals, or the host Browser. A grant's highest level may be Full access when the person chooses it for that grant (maintainer decision, 2026-11-12). An agent grant is not a paired device: the rule that a paired device is the person does not reach it. |
 | SEC-2 | Every mutation is journaled with the outside-agent principal; no agent key or secret enters the journal.                                                                                                                                                                                                                                                                         |
@@ -109,8 +109,9 @@ listener, pairing, or other grants; agent-to-agent work between hosts (that is
 1. In **Settings › Remote access › Agent access**, or with
    `octant agent-access create <name> --project <name>…`, the person makes a
    grant and chooses its scope (section 4). This is done from a local window,
-   the loopback CLI, or a paired device (maintainer decision, 2026-11-12; not
-   built yet: today local-window or loopback CLI only).
+   the loopback CLI, or a device the host's own person paired, whose Host
+   settings in the paired browser show the same Agent access section
+   (maintainer decision, 2026-11-12).
 2. For a bridge, Octant shows a one-time connection code
    (`octant-agent-1.` + base64url of `{origin, ticketId, ticketProof, pin}`),
    valid for five minutes, the shape of the app pairing code.
@@ -319,7 +320,7 @@ id is the grant's scope id.
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
 | AA-1  | An outside agent is its own principal, found and journaled by its grant; product routes see it as a paired-device principal with the grant's scope id.                                                                                                                                          | Approved |
 | AA-2  | Its authority is an agent grant: named Projects, modes, highest level (Full access when the person chooses it for the grant; maintainer decision, 2026-11-12), tools, models, limits, and expiry, inside the clamps of a restricted device session. Its prompts stay marked as outside content. | Approved |
-| AA-3  | Grants are created and widened from a local window, the loopback CLI, or a device the host's own person paired (maintainer decision, 2026-11-12; not built yet: today a paired device may only view and revoke).                                                                                | Approved |
+| AA-3  | Grants are created and widened from a local window, the loopback CLI, or a device the host's own person paired (maintainer decision, 2026-11-12; built: such a device sends grant commands over `/api/agent-grants/commands`, journaled as the device).                                         | Approved |
 | AA-4  | The only route an outside agent reaches is `POST /api/agent-access/mcp` on a new listener surface; the tools run in process under the principal.                                                                                                                                                | Approved |
 | AA-5  | The bridge (`octant agent mcp --connection`) is the recommended connection: a key pair made on the agent's machine, signed requests, pinned TLS.                                                                                                                                                | Approved |
 | AA-6  | Direct Streamable HTTP with a bearer key is opt-in per grant and needs the listener's Tailscale certificate.                                                                                                                                                                                    | Approved |
@@ -365,7 +366,8 @@ maintainer decision and its own threat review.
    and `octant agent mcp --connection`.
 4. **Direct:** bearer keys, rotate, and the Tailscale-certificate requirement.
 5. **Visibility:** "Started by" on threads and in Needs you, the paired-device
-   view and revoke, push labels.
+   view and revoke (and, for a device the person paired, making and changing
+   grants), push labels.
 6. **Local MCP clients:** the agent endpoint on the loopback server and
    `octant agent mcp --connection <file> --local`.
    Option 2 of AA-11 is not planned.
