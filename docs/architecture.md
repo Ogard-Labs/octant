@@ -1839,9 +1839,14 @@ and keeps every other guard, and a Codex process is leased without the
 `features.memories=false` override, so Codex's own configuration decides and
 Octant never forces the feature on; that lease is a process of its own, like
 the one that runs Codex's subagents. It applies to Work and Code sessions
-outside Plan. A Plan launch keeps memory off at every setting: Plan may write
+outside Plan, and to Claude Code in Plan and Chat. Plan and Chat may write
 nothing a later session would load, and the runtime's memory folder is exactly
-that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)).
+that ([Plan launch writes](design/decisions.md#plan-launch-writes-and-sign-in)),
+so there a provider's memory loads only read-only: Claude Code's, which only
+its file tools write, loads with its writes refused, and Codex's, which Codex
+writes in the background, stays off at every setting
+([Plan and Chat tool parity](#security-and-authority); maintainer decision,
+2026-11-16).
 OpenCode and Mistral Vibe keep no memory of their own behind a switch Octant
 sets, so their accounts carry no setting. Chat keeps a provider's memory off
 at every setting, as Plan does (maintainer decision, 2026-11-14), because no
@@ -14414,6 +14419,72 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the same trust steps as on macOS
     ([Outside provider drivers](design/outside-provider-drivers.md)).
 
+  **Plan and Chat tool parity** (maintainer decision, 2026-11-16; partly
+  built). Plan and Chat keep their rules (Plan writes nothing, Chat has no
+  folder), and inside those rules a provider keeps what it offers on its own:
+  - **Read-only MCP servers in Plan** (designed, not built). A server's own
+    `readOnlyHint` is the server's claim and is never trusted. The person may
+    mark one MCP server "Read-only — allowed in Plan", per server and per
+    host, from the Settings surfaces that manage MCP servers today; the mark
+    is journaled, and a tool's `readOnlyHint` may pre-suggest the mark in the
+    dialog but never sets it. In Plan the tools of a marked server are offered
+    and run under the thread's ask rules; an unmarked server stays withheld,
+    as every server is in Plan today. It is to be wired for every provider
+    whose MCP servers Octant controls: Claude Code, Codex and OpenCode at
+    least. Until built, Plan starts no MCP server but Octant's own.
+  - **Provider memory, read-only** (built for Claude Code and Codex). Claude
+    Code loads its memory in Plan and Chat with the account's memory setting
+    on: the account's `CLAUDE.md` (in Chat the only instruction file, since
+    Chat has no Project) and its auto-memory under
+    `projects/<folder>/memory/`. Plan holds no write tool and its sandbox
+    binds the account folder read-only; Claude Code's own permission check
+    allows a Markdown write into its memory folder without asking, so in Chat
+    and Plan Octant's gate refuses every file write into the account's
+    `CLAUDE.md` or a memory folder, links resolved, before any level's allow,
+    with a sentence saying memory is read-only there. A shell command in Chat
+    stays held by Claude's own command sandbox. Codex keeps its memory off in
+    Plan and Chat at every setting, because Codex writes memories by itself
+    after a turn into `~/.codex/memories`, outside any tool call Octant's gate
+    could refuse. OpenCode, Mistral Vibe and the other providers keep no
+    memory behind a switch Octant sets, so nothing changes for them.
+  - **Linux Plan and Chat confinement admits processes** (built for OpenCode
+    2; Claude Code's Plan shell on Linux designed, not built). A Linux Chat or
+    Plan launch that needs to start processes runs in the same Bubblewrap
+    capsule with the process-denying seccomp filter left off: every bound
+    folder read-only, a private writable temp and the runtime's own state
+    folders the only writable roots, the launch's existing network rule, all
+    capabilities dropped, and Bubblewrap's no-new-privileges. Every other
+    rule of the capsule stays, and a capsule that cannot be built is refused
+    as today; a launch that needs no process (OpenCode 1.x, Pi, ACP agents)
+    keeps the filter. OpenCode 2 therefore runs Chat and Plan on Linux,
+    with its permission rules still denying its shell and delegation and the
+    always-failing `git` stand-in first on its `PATH`, as on macOS, so a
+    repository's own Git configuration never runs there. Claude Code's Bash
+    in Plan stays macOS only until Linux can hold it to macOS's rules: on
+    macOS the profile keeps the command from the runtime's network, its
+    account state (every session's transcript and, on Linux, the sign-in
+    file `.credentials.json`) and writes into its transcript, judged by the
+    program asking. One Bubblewrap capsule cannot tell the shell from the
+    runtime, so on Linux a Plan command could read the account's sign-in and
+    send it anywhere the runtime may reach. Building it needs a nested capsule
+    for the shell alone, or the maintainer's acceptance of that reach.
+  - **Files of any kind as attachments** (designed, not built). A person may
+    attach any file in every mode. Octant keeps it in an Octant-owned
+    attachments folder per thread under the host's data directory, never
+    inside the Project, journaled like an image attachment and under the same
+    size and count limits, and grants the session read access to that one
+    folder at every level, Plan and Chat included, read-only. A provider that
+    takes the file natively (a PDF where its API takes one, OpenCode's PDF
+    capability) gets it natively; any other gets the file's path in the
+    message and reads it with its own tools. The composer accepts any file
+    by choosing or dropping it and shows it as an attachment chip. Until
+    built, attachments are images only.
+
+  Rationale: Plan's and Chat's limits are what the person relies on, not
+  the absence of a tool; each of these keeps the limit at the boundary that
+  enforces it (the sandbox, the gate, or the person's own mark) instead of
+  withholding the tool.
+
   Option names were read from the installed Agent SDK (0.3.211
   `PermissionMode`) and the Codex app-server schema (codex-cli 0.164.0
   `SandboxMode`, `AskForApproval`, `ApprovalsReviewer`). Auto is offered
@@ -14906,7 +14977,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   that cannot cover a denied file is refused.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
-  `execveat` after start, because Bubblewrap cannot block the first `execve`.
+  `execveat` after start, because Bubblewrap cannot block the first `execve`,
+  except a launch whose Chat and Plan capsule admits processes, which keeps
+  the read-only binds and leaves the filter off
+  ([Plan and Chat tool parity](#security-and-authority)).
   A launch that needs that filter fails closed as `incompatible` on a CPU
   other than x64 or arm64 or without an executable `/bin/sh`.
   Sensitive system roots remain denied even where runtime compatibility
@@ -15138,7 +15212,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
   launch may fork and may exec exactly `/usr/bin/false`, which is its Git
-  stand-in (described below). Oh My Pi's probe is a held gap, not
+  stand-in (described below). On Linux, where one exec cannot be granted
+  alone, an OpenCode 2 Chat or Plan launch may start processes inside its
+  read-only capsule, with the same stand-in first on its `PATH`
+  ([Plan and Chat tool parity](#security-and-authority)). Oh My Pi's probe is a held gap, not
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools run under the sandbox its row names:
   Codex's shell under Octant's, Claude's Bash on the postures that write under
@@ -15171,7 +15248,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   without `CLAUDE_CODE_DISABLE_AUTO_MEMORY` alone, which the bundled runtime
   (Agent SDK 0.3.211) reads on no other path; its memory then lives under the
   account's configuration directory, in `projects/<session folder>/memory/`.
-  A Plan launch, a Chat launch, and the version read keep the guard.
+  The version read keeps the guard. A Plan or Chat launch goes without it on
+  the same setting, its memory read-only
+  ([Plan and Chat tool parity](#security-and-authority)).
   Telemetry and self-update stay off. The runtime's release-note,
   PR-badge, and availability checks are therefore its own traffic to
   Anthropic under the person's account; they carry no Project content.
@@ -15412,7 +15491,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   provider), and write the launch's temporary
   directory, which is removed when the runtime exits. On Linux the Plan
   launch keeps its fork-denying seccomp filter, and Plan offers no Bash
-  tool there. Before a confined launch starts, the
+  tool there until a Linux capsule can hold the shell apart from the runtime
+  ([Plan and Chat tool parity](#security-and-authority), designed, not
+  built). Before a confined launch starts, the
   `claude auth status` check that readiness uses runs inside that launch's
   sandbox: a sign-in the sandbox cannot read refuses the turn with the step
   that fixes it, instead of failing after the turn has started. Octant
@@ -15456,14 +15537,16 @@ approval-gated` command that undoes it. The terminal shows no one-time
   attests at a directory with a `.git` marker under the Chat/Plan
   confinement and fails closed — listing-only, no turns — if a future
   OpenCode treats the failing git as fatal. Linux confinement cannot express
-  that one exec without also allowing fork, which is the hole the Plan jail
-  exists to close. On Linux a 2.x runtime therefore runs turns where a shell
-  is already allowed, Work and Code at Ask first, Auto, Accept edits and Full
-  access, whose launches allow fork and exec as they do on macOS; a Chat or
-  Plan launch is refused before it starts, naming that reason (maintainer
-  decision, 2026-11-14). The Linux probe attests the Code jail at Ask first,
-  and the capability report says so per mode (`turnModes`: Chat and Plan
-  unsupported, `host-confinement`). App-managed tools stay macOS only and
+  that one exec without also allowing fork, so a Linux 2.x Chat or Plan launch
+  runs in the read-only capsule that admits processes, with the same stand-in
+  first on its `PATH`, and the Linux probe attests that capsule (maintainer
+  decision, 2026-11-16, replacing the 2026-11-14 refusal;
+  [Plan and Chat tool parity](#security-and-authority)). On a host that is
+  neither, a 2.x runtime runs turns only where a shell is already allowed,
+  Work and Code outside Plan; a Chat or Plan launch is refused before it
+  starts, naming that reason, and the capability report says so per mode
+  (`turnModes`: Chat and Plan unsupported, `host-confinement`). App-managed
+  tools stay macOS only and
   pinned to the measured releases.
   Discovery re-allowances — a runtime asking whether a path exists and what it
   resolves to, not to read it — follow one rule. Each names an exact literal
