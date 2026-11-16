@@ -1,16 +1,16 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-const root = mkdtempSync(join(tmpdir(), "octant-native-approval-"));
+const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-native-approval-")));
 const executable = process.argv[2];
 if (!executable) throw new Error("Missing native Claude runtime");
 const canary = join(root, "command-ran");
-const outside = mkdtempSync(join(tmpdir(), "octant-native-outside-"));
+const outside = realpathSync(mkdtempSync(join(tmpdir(), "octant-native-outside-")));
 const outsideCanary = join(outside, "command-ran");
-const authority = mkdtempSync(join(tmpdir(), "octant-native-authority-"));
+const authority = realpathSync(mkdtempSync(join(tmpdir(), "octant-native-authority-")));
 const pinNativeLaunch =
   process.platform === "linux"
     ? (await import("../../process/linuxPinnedLaunch.ts")).pinLinuxLaunch
