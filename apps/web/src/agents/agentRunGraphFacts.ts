@@ -1,4 +1,4 @@
-import type { AgentRunCenterSummary } from "@octant/contracts";
+import type { AgentRunCenterSummary, ProviderChildUsage } from "@octant/contracts";
 
 export function formatAgentRunRecency(timestamp: string, nowMs: number): string {
   const elapsedMs = Math.max(0, nowMs - new Date(timestamp).getTime());
@@ -35,4 +35,24 @@ export function agentRunGraphUsageLine(summary: AgentRunCenterSummary): string |
   }
   if (summary.usageQuality === "estimated") return "Estimated usage";
   return undefined;
+}
+
+/**
+ * Usage a provider reported for a subagent it started. Each side appears only
+ * when reported; a runtime that counts only a total is shown as a total.
+ */
+export function observedChildUsageLine(usage: ProviderChildUsage | undefined): string | undefined {
+  if (usage === undefined) return undefined;
+  const sides = [
+    usage.inputTokens === undefined
+      ? undefined
+      : `IN ${formatAgentRunTokenCount(usage.inputTokens)}`,
+    usage.outputTokens === undefined
+      ? undefined
+      : `OUT ${formatAgentRunTokenCount(usage.outputTokens)}`,
+  ].filter((side): side is string => side !== undefined);
+  if (sides.length > 0) return sides.join(" · ");
+  return usage.totalTokens === undefined
+    ? undefined
+    : `${formatAgentRunTokenCount(usage.totalTokens)} tokens`;
 }

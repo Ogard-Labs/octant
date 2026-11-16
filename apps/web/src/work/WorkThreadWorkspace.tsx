@@ -160,7 +160,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -242,6 +242,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "steered";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -1495,6 +1500,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
       }
       if (!headPlaced) rows.push(head);
+      if (turn.steeredResults !== undefined && turn.steeredResults.length > 0) {
+        rows.push({
+          kind: "steered",
+          key: `${String(turn.requestId)}-steered`,
+          steered: turn.steeredResults,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -2746,6 +2758,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                     loadedTurnIds={row.loadedTurnIds}
                     running={row.running}
                     turnId={row.turnId}
+                  />
+                );
+              }
+              if (row.kind === "steered") {
+                return (
+                  <SteeredChildResults
+                    providerGroups={props.providerGroups}
+                    steered={row.steered}
                   />
                 );
               }

@@ -27,6 +27,7 @@ import {
   type ProviderContextBlock,
   type ProviderModelCapability,
   type WorktreeReceiptId,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { assertAgentRunSandboxEqualOrNarrower } from "@octant/domain/agent-run-policy";
 import {
@@ -82,6 +83,11 @@ export interface ProviderReadinessPort {
   readonly isReady: (input: {
     readonly providerInstanceId: string;
     readonly modelId: string;
+    /**
+     * The level the child will run at, when known: a runtime whose Octant
+     * tools are `mixed` carries them only at Full access.
+     */
+    readonly executionPolicy?: ProviderExecutionPolicy;
   }) => boolean;
 }
 
@@ -287,7 +293,13 @@ export function buildAgentRunRequestCommand(
             modelId: String(poolRoute.decision.selectedCandidate.modelId),
           }
         : { providerInstanceId: request.providerInstanceId, modelId: request.modelId };
-  if (executionCandidate !== undefined && !input.providerReadiness.isReady(executionCandidate)) {
+  if (
+    executionCandidate !== undefined &&
+    !input.providerReadiness.isReady({
+      ...executionCandidate,
+      executionPolicy: request.requestedAuthority.executionPolicy,
+    })
+  ) {
     throw new AgentRunCreationRejected(
       "provider-not-ready",
       "The selected provider/model is not configured and ready. Configure it before creating this child.",
@@ -402,6 +414,7 @@ export function buildAgentRunRequestCommand(
     parentThreadId: request.parentThreadId,
     ...(request.parentRunId === undefined ? {} : { parentRunId: request.parentRunId }),
     ...(request.dependsOn === undefined ? {} : { dependsOn: request.dependsOn }),
+    ...(request.compareGroup === undefined ? {} : { compareGroup: request.compareGroup }),
     role: request.role,
     task: request.task,
     creationPosture: input.creationPosture,

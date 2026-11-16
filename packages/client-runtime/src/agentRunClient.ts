@@ -1,6 +1,10 @@
 import {
   AgentRunReviewResponse,
   AgentObservedChild,
+  type AgentObservedChildStopRequest,
+  type AgentObservedChildStopResponse,
+  decodeAgentObservedChildStopRequest,
+  decodeAgentObservedChildStopResponse,
   type AgentRunResultPacket,
   AgentRunResultsResponse,
   decodeAgentRunCanvasSnapshotRequest,
@@ -83,6 +87,8 @@ export interface AgentRunParentSummaryClientEntry {
   readonly parentRunId?: AgentRunId;
   /** The sibling runs this one waits for, under the same parent thread. */
   readonly dependsOn?: ReadonlyArray<AgentRunId>;
+  /** The parent agent's label for siblings shown side by side; the host ranks nothing. */
+  readonly compareGroup?: string;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
@@ -165,6 +171,12 @@ export interface AgentRunClient {
     readonly scope: "self" | "subtree" | "hierarchy";
   }): Promise<{ readonly results: ReadonlyArray<AgentRunClientCommandResult> }>;
   steer(input: AgentRunSteerRequest): Promise<AgentRunClientCommandResult>;
+  /**
+   * Asks the thread's running turn to stop one subagent its provider started.
+   * A refusal is an answer, not a failure; the child reads as stopped only
+   * once the provider reports it finished.
+   */
+  stopObserved?(input: AgentObservedChildStopRequest): Promise<AgentObservedChildStopResponse>;
   retry(input: AgentRunRetryRequest): Promise<AgentRunClientCommandResult>;
   resume(input: AgentRunResumeRequest): Promise<AgentRunClientCommandResult>;
   /** Arms or withdraws the opt-in to resume a usage-limited run at reset. */
@@ -402,6 +414,38 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       return postRunCommand(options, headers, "/api/agent-runs/steer", () =>
         decodeAgentRunSteerRequest(input),
       );
+    },
+    async stopObserved(input) {
+      let validated: AgentObservedChildStopRequest;
+      try {
+        validated = decodeAgentObservedChildStopRequest(input);
+      } catch {
+        throw new AgentRunClientFailure("invalid", "The stop request is invalid.");
+      }
+      let response: Response;
+      try {
+        response = await options.fetch(
+          new URL("/api/agent-runs/observed/stop", options.baseUrl).toString(),
+          {
+            method: "POST",
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify(validated),
+          },
+        );
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "Octant AgentRun service is unavailable.");
+      }
+      if (response.status === 401) {
+        throw new AgentRunClientFailure("unauthorized", "AgentRun request is unauthorized.");
+      }
+      if (response.ok || response.status === 403 || response.status === 409) {
+        try {
+          return decodeAgentObservedChildStopResponse(await response.json());
+        } catch {
+          throw new AgentRunClientFailure("unavailable", "The stop response is malformed.");
+        }
+      }
+      throw new AgentRunClientFailure("unavailable", "The provider could not stop the subagent.");
     },
     async retry(input) {
       return postRunCommand(options, headers, "/api/agent-runs/retry", () =>

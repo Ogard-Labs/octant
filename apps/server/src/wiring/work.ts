@@ -795,6 +795,18 @@ export function wireWork(deps: WorkDependencies) {
               parentThreadId: String(input.thread.id),
               mode: "work",
               projectId: input.thread.projectId,
+              // A routine run has nobody to answer.
+              ...(input.routineRun !== undefined
+                ? {}
+                : {
+                    askThroughHost: {
+                      lead: {
+                        hostId: LOCAL_HOST_ID,
+                        providerInstanceId: input.thread.providerInstanceId,
+                        modelId: input.thread.modelId,
+                      },
+                    },
+                  }),
             });
         const canvasTools = !browserSupported
           ? undefined

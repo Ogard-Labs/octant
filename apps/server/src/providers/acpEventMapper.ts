@@ -11,6 +11,7 @@ import type {
 import { OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS } from "@octant/contracts";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
+import { boundedChildFinalSummary } from "@octant/provider-sdk/child-observations";
 import { providerApprovalCall } from "./providerApprovalCall";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -284,8 +285,11 @@ function mapTool(
  * A call that started one of the agent's own subagents, shown as a child run
  * once the agent names the child's session under the profile's
  * `childRunMetaKey`: running when first named, then finished or failed with
- * the call. The task is the first line of what the agent sent the child;
- * nothing the child said is read.
+ * the call. The task is the first line of what the agent sent the child.
+ * The child's closing answer, which Mistral Vibe's source puts under
+ * `response` once the call finished, is carried for the person to read and
+ * never sent to a model. The agent names no model or token counts for its
+ * child, so those stay unknown.
  */
 function childRun(
   context: AcpEventContext,
@@ -307,6 +311,8 @@ function childRun(
   if (childAgentId === undefined || (!firstSeen && ended === undefined)) return [];
   const task = normalized(string(meta?.task)?.split("\n")[0], 200);
   const status = ended ?? "running";
+  const finalSummary =
+    status === "completed" ? boundedChildFinalSummary(string(meta?.response)) : undefined;
   const unseen = context.unseenChildCalls;
   if (unseen === undefined) {
     return [
@@ -314,6 +320,7 @@ function childRun(
         kind: "child-agent-activity",
         childAgentId,
         ...(task === undefined ? {} : { task }),
+        ...(finalSummary === undefined ? {} : { finalSummary }),
         status,
         summary:
           status === "running"
@@ -335,6 +342,7 @@ function childRun(
       kind: "child-agent-activity",
       childAgentId,
       ...(task === undefined ? {} : { task }),
+      ...(finalSummary === undefined ? {} : { finalSummary }),
       status,
       summary:
         status === "running"

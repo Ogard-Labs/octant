@@ -1,9 +1,14 @@
 import type { ConversationInputManifest } from "@octant/contracts/conversation-inputs";
+import { Effect } from "effect";
 import { observedChildren } from "./agentObservedChildren";
+import type { LiveTurnConnection } from "../liveTurn/liveTurnRegistry";
 import {
   decodeAgentRunResultsResponse,
   decodeAgentRunReviewResponse,
+  decodeAgentObservedChildStopRequest,
   type AgentObservedChild,
+  type AgentObservedChildStopRequest,
+  type AgentObservedChildStopResponse,
 } from "@octant/contracts";
 import {
   decodeAgentRunCenterQuery,
@@ -79,6 +84,8 @@ export interface AgentRunRouteDependencies {
     readonly observations: ReadonlyArray<AgentObservedChild>;
     readonly observationsTruncated: boolean;
   };
+  /** The connection of the thread's running turn, which stops one observed child. */
+  readonly liveTurnConnection?: (threadId: string) => LiveTurnConnection | undefined;
 
   readonly listTargets: (parent: AgentRunControlParentFacts) => ReadonlyArray<AgentsToolTarget>;
   readonly onExecutionAccepted?: AgentRunControlAdmissionDependencies["onExecutionAccepted"];
@@ -273,6 +280,10 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         200,
         origin,
       );
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/observed/stop") {
+      return handleObservedStop(dependencies, authenticatedWindowId, request, origin);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/coordinator-graph") {
@@ -1230,6 +1241,7 @@ function serializeEntry(
     parentThreadId: entry.parentThreadId,
     ...(entry.parentRunId === undefined ? {} : { parentRunId: entry.parentRunId }),
     ...(dependsOn.length === 0 ? {} : { dependsOn }),
+    ...(entry.compareGroup === undefined ? {} : { compareGroup: entry.compareGroup }),
     role: entry.role,
     task: entry.task,
     lifecycleStatus: entry.lifecycleStatus,
@@ -1268,4 +1280,67 @@ function serializeEntry(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Stops one subagent a provider runtime started, through the thread's running
+ * turn. The child is found among the observations this window may read for
+ * the thread, never from what the request claims about it, and the stop goes
+ * only to the turn's own session.
+ */
+async function handleObservedStop(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  request: Request,
+  origin: string | null,
+): Promise<Response> {
+  let stopRequest: AgentObservedChildStopRequest;
+  try {
+    stopRequest = decodeAgentObservedChildStopRequest(await request.json());
+  } catch {
+    return failure("The stop request is invalid.", 400, origin);
+  }
+  const refused = (
+    reason: Extract<AgentObservedChildStopResponse, { status: "refused" }>["reason"],
+  ) =>
+    json(
+      { status: "refused", reason } satisfies AgentObservedChildStopResponse,
+      reason === "unauthorized" ? 403 : 409,
+      origin,
+    );
+  const { parentThreadId, observationId } = stopRequest;
+  if (!(await dependencies.authorizeParentThread({ parentThreadId, windowId }))) {
+    return refused("unauthorized");
+  }
+  const child = dependencies
+    .readObservations?.({ parentThreadId, windowId })
+    .observations.find((observation) => observation.observationId === observationId);
+  if (
+    child === undefined ||
+    child.lifecycleStatus === "completed" ||
+    child.lifecycleStatus === "failed"
+  ) {
+    return refused("not-found");
+  }
+  const live = dependencies.liveTurnConnection?.(String(parentThreadId));
+  if (
+    live === undefined ||
+    String(live.providerInstanceId) !== String(child.providerInstanceId) ||
+    String(live.sessionId) !== String(child.sessionId)
+  ) {
+    return refused("not-live");
+  }
+  const stopChild = live.connection.stopChildAgent;
+  if (stopChild === undefined) return refused("unsupported");
+  const outcome = await Effect.runPromise(
+    stopChild({ sessionId: live.sessionId, childAgentId: child.childAgentId }).pipe(
+      Effect.map((value) => ({ kind: "settled" as const, value })),
+      Effect.catchAll(() => Effect.succeed({ kind: "failed" as const })),
+    ),
+  );
+  if (outcome.kind === "failed") {
+    return failure("The provider could not stop the subagent.", 502, origin);
+  }
+  if (outcome.value !== "stopped") return refused(outcome.value);
+  return json({ status: "stop-requested" } satisfies AgentObservedChildStopResponse, 200, origin);
 }

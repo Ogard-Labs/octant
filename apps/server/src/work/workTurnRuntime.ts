@@ -531,6 +531,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           message: "This provider cannot open a turn it started itself.",
         });
       }
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.providerSessionId,
+        providerInstanceId: input.command.authority.providerInstanceId,
+        takesSteeredResults: true,
+      });
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
           if (!reachedTerminalEvent) {

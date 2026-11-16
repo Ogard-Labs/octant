@@ -68,6 +68,8 @@ export interface AgentRunParentSummaryEntry {
    * thread, so a reader of this summary may already read each of them.
    */
   readonly dependsOn?: AgentRun["dependsOn"];
+  /** The parent agent's label for siblings a person may compare side by side. */
+  readonly compareGroup?: AgentRun["compareGroup"];
   readonly role: AgentRun["role"];
   readonly task: string;
   readonly lifecycleStatus: AgentRunLifecycleStatus;
@@ -429,6 +431,7 @@ export class AgentRunProjection implements Projection {
         parentThreadId: run.parentThreadId,
         ...(run.parentRunId === undefined ? {} : { parentRunId: run.parentRunId }),
         ...(run.dependsOn === undefined ? {} : { dependsOn: run.dependsOn }),
+        ...(run.compareGroup === undefined ? {} : { compareGroup: run.compareGroup }),
         role: run.role,
         task: run.task,
         lifecycleStatus: run.lifecycleStatus,

@@ -7,7 +7,7 @@ import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark } from "./agentRun";
+import { AgentResultsSteeredIntoTurn, AgentRunResultDeliveryMark } from "./agentRun";
 import { ContextCompactionSettledRecord } from "./context";
 import {
   ContextHandoffMessages,
@@ -316,6 +316,8 @@ export const WorkTurnState = Schema.Struct({
    * result; journaled with the turn's acceptance so replay keeps the mark.
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
+  /** Finished children's results steered into this turn while it ran, in arrival order. */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   capabilities: WorkTurnCapabilityFacts,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   version: AggregateVersion,

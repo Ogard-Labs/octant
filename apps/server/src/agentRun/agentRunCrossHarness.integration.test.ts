@@ -13,10 +13,13 @@ import {
   decodeProviderRuntimeEvent,
   decodeProviderServiceLimits,
   decodeWindowId,
+  ACP_AGENT_KINDS,
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type AgentRunAuthority,
+  type AgentRunId,
   type AgentRunResultDeliveryMark,
   type NativeHarnessRouteDecision,
+  type ProviderDriverKind,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import type {
@@ -69,8 +72,44 @@ const ids = {
   foreignWindow: decodeWindowId("10000000-0000-4000-8000-000000000004"),
   octant: decodeProviderInstanceId("10000000-0000-4000-8000-000000000005"),
   provider: decodeProviderInstanceId("10000000-0000-4000-8000-000000000006"),
+  claude: decodeProviderInstanceId("10000000-0000-4000-8000-000000000007"),
+  opencode: decodeProviderInstanceId("10000000-0000-4000-8000-000000000008"),
+  acp: decodeProviderInstanceId("10000000-0000-4000-8000-000000000009"),
+  pi: decodeProviderInstanceId("10000000-0000-4000-8000-00000000000a"),
 };
 type Harness = "Octant Harness" | "provider harness";
+const acpKind = ACP_AGENT_KINDS[0];
+if (acpKind === undefined) throw new Error("The contract lists no ACP agent kind.");
+/**
+ * One stand-in for each runtime kind a managed child can run on in
+ * production. Each has its own provider instance and model, so a child routed
+ * to one is observable only on that driver.
+ */
+const standIns = {
+  claude: { driverKind: "claude", instanceId: ids.claude, modelId: "fixture-claude" },
+  codex: { driverKind: "codex", instanceId: ids.provider, modelId: "fixture-provider" },
+  opencode: { driverKind: "opencode", instanceId: ids.opencode, modelId: "fixture-opencode" },
+  acp: { driverKind: acpKind, instanceId: ids.acp, modelId: "fixture-acp" },
+  pi: { driverKind: "pi", instanceId: ids.pi, modelId: "fixture-pi" },
+  "openai-compatible": {
+    driverKind: "openai-compatible",
+    instanceId: ids.octant,
+    modelId: "fixture-direct",
+  },
+} as const satisfies Record<
+  string,
+  {
+    readonly driverKind: ProviderDriverKind;
+    readonly instanceId: typeof ids.octant;
+    readonly modelId: string;
+  }
+>;
+type StandIn = keyof typeof standIns;
+const standInNames = Object.keys(standIns) as ReadonlyArray<StandIn>;
+const harnessStandIn: Record<Harness, StandIn> = {
+  "Octant Harness": "openai-compatible",
+  "provider harness": "codex",
+};
 const candidates = {
   "Octant Harness": decodeNativeHarnessSlotCandidate({
     hostId: "local",
@@ -100,20 +139,21 @@ const liveAuthority: AgentRunAuthority = {
  * normalized events at the SDK seam. Both hold their replies until released so
  * sibling admission and separate session identity are observable concurrently.
  */
-function fixtureDriver(harness: Harness, released: Promise<void>) {
+function fixtureDriver(name: StandIn, released: Promise<void>) {
   const acquired: ProviderAcquireInput[] = [];
   const started: ProviderSessionStart[] = [];
   const resumed: ProviderSessionResume[] = [];
   const requests: NativeHarnessRequest[] = [];
   const transcripts = new MemoryNativeHarnessTranscriptStore();
-  const target = candidates[harness];
+  const { driverKind, instanceId } = standIns[name];
+  const hostOwned = driverKind === "openai-compatible";
   const driver: ProviderDriver = {
-    kind: harness === "Octant Harness" ? "openai-compatible" : "codex",
-    conversationOwnership: harness === "Octant Harness" ? "host" : "provider",
+    kind: driverKind,
+    conversationOwnership: hostOwned ? "host" : "provider",
     probe: () => Effect.die("Fixture readiness is supplied by the host; probing is unexpected."),
     acquire: (input) => {
       acquired.push(input);
-      if (harness === "Octant Harness")
+      if (hostOwned)
         return createNativeHarnessConnection({
           instanceId: input.instanceId,
           driverKind: "openai-compatible",
@@ -161,7 +201,7 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
             started.push(start);
             return Effect.succeed({
               sessionId: start.sessionId,
-              resumeCursor: { driverKind: "codex" as const, value: "fixture-native-session" },
+              resumeCursor: { driverKind, value: `fixture-${name}-session` },
             });
           },
           resume: (input: ProviderSessionResume) => {
@@ -174,16 +214,16 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
                 Queue.offerAll(queue, [
                   decodeProviderRuntimeEvent({
                     kind: "text-delta",
-                    instanceId: target.providerInstanceId,
+                    instanceId,
                     sessionId: turn.sessionId,
                     sequence: 1,
                     correlationId: randomUUID(),
                     occurredAt: now,
-                    text: `Fixture provider reply: ${turn.prompt}`,
+                    text: `Fixture provider reply (${name}): ${turn.prompt}`,
                   }),
                   decodeProviderRuntimeEvent({
                     kind: "usage",
-                    instanceId: target.providerInstanceId,
+                    instanceId,
                     sessionId: turn.sessionId,
                     sequence: 2,
                     correlationId: randomUUID(),
@@ -193,7 +233,7 @@ function fixtureDriver(harness: Harness, released: Promise<void>) {
                   }),
                   decodeProviderRuntimeEvent({
                     kind: "completed",
-                    instanceId: target.providerInstanceId,
+                    instanceId,
                     sessionId: turn.sessionId,
                     sequence: 3,
                     correlationId: randomUUID(),
@@ -219,6 +259,7 @@ function fixture(
   parentHarness: Harness,
   childHarness: Harness,
   spendCeiling?: AgentRunSessionRuntimeOptions["spendCeiling"],
+  toolsUnsupportedOn?: StandIn,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-cross-harness-"));
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -242,8 +283,13 @@ function fixture(
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const direct = fixtureDriver("Octant Harness", released);
-  const provider = fixtureDriver("provider harness", released);
+  const drivers = Object.fromEntries(
+    standInNames.map((name) => [name, fixtureDriver(name, released)]),
+  ) as Record<StandIn, ReturnType<typeof fixtureDriver>>;
+  const direct = drivers["openai-compatible"];
+  const provider = drivers.codex;
+  const standInFor = (id: unknown) =>
+    standInNames.find((name) => String(standIns[name].instanceId) === String(id));
   const sessionStore = new AgentRunSessionStore({
     connection,
     getById: (id) => persistence.getById(id),
@@ -255,15 +301,31 @@ function fixture(
     ambiguousReservationTtlMs: 60_000,
   });
   const runtime = createAgentRunSessionRuntime({
-    resolveDriver: (id) =>
-      String(id) === String(ids.octant)
-        ? direct.driver
-        : String(id) === String(ids.provider)
-          ? provider.driver
-          : undefined,
+    resolveDriver: (id) => {
+      const name = standInFor(id);
+      return name === undefined ? undefined : drivers[name].driver;
+    },
     sessionStore: sessionStore.sessions,
-    supportsResume: (id) =>
-      String(id) === String(ids.provider) || String(id) === String(ids.octant),
+    supportsResume: (id) => standInFor(id) !== undefined,
+    ...(toolsUnsupportedOn === undefined
+      ? {}
+      : {
+          // Every child is offered one Octant tool; only the named stand-in's
+          // transport reports it cannot carry it.
+          appManagedTools: () => ({
+            definitions: [
+              {
+                name: "fixture_lookup",
+                inputSchema: { type: "object", properties: {} },
+              },
+            ],
+            execute: async () => ({ result: "unused" }),
+          }),
+          appManagedToolTransport: ({ providerInstanceId }) =>
+            String(providerInstanceId) === String(standIns[toolsUnsupportedOn].instanceId)
+              ? "unsupported"
+              : "supported",
+        }),
     ...(spendCeiling === undefined ? {} : { spendCeiling }),
     capacityScheduler: providerCapacity,
     context: createRecordedAgentRunContextSnapshotPort({
@@ -294,7 +356,8 @@ function fixture(
   const orchestration = new AgentRunOrchestrationService({
     persistence,
     processes: supervisor,
-    capacity: createInMemoryCapacityPort(),
+    // Room for one helper on every stand-in at once.
+    capacity: createInMemoryCapacityPort(() => ({ perThread: 8, onHost: 8 })),
     worktree: { isVerifiedIsolation: () => false, isParentCheckout: () => true },
     approvals: { isCurrent: () => true },
   });
@@ -320,8 +383,7 @@ function fixture(
     authorizeCreation,
     settings: { current: () => ({ creationPosture: "automatic" }) },
     providerReadiness: {
-      isReady: ({ providerInstanceId }) =>
-        [String(ids.octant), String(ids.provider)].includes(String(providerInstanceId)),
+      isReady: ({ providerInstanceId }) => standInFor(providerInstanceId) !== undefined,
     },
     nativeEvidence: () => ({
       claimedNativeSupport: "unsupported",
@@ -356,20 +418,13 @@ function fixture(
     parentThreadId: String(ids.thread),
     windowId: String(ids.window),
     uuid: randomUUID,
-    listTargets: () => [
-      {
-        providerInstanceId: String(ids.octant),
-        modelIds: ["fixture-direct"],
-        displayName: "Fixture direct",
-        driverKind: "openai-compatible",
-      },
-      {
-        providerInstanceId: String(ids.provider),
-        modelIds: ["fixture-provider"],
-        displayName: "Fixture provider",
-        driverKind: "codex",
-      },
-    ],
+    listTargets: () =>
+      standInNames.map((name) => ({
+        providerInstanceId: String(standIns[name].instanceId),
+        modelIds: [standIns[name].modelId],
+        displayName: `Fixture ${name}`,
+        driverKind: standIns[name].driverKind,
+      })),
   };
   // Both parent harnesses delegate through the same `octant_agents` tool; an
   // Octant Harness lead's role routing is journaled on its harness session.
@@ -487,6 +542,7 @@ function fixture(
       ),
     direct,
     provider,
+    drivers,
     deliveries,
     delivery,
     target,
@@ -501,6 +557,24 @@ function fixture(
           providerInstanceId: target.providerInstanceId,
           modelId: target.modelId,
         }),
+      }),
+    delegateTo: (task: string, to: Harness | StandIn) => {
+      const standIn = standIns[to in standIns ? (to as StandIn) : harnessStandIn[to as Harness]];
+      return tools.execute({
+        name: "octant_agents",
+        inputJson: JSON.stringify({
+          operation: "delegate",
+          role: "research",
+          task,
+          providerInstanceId: standIn.instanceId,
+          modelId: standIn.modelId,
+        }),
+      });
+    },
+    waitAll: (runIds: ReadonlyArray<string>) =>
+      tools.execute({
+        name: "octant_agents",
+        inputJson: JSON.stringify({ operation: "wait", runIds, waitFor: "all", timeoutMs: 5_000 }),
       }),
     followUp: (runId: string, expectedVersion: number, message: string) =>
       tools.execute({
@@ -529,6 +603,41 @@ function fixture(
 }
 
 describe("cross-harness delegation with fixture provider transports", () => {
+  it("fans one thread's helpers out to two providers and waits on both together", async () => {
+    const subject = fixture("provider harness", "provider harness");
+    try {
+      const runIds: string[] = [];
+      for (const [task, harness] of [
+        ["Check with the direct endpoint", "Octant Harness"],
+        ["Check with the provider runtime", "provider harness"],
+      ] as const) {
+        const outcome = await subject.delegateTo(task, harness);
+        expect(outcome.result).toMatchObject({
+          status: "accepted",
+          target: { providerInstanceId: candidates[harness].providerInstanceId },
+        });
+        runIds.push((outcome.result as { runId: string }).runId);
+      }
+      await expect.poll(() => subject.direct.started.length).toBe(1);
+      await expect.poll(() => subject.provider.started.length).toBe(1);
+      subject.release();
+      const waited = await subject.waitAll(runIds);
+      expect(waited.result).toMatchObject({ status: "settled", waitFor: "all", pending: [] });
+      const settled = (waited.result as { settled: ReadonlyArray<{ text?: string }> }).settled;
+      expect(settled.map((entry) => entry.text?.split(":")[0])).toEqual([
+        "Fixture direct reply",
+        "Fixture provider reply (codex)",
+      ]);
+      expect(
+        subject.persistence
+          .parentSummary(ids.thread)
+          .map((entry) => String(entry.route.executionProviderInstanceId)),
+      ).toEqual(expect.arrayContaining([String(ids.octant), String(ids.provider)]));
+    } finally {
+      await subject.close();
+    }
+  });
+
   it.each([
     ["Octant Harness", "Octant Harness"],
     ["Octant Harness", "provider harness"],
@@ -729,6 +838,131 @@ describe("cross-harness delegation with fixture provider transports", () => {
       }
     },
   );
+
+  async function delegateToEveryStandIn(subject: ReturnType<typeof fixture>) {
+    const runIds = new Map<StandIn, AgentRunId>();
+    for (const name of standInNames) {
+      const outcome = await subject.delegateTo(`Check with the ${name} runtime`, name);
+      expect(outcome.result).toMatchObject({
+        status: "accepted",
+        target: {
+          providerInstanceId: standIns[name].instanceId,
+          modelId: standIns[name].modelId,
+        },
+      });
+      runIds.set(name, (outcome.result as { runId: AgentRunId }).runId);
+    }
+    return runIds;
+  }
+
+  function expectedReply(name: StandIn) {
+    return name === "openai-compatible"
+      ? "Fixture direct reply"
+      : `Fixture provider reply (${name})`;
+  }
+
+  it("runs one helper on each provider runtime kind from the same thread and waits on every reply", async () => {
+    const subject = fixture("provider harness", "provider harness");
+    try {
+      const runIds = await delegateToEveryStandIn(subject);
+      for (const name of standInNames)
+        await expect.poll(() => subject.drivers[name].started.length).toBe(1);
+      for (const name of standInNames) {
+        const driver = subject.drivers[name];
+        expect(driver.acquired.map((input) => String(input.instanceId))).toEqual([
+          String(standIns[name].instanceId),
+        ]);
+        expect(driver.started.map((start) => start.modelId)).toEqual([standIns[name].modelId]);
+      }
+      const sessionIds = standInNames.map((name) =>
+        String(subject.drivers[name].started[0]?.sessionId),
+      );
+      expect(new Set(sessionIds).size).toBe(standInNames.length);
+
+      subject.release();
+      const waited = await subject.waitAll([...runIds.values()]);
+      expect(waited.result).toMatchObject({ status: "settled", waitFor: "all", pending: [] });
+      const settled = (waited.result as { settled: ReadonlyArray<{ text?: string }> }).settled;
+      expect(settled).toHaveLength(standInNames.length);
+      standInNames.forEach((name, index) => {
+        expect(settled[index]?.text).toContain(expectedReply(name));
+        expect(settled[index]?.text).toContain(`Check with the ${name} runtime`);
+      });
+      const summary = subject.persistence.parentSummary(ids.thread);
+      for (const name of standInNames) {
+        const entry = summary.find((run) => String(run.runId) === runIds.get(name));
+        expect(String(entry?.route.executionProviderInstanceId)).toBe(
+          String(standIns[name].instanceId),
+        );
+      }
+    } finally {
+      await subject.close();
+    }
+  });
+
+  it("follows each helper up in its saved session on the provider it ran on", async () => {
+    const subject = fixture("provider harness", "provider harness");
+    try {
+      const runIds = await delegateToEveryStandIn(subject);
+      subject.release();
+      await subject.waitAll([...runIds.values()]);
+      const followed: StandIn[] = [];
+      for (const name of standInNames) {
+        const runId = runIds.get(name);
+        const completed = runId === undefined ? undefined : subject.persistence.getById(runId);
+        if (completed === undefined) throw new Error(`Missing ${name} helper`);
+        const saved = subject.sessionStore.sessions.read(completed);
+        expect(saved?.resumeCursor?.driverKind).toBe(standIns[name].driverKind);
+        const message = `Follow up on the ${name} result`;
+        const outcome = await subject.followUp(completed.id, completed.version, message);
+        expect(outcome.result).toMatchObject({ status: "accepted", generation: 2 });
+        await expect
+          .poll(() => subject.persistence.getById(completed.id))
+          .toMatchObject({ lifecycleStatus: "completed", generation: 2 });
+        expect(subject.persistence.resultText(completed.id)).toContain(message);
+        followed.push(name);
+        expect(subject.drivers[name].resumed).toEqual([
+          expect.objectContaining({
+            sessionId: saved?.sessionId,
+            resumeCursor: saved?.resumeCursor,
+            modelId: standIns[name].modelId,
+          }),
+        ]);
+        for (const other of standInNames) {
+          expect(subject.drivers[other].started).toHaveLength(1);
+          expect(subject.drivers[other].resumed).toHaveLength(followed.includes(other) ? 1 : 0);
+        }
+      }
+    } finally {
+      await subject.close();
+    }
+  });
+
+  it("refuses a helper whose transport cannot carry Octant's tools while the others run", async () => {
+    const subject = fixture("provider harness", "provider harness", undefined, "acp");
+    try {
+      const runIds = await delegateToEveryStandIn(subject);
+      const refusedId = runIds.get("acp");
+      if (refusedId === undefined) throw new Error("Missing ACP helper");
+      await expect
+        .poll(() => subject.persistence.getById(refusedId))
+        .toMatchObject({ lifecycleStatus: "interrupted", recoveryReason: "tools-unsupported" });
+      expect(subject.drivers.acp.started).toHaveLength(0);
+      const running = standInNames.filter((name) => name !== "acp");
+      for (const name of running)
+        await expect.poll(() => subject.drivers[name].started.length).toBe(1);
+      subject.release();
+      const waited = await subject.waitAll(running.map((name) => runIds.get(name) ?? ""));
+      expect(waited.result).toMatchObject({ status: "settled", pending: [] });
+      const settled = (waited.result as { settled: ReadonlyArray<{ text?: string }> }).settled;
+      running.forEach((name, index) => {
+        expect(settled[index]?.text).toContain(expectedReply(name));
+      });
+      expect(subject.drivers.acp.started).toHaveLength(0);
+    } finally {
+      await subject.close();
+    }
+  });
 });
 
 it("keeps a completed child's reply and generation when spend admission refuses its follow-up", async () => {
@@ -759,7 +993,7 @@ it("keeps a completed child's reply and generation when spend admission refuses 
     if (consumed.kind !== "run-updated") throw new Error("Expected consumed result");
     expect(await subject.runtime.checkResume?.(consumed.run)).toEqual({ status: "ready" });
     const saved = subject.sessionStore.sessions.read(consumed.run);
-    expect(saved?.resumeCursor?.value).toBe("fixture-native-session");
+    expect(saved?.resumeCursor?.value).toBe("fixture-codex-session");
     const rows = subject.journalRows();
     const refusal = "This follow-up exceeds the current spend ceiling.";
     admit.mockReturnValue({ status: "refused", refusal: { message: refusal } });

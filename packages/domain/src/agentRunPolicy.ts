@@ -819,6 +819,9 @@ export function createAgentRunFromRequest(input: {
     parentThreadId: input.command.parentThreadId,
     parentRunId: input.command.parentRunId,
     ...(input.command.dependsOn === undefined ? {} : { dependsOn: input.command.dependsOn }),
+    ...(input.command.compareGroup === undefined
+      ? {}
+      : { compareGroup: input.command.compareGroup }),
     depth,
     role: input.command.role,
     task: input.command.task,

@@ -2710,7 +2710,11 @@ A child AgentRun starts only when the thread's agent delegates through
 `octant_agents`, the one child-run tool, offered to an Octant Harness lead and
 to a provider runtime's agent alike. Its operations are `capabilities`,
 `delegate`, `status`, `wait`, `cancel`, and `follow-up`; `wait` with a zero
-timeout reads a finished reply without blocking. Either parent harness can
+timeout reads a finished reply without blocking, and `wait` over several
+`runIds` answers when the first settles (`any`) or every one has (`all`, the
+default), collecting each reply once as its child settles. `delegate` may give
+siblings one `compareGroup` label (at most 64 characters, journaled on the run)
+so the Agents dock shows them side by side; the host groups and never ranks. Either parent harness can
 target either child harness; provider-owned hidden subagents remain disabled.
 Every child appears in the Agents surface, where the person can watch, stop,
 or resume it, and `cancel` is the agent's way to stop one it started.
@@ -2869,7 +2873,13 @@ that the running child received it.
 
 Delegation resolves explicit provider/model selections against the parent's
 current eligible catalog, including Project policy and supported reasoning
-values. A provider that can answer counts even when its catalog is
+values. Every child carries Octant's tools, so a target's model must carry them
+on every runtime (provider-wide support, Verify tools, or `mixed` for a child
+at Full access) before it is advertised or admitted (`modelCanTakeDelegatedWork`).
+Rationale: an ACP agent without negotiated tools, or OpenCode below Full
+access, was advertised and then refused at start with `tools-unsupported`.
+`capabilities` also lists every enabled provider it leaves out, with the first
+reason that excludes it (`not-ready`, `tools-unsupported`, `project-policy`). A provider that can answer counts even when its catalog is
 degraded (a Foundry deployment its models route does not list); a direct
 endpoint model is a target only once its tools are verified. With no explicit target, both harnesses use the same role-to-slot
 mapping and host/Project model slots (Settings names them model roles: Planner, Scout, Quick edit, Builder, Hard problems, Reviewer, Sees images and Small jobs, with Advisor kept as it was). An unconfigured route can inherit the
@@ -2882,10 +2892,49 @@ per thread and their yes is journaled for the thread
 (`thread.standing-answer-recorded@1`, erased with the thread), so later
 helpers start unasked and a waiting helper is kept; Plan stays refused
 (maintainer decision, 2026-11-13). The level is the one the turn runs at.
-Built for a Code thread, which asks in the thread's tool approval. Not built
-yet: a Work or Chat thread below Full access is still refused, because their
-turns have no way to ask a person from a host tool, and the reviewer at Auto
-does not answer in the person's place. A helper on another hub member follows
+Built: a Code thread asks in the thread's tool approval; a Chat or Work thread
+asks through the host's single-use approval card on the thread (class
+`agents.delegate`), which every thread's composer shows, ended with the tool
+call that asked; a Work routine run, which nobody can answer, still refuses.
+The reviewer at Auto does not answer in the person's place.
+
+A finished child's result reaches its parent as a queued delivery turn, or,
+while the parent's turn is running on a runtime that steers (Codex, the Octant
+Harness) and the result fits the runtime's note limit, as a note steered into
+that turn (`steer` with `source: "agent-result"`). The parent is marked as
+having read outside content before either, and its approval gates read the
+mark live, so later tools in the same turn act marked; a Code turn reviewed by
+the provider's own reviewer is never steered, because that reviewer was chosen
+while the thread was unmarked. A steered result settles as delivered with
+detail "Steered into the parent's running turn." and is journaled as
+`agent.result-steered@1` on its own aggregate (the thread, the running turn's
+key, the delivery mark and the framed text), so it never moves the turn's or
+the thread's version. Chat, Work and Code turn reads attach it as
+`steeredResults`, once per run generation, and the transcript shows the
+ordinary child-result card after the turn's reply, labelled "Delivered into the
+running turn"; it shows on the next read, not as a stream frame. The thread
+purge erases it with the thread, as every aggregate whose payload names the
+thread. A crash between the steer and the record leaves the result delivered
+without a card.
+
+A subagent the provider runtime started itself is observed, never managed. Its
+one control is Stop, offered (`control: "stop"`) only while the thread's
+running turn holds a connection that stops one child alone
+(`ProviderConnection.stopChildAgent`: Claude through the SDK's task stop,
+OpenCode by aborting a child session that runs under the turn's own session)
+on that child's provider instance and session. `POST
+/api/agent-runs/observed/stop` checks the window as the summary read does and
+finds the child only among the observations that window may read; Codex
+(an interrupt on a subagent thread is unverified) and ACP (no protocol call)
+report it unsupported.
+
+A provider-started subagent carries what its runtime reports and nothing it
+does not: its model (Claude from the subagent call, Codex from the spawn call,
+OpenCode from the child's first reply; ACP names only an agent profile), a
+final summary of at most 2,048 characters when it completes, and token usage
+(input and output for Codex and OpenCode, a total for Claude, none for ACP).
+The summary is shown to the person only and never added to the parent's
+context, so it changes no outside-content mark. A helper on another hub member follows
 the same rule, and the same answer covers it (maintainer decision, 2026-11-13;
 [Hub and spokes: delegation](design/hub-and-spokes.md#spoke-to-spoke-discovery-and-delegation)).
 

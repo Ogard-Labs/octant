@@ -1,6 +1,9 @@
+import type { ProviderConnection } from "@octant/provider-sdk";
 import {
   decodeUtcTimestamp,
   type MachineChangeTopic,
+  type ProviderInstanceId,
+  type ProviderSessionId,
   type ProviderRuntimeEvent,
   type ThreadLiveStep,
   type UtcTimestamp,
@@ -19,6 +22,26 @@ export interface LiveTurnFacts {
 }
 
 /**
+ * The provider connection a running turn holds, so the host can act on that
+ * one turn without starting another: stop one subagent the runtime started,
+ * or steer a finished child's result in.
+ */
+export interface LiveTurnConnection {
+  readonly connection: ProviderConnection;
+  readonly sessionId: ProviderSessionId;
+  readonly providerInstanceId: ProviderInstanceId;
+  /**
+   * Whether a child's result steered in mid-turn is covered by the thread's
+   * journaled outside-content mark alone. Every approval gate reads that mark
+   * when it decides, so a later tool in the turn acts tainted; a turn whose
+   * runtime chose its own approval reviewer while the thread was unmarked
+   * keeps that reviewer for the rest of the turn, so it takes no steered
+   * result and the result waits for the next turn instead.
+   */
+  readonly takesSteeredResults: boolean;
+}
+
+/**
  * The runner's handle on one thread's turn. A runner calls `begin` when it
  * starts, `observe` for every provider event, and `end` when the turn is over
  * whatever its outcome.
@@ -26,6 +49,8 @@ export interface LiveTurnFacts {
 export interface LiveTurnTracker {
   begin(startedAt: string): void;
   observe(event: ProviderRuntimeEvent): void;
+  /** Records the connection the turn acquired; it is forgotten at `end`. */
+  connect(connection: LiveTurnConnection): void;
   end(): void;
 }
 
@@ -46,6 +71,7 @@ interface LiveTurn {
   readonly owner: symbol;
   readonly startedAt: UtcTimestamp;
   state: LiveTurnState;
+  connection?: LiveTurnConnection;
 }
 
 /**
@@ -115,12 +141,21 @@ export class LiveTurnRegistry {
         turn.state = next;
         if (moved) this.#changed(topic);
       },
+      connect: (connection) => {
+        const turn = own();
+        if (turn !== undefined) turn.connection = connection;
+      },
       end: () => {
         if (own() === undefined) return;
         this.#turns.delete(threadId);
         this.#changed(topic);
       },
     };
+  }
+
+  /** The connection of the thread's running turn, once the turn acquired one. */
+  connection(threadId: string): LiveTurnConnection | undefined {
+    return this.#turns.get(threadId)?.connection;
   }
 
   /** The thread's live-turn facts, or nothing when no turn is running. */
