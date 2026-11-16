@@ -1,4 +1,4 @@
-import { LayoutGrid, X } from "../ui/icons";
+import { LayoutGrid, PictureInPicture2, X } from "../ui/icons";
 import {
   useEffect,
   useLayoutEffect,
@@ -15,7 +15,7 @@ import {
   setNativeSurfaceResizeGuard,
   signalNativeSurfaceLayoutChange,
 } from "../browser/useNativeBrowserSurface";
-import { DockBarRow, TILE_CONTROLS, useFoldedControls } from "./DockBarRow";
+import { DockBarRow, TILE_CONTROLS, TILE_MINIMISE_CONTROL, useFoldedControls } from "./DockBarRow";
 import { DockBarContext, useDockBarSlot } from "./dockBarControls";
 import {
   cancelDockToolDrag,
@@ -687,7 +687,11 @@ function Tile(props: {
   const bar = useRef<HTMLDivElement>(null);
   // Every pane has the one bar, alone or among tiles: the same height, insets
   // and controls, so nothing in a pane moves when a neighbour opens or closes.
-  const folded = useFoldedControls(bar, barItems ?? [], TILE_CONTROLS);
+  const folded = useFoldedControls(
+    bar,
+    barItems ?? [],
+    TILE_CONTROLS + (props.onMinimise === undefined ? 0 : TILE_MINIMISE_CONTROL),
+  );
   // Alone there is nothing to arrange, and only the Browser and Terminal can
   // become a card; the control keeps its slot either way.
   const arrangeable = !props.single || props.onMinimise !== undefined;
@@ -750,6 +754,17 @@ function Tile(props: {
         </div>
         <DockBarRow fold={folded} items={barItems ?? []} toolLabel={content.label} />
         <>
+          {/* One press turns a Browser or a Terminal into its card in the
+              Environment section; the card's Show brings it back where it was.
+              It stands before Arrange and Close, which every pane ends with. */}
+          {props.onMinimise === undefined ? null : (
+            <IconButton
+              className="dock-tile__control text-muted-foreground"
+              icon={PictureInPicture2}
+              label={`Minimise ${content.label}`}
+              onClick={props.onMinimise}
+            />
+          )}
           {arrangeable ? (
             <OctantMenuRoot>
               <OctantMenuTrigger

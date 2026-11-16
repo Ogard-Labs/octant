@@ -2055,8 +2055,46 @@ html[data-octant-increased-contrast="true"] .navigator-panel__capability {
 
 .dock-mini-card__title {
   min-width: 0;
-  /* The name gives way first, with an ellipsis, before a word beside it or a button. */
-  flex: 1 10 auto;
+  /* The name gives way first, with an ellipsis, before a word beside it or a
+     button. It takes its own width, so the chevron of its pages stands right
+     after it; the space after them is the head's, not the name's. */
+  flex: 0 10 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-mini-card__head-space {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+/* The tool's pages or sessions: a small chevron after the name, a 16px press
+   area in the head's 28px row, with the menu's rows naming each page. */
+.dock-mini-card__pages {
+  width: 16px;
+  min-width: 16px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  padding: 0;
+}
+
+.dock-mini-card__page {
+  display: flex;
+  max-width: 280px;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.dock-mini-card__page-icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.dock-mini-card__page-label {
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -239,6 +239,8 @@ export type ShellActions = {
   readonly minimiseDockTool: (tabId: string) => void;
   /** Brings a minimised tool back from its card, to the place it was minimised from while that place exists. */
   readonly restoreDockTool: (tabId: string) => void;
+  /** Makes another page of the minimised Browser the one its card shows. */
+  readonly previewDockCardPage: (tabId: string) => void;
   /** Takes a minimised tool's card away; the tool stays open, its button in the row. */
   readonly hideDockCard: (tabId: string) => void;
   readonly moveDockTile: (tabId: string, direction: DockTileMove) => void;

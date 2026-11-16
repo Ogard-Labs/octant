@@ -1478,11 +1478,27 @@ describe("tool tiles in the right sidebar", () => {
       expect(screen.queryByRole("region", { name: "Terminal" })).not.toBeInTheDocument();
     });
 
+    it("turns a Browser into its card with one press of the bar's Minimise, and offers none on other panes", async () => {
+      const user = userEvent.setup();
+      render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
+      const browser = screen.getByRole("region", { name: "Browser" });
+      const files = screen.getByRole("region", { name: "Files" });
+      expect(within(files).queryByRole("button", { name: /^Minimise/ })).toBeNull();
+      // Minimise stands before Arrange and Close, which every pane ends with.
+      const trailing = within(browser)
+        .getAllByRole("button")
+        .map((button) => button.getAttribute("aria-label"))
+        .filter((name) => /^(Minimise|Arrange|Close) Browser$/.test(name ?? ""));
+      expect(trailing.slice(-3)).toEqual(["Minimise Browser", "Arrange Browser", "Close Browser"]);
+      await user.click(within(browser).getByRole("button", { name: "Minimise Browser" }));
+      expect(screen.queryByRole("region", { name: "Browser" })).not.toBeInTheDocument();
+      expect(within(shelf()!).getByRole("region", { name: "Minimised Browser" })).toBeVisible();
+      expect(screen.getByRole("region", { name: "Files" })).toBeVisible();
+    });
+
     it("offers Minimise to card only for the Browser and the Terminal, in the tile's Arrange menu and the button's context menu", async () => {
       const user = userEvent.setup();
       render(<TiledDock initial={showUtilityTabBeside(opened("browser", "files"), "browser")} />);
-      // The tile bar carries no button of its own for it: it lives in Arrange.
-      expect(screen.queryByRole("button", { name: /^Minimise/ })).not.toBeInTheDocument();
       await user.click(
         within(screen.getByRole("region", { name: "Browser" })).getByRole("button", {
           name: "Arrange Browser",

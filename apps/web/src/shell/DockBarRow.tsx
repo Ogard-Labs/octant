@@ -32,6 +32,8 @@ const GAP = 4;
 const INSETS = 20;
 /** Arrange and Close with the gaps around them. */
 export const TILE_CONTROLS = 2 * CONTROL + 2 * GAP;
+/** A pane that can become a card has one more: Minimise, before Arrange. */
+export const TILE_MINIMISE_CONTROL = CONTROL + GAP;
 
 /**
  * How much of a tool's controls a bar shows: every control as it is (`full`),

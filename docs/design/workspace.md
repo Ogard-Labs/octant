@@ -1485,18 +1485,19 @@ card brings it back as a tile of its own (see **A card**). The state, with the
 place each minimised tool stood in, is window-local presentation stored with the
 thread's open tools; the bottom panel never has one.
 
-- **Ways in.** A tile's **Arrange <tool>** menu offers **Minimise to card** for the
-  Browser and the Terminal only, after **Hide from view**. The Browser and
+- **Ways in.** A Browser or Terminal pane's bar has a **Minimise <tool>**
+  button (a picture-in-picture glyph) before Arrange and Close: one press turns
+  the pane into its card. A tile's **Arrange <tool>** menu offers **Minimise to
+  card** for the same two tools, after **Hide from view**. The Browser and
   Terminal buttons in the title band's tool row offer the same item on their
   context menu (right click, the menu key or Shift+F10), after the placements
   and before New Terminal or New Browser page. Pressing a pressed Browser or
   Terminal button minimises it instead of closing it, so the page or shell keeps
   running in view on the shelf; closing stays the tile bar's **Close** and
   **Close <tool>** on the button's menu, and every other tool keeps its rule
-  that a press on a pressed button closes it. The tile bar has no button of its
-  own for it, so a tile still has one bar and one name. Minimising never closes
+  that a press on a pressed button closes it. Minimising never closes
   or stops the tool and never sends anything to a page or a shell. Where the
-  tile's Arrange menu minimised it, focus goes to the card's expand control,
+  tile's bar or its Arrange menu minimised it, focus goes to the card's expand control,
   since the control it was on has left; it is taken only while focus is still on
   the page body or in the closing menu, so a person who has since moved it keeps
   it where they put it.
@@ -1521,11 +1522,20 @@ thread's open tools; the bottom panel never has one.
   tiles above keep their floors and measure the space that is left. The modal dock
   (960px and below) has no room for it and draws none; the state is kept, and
   there the tool's button reads as any open tool's, so nothing leads nowhere.
-- **A card** is one of the dock's cards: the tool's icon, a title, **Show
-  <tool>** (expand) and a second control (the Terminal's **Hide Terminal card**, the
+- **A card** is one of the dock's cards: the tool's icon (a page's own icon
+  for the Browser), a title, a small chevron right after the title that opens
+  a menu of the tool's pages or sessions ("Browser pages", "Terminal
+  sessions"; the one the card shows is marked; drawn whenever the tool has
+  any, one included, so the head is the same for one page and for five),
+  **Show <tool>** (expand) and a second control (the Terminal's **Hide Terminal card**, the
   Browser's **Close Browser**, below), and a live preview that is
   itself the expand control (named "Show <tool>, live preview"); the preview is
   drawn inert under that one button, so nothing in it can take focus or act.
+  Choosing a Browser page in the chevron's menu makes it the page the card
+  shows and the one Show returns to, without showing, closing or moving
+  anything; the Terminal's card follows the thread's first shell, so choosing
+  a session there shows that session in its pane. The picture box keeps its
+  size whatever it holds.
   Show brings the tool back as a tile of its own (the Browser as the page it
   last showed), focused, and returns the keyboard to the tool's button in the row. It returns to the place it
   was minimised from while that place still exists: the same row of a column it

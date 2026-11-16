@@ -435,6 +435,23 @@ export function hideUtilityCard(
 }
 
 /**
+ * Makes another page of the minimised Browser the one its card stands for and
+ * shows, and the one showing the Browser returns to. Nothing is shown, closed
+ * or moved: the Browser stays a card. A page that is not the minimised
+ * Browser's changes nothing.
+ */
+export function previewUtilityCardPage(
+  state: ThreadUtilityDockState,
+  tabId: string,
+): ThreadUtilityDockState {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  if (tab === undefined || tab.surface !== "browser") return state;
+  if (shownUtilityTabIds(state).some((id) => id === tabId)) return state;
+  if (state.lastBrowser === tabId) return state;
+  return { ...state, lastBrowser: tabId };
+}
+
+/**
  * Brings a tool back from its card as a tile of its own and focuses it. It
  * returns to the place it was minimised from while that place still exists (its
  * column is there with room, or it was the column after the last and there is

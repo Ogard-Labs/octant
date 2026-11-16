@@ -102,6 +102,37 @@ describe("DockBrowserCard", () => {
     expect(screen.queryByRole("button", { name: "Hide Browser card" })).toBeNull();
   });
 
+  it("lists the Browser's pages behind a chevron after the title, and shows the one chosen", async () => {
+    const user = userEvent.setup();
+    const onChoose = vi.fn();
+    render(
+      <DockBrowserCard
+        client={clientOf(() => snapshot())}
+        onClose={vi.fn()}
+        onExpand={vi.fn()}
+        pages={{
+          label: "Browser pages",
+          items: [
+            { id: "one", label: "Your account", current: true },
+            { id: "two", label: "Pricing", current: false },
+          ],
+          onChoose,
+        }}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      />,
+    );
+    await screen.findByText("Your account");
+    await user.click(screen.getByRole("button", { name: "Browser pages" }));
+    const menu = await screen.findByRole("menu", { name: "Browser pages" });
+    expect(within(menu).getByRole("menuitem", { name: "Your account" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await user.click(within(menu).getByRole("menuitem", { name: "Pricing" }));
+    expect(onChoose).toHaveBeenCalledExactlyOnceWith("two");
+  });
+
   it("asks for a picture only while the card is shown", async () => {
     const client = clientOf(() => snapshot());
     const { unmount } = renderCard(client, { pollIntervalMs: 10 });

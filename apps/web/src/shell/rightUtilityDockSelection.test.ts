@@ -9,6 +9,7 @@ import {
   hideUtilityTile,
   isUtilityToolMinimised,
   minimiseUtilityTool,
+  previewUtilityCardPage,
   offeredBrowserStaysMinimised,
   minimisedUtilityTabIds,
   MINIMISABLE_DOCK_SURFACES,
@@ -905,6 +906,25 @@ describe("dock tool tiles", () => {
 });
 
 describe("minimised dock tools", () => {
+  it("makes another page the one a minimised Browser's card stands for, and shows nothing", () => {
+    const pageOne = "10000000-0000-4000-8000-000000000001";
+    const pageTwo = "10000000-0000-4000-8000-000000000002";
+    let state: ThreadUtilityDockState = { tabs: [] };
+    state = addUtilityTabState(state, "browser", pageOne);
+    state = addUtilityTabState(state, "browser", pageTwo);
+    const parked = minimiseUtilityTool(state, pageTwo);
+    expect(parked.lastBrowser).toBe(pageTwo);
+    const next = previewUtilityCardPage(parked, pageOne);
+    expect(next.lastBrowser).toBe(pageOne);
+    // The Browser is still a card: nothing is shown and nothing is closed.
+    expect(next.minimised).toEqual(parked.minimised);
+    expect(next.layout).toEqual(parked.layout);
+    expect(next.tabs).toEqual(parked.tabs);
+    // The same page again, or a tab that is no Browser page, changes nothing.
+    expect(previewUtilityCardPage(next, pageOne)).toBe(next);
+    expect(previewUtilityCardPage(next, "missing")).toBe(next);
+  });
+
   const pageOne = "10000000-0000-4000-8000-000000000001";
   const pageTwo = "10000000-0000-4000-8000-000000000002";
   const shellTab = "10000000-0000-4000-8000-000000000003";

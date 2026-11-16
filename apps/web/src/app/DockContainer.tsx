@@ -31,6 +31,7 @@ import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { browserPageHost, DockBrowserCard } from "../shell/DockBrowserCard";
+import { PageFavicon } from "../shell/PageFavicon";
 import { dockShelfEntries, type DockShelfEntry } from "../shell/DockShelf";
 import type { DockCardControls } from "../shell/RightUtilityDockSurface";
 import { DockTerminalCard } from "../shell/DockTerminalCard";
@@ -82,6 +83,7 @@ export interface DockContainerProps {
     | "hideDockTile"
     | "minimiseDockTool"
     | "restoreDockTool"
+    | "previewDockCardPage"
     | "runDockToolMenu"
     | "toggleDockTool"
     | "moveDockTile"
@@ -772,6 +774,18 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       key={`browser:${dockThread.threadId}:${contextId ?? ""}`}
                       onClose={controls.onClose}
                       onExpand={controls.onShow}
+                      pages={{
+                        label: "Browser pages",
+                        items: displayedDockState.tabs
+                          .filter((tab) => tab.surface === "browser")
+                          .map((tab) => ({
+                            id: tab.id,
+                            label: pageTitle(tab.id) ?? "New tab",
+                            icon: <PageFavicon src={pageIcon(tab.id)} />,
+                            current: tab.id === entry.tabId,
+                          })),
+                        onChoose: actions.previewDockCardPage,
+                      }}
                       threadId={decodeBrowserThreadId(dockThread.threadId)}
                     />
                   ) : dockThread.mode === "code" ? (
@@ -781,6 +795,21 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
                       key={`terminal:${dockThread.threadId}:${String(dockThread.checkoutId)}`}
                       onExpand={controls.onShow}
                       onHide={controls.onHide}
+                      sessions={{
+                        label: "Terminal sessions",
+                        items: displayedDockState.tabs
+                          .filter((tab) => tab.surface === "terminal")
+                          .map((tab, index) => ({
+                            id: tab.id,
+                            label:
+                              dockTabs.find((candidate) => candidate.id === tab.id)?.label ??
+                              "Terminal",
+                            current: index === 0,
+                          })),
+                        // The card follows the thread's first shell; another
+                        // session is shown in its pane, not in the card.
+                        onChoose: actions.selectDockTab,
+                      }}
                       threadId={decodeCodeThreadId(dockThread.threadId)}
                     />
                   ) : null;

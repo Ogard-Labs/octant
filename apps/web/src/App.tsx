@@ -459,6 +459,7 @@ import {
   hideUtilityTile,
   minimisedUtilityTabIds,
   minimiseUtilityTool,
+  previewUtilityCardPage,
   MAX_DOCK_TILE_COLUMNS,
   MAX_DOCK_TILES_PER_COLUMN,
   offeredBrowserStaysMinimised,
@@ -4675,6 +4676,9 @@ function LaunchedShell(
   function hideDockCard(tabId: string) {
     changeDockTiles((state) => hideUtilityCard(state, tabId));
   }
+  function previewDockCardPage(tabId: string) {
+    changeDockTiles((state) => previewUtilityCardPage(state, tabId));
+  }
   function restoreDockTool(tabId: string) {
     changeDockTiles((state) => restoreUtilityTool(state, tabId));
   }
@@ -5762,6 +5766,7 @@ function LaunchedShell(
       hideDockCard,
       hideDockTile,
       restoreDockTool,
+      previewDockCardPage,
       minimiseDockTool,
       moveDockTile,
       placeDockTile,

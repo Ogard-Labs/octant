@@ -3,7 +3,7 @@ import type { BrowserThreadId } from "@octant/contracts/browser-automation";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
 import { useEffect, useState } from "react";
 import { useBrowserThreadRead } from "../threadActivity/useBrowserThreadSnapshot";
-import { DockMiniCard } from "./DockShelf";
+import { DockMiniCard, type DockCardPages } from "./DockShelf";
 import type { OctantHostBridge } from "./hostBridge";
 import { PageFavicon } from "./PageFavicon";
 
@@ -31,6 +31,8 @@ export function DockBrowserCard(props: {
   /** Closes the page the card stands for. */
   readonly onClose: () => void;
   readonly onExpand: () => void;
+  /** The Browser's pages; choosing one makes it the page the card shows. */
+  readonly pages?: DockCardPages;
   readonly pollIntervalMs?: number;
   readonly threadId: BrowserThreadId;
   /** The desktop app's bridge, whose own picture of the page the card prefers. */
@@ -125,6 +127,7 @@ export function DockBrowserCard(props: {
       onClose={props.onClose}
       onHide={props.onClose}
       onExpand={props.onExpand}
+      pages={props.pages}
       previewLabel={`Show Browser, live preview${
         title === "Browser" ? "" : `: ${title}`
       }${profile === undefined ? "" : `, ${profile} profile`}`}
