@@ -75,8 +75,8 @@ export interface ClaudeRuntimeConfinement {
   readonly executionPolicy: ProviderExecutionPolicy;
   /**
    * Whether this launch offers the Bash tool. A Plan launch gets the shell and
-   * read-only programs only then: Chat, Work and the readiness probes run the
-   * same posture without a shell, and hiding the tool from the model would not
+   * read-only programs only then: Chat and the readiness probes run the same
+   * posture without a shell, and hiding the tool from the model would not
    * take the fork and exec grants away from the process.
    */
   readonly runsCommands?: boolean;

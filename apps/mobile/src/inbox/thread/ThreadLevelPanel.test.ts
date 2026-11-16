@@ -109,6 +109,26 @@ describe("a thread's mode on a phone the host's own person paired", () => {
     expect(document.body.textContent).toContain("The host did not change this thread's mode.");
   });
 
+  it("offers a Work thread Plan and sends it as the Work level change", async () => {
+    const { transport, sent } = host("host-w");
+    const onChanged = vi.fn();
+    mount({
+      actsAsHostPerson: true,
+      subject: {
+        mode: "work",
+        thread: { id: "20000000-0000-4000-8000-000000000001", version: 3, access: "auto" } as never,
+      },
+      transport,
+      onChanged,
+    });
+
+    await press("Plan");
+    expect(sent).toEqual([
+      expect.objectContaining({ kind: "change-work-thread-access", access: "plan" }),
+    ]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the Full access warning once ever per host, not again after the app restarts", async () => {
     const storage = createInMemoryMobileHostRegistryStorage();
     const first = host("host-d");

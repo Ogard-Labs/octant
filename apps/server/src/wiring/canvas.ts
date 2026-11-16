@@ -525,11 +525,11 @@ export function wireCanvas(deps: CanvasDependencies) {
       ),
     }),
     // Read-only is a promise about the disk as well as the journal, so a
-    // Code thread under Plan mode writes no files. Only Code carries an
-    // execution policy; Chat and Work threads have no read-only posture to
-    // read here.
+    // Work or Code thread in Plan writes no files. Chat has no Plan.
     planMode: (version) => {
       const provenance = version.definition.provenance;
+      if (provenance.mode === "work")
+        return workThreadProjection.read(provenance.threadId as never)?.access === "plan";
       if (provenance.mode !== "code") return false;
       return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
     },

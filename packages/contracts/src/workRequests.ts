@@ -2,8 +2,8 @@ import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, UtcTimestamp } from "./events";
-import { ProviderInstanceId, ProviderSessionId } from "./providers";
-import { WorkThreadId } from "./workThreads";
+import { MAX_PROVIDER_PLAN_CHARACTERS, ProviderInstanceId, ProviderSessionId } from "./providers";
+import { WorkAccess, WorkThreadId } from "./workThreads";
 import { Questionnaire, QuestionnaireResponse } from "./questionnaire";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -66,6 +66,16 @@ const WorkRequestProviderOptionValues = Schema.Array(WorkRequestProviderOptionVa
 );
 export type WorkRequestProviderOptionValues = typeof WorkRequestProviderOptionValues.Type;
 
+// Tabs and line breaks are a plan's layout; every other control character is refused.
+function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if ((code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f)
+      return true;
+  }
+  return false;
+}
+
 export const WorkRequestKind = Schema.Literal("approval", "user-input");
 export type WorkRequestKind = typeof WorkRequestKind.Type;
 
@@ -112,16 +122,53 @@ export const WorkQuestionnaireResponse = QuestionnaireResponse.pipe(
 export const decodeWorkQuestionnaireResponse = Schema.decodeUnknownSync(WorkQuestionnaireResponse);
 
 /**
+ * The plan an agent asks the person to approve when it asks to leave Plan,
+ * shown whole on the card. Unlike request text it keeps paths and links: a
+ * plan names the files it would change, and the person must read exactly
+ * what they approve. The host redacts known secret formats before recording
+ * it, and it is bounded as a runtime's plan is.
+ */
+export const WorkLevelChangePlan = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_PROVIDER_PLAN_CHARACTERS),
+  Schema.filter((value) => !hasControlCharacter(value)),
+);
+export type WorkLevelChangePlan = typeof WorkLevelChangePlan.Type;
+
+/**
+ * An approval that asks to change the thread's level instead of to run a
+ * tool: the agent's own ask to plan first (`to: "plan"`), or to leave Plan
+ * for the level the thread returns to, with the plan it hands over.
+ */
+export const WorkLevelChangeRequest = Schema.Struct({
+  to: WorkAccess,
+  plan: Schema.optional(WorkLevelChangePlan),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (change) =>
+        change.to !== "full-access" && (change.to !== "plan" || change.plan === undefined),
+      {
+        jsonSchema: {},
+      },
+    ),
+  );
+export type WorkLevelChangeRequest = typeof WorkLevelChangeRequest.Type;
+
+/**
  * Sanitized request detail. `approval` carries the action/description a
- * provider tool call wants to perform; `user-input` carries the prompt and
- * bounded option list a provider question offers. Both are already sanitized
- * free text with no path/URL leakage; only up to 8 options are retained.
+ * provider tool call wants to perform, and `levelChange` when the call asks
+ * to move the thread into or out of Plan; `user-input` carries the prompt and
+ * bounded option list a provider question offers. Action, description,
+ * prompt and options are sanitized free text with no path/URL leakage; only
+ * up to 8 options are retained.
  */
 export const WorkRequestDetail = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("approval"),
     action: WorkRequestSanitizedText,
     description: WorkRequestSanitizedText,
+    levelChange: Schema.optional(WorkLevelChangeRequest),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("user-input"),

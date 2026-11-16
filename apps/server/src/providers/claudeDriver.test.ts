@@ -801,8 +801,11 @@ describe("Claude execution policy", () => {
       ],
       fullToolSet: false,
     });
-    // A Code Plan turn runs read-only commands only where its sandbox can hold
-    // the shell; Chat has no shell, and Work never runs in Plan.
+    // A Work or Code Plan turn runs read-only commands only where its sandbox
+    // can hold the shell; Chat has no shell.
+    expect(claudeExecutionOptions("plan", false, "work", "darwin")).toEqual(
+      claudeExecutionOptions("plan", false, "code", "darwin"),
+    );
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -816,13 +819,15 @@ describe("Claude execution policy", () => {
       "Bash",
     ]);
     // Linux holds each command in a nested capsule where the host can build one.
-    expect(claudeExecutionOptions("plan", false, "code", "linux").tools.includes("Bash")).toBe(
-      claudePlanRunsCommands("linux"),
-    );
+    for (const mode of ["code", "work"] as const) {
+      expect(claudeExecutionOptions("plan", false, mode, "linux").tools.includes("Bash")).toBe(
+        claudePlanRunsCommands("linux"),
+      );
+    }
     for (const [mode, platform] of [
       ["code", "win32"],
+      ["work", "win32"],
       ["chat", "darwin"],
-      ["work", "darwin"],
     ] as const) {
       expect(claudeExecutionOptions("plan", false, mode, platform).tools).toEqual([
         "Read",

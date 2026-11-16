@@ -86,7 +86,7 @@ async function press(label: string, index = 0) {
 }
 
 describe("phone owner recovery across roster changes", () => {
-  it("chooses a Work level without offering Plan or adding a Code persistence grant", async () => {
+  it("chooses a Work level, Plan offered among them, without adding a Code persistence grant", async () => {
     const subject = { kind: "work-thread", threadId: "50000000-0000-4000-8000-000000000001" };
     const work = {
       title: "Work task",
@@ -96,7 +96,7 @@ describe("phone owner recovery across roster changes", () => {
     mount([spoke]);
     await press("Refresh access levels");
     await press("Work thread: Work task");
-    expect(buttons("Plan (read only)")).toHaveLength(0);
+    expect(buttons("Plan (read only)")).toHaveLength(1);
     expect(buttons("Auto")).toHaveLength(1);
     await press("Auto");
     await press("Apply level");
