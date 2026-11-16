@@ -40,6 +40,7 @@ import {
   type BrowserToolRecordingOperation,
 } from "./browserToolOperations";
 import { BROWSER_TOOL_DEFINITION, BROWSER_TOOL_HELP } from "./browserToolDefinition";
+import { askOneUsePageScriptPermission } from "./browserPageScriptPermission";
 import type {
   BrowserDownloadSource,
   BrowserActionRequest,
@@ -192,9 +193,12 @@ export interface BrowserAppManagedToolsOptions {
    * level the thread holds now (undefined once it differs from the level this
    * turn began with). Chat has no Full access, and terminal, routine and
    * delegated-child tools are lent none, so `run-script` is refused there.
+   * `oneUsePermission` says whether Work below Full access may ask the
+   * person's one-use script permission, as Code does; Strict keeps it off.
    */
   readonly pageScript?: {
     readonly level: () => ProviderExecutionPolicy | undefined;
+    readonly oneUsePermission: () => boolean;
     readonly run: (input: BrowserPageScriptInput) => Promise<BrowserPageScriptReceipt>;
   };
   readonly approvals?: Pick<BrowserToolApprovalService, "request"> &
@@ -290,8 +294,13 @@ export function createBrowserAppManagedTools(
       const script = options.pageScript;
       if (script === undefined || options.mode !== "work") return failure("script-unavailable");
       if (signInRefusal(options) !== undefined) return failure("script-needs-a-local-person");
-      // Work has no one-use script permission: below Full access it is refused.
-      if (script.level() !== "full-access") return failure("script-needs-full-access");
+      const level = script.level();
+      if (level === undefined) return failure("browser-authority-stale");
+      if (level === "plan") return failure("plan-mode-read-only");
+      // Below Full access Work asks Code's one-use permission for this exact
+      // source; Strict will keep Work refused there (`oneUsePermission`).
+      const scoped = level !== "full-access";
+      if (scoped && !script.oneUsePermission()) return failure("script-needs-full-access");
       if (!modelIsCurrent(options)) return failure("browser-model-stale");
       const opened = options.browser.inspectThread(options.windowId, options.threadId);
       if (opened.waitingForPerson !== undefined) {
@@ -301,6 +310,15 @@ export function createBrowserAppManagedTools(
       if (context?.state !== "active" || context.presentation !== "native-live")
         return failure("script-needs-the-app-browser");
       const profileKey = JSON.stringify(context.policy.profile ?? null);
+      const bindingIsCurrent = () => {
+        const binding = options.modelBindings.get(String(context.contextId));
+        return (
+          binding !== undefined &&
+          binding.approval !== "pending" &&
+          String(binding.modelId) === String(options.modelId) &&
+          sameToolActionAuthority(binding.authority, authority)
+        );
+      };
       const callerIsCurrent = () => {
         const latest = options.browser.inspectThread(options.windowId, options.threadId);
         const held = options.resolveAuthority(options.threadId, options.mode);
@@ -308,21 +326,44 @@ export function createBrowserAppManagedTools(
           held !== undefined &&
           sameToolActionAuthority(authority, held) &&
           modelIsCurrent(options) &&
-          script.level() === "full-access" &&
+          script.level() === level &&
+          (!scoped || bindingIsCurrent()) &&
           signInRefusal(options) === undefined &&
           String(latest.context?.contextId) === String(context.contextId) &&
           JSON.stringify(latest.context?.policy.profile ?? null) === profileKey &&
           latest.waitingForPerson === undefined
         );
       };
+      if (scoped) {
+        const permission = await askOneUsePageScriptPermission({
+          approvals: options.approvals,
+          windowId: options.windowId,
+          threadId: String(options.threadId),
+          authority,
+          profile: storedBrowserProfile(context.policy.profile),
+          expectedUrl: opened.observation?.url,
+          source: input.source,
+          expectedObservationRevision: input.expectedObservationRevision,
+          bindingIsCurrent,
+          callerIsCurrent,
+          observe: () =>
+            options.browser.inspectThread(options.windowId, options.threadId).observation,
+          pageHold,
+          signal,
+        });
+        if (permission.status === "refused") return failure(permission.reason);
+      }
       const receipt = await script.run({
         windowId: options.windowId,
         threadId: options.threadId,
         contextId: context.contextId,
         source: input.source,
         expectedObservationRevision: input.expectedObservationRevision,
-        turnExecutionPolicy: "full-access",
+        turnExecutionPolicy: level,
         callerIsCurrent,
+        // The service checks the exact observation before dispatch, then
+        // invalidates it after an effect; publication still checks authority.
+        ...(scoped ? { scriptPermissionIsCurrent: callerIsCurrent } : {}),
         ...(signal === undefined ? {} : { signal }),
       });
       return browserPageScriptToolResult(

@@ -348,6 +348,26 @@ describe("starting a Code thread from the terminal", () => {
     }
   });
 
+  it("starts this run's thread at Full access with the person's flag, remembering nothing on the Project", async () => {
+    const fake = host("current-session");
+
+    const result = await createAgentThread(fake.session, {
+      mode: "code",
+      title: "Run the terminal",
+      projectName: "Repo",
+      access: "full-access",
+      fullAccessScope: "run",
+    });
+
+    expect(result).toMatchObject({ kind: "created", mode: "code" });
+    expect(result).not.toHaveProperty("projectRemembersFullAccess");
+    expect(fake.projectCommands()).toEqual([]);
+    expect(fake.created()?.thread).toMatchObject({
+      executionPolicy: "full-access",
+      fullAccessRunFlag: true,
+    });
+  });
+
   it("starts a narrower asked-for mode without touching the Project's remembered access", async () => {
     const fake = host("project-default");
 

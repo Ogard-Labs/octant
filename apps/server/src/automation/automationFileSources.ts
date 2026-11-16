@@ -208,6 +208,10 @@ export class AutomationFileSources {
           : {}),
         coverageGap: checkpoint.coverageGap,
         activityWindow: [],
+        // A re-arm is a review of the input, not of the window the person set.
+        ...(checkpoint.activityWindowLimit === undefined
+          ? {}
+          : { activityWindowLimit: checkpoint.activityWindowLimit }),
         busyChangeObserved: false,
       };
       const retained = () =>
