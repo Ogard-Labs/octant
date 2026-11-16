@@ -738,6 +738,19 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 /* SettingGroup's optional description; the divider under it comes from the
    first row's own border-top, so the note draws none of its own. */
+/* A group whose values are still being read keeps its rows and hides only
+   their controls, so the rows stand where they will and no value that was
+   never saved is shown. */
+.setgroup[data-loading="true"] .setrow-control {
+  visibility: hidden;
+}
+
+/* The load readings are three lines once read; the room is held from the
+   first frame so the rows under them do not step down when they arrive. */
+.host-resources__readings {
+  min-height: 3lh;
+}
+
 .setgroup-note {
   margin: 0;
   padding: 0 0 12px;
