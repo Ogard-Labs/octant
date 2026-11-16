@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./activation": "./src/activation.ts",
+    "./acp-agents": "./src/acpAgents.ts",
     "./provider-drivers": "./src/bundledProviderDrivers.ts",
     "./language-servers": "./src/bundledLanguageServers.ts",
     "./agent-plugins": "./src/agentPlugins/index.ts",

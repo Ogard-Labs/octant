@@ -232,6 +232,13 @@ interface Factories {
   readonly clock: () => string;
   readonly makeCorrelation: () => string;
   readonly makeRequestId: () => string;
+  /**
+   * What the last probe found of the profile's reviewed command inventory.
+   * `unverified`: the release listed another inventory, so it runs at Full
+   * access only; `unreviewed` names the commands it listed beyond the
+   * reviewed ones.
+   */
+  readonly commandInventory: { unverified: boolean; unreviewed: ReadonlyArray<string> };
 }
 
 function hasVerifiedCompaction(profile: AcpProviderProfile): boolean {
@@ -609,6 +616,16 @@ function advertisedCommandsOf(
   return advertisedSlashCommands(update.availableCommands);
 }
 
+/** What the runtime card says of a release whose command inventory Octant has not reviewed. */
+function unverifiedInventoryMessage(
+  name: string,
+  version: string,
+  unreviewed: ReadonlyArray<string>,
+): string {
+  const listed = unreviewed.length === 0 ? "" : ` (${unreviewed.join(", ")})`;
+  return `${name} ${version} is unverified: its commands${listed} differ from the ones Octant reviewed. It runs at Full access only, its listed commands with it; below Full access it is refused until Octant reviews this release.`;
+}
+
 function isReviewedCommandInventory(
   reviewed: ReadonlyArray<string>,
   commands: ReadonlyArray<string>,
@@ -662,6 +679,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
     clock: options.clock ?? (() => new Date().toISOString()),
     makeCorrelation: options.correlationId ?? (() => crypto.randomUUID()),
     makeRequestId: options.requestId ?? (() => crypto.randomUUID()),
+    commandInventory: { unverified: false, unreviewed: [] },
   };
   const resumeIdentities = new Map<string, ResumeIdentity>();
   const request = <A>(
@@ -747,13 +765,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       } finally {
         removeNotification();
       }
-      if (!isReviewedCommandInventory(reviewed, commands)) {
-        return yield* Effect.fail(
-          failure("incompatible", `${name} advertised an unreviewed command inventory.`, {
-            reason: "runtime-incompatible",
-          }),
-        );
-      }
+      // A release whose inventory differs from the reviewed one is offered
+      // as unverified rather than refused: it runs at Full access, each of
+      // its listed commands with it, and below Full access the pin holds.
+      factories.commandInventory.unverified = !isReviewedCommandInventory(reviewed, commands);
+      factories.commandInventory.unreviewed = [
+        ...new Set(commands.filter((command) => !reviewed.includes(command))),
+      ].slice(0, 32);
       return scratch;
     });
 
@@ -869,7 +887,19 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
+        const commandsListed =
+          advertised.length === 0 ? observed : { ...observed, commands: advertised };
+        const listed =
+          !factories.commandInventory.unverified || profile.reviewedCommands === undefined
+            ? commandsListed
+            : {
+                ...commandsListed,
+                message: unverifiedInventoryMessage(
+                  name,
+                  connection.version,
+                  factories.commandInventory.unreviewed,
+                ),
+              };
         options.runtimeRegistry.setObservedState(listed);
         return listed;
       });
@@ -1588,6 +1618,16 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
+            if (
+              profile.reviewedCommands !== undefined &&
+              factories.commandInventory.unverified &&
+              input.executionPolicy !== "full-access"
+            )
+              throw failure(
+                "incompatible",
+                `${name} lists commands Octant has not reviewed, so this release runs at Full access only, unverified.`,
+                { reason: "runtime-incompatible" },
+              );
             // A Project trusted for the agent, outside Plan, loads the files
             // the refusal is about, as the agent does on its own.
             const projectRefusal =
@@ -2116,7 +2156,14 @@ function makeConnection(
                 // that inventory, and one its session listed once it has
                 // listed any, so an unreviewed command cannot run. It does so
                 // in every mode; the level's tool rules decide what it does.
-                const reviewed = profile.reviewedCommands;
+                // At Full access an unverified release runs its listed
+                // commands too, as the agent does on its own.
+                const reviewed =
+                  profile.reviewedCommands === undefined
+                    ? undefined
+                    : state.executionPolicy === "full-access"
+                      ? [...profile.reviewedCommands, ...factories.commandInventory.unreviewed]
+                      : profile.reviewedCommands;
                 const opensWithSlash = prompt.trimStart().startsWith("/");
                 const listed = [...state.runtime.commands];
                 const command = providerCommandOf(

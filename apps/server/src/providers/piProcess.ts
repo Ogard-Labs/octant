@@ -895,7 +895,11 @@ export function makePiConfinementLive(options: PiConfinementOptions = {}): PiCon
               allowFileReadStar: true,
               // Outside Strict Pi's own tools may use the protected files
               // inside its folders, other providers' sign-ins excepted.
-              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
+              ...(input.strict === false &&
+              input.fullAccessSandbox !== true &&
+              input.sandboxPolicy === undefined
+                ? { protectedFiles: "provider-sign-ins" as const }
+                : {}),
               // Work declares shell "denied"; an in-process provider shell
               // emits no permission request, so the jail itself must refuse
               // to spawn it.

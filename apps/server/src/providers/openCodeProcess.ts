@@ -101,6 +101,12 @@ export interface OpenCodeProcessStartInput {
    */
   readonly fullAccessSandbox?: boolean;
   readonly sandboxPolicy?: SandboxPolicySelection;
+  /**
+   * Whether the launch is Strict; absent is Strict. Outside Strict the wall
+   * refuses only other providers' sign-ins among the protected files, so
+   * OpenCode's own tools use the rest as they do on their own.
+   */
+  readonly strict?: boolean;
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /**
@@ -1431,6 +1437,13 @@ function prepareOpenCodeLaunch(
           ? { loopbackRelayPorts: loopbackPorts }
           : {}),
         writeBoundRoot: !chatOrPlan,
+        // Outside Strict OpenCode's own tools may use the protected files
+        // inside its folders, other providers' sign-ins excepted.
+        ...(input.strict === false &&
+        input.fullAccessSandbox !== true &&
+        input.sandboxPolicy === undefined
+          ? { protectedFiles: "provider-sign-ins" as const }
+          : {}),
         allowProcessExec: !jailDeniesProcess,
         // On macOS the stand-in needs fork so OpenCode can spawn the failing
         // git; exec stays denied except for the single /usr/bin/false literal

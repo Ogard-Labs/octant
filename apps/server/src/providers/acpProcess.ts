@@ -607,7 +607,11 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
               networkEgress,
               // Outside Strict the agent's own tools may use the protected
               // files inside its folders, other providers' sign-ins excepted.
-              ...(input.strict === false ? { protectedFiles: "provider-sign-ins" as const } : {}),
+              ...(input.strict === false &&
+              input.fullAccessSandbox !== true &&
+              input.sandboxPolicy === undefined
+                ? { protectedFiles: "provider-sign-ins" as const }
+                : {}),
               // On Linux the capsule reaches the tool bridges through the
               // forwarder's loopback relay; Seatbelt opens them above.
               ...(platform === "linux" &&

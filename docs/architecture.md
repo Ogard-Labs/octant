@@ -14471,7 +14471,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
     Claude Code's full built-in tool preset with no Octant deny list.
   - **OpenCode's `task` subagents** are always allowed outside Plan, instead
-    of following the level; Plan still denies them.
+    of following the level; Plan still denies them. Built: `task` and 2.x
+    `subagent` start unasked at every level outside Plan, a child session's
+    requests still reach the person through the parent's approval path, and a
+    person's own OpenCode rule denying `task` still wins.
 
   Rationale: each provider then behaves as its own documentation says, and
   Octant's server still answers every ask the provider raises and journals
@@ -14519,8 +14522,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Codex: outside Strict a Work or Code thread below Full access runs in
     Codex's own sandbox, which reads them as Codex on its own does, and a
     Plan or Chat lease keeps Octant's profile with only other providers'
-    sign-ins refused. Not built yet for OpenCode, whose processes are shared
-    per posture and do not yet key on Strict. Until
+    sign-ins refused. Built for OpenCode, whose shared process is keyed on
+    Strict: outside Strict its wall and its permission rules refuse only
+    other providers' sign-ins, and a process started under one Strict value
+    refuses a session asking for the other. Until
     [Providers run in their own sandbox](#security-and-authority) is built for
     a runtime, its wall still keeps files outside the Project's folders
     unreadable, so outside Strict the narrowing reaches the protected files
@@ -14739,8 +14744,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   built. A device the host knows only through the hub's roster is unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
-  2026-11-16; partly built: Ollama off loopback and Bedrock's AWS profile and
-  access keys are built, the rest is designed, not built):
+  2026-11-16; partly built: Ollama off loopback, Bedrock's AWS profile and
+  access keys, and Kimi Code's unverified command inventory are built, as
+  each item says):
   - **Ollama off loopback.** An Ollama address on the local network or a
     hosted Ollama is allowed, and plain HTTP to a private-network address is
     allowed with a warning; a public address still needs HTTPS
@@ -14753,7 +14759,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     the one a version pin was reviewed against is offered as "unverified"
     instead of losing the pinned features (Kimi Code's command inventory,
     OpenCode's Octant tools, an ACP probe's claims); below Full access the
-    pin holds ([Provider runtimes](design/provider-runtimes.md)).
+    pin holds ([Provider runtimes](design/provider-runtimes.md)). Built for
+    Kimi Code's command inventory; OpenCode's Octant tools were already
+    offered at Full access on any release that accepts them (`mixed`). Not
+    built yet for an ACP probe's exact-release claims.
   - **Linux parity.** Octant's tools reach OpenCode and ACP agents on Linux
     as on macOS (built: the launch reaches the tool bridge on the shared host
     network, or through the egress forwarder's loopback relay for the
@@ -15531,7 +15540,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps
-    Octant's profile.
+    Octant's profile. A provider's own sandbox replaces Octant's profile
+    only where it can keep other providers' sign-ins unreadable, since one
+    provider never reads another's credentials, Strict or not. Checked, and
+    kept on Octant's profile below Full access for that reason or the ones
+    [Provider runtimes](design/provider-runtimes.md#own-sandboxes-checked-and-not-switched)
+    records: Gemini CLI, Qwen Code, Copilot CLI, Cursor and Grok Build.
   - **Unchanged.** Server-side approval authority and journaling; Plan's
     read-only enforcement and no shell in Chat; the paired-device and
     routine rules; never handing one provider another's credentials;
@@ -15551,9 +15565,11 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Code settings for the same reason. Octant's profile cannot hold a native sandbox inside
   it on macOS, which refuses nested Seatbelt, so keeping the wall means
   giving the native sandbox up. The accepted trade-off: below Full access a
-  provider's native sandbox may allow reads outside the Project, other
-  credentials included, as the provider on its own does; a person who wants
-  those reads closed turns Strict on.
+  provider's native sandbox may allow reads outside the Project, the
+  person's other credentials included, as the provider on its own does; a
+  person who wants those reads closed turns Strict on. Another provider's
+  sign-in is never among them: a native sandbox that cannot refuse those
+  keeps Octant's profile.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                     | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

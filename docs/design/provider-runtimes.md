@@ -1469,8 +1469,13 @@ the Provider sign-ins group stays refused there, on 1.x and 2.x alike, still
 last, and the person's added paths and every other group are readable
 (maintainer decision, 2026-11-15). The host narrows the list
 (`protectedAtLevel`) and passes the driver both lists, below and at Full
-access, as plain paths; the driver only picks one by level and imports no
-host policy. A Full access launch
+access, as plain paths; the driver only picks one by level and by Strict
+(`openCodeProtectedPathsFor`) and imports no host policy. Outside Strict the
+Full access list applies at every level, so OpenCode's own tools use the
+other protected files as on their own, and its wall drops the same files
+(`protectedFiles: "provider-sign-ins"`); Strict keeps the whole list below
+Full access ([Architecture: Octant adds no restrictions of its own unless
+Strict is on](../architecture.md#security-and-authority)). A Full access launch
 runs outside Octant's sandbox, so no OS rule narrows with it; one that kept
 its sandbox keeps the Accept edits wall and its whole OS deny list. Plan also allows
 OpenCode's other read-only tools without asking: `todowrite`, `todoread`,
@@ -1689,6 +1694,34 @@ instance resumes the same native session on the thread's current model and
 re-records it on the cursor's binding, instead of refusing the session it can
 carry.
 
+### OpenCode subagents, Strict and sessions
+
+OpenCode's `task` (2.x `subagent`) starts without asking at every level
+outside Plan, as OpenCode's own default agent starts it (maintainer decision,
+2026-11-15). Starting one changes nothing by itself: the child session runs
+under the same rules, and each edit, command or outside folder it asks for
+reaches the person through the parent's approval path
+(`openCodeChildSessions.ts`). Plan still denies both names, and a person's
+own OpenCode rule denying `task` still wins, since their rules come after
+the level's allows.
+
+OpenCode serves every session of a connection from one process, whose wall
+and permission rules are fixed at its start, so the process is keyed on
+Strict as on the level: a session asking for the other Strict value than the
+running process was started with is refused, as a wider level is, and the
+next start launches a fresh process.
+
+Not built yet: starting a thread from one of the person's own OpenCode
+sessions, and a native fork. OpenCode's server serves both (`GET /session`
+and `POST /session/{id}/fork` with a `messageID`), but three pieces are
+missing: listing or forking needs a running server for the folder outside
+any thread, and a short-lived Plan-posture launch is refused by OpenCode 2
+on a host whose Chat and Plan jail starts no process; Octant keeps no durable
+record of which Octant session holds which OpenCode session (the resume
+cursor is the only one), so a session another thread holds cannot be left
+out or refused; and OpenCode's completed turn reports no native anchor for
+a fork to end at.
+
 ## Pi
 
 Octant launches Pi in RPC mode with `--no-extensions`, which since Pi 0.99
@@ -1752,6 +1785,31 @@ runs on the model it was opened with, so a resume that names another is refused
 as `stale-resume` rather than run on the old model unseen. Pi 1.0.3
 renamed the Azure provider from `azure-openai-responses` to `azure` and kept
 its `AZURE_OPENAI_*` variables, so a thread holds them under either name.
+
+A message the person sends into a running Pi turn is steered into it with
+Pi's RPC `steer`, which Pi delivers after the current step finishes its tool
+calls and before the next model call (Pi's RPC command reference); a steer Pi
+declines leaves the turn as it was and reads as not steered. The person may
+compact a Pi session between turns: Pi's RPC `compact` compacts it in any
+mode, and the reply's `tokensBefore` and `estimatedTokensAfter` are reported
+with the requested compaction, which may take up to ten minutes. A refusal
+from Pi is reported as a failed compaction that may have changed the session,
+since its reply does not say how far it got.
+
+An empty Work or Code thread can start from one of the person's own Pi
+sessions in its folder (`piNativeSessions.ts`). Pi keeps each session as a
+JSONL file under `<sessions>/--<folder>--/<timestamp>_<id>.jsonl`, where
+`<sessions>` is `PI_CODING_AGENT_SESSION_DIR`, else the agent folder's
+`sessions`, and the first line is its header naming its id and folder (Pi's
+session file format reference). The list offers the newest 50 whose header
+names the thread's folder, with the name the person last gave each. Adopting
+copies the session into Octant's own Pi session folder under the thread's
+session id, with `parentSession` naming the file it came from, as Pi's own
+fork records its source, and the thread then resumes the copy through the
+ordinary checks. The person's file is never written, so their own Pi keeps
+working on it; the copy's `parentSession` is the record that a thread holds
+that session, which is then neither offered again nor adopted by a second
+thread. A `sessionDir` set in Pi's settings file is not read.
 
 ## ACP agents
 
@@ -1863,6 +1921,53 @@ command such as `update-config` may do. The earlier refusal everywhere was
 Octant's default, not a protocol limit: ACP carries the command as prompt
 text.
 
+### Own sandboxes checked and not switched
+
+Under [Providers run in their own sandbox](../architecture.md#security-and-authority)
+an agent's own sandbox replaces Octant's profile only where it keeps other
+providers' sign-ins unreadable: one provider never reads another's
+credentials, Strict or not, as OpenCode's launch outside Strict keeps the
+Provider sign-ins group refused (`protectedFiles: "provider-sign-ins"`).
+Each agent below keeps Octant's profile below Full access, and Strict and
+Full access are as they were.
+
+- **Gemini CLI** 0.68.0 runs each tool command in its own sandbox when
+  `security.toolSandboxing` is set (Seatbelt on macOS, Bubblewrap on Linux),
+  and a command that needs more raises a `sandbox_expansion` confirmation
+  its ACP server sends as `session/request_permission`. Its sandbox reads
+  every file but the Project's `.geminiignore` entries: no setting takes a
+  deny list Octant could write (`tools.sandboxAllowedPaths` only widens),
+  and an expansion can widen reads to any path, so `~/.codex/auth.json` or
+  another provider's managed home would be readable.
+- **Qwen Code** 0.27.4 relaunches itself, ACP included, under `sandbox-exec`
+  when `QWEN_SANDBOX` names it, but every built-in Seatbelt profile it ships
+  allows all reads (`permissive-*` allow everything, `restrictive-*` keep
+  `(allow file-read*)`), and a custom profile is read only from the
+  Project's `.qwen` folder, which Octant does not write. On Linux its sandbox
+  is Docker or Podman, which Octant does not start.
+
+- **Copilot CLI** 1.0.112 has a command sandbox (its MXC layer: Seatbelt on
+  macOS; Bubblewrap with a private network namespace on Linux, needing
+  `slirp4netns`, `iptables` and `/dev/net/tun`) and a per-command bypass.
+  Its help says `--sandbox` enables it for one session, but `copilot --help`
+  on 1.0.112 does not list that flag, the setting otherwise lives in the
+  person's own `settings.json`, which Octant does not write, and whether a
+  bypass reaches an ACP client as a permission request needs a signed-in
+  probe. It keeps Octant's profile.
+- **Cursor** has no probed release on this stack, so it keeps Octant's
+  profile wherever it is added as [any ACP agent](#any-acp-agent).
+- **Grok Build** 1.0.77 applies its own sandbox to its own process
+  (Seatbelt on macOS, Landlock on Linux), so inside Octant's Seatbelt profile
+  it would nest one Seatbelt profile in another, which macOS refuses:
+  `GROK_SANDBOX=off` keeps the person's `[sandbox] profile` from making it
+  try. Switching to Grok's own sandbox outside Strict was checked and not
+  done: its built-in profiles log a warning and run unenforced where the
+  kernel cannot apply them, write only the folder Grok starts in (not the
+  Project's extra folders), and the custom profiles that refuse to start
+  when they cannot be applied live only in the person's `~/.grok/sandbox.toml`
+  or the Project's `.grok/sandbox.toml`, neither of which Octant writes; no
+  per-command grant reaching an ACP client could be read from the release.
+
 ### What an ACP agent cannot do
 
 The protocol leaves three things to the agent, and the driver reports them as
@@ -1943,11 +2048,11 @@ distribution.
 | `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
 | `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
 | `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
-| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Probe next (shortlist)                                                                              |
-| `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Probe next (shortlist)                                                                              |
-| `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Probe next                                                                                          |
-| `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Probe next                                                                                          |
-| `factory-droid`           | Factory Droid      | `npx droid exec --output-format acp-daemon`            | Probe next                                                                                          |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Listed for adding as any ACP agent; profile needs the probe                                         |
+| `factory-droid`           | Factory Droid      | `npx droid exec --output-format acp-daemon`            | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `autohand`                | Autohand Code      | `npx @autohandai/autohand-acp`                         | Probe next                                                                                          |
 | `bob`                     | Bob                | `npx @ibm/bob acp`                                     | Probe next                                                                                          |
 | `codebuddy-code`          | Codebuddy Code     | `npx @tencent-ai/codebuddy-code --acp`                 | Probe next                                                                                          |
@@ -1965,7 +2070,7 @@ distribution.
 | `claude-acp`              | Claude Agent       | `npx @agentclientprotocol/claude-agent-acp`            | Blocked: Claude Code stays on the Agent SDK driver                                                  |
 | `codex-acp`               | Codex              | `npx @agentclientprotocol/codex-acp`                   | Blocked: Codex stays on the app-server driver                                                       |
 | `pi-acp`                  | pi ACP             | `npx pi-acp`                                           | Blocked: Pi stays on the RPC driver                                                                 |
-| `cursor`                  | Cursor             | `cursor-agent acp` (binary)                            | Blocked: kept out of production                                                                     |
+| `cursor`                  | Cursor             | `cursor-agent acp` (binary)                            | Listed for adding as any ACP agent; profile needs the probe                                         |
 | `github-copilot`          | Copilot            | `npx @github/copilot-language-server --acp`            | Blocked: Copilot ships through the Copilot CLI entry; the language server is not a coding-agent CLI |
 | `agoragentic-acp`         | Agoragentic        | `npx agoragentic-mcp --acp`                            | Blocked: registry quarantine (postinstall script)                                                   |
 | `crow-cli`                | crow-cli           | `crow-cli acp` (binary)                                | Blocked: registry quarantine (initialize fails)                                                     |
@@ -1981,6 +2086,22 @@ Kiro, Trae and Muse (not in the snapshot above), are to become first-class
 profiles, each through the probe below; Cursor's block is to be rechecked
 against the current release and lifted if its reason no longer holds. Every
 other agent can be added as [any ACP agent](#any-acp-agent).
+
+Rechecked against the registry's source at commit `131167e` (2026-11-16):
+none of these has a profile yet, because none has the signed-in probe below
+on record and the registry entry gives only a command, not the
+`agentInfo.name`, modes, sign-in folder or Project entries a profile pins.
+They are listed for adding as any ACP agent instead (`ACP_REGISTRY_AGENTS`),
+with the registry's macOS command: Google Antigravity (`agy_acp_server.par`,
+1.5.0), Factory Droid (`npx droid@1.12.1 exec --output-format acp-daemon`),
+Junie (`junie --acp=true` inside `junie.app`, 4020.10.0), Amp (`amp-acp`
+0.13.0, a third-party wrapper), Auggie (`npx @augmentcode/auggie@0.37.0
+--acp`), Kiro CLI (`kiro-cli acp --agent-engine=v3`, 3.0.0) and Muse Code
+(`muse acp`, 1.4.14). Trae is not in the registry at that commit, so a
+person adds it as a local command. Cursor's block was that its
+compatibility probe through this stack never ran (registry 2026.11.13,
+`cursor-agent acp`); that still holds for a profile, so Cursor too is listed
+for adding as any ACP agent rather than kept out.
 
 fx ships as an ACP profile (`fx`) but is not in the registry.
 
@@ -2003,7 +2124,7 @@ threads stay.
 
 ### Any ACP agent
 
-Decided (maintainer decision, 2026-11-16; designed, not built; this replaces
+Decided (maintainer decision, 2026-11-16; partly built; this replaces
 the rule that only a reviewed profile runs): a person may add an agent from
 the public ACP registry, or their own local command, through the plugin
 model ([Architecture: extensions and skills](../architecture.md#extensions-and-skills)).
@@ -2018,12 +2139,47 @@ above allow. Trusting it lifts the sandbox outside Strict, as for a shipped
 profile. A reviewed profile stays the way an agent gets Octant's deeper fit
 (mode mapping, managed home, usage and the probe's evidence).
 
+Built: the launch policy, `decideAcpAgentLaunch` in
+`packages/plugin-host/src/acpAgents.ts`, pure like the rest of the
+activation policy there:
+
+| Steps the person took                  | Strict or level                 | Starts                                |
+| -------------------------------------- | ------------------------------- | ------------------------------------- |
+| None (found in the registry, or typed) | Any                             | Nothing (`not-installed`)             |
+| Installed, not enabled                 | Any                             | Nothing (`disabled`)                  |
+| Installed and enabled, not trusted     | Any, Full access included       | In Octant's sandbox, remembering none |
+| Trusted                                | Full access                     | With no sandbox                       |
+| Trusted                                | Plan, or Strict (or unresolved) | In Octant's sandbox                   |
+| Trusted                                | Outside Strict, below Full      | Without Octant's sandbox              |
+
+An untrusted agent at Full access gets the wall Accept edits has, since it
+is not yet trusted to run open. A command is an absolute executable path
+with literal arguments, never run through a shell; a relative path or a
+control character is refused before the agent is added
+(`acpAgentCommandRefusal`). An agent from the registry is added from the
+executable the person's install put on disk (`addRegistryAcpAgent`), and
+starts installed, untrusted and disabled. Under Octant's sandbox the home
+folder is unreadable, so an untrusted agent that keeps its sign-in there
+reaches its provider only through a key in its environment.
+
+Not built yet: the host side, that is Settings' add, trust and enable flow,
+installing a registry distribution, and a provider instance for an added
+agent on the shared stack, which needs a driver kind of its own beside the
+reviewed rows of `ACP_AGENT_PROFILES`.
+
 ### Probe before a profile ships
 
 At Full access an installed release newer than the one a profile's probe
 pinned is offered as "unverified" instead of refused, under
-[Provider reach Octant no longer narrows](../architecture.md#security-and-authority) (designed, not built); below
-Full access the pin holds.
+[Provider reach Octant no longer narrows](../architecture.md#security-and-authority); below
+Full access the pin holds. Built for Kimi Code's reviewed command inventory:
+a release that lists another inventory passes the probe, the runtime card
+says it is unverified and names the commands it added, a session below Full
+access is refused, and at Full access its listed commands run with it. Not
+built yet for the exact-release claims a profile pins (usage, compaction,
+file review, forms, warm reuse, unadvertised HTTP tools): the probe reports
+each one for every level, so offering it at Full access alone needs a Full
+access value of its own, as `appManagedToolsAtFullAccess` is.
 
 A profile ships only after a live probe against a signed-in install on Apple
 Silicon shows each of the following, recorded as a smoke test beside

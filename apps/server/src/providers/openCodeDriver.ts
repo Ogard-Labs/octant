@@ -164,6 +164,21 @@ export interface OpenCodeProtectedPaths {
 
 const NO_PROTECTED_PATHS: OpenCodeProtectedPaths = { belowFullAccess: [], atFullAccess: [] };
 
+/**
+ * The protected files a session refuses, by Strict. Outside Strict OpenCode's
+ * own tools may read and write the files Octant protects at every level, as
+ * OpenCode does on its own, so only the provider sign-ins (the Full access
+ * list) stay refused; one provider never reads another's credentials. Strict
+ * keeps the full list below Full access (Architecture: "Octant adds no
+ * restrictions of its own unless Strict is on").
+ */
+export function openCodeProtectedPathsFor(
+  paths: OpenCodeProtectedPaths,
+  strict: boolean,
+): OpenCodeProtectedPaths {
+  return strict ? paths : { belowFullAccess: paths.atFullAccess, atFullAccess: paths.atFullAccess };
+}
+
 export interface OpenCodeDriverOptions {
   readonly sandboxPolicy?: SandboxPolicySelection;
   readonly instanceId: ProviderInstanceId;
@@ -1879,6 +1894,7 @@ function makeConnection(
     let runtimePolicy: ProviderExecutionPolicy | undefined;
     // Whether the running server was launched inside the Full access sandbox.
     let runtimeFullAccessSandbox = false;
+    let runtimeStrict = true;
     let runtimeOwnSkills = false;
     let runtimeOwnSetupKey = ownSetupKey(undefined);
     let runtimeKind: "legacy" | "beta" | undefined;
@@ -2128,6 +2144,7 @@ function makeConnection(
       runtimePolicy = undefined;
       runtimeOwnSkills = false;
       runtimeFullAccessSandbox = false;
+      runtimeStrict = true;
       runtimeOwnSetupKey = ownSetupKey(undefined);
       runtimeVersion = undefined;
       runtimeIsolated = false;
@@ -2138,6 +2155,7 @@ function makeConnection(
     const ensureRuntime = (
       executionPolicy: ProviderExecutionPolicy,
       fullAccessSandbox: boolean,
+      strict: boolean,
       loopbackPorts: ReadonlyArray<number>,
       managedToolServerName: string | undefined,
       ownSkills: boolean,
@@ -2151,6 +2169,9 @@ function makeConnection(
             if (
               runtimePolicy !== executionPolicy ||
               runtimeFullAccessSandbox !== fullAccessSandbox ||
+              // Strict is fixed when the process starts: its wall and its
+              // permission rules both refuse the protected files under it.
+              runtimeStrict !== strict ||
               runtimeOwnSkills !== ownSkills ||
               runtimeOwnSetupKey !== ownSetupKey(ownSetup)
             ) {
@@ -2181,6 +2202,7 @@ function makeConnection(
                   mode,
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
+                  ...(strict ? {} : { strict: false }),
                   ...(ownSkills ? { ownSkills: true as const } : {}),
                   ...(ownSetup === undefined ||
                   (!ownSetup.toolServers && ownSetup.planServers.length === 0)
@@ -2195,7 +2217,10 @@ function makeConnection(
                     extraFolders,
                     ownSkills,
                     ownPermissions(ownSetup),
-                    options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                    openCodeProtectedPathsFor(
+                      options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                      strict,
+                    ),
                     readOnlyFolders,
                   ),
                   ...(readOnlyFolders.length === 0 ? {} : { readOnlyFolders }),
@@ -2218,6 +2243,7 @@ function makeConnection(
             processMonitor = monitor;
             runtimePolicy = executionPolicy;
             runtimeFullAccessSandbox = fullAccessSandbox;
+            runtimeStrict = strict;
             runtimeOwnSkills = ownSkills;
             runtimeOwnSetupKey = ownSetupKey(ownSetup);
             runtimeKind = started.runtime ?? "legacy";
@@ -2565,13 +2591,17 @@ function makeConnection(
             input.nativeSetup,
             rememberedEdits,
             ownPermissions(ownSetup),
-            options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+            openCodeProtectedPathsFor(
+              options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+              input.strict !== false,
+            ),
           );
           return prepareManagedTools(state, input.tools ?? []).pipe(
             Effect.flatMap(() =>
               ensureRuntime(
                 input.executionPolicy,
                 keepsFullAccessSandbox(input),
+                input.strict !== false,
                 state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                 state.managedTools?.serverName,
                 state.nativeSetup?.skills === true,
@@ -2737,7 +2767,10 @@ function makeConnection(
                 input.nativeSetup,
                 rememberedEdits,
                 ownPermissions(ownSetup),
-                options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                openCodeProtectedPathsFor(
+                  options.protectedPaths?.() ?? NO_PROTECTED_PATHS,
+                  input.strict !== false,
+                ),
               );
               if (inheritedTools !== undefined) {
                 inheritedTools.owner.state = state;
@@ -2754,6 +2787,7 @@ function makeConnection(
                   ensureRuntime(
                     input.executionPolicy,
                     keepsFullAccessSandbox(input),
+                    input.strict !== false,
                     state.managedTools === undefined ? [] : [state.managedTools.bridge.port],
                     state.managedTools?.serverName,
                     state.nativeSetup?.skills === true,
@@ -3735,6 +3769,18 @@ const PLAN_READ_TOOLS = [
 const PROJECT_READ_TOOLS = ["read", "glob", "grep", "list"] as const;
 
 /**
+ * OpenCode's subagents (`task` in 1.x, `subagent` in 2.x) start without
+ * asking at every level outside Plan, as OpenCode's own default agent starts
+ * them, instead of following the level's catch-all ask (maintainer decision,
+ * 2026-11-15). Starting one changes nothing by itself: a child session runs
+ * under the same rules, and every edit, command or outside folder it asks
+ * for reaches the person through the parent's approval path. Plan still
+ * denies both. The person's own rules apply after these, so their deny of
+ * `task` still holds.
+ */
+const OPENCODE_SUBAGENT_ALLOWS = ["task", "subagent"] as const;
+
+/**
  * OpenCode's own default agent refuses `.env` files but not their examples;
  * its rules come before Octant's, so the read allow above would otherwise
  * take that protection away. These sit with the level's allows, under the
@@ -3795,9 +3841,21 @@ export function permissionRules(
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
       { permission: "edit", pattern: "*", action: "allow" },
+      ...OPENCODE_SUBAGENT_ALLOWS.map((permission) => ({
+        permission,
+        pattern: "*",
+        action: "allow" as const,
+      })),
     ];
   } else if (policy === "approval-gated") {
-    rules = [{ permission: "*", pattern: "*", action: "ask" }];
+    rules = [
+      { permission: "*", pattern: "*", action: "ask" },
+      ...OPENCODE_SUBAGENT_ALLOWS.map((permission) => ({
+        permission,
+        pattern: "*",
+        action: "allow" as const,
+      })),
+    ];
   } else {
     rules = [
       { permission: "*", pattern: "*", action: "ask" },
@@ -3903,9 +3961,21 @@ export function betaAgentPermissionRules(
     rules = [
       { action: "*", resource: "*", effect: "ask" },
       { action: "edit", resource: "*", effect: "allow" },
+      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+        action,
+        resource: "*",
+        effect: "allow" as const,
+      })),
     ];
   } else if (policy === "approval-gated") {
-    rules = [{ action: "*", resource: "*", effect: "ask" }];
+    rules = [
+      { action: "*", resource: "*", effect: "ask" },
+      ...OPENCODE_SUBAGENT_ALLOWS.map((action) => ({
+        action,
+        resource: "*",
+        effect: "allow" as const,
+      })),
+    ];
   } else {
     rules = [
       { action: "*", resource: "*", effect: "ask" },
