@@ -30,11 +30,18 @@ export type SearxngSearchFailureCategory =
 
 export class SearxngSearchFailed extends Error {
   readonly category: SearxngSearchFailureCategory;
+  /**
+   * The HTTP status the instance answered with, when it answered with an
+   * error. The backend list tells a refusal of the query (a 4xx) from an
+   * instance that did not answer, so a refused query goes to no other vendor.
+   */
+  readonly httpStatus: number | undefined;
 
-  constructor(category: SearxngSearchFailureCategory, message: string) {
+  constructor(category: SearxngSearchFailureCategory, message: string, httpStatus?: number) {
     super(message);
     this.name = "SearxngSearchFailed";
     this.category = category;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -70,8 +77,20 @@ function boundedString(value: unknown, maximum = 512): string | undefined {
   return Array.from(normalized).length <= maximum ? normalized : undefined;
 }
 
-function stripMarkup(value: string): string {
-  return value.replace(/<[^>]*>/g, "").trim();
+/**
+ * A search result's text with every tag removed. One pass of a tag pattern
+ * leaves a tag behind when tags nest (`<scr<b>ipt>` becomes `<script>`), so
+ * tags are removed until none remain, and an angle bracket left over from an
+ * unclosed tag is dropped too.
+ */
+export function stripMarkup(value: string): string {
+  let current = value;
+  let previous: string;
+  do {
+    previous = current;
+    current = current.replace(/<[^<>]*>/g, "");
+  } while (current !== previous);
+  return current.replace(/[<>]/g, "").trim();
 }
 
 function isJsonMediaType(value: string): boolean {
@@ -327,7 +346,11 @@ export class SearxngClient {
 
         if (!response.ok) {
           await cancelResponseBody(response);
-          fail("unavailable", `The SearXNG request failed with HTTP ${response.status}.`);
+          throw new SearxngSearchFailed(
+            "unavailable",
+            `The SearXNG request failed with HTTP ${response.status}.`,
+            response.status,
+          );
         }
 
         const declared = Number(response.headers.get("content-length"));

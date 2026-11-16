@@ -870,7 +870,7 @@ describe("Add endpoint, step by step", () => {
     expect(chatty).toBeDisabled();
     expect(chatty).toHaveAccessibleDescription(/Chat only models can't take agent work/);
 
-    const main = await screen.findByRole("combobox", { name: "Main model" });
+    const main = await screen.findByRole("combobox", { name: "Builder" });
     await user.click(main);
     const options = await screen.findAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual(["Keep older-model", "good-model"]);
@@ -921,7 +921,7 @@ describe("Add endpoint, step by step", () => {
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(await screen.findByRole("combobox", { name: "Planning" }));
+    await user.click(await screen.findByRole("combobox", { name: "Planner" }));
     await user.click(await screen.findByRole("option", { name: "good-model" }));
     await user.click(screen.getByRole("button", { name: "Finish" }));
 

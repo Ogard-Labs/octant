@@ -88,9 +88,11 @@ import {
   decodeProjectId,
   decodeBindingRevisionId,
   decodeProviderInstance,
+  decodeProviderResumeCursor,
   decodeWindowId,
   type AgentRun,
   type Project,
+  type WorkThreadAdoptedSession,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Schema, Stream } from "effect";
@@ -115,7 +117,7 @@ import {
   type WorkTurnServiceDependencies,
 } from "./workTurnService";
 import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
-import { WorkTurnRuntime, type WorkTurnRuntimePort } from "./workTurnRuntime";
+import { WorkTurnRuntime, workSessionTerms, type WorkTurnRuntimePort } from "./workTurnRuntime";
 import { prepareAutomationFileDefinition } from "../automation/automationFileSourceAuthority";
 import {
   automationDefinitionFixture,
@@ -126,6 +128,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { frameExternalContentForModel } from "../context/externalContentFraming";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 
 const attachmentRoots: string[] = [];
 
@@ -148,8 +151,8 @@ const ids = {
 } as const;
 
 describe("WorkTurnService", () => {
-  it.each(["ask-first", "auto-accept-edits", "auto", "full-access"] as const)(
-    "refuses a Windows Work turn at %s before acquiring a provider or appending the journal",
+  it.each(["ask-first", "auto-accept-edits", "auto"] as const)(
+    "refuses a Windows Work turn at %s, naming the missing sandbox, before acquiring a provider or appending the journal",
     async (threadAccess) => {
       const fixture = serviceFixture({ threadAccess });
       vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
@@ -157,7 +160,7 @@ describe("WorkTurnService", () => {
         await expect(
           fixture.service.startFirstTurn(ids.window, startCommand()),
         ).rejects.toMatchObject({
-          failure: { category: "unavailable" },
+          failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
         });
         expect(fixture.acquireInputs).toHaveLength(0);
         expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
@@ -166,6 +169,34 @@ describe("WorkTurnService", () => {
       }
     },
   );
+
+  it("refuses a Windows turn on a Full access thread when its caller's ceiling lowers the turn below Full access", async () => {
+    const fixture = serviceFixture({ threadAccess: "full-access" });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand(), { accessCeiling: "ask-first" }),
+      ).rejects.toMatchObject({
+        failure: { category: "unavailable", message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+      expect(fixture.acquireInputs).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("starts a Windows Work turn at Full access and reaches its provider", async () => {
+    const fixture = serviceFixture({ threadAccess: "full-access" });
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await vi.waitFor(() => expect(fixture.acquireInputs).toHaveLength(1));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 
   it("launches in the selected approved folder and refuses revocation without falling back", async () => {
     const base = workProject();
@@ -2241,6 +2272,298 @@ describe("WorkTurnService", () => {
     );
   });
 
+  describe("a thread started from a session begun outside Octant", () => {
+    const cursor = decodeProviderResumeCursor({ driverKind: "claude", value: "outside-cursor" });
+    const withSessions = (
+      adopt: NonNullable<ProviderDriver["nativeSessions"]>["adopt"],
+    ): Parameters<typeof serviceFixture>[0] => ({
+      resolveDriver: (_id, fallback) => ({
+        ...fallback,
+        nativeSessions: {
+          list: () =>
+            Effect.succeed([
+              { nativeSessionId: "outside-1", title: "Draft notes", lastModified: 1 },
+              { nativeSessionId: "../escape", lastModified: 2 },
+            ]),
+          adopt,
+        },
+      }),
+    });
+
+    it("offers the provider's sessions for the folder the thread works in, and only well-formed ids", async () => {
+      const list = vi.fn(() =>
+        Effect.succeed([
+          { nativeSessionId: "outside-1", title: "Draft notes", lastModified: 1 },
+          { nativeSessionId: "../escape", lastModified: 2 },
+        ]),
+      );
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list, adopt: () => Effect.die("unused") },
+        }),
+      });
+      const listed = await fixture.service.nativeSessions(ids.window, ids.thread);
+      expect(list).toHaveBeenCalledWith({
+        instanceId: ids.provider,
+        projectRoot: "/private/tmp/knowledge",
+      });
+      expect(listed.sessions.map((session) => session.nativeSessionId)).toEqual(["outside-1"]);
+    });
+
+    it("adopts the session under the thread's own folder and resumes it on the first turn", async () => {
+      let adopted: WorkThreadAdoptedSession | undefined;
+      const adopt = vi.fn(() => Effect.succeed(cursor));
+      const seen: Array<{ readonly sessionId: string; readonly cursor?: string }> = [];
+      const fixture = serviceFixture({
+        ...withSessions(adopt),
+        recordAdoptedSession: (_thread, record) => {
+          adopted = record;
+          return { status: "recorded" };
+        },
+        adoptedSession: () => adopted,
+        turnRuntime: {
+          run: async (input) => {
+            seen.push({
+              sessionId: String(input.providerSessionId),
+              ...(input.resumeCursor === undefined ? {} : { cursor: input.resumeCursor.value }),
+            });
+            return { kind: "completed", response: "Done" };
+          },
+        },
+      });
+
+      const result = await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(result).toEqual({
+        kind: "work-native-session-adopted",
+        threadId: ids.thread,
+        nativeSessionId: "outside-1",
+      });
+      expect(adopt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "work",
+          projectRoot: "/private/tmp/knowledge",
+          nativeSessionId: "outside-1",
+        }),
+      );
+      expect(adopted).toMatchObject({
+        nativeSessionId: "outside-1",
+        resumeCursor: cursor,
+        workingDirectory: ".",
+        bindingRevisionId: ids.binding,
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(seen).toEqual([
+        { sessionId: String(adopted?.providerSessionId), cursor: "outside-cursor" },
+      ]);
+    });
+
+    it("refuses a message sent while the thread takes up a session, and an adoption once it has a turn", async () => {
+      let release: (() => void) | undefined;
+      const adopt = vi.fn(() =>
+        Effect.async<typeof cursor>((resume) => {
+          release = () => resume(Effect.succeed(cursor));
+        }),
+      );
+      const fixture = serviceFixture({
+        ...withSessions(adopt),
+        recordAdoptedSession: () => ({ status: "recorded" }),
+      });
+
+      const adopting = fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalled());
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+      release?.();
+      expect((await adopting).kind).toBe("work-native-session-adopted");
+
+      const busy = serviceFixture({
+        ...withSessions(() => Effect.succeed(cursor)),
+        recordAdoptedSession: () => ({ status: "recorded" }),
+      });
+      await busy.service.startFirstTurn(ids.window, startCommand());
+      await busy.waitForIdle();
+      expect(await busy.service.adoptNativeSession(ids.window, ids.thread, "outside-1")).toEqual({
+        kind: "work-native-session-refused",
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+      });
+    });
+
+    it("releases the session's claim when the thread changed before the adoption could be recorded", async () => {
+      const release = vi.fn((_input: { readonly sessionId: unknown }) => Effect.void);
+      const adopt = vi.fn((_input: { readonly sessionId: unknown }) => Effect.succeed(cursor));
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+        }),
+        recordAdoptedSession: () => ({
+          status: "refused",
+          message: "This thread changed. Try again.",
+        }),
+      });
+
+      const result = await fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+
+      expect(result).toEqual({
+        kind: "work-native-session-refused",
+        message: "This thread changed. Try again.",
+      });
+      // The claim released is exactly the one this adoption wrote.
+      expect(release).toHaveBeenCalledWith({
+        instanceId: ids.provider,
+        nativeSessionId: "outside-1",
+        sessionId: adopt.mock.calls[0]?.[0].sessionId,
+      });
+    });
+
+    it("refuses an adoption whose Project was relinked while it ran, and gives the claim back", async () => {
+      let finish: (() => void) | undefined;
+      const adopt = vi.fn((_input: { readonly sessionId: unknown }) =>
+        Effect.async<typeof cursor>((resume) => {
+          finish = () => resume(Effect.succeed(cursor));
+        }),
+      );
+      const release = vi.fn((_input: { readonly sessionId: unknown }) => Effect.void);
+      const recordAdoptedSession = vi.fn(() => ({ status: "recorded" as const }));
+      const fixture = serviceFixture({
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          nativeSessions: { list: () => Effect.succeed([]), adopt, release },
+        }),
+        recordAdoptedSession,
+      });
+
+      const adoption = fixture.service.adoptNativeSession(ids.window, ids.thread, "outside-1");
+      await vi.waitFor(() => expect(adopt).toHaveBeenCalledOnce());
+      fixture.persistence.readProject.mockImplementation(() =>
+        workProject({
+          binding: { canonicalRoot: "/private/tmp/elsewhere" },
+          bindingHistory: [
+            ...workProject().bindingHistory,
+            {
+              revisionId: "72000000-0000-4000-8000-000000000077" as never,
+              revision: 2,
+              currentBinding: { canonicalRoot: "/private/tmp/elsewhere" },
+              actor: {
+                kind: "local-user",
+                actorId: "72000000-0000-4000-8000-000000000009" as never,
+              },
+              changedAt: now as never,
+            },
+          ],
+        }),
+      );
+      finish?.();
+
+      expect(await adoption).toEqual({
+        kind: "work-native-session-refused",
+        message: "This thread's Project folder changed while it took up the session. Try again.",
+      });
+      expect(recordAdoptedSession).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: adopt.mock.calls[0]?.[0].sessionId }),
+      );
+    });
+
+    it("refuses the first turn once the thread moved to another model than the session it adopted", async () => {
+      const fixture = serviceFixture({
+        adoptedSession: () => ({
+          nativeSessionId: "outside-1",
+          providerSessionId: ids.session as never,
+          resumeCursor: cursor,
+          providerInstanceId: ids.provider as never,
+          modelId: "model-b" as never,
+          bindingRevisionId: ids.binding as never,
+          workingDirectory: "." as never,
+        }),
+      });
+      await expect(
+        fixture.service.startFirstTurn(ids.window, startCommand()),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+      expect(fixture.acquireInputs).toHaveLength(0);
+    });
+  });
+
+  it("holds a kept session to the folders the turn took, so a folder removed while it starts is never retained", async () => {
+    const taken = workProject({
+      extraFolders: [
+        {
+          canonicalRoot: "/private/tmp/assets",
+          addedBy: { kind: "local-user", actorId: "72000000-0000-4000-8000-000000000009" },
+          addedAt: now,
+        },
+      ] as never,
+    });
+    const narrowed = workProject({ extraFolders: [] });
+    let current = taken;
+    const seen: Array<{ readonly terms?: string; readonly extraFolders?: ReadonlyArray<string> }> =
+      [];
+    const fixture = serviceFixture({
+      project: taken,
+      // Watching the folder starts once the turn took its folders, before its
+      // session is acquired: the person removes the extra folder meanwhile.
+      turnFileObserver: {
+        observe: () => {
+          current = narrowed;
+          return { finish: () => [] };
+        },
+      } as never,
+      turnRuntime: {
+        run: async (input) => {
+          seen.push({
+            ...(input.sessionTerms === undefined ? {} : { terms: input.sessionTerms }),
+            ...(input.extraFolders === undefined ? {} : { extraFolders: input.extraFolders }),
+          });
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    fixture.persistence.readProject.mockImplementation(() => current);
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const thread = await fixture.threads.read();
+    expect(seen).toEqual([
+      { terms: workSessionTerms(thread, taken), extraFolders: ["/private/tmp/assets"] },
+    ]);
+    // The Project's terms now differ, so the session is not kept past its turn.
+    expect(seen[0]?.terms).not.toEqual(workSessionTerms(thread, narrowed));
+  });
+
+  it("stops the thread's kept session before a compaction resumes it, and refuses while a turn runs", async () => {
+    const stopKeptSession = vi.fn(async () => true);
+    let release: (() => void) | undefined;
+    const fixture = serviceFixture({
+      stopKeptSession,
+      turnRuntime: {
+        run: () =>
+          new Promise((resolve) => {
+            release = () => resolve({ kind: "completed", response: "Done" });
+          }),
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(await fixture.service.releaseSessionForCompaction(ids.thread)).toBe(false);
+    expect(stopKeptSession).not.toHaveBeenCalled();
+    release?.();
+    await fixture.waitForIdle();
+    await vi.waitFor(() => expect(fixture.service.isTurnActive(ids.thread)).toBe(false));
+    expect(await fixture.service.releaseSessionForCompaction(ids.thread)).toBe(true);
+    expect(stopKeptSession).toHaveBeenCalledWith(ids.thread);
+  });
+
+  it("refuses to open the runtime's own turn on a thread with no session to open it in", async () => {
+    const run = vi.fn();
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, startCommand(), { runtimeTurn: true }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it("validates host, Project, binding, working directory, and confinement before launching", async () => {
     const fixture = serviceFixture();
     const result = await fixture.service.startFirstTurn(ids.window, startCommand());
@@ -2710,6 +3033,79 @@ describe("WorkTurnService", () => {
     expect(sent).toContainEqual({ kind: "project-memory", text: "Invoices go out on the 1st." });
     expect(JSON.stringify(sent)).not.toContain("on the 15th");
     expect(readProjectMemory).toHaveBeenCalledWith(ids.project);
+  });
+
+  it("gives a Work session your and its Project's instructions after Octant's own and before person and Project memory", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const fixture = serviceFixture({
+      nativeConversation: true,
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+        { kind: "project-instructions", key: "octant-project-instructions:p", text: "Ship." },
+      ],
+      personMemoryBlock: () => "Remembered: prefers tables.",
+      readProjectMemory: () =>
+        decodeProjectMemoryView({
+          projectId: ids.project,
+          active: [
+            {
+              id: "00000000-0000-4000-8000-000000000a03",
+              kind: "fact",
+              projectId: ids.project,
+              content: "Invoices go out on the 1st.",
+              provenance: { kind: "user-authored" },
+              author: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              version: 1,
+              createdAt: "2026-07-14T10:00:00.000Z",
+              updatedAt: "2026-07-14T10:00:00.000Z",
+              status: "active",
+            },
+          ],
+          history: [],
+        }),
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    expect((await fixture.service.startFirstTurn(ids.window, startCommand())).kind).toBe(
+      "accepted",
+    );
+    await fixture.waitForIdle();
+
+    const kinds = (contexts[0] ?? []).map((block) => block.kind);
+    const yours = kinds.indexOf("person-instructions");
+    expect(yours).toBeGreaterThan(kinds.indexOf("instructions"));
+    expect(kinds.indexOf("project-instructions")).toBe(yours + 1);
+    expect(kinds.indexOf("person-memory")).toBe(yours + 2);
+    expect(kinds.indexOf("project-memory")).toBe(yours + 3);
+  });
+
+  it("gives a routine's Work turn your instructions though it gets no person memory", async () => {
+    const contexts: Array<ReadonlyArray<ProviderContextBlock>> = [];
+    const fixture = serviceFixture({
+      octantInstructionBlocks: () => [
+        { kind: "person-instructions", key: "octant-person-instructions", text: "Use Canvas." },
+      ],
+      turnRuntime: {
+        run: async (input) => {
+          contexts.push(input.context ?? []);
+          return { kind: "completed", response: "Provider reply" };
+        },
+      },
+    });
+
+    await fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand());
+    await fixture.waitForIdle();
+
+    expect(contexts[0]).toContainEqual({
+      kind: "person-instructions",
+      key: "octant-person-instructions",
+      text: "Use Canvas.",
+    });
   });
 
   it("opens every task with the Project's status, and takes stock when the status is stale unless the request is unrelated", async () => {
@@ -3382,6 +3778,108 @@ describe("WorkTurnService", () => {
       }),
     );
     expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("gives a model that cannot read images the words Sees images wrote, keeping the image on the turn", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000011");
+    const sent: Array<{
+      readonly attachments: ReadonlyArray<unknown>;
+      readonly context: ReadonlyArray<{ readonly text: string }>;
+    }> = [];
+    const asked: unknown[] = [];
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async (input) => {
+        asked.push(input.images.map((image) => image.name));
+        return {
+          status: "described",
+          images: input.images.map((image) => ({
+            attachmentId: image.attachmentId,
+            name: image.name,
+            describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+            text: "A sign-in form with a red error.",
+          })),
+        };
+      },
+      turnRuntime: {
+        run: async (input) => {
+          sent.push({ attachments: input.attachments ?? [], context: input.context ?? [] });
+          return { kind: "completed", response: "Read the description" };
+        },
+      },
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      prompt: "What is wrong here?",
+      attachmentIds: [attachmentId],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(asked).toEqual([["login.png"]]);
+    expect(sent[0]?.attachments).toEqual([]);
+    expect(sent[0]?.context.map((block) => block.text)).toContain(
+      "[Image login.png (attachment 30000000-0000-4000-8000-000000000011), described by Haiku 5.5 (Anthropic)]: A sign-in form with a red error.",
+    );
+    const accepted = fixture.projection.lookup(ids.request);
+    expect(accepted?.attachments?.map((attachment) => String(attachment.attachmentId))).toEqual([
+      String(attachmentId),
+    ]);
+    expect(accepted?.describedImages).toEqual([
+      {
+        attachmentId: String(attachmentId),
+        name: "login.png",
+        describedBy: { model: "Haiku 5.5", provider: "Anthropic" },
+        description: "A sign-in form with a red error.",
+      },
+    ]);
+    // A later history rebuild or compaction reads the words with the message.
+    expect(
+      fixture.service
+        .sessionCompactionConversation(ids.thread)
+        .find((message) => message.role === "user")?.content,
+    ).toContain("A sign-in form with a red error.");
+  });
+
+  it("refuses an image for a model that cannot read it, with Sees images' reason, and journals nothing", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000012");
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => false,
+      describeImages: async () => ({
+        status: "refused",
+        reason: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "login.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        prompt: "What is wrong here?",
+        attachmentIds: [attachmentId],
+      }),
+    ).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "unsupported",
+        message: "Luna can't read images. Set a model that sees images in Model roles.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("does not send a discarded image on a later turn", async () => {
@@ -4510,6 +5008,45 @@ describe("WorkTurnService", () => {
       fixture.persistence.journal.append.mock.calls
         .flatMap(([request]) => request.events)
         .map((event: { readonly payload: unknown }) => event.payload);
+
+    it("never resumes a session adopted from outside Octant once a rewind removed every turn it ran", async () => {
+      const adopted: WorkThreadAdoptedSession = {
+        nativeSessionId: "outside-1",
+        providerSessionId: "12121212-1212-4121-8121-121212121212" as never,
+        resumeCursor: decodeProviderResumeCursor({ driverKind: "pi", value: "outside-cursor" }),
+        providerInstanceId: ids.provider as never,
+        modelId: "model-a" as never,
+        bindingRevisionId: ids.binding as never,
+        workingDirectory: "." as never,
+      };
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: input.resumeCursor ?? { driverKind: "pi", value: "fresh" },
+        });
+        return { kind: "completed" as const, response: "Done" };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        adoptedSession: () => adopted,
+        resolveDriver: (_id, fallback) => ({ ...fallback, conversationOwnership: "provider" }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(String(run.mock.calls[0]?.[0].providerSessionId)).toBe(
+        String(adopted.providerSessionId),
+      );
+
+      await fixture.service.rewindThread(ids.window, rewindFrom(ids.request));
+      await fixture.service.startFirstTurn(ids.window, secondCommand());
+      await fixture.waitForIdle(secondRequest);
+
+      // The adopted session still holds the removed turn, so it is not taken up.
+      expect(String(run.mock.calls[1]?.[0].providerSessionId)).not.toBe(
+        String(adopted.providerSessionId),
+      );
+      expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+    });
 
     it("refuses a turn whose thread a move froze while the turn was still being prepared", async () => {
       // Clear when the turn is admitted, held by the time its context is ready.
@@ -5771,6 +6308,7 @@ function serviceFixture(
     readonly prepareProductFeedbackForTurn?: WorkTurnServiceDependencies["prepareProductFeedbackForTurn"];
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
+    readonly describeImages?: WorkTurnServiceDependencies["describeImages"];
     readonly supportsModelSwitch?: () => boolean;
     readonly conversationInputTransfer?: WorkTurnServiceDependencies["conversationInputTransfer"];
     readonly contextHarness?: ContextHarnessService;
@@ -5784,6 +6322,8 @@ function serviceFixture(
     readonly resolveAppManagedTools?: WorkTurnServiceDependencies["resolveAppManagedTools"];
     readonly spendCeiling?: WorkTurnServiceDependencies["spendCeiling"];
     readonly nativeHarness?: WorkTurnServiceDependencies["nativeHarness"];
+    readonly octantInstructionBlocks?: WorkTurnServiceDependencies["octantInstructionBlocks"];
+    readonly personMemoryBlock?: WorkTurnServiceDependencies["personMemoryBlock"];
     readonly projectStatusFiles?: WorkProjectStatusFiles;
     readonly designSystemFiles?: WorkTurnServiceDependencies["designSystemFiles"];
     readonly turnFileObserver?: WorkTurnServiceDependencies["turnFileObserver"];
@@ -5808,6 +6348,10 @@ function serviceFixture(
     readonly serverProjects?: WorkTurnServiceDependencies["serverProjects"];
     /** Read on every admission and rewind, so a test can freeze the thread for a move. */
     readonly moveHold?: (threadId: string) => boolean;
+    readonly recordAdoptedSession?: WorkTurnServiceDependencies["recordAdoptedSession"];
+    readonly stopKeptSession?: WorkTurnServiceDependencies["stopKeptSession"];
+    /** Read on every thread read, so a test can adopt a session between reads. */
+    readonly adoptedSession?: () => WorkThreadAdoptedSession | undefined;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -5927,6 +6471,9 @@ function serviceFixture(
         ...(options.documentDelivery === undefined
           ? {}
           : { documentDelivery: options.documentDelivery }),
+        ...(options.adoptedSession?.() === undefined
+          ? {}
+          : { adoptedSession: options.adoptedSession() }),
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -5966,6 +6513,7 @@ function serviceFixture(
     ...(options.supportsAttachments === undefined
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
+    ...(options.describeImages === undefined ? {} : { describeImages: options.describeImages }),
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: options.supportsModelSwitch }),
@@ -6006,6 +6554,12 @@ function serviceFixture(
       ? {}
       : { resolveAppManagedTools: options.resolveAppManagedTools }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
+    ...(options.octantInstructionBlocks === undefined
+      ? {}
+      : { octantInstructionBlocks: options.octantInstructionBlocks }),
+    ...(options.personMemoryBlock === undefined
+      ? {}
+      : { personMemoryBlock: options.personMemoryBlock }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.designSystemFiles === undefined
       ? {}
@@ -6018,6 +6572,10 @@ function serviceFixture(
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
     ...(options.moveHold === undefined ? {} : { moveHold: options.moveHold }),
+    ...(options.recordAdoptedSession === undefined
+      ? {}
+      : { recordAdoptedSession: options.recordAdoptedSession }),
+    ...(options.stopKeptSession === undefined ? {} : { stopKeptSession: options.stopKeptSession }),
     ...(options.onTurnCancelled === undefined ? {} : { onTurnCancelled: options.onTurnCancelled }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
     ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),

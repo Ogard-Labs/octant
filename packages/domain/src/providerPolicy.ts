@@ -1962,17 +1962,18 @@ export function setProviderNativeSetup(
     current.driverKind !== "claude" &&
     current.driverKind !== "codex" &&
     current.driverKind !== "opencode" &&
-    current.driverKind !== "mistral-vibe"
+    !isAcpAgentInstance(current)
   ) {
     reject(
       "invalid-configuration",
-      "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+      "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
     );
   }
   const { nativeSetup: _previous, ...rest } = current;
   return {
     ...rest,
-    ...(input.enabled ? { nativeSetup: true as const } : {}),
+    // On is the default and needs no field; only the person's off is kept.
+    ...(input.enabled ? {} : { nativeSetup: false as const }),
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };
@@ -1997,7 +1998,8 @@ export function setProviderOwnMemory(
   const { ownMemory: _previous, ...rest } = current;
   return {
     ...rest,
-    ...(input.enabled ? { ownMemory: true as const } : {}),
+    // On is the default and needs no field; only the person's off is kept.
+    ...(input.enabled ? {} : { ownMemory: false as const }),
     version: nextVersion(current.version),
     updatedAt: input.updatedAt,
   };

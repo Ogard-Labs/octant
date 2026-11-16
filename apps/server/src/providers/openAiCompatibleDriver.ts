@@ -1,4 +1,12 @@
+import { openAiOwnSearchOrigin } from "@octant/domain";
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
+import { attachedImagesSupport, sendsEveryAttachment } from "./promptImages";
+import {
+  chatCompletionsUserContent,
+  promptImagesOf,
+  responsesUserContent,
+  type PromptImage,
+} from "./promptImages";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
@@ -315,6 +323,11 @@ function admitTurn(
     ...(observed?.capabilities ?? initialCapabilities),
     appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
   };
+  // The request carries images only; a document the model lists would be
+  // dropped on the wire, so it is refused here instead.
+  if (!sendsEveryAttachment(input.attachments)) {
+    return failure("unsupported", "This endpoint sends attached images only.");
+  }
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }
 
@@ -434,13 +447,17 @@ function sessionOver(
 function protocolInput(request: HarnessEndpointRequest): {
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
+  readonly promptImages?: ReadonlyArray<PromptImage>;
   readonly toolAnswers: readonly ProviderToolAnswer[] | undefined;
 } {
   const last = request.history.at(-1);
   if (last?.role === "user" && last.toolResults === undefined) {
+    // A turn's attachments ride on its own user message only.
+    const promptImages = promptImagesOf(last.attachments);
     return {
       history: request.history.slice(0, -1),
       prompt: last.text,
+      ...(promptImages.length === 0 ? {} : { promptImages }),
       toolAnswers: undefined,
     };
   }
@@ -464,13 +481,18 @@ async function sendCompatibleRequest(
     readonly subscriptionUsageGranted: boolean | undefined;
   } = { profile: undefined, subscriptionUsageGranted: undefined },
 ): Promise<CompatibleTurnResult> {
-  const { history, prompt, toolAnswers } = protocolInput(request);
+  const { history, prompt, promptImages, toolAnswers } = protocolInput(request);
   const onEvent = (event: ProtocolTurnEvent) => {
     // Tool calls arrive on the result; the loop asks for them as a step.
     if (event.kind === "tool-call") return;
     if (event.kind === "usage") {
       const { sequence: _sequence, ...usage } = event;
       stream.onEvent(usage);
+      return;
+    }
+    if (event.kind === "web-search") {
+      const { sequence: _sequence, kind: _kind, ...search } = event;
+      stream.onEvent({ kind: "provider-web-search", ...search });
       return;
     }
     stream.onEvent({ kind: event.kind, text: event.text });
@@ -480,6 +502,7 @@ async function sendCompatibleRequest(
     modelId: request.modelId,
     history,
     prompt,
+    ...(promptImages === undefined ? {} : { promptImages }),
     ...(request.system === undefined ? {} : { system: request.system }),
     ...(request.tools.length === 0 ? {} : { tools: request.tools }),
     ...(toolAnswers === undefined ? {} : { toolAnswers }),
@@ -524,6 +547,13 @@ async function sendCompatibleRequest(
           value: await runProviderEffect(
             sendResponsesTurn({
               ...shared,
+              // Only OpenAI's own API on Responses runs a search whose terms
+              // Octant knows; anywhere else the request leaves the tool out.
+              ...(request.providerWebSearch !== undefined &&
+              options.profile === undefined &&
+              openAiOwnSearchOrigin(options.configuration) !== undefined
+                ? { webSearch: true }
+                : {}),
               // One stable key per harness session, so every step of the
               // conversation is routed to the same prompt cache.
               promptCacheKey: String(request.sessionId),
@@ -577,7 +607,8 @@ function recordObservedTurn(
     ...(authStrategyOf(options) !== "none" ? { credentialStatus: "stored" } : {}),
     models,
     capabilities: {
-      ...initialCapabilities,
+      ...capabilitiesFor(options),
+      nativeAttachments: attachedImagesSupport(models),
       streaming: result.protocol === "chat-completions" ? result.streaming : "supported",
       reasoning: result.reasoning.length > 0 ? "supported" : "unavailable",
       usage: result.usage === undefined ? "unavailable" : "supported",
@@ -711,7 +742,10 @@ function recordProbe(
     // What requests taught about each model's window, and a
     // person's override, outlive the probe a Chat turn runs first.
     models: carryModelContextWindowFacts(result.models, prior?.models),
-    capabilities: initialCapabilities,
+    capabilities: {
+      ...capabilitiesFor(options),
+      nativeAttachments: attachedImagesSupport(result.models),
+    },
     ...(result.failure === undefined ? {} : { message: result.failure.message }),
     lastSuccessfulProbeAt: observedAt,
     observedAt,
@@ -831,6 +865,17 @@ function protocolFailure(
   };
 }
 
+/**
+ * What this endpoint can do before a turn proves more. Its provider's own web
+ * search is reported only on OpenAI's own API on Responses, the one origin
+ * where Octant knows whose search runs the query.
+ */
+function capabilitiesFor(options: OpenAiCompatibleDriverOptions): ProviderCapabilities {
+  return options.profile !== undefined || openAiOwnSearchOrigin(options.configuration) === undefined
+    ? initialCapabilities
+    : { ...initialCapabilities, nativeWebResearch: "supported" };
+}
+
 function manualModels(modelIds: readonly ProviderModelId[]) {
   return modelIds.map((id) => ({
     id,
@@ -920,7 +965,7 @@ function estimateBody(
  * a responses token count is never paired with a chat-completions estimate.
  */
 function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, unknown> {
-  const { history, prompt, toolAnswers } = protocolInput(request);
+  const { history, prompt, promptImages, toolAnswers } = protocolInput(request);
   const includeUserPrompt = !(prompt.length === 0 && toolAnswers !== undefined);
   const input = [
     ...history.flatMap((entry) => {
@@ -932,7 +977,13 @@ function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, 
         }));
       }
       return [
-        { role: entry.role, content: entry.text },
+        {
+          role: entry.role,
+          content:
+            entry.role === "user"
+              ? responsesUserContent(entry.text, promptImagesOf(entry.attachments))
+              : entry.text,
+        },
         ...(entry.toolCalls === undefined
           ? []
           : entry.toolCalls.map((call) => ({
@@ -950,7 +1001,9 @@ function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, 
             }))),
       ];
     }),
-    ...(includeUserPrompt ? [{ role: "user" as const, content: prompt }] : []),
+    ...(includeUserPrompt
+      ? [{ role: "user" as const, content: responsesUserContent(prompt, promptImages) }]
+      : []),
     ...(toolAnswers === undefined
       ? []
       : toolAnswers.map((answer) => ({
@@ -994,7 +1047,10 @@ function compatibleEstimateBody(request: HarnessEndpointRequest): Record<string,
       }
       return [
         entry.toolCalls === undefined
-          ? { role: entry.role, content: entry.text }
+          ? {
+              role: entry.role,
+              content: chatCompletionsUserContent(entry.text, promptImagesOf(entry.attachments)),
+            }
           : {
               role: entry.role,
               content: entry.text,

@@ -1,4 +1,5 @@
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
+import { terminalShellFor } from "../code/terminalShell";
 import {
   resolveThreadWorkingDirectory,
   threadWorkingDirectoryCurrent,
@@ -262,6 +263,11 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         : new ProjectTerminalService({
             ...serverActions,
             terminals: sharedTerminals,
+            shell: () =>
+              terminalShellFor({
+                platform: process.platform,
+                windowsShell: persistence.readCodeSettings()?.settings.windowsTerminalShell,
+              }),
             worktreePreparation,
             childWorktreeSources,
             readProject: persistence.readProject,

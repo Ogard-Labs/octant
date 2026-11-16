@@ -79,6 +79,10 @@ const MAX_DETAIL = 512;
 /** Long enough to read the dialog, short enough that a stale one cannot be replayed later. */
 const DESTROY_CONFIRMATION_MS = 5 * 60_000;
 
+/** The named refusal every call to a suspended machine's server, and every turn there, gets. */
+export const CLOUD_MACHINE_SUSPENDED_MESSAGE =
+  "This machine is suspended; resume it first in Settings › Permissions › Servers. Nothing ran.";
+
 export type CloudMachinePrincipal = "local-window" | "remote-device" | "agent" | "routine";
 export type CloudMachineAct = "create" | "describe" | "suspend" | "resume" | "destroy";
 
@@ -182,6 +186,38 @@ export class CloudMachineService {
       };
     }
     return undefined;
+  }
+
+  /**
+   * The host keys pinned for a server: those the provider reported when it
+   * created the live machine at that address. They are fixed at creation; a
+   * later answer never changes them, so a machine whose key changed is
+   * refused by the strict host check. A destroyed machine pins nothing, so a
+   * reused address is not held to an old machine's key.
+   */
+  pinnedHostKeys(server: {
+    readonly alias: string;
+    readonly user: string;
+  }): ReadonlyArray<string> | undefined {
+    return this.#liveAt(server)?.endpoint?.hostKeys;
+  }
+
+  /** Why no call may go to a server now: its machine is suspended. */
+  suspendedRefusal(server: { readonly alias: string; readonly user: string }): string | undefined {
+    return this.#liveAt(server)?.state === "suspended"
+      ? CLOUD_MACHINE_SUSPENDED_MESSAGE
+      : undefined;
+  }
+
+  /** The most recently requested created machine at this address and login, if one is live. */
+  #liveAt(server: { readonly alias: string; readonly user: string }): CloudMachine | undefined {
+    let found: CloudMachine | undefined;
+    for (const machine of this.#machines.values()) {
+      if (machine.lifecycle !== "created" || machine.endpoint === undefined) continue;
+      if (machine.endpoint.host !== server.alias || machine.endpoint.user !== server.user) continue;
+      if (found === undefined || machine.requestedAt >= found.requestedAt) found = machine;
+    }
+    return found;
   }
 
   async create(input: {
@@ -453,6 +489,9 @@ export class CloudMachineService {
         act,
         state: result.machine.state,
         observedAt,
+        ...(result.machine.costPerHour === undefined
+          ? {}
+          : { costPerHour: result.machine.costPerHour }),
         principal,
       };
       if (!this.#record(machineId, CLOUD_MACHINES_EVENT_NAMES.stateChanged, payload))
@@ -621,6 +660,9 @@ export class CloudMachineService {
         state: created.machine.state,
         stateObservedAt: created.observedAt,
         ...(created.machine.endpoint === undefined ? {} : { endpoint: created.machine.endpoint }),
+        ...(created.machine.costPerHour === undefined
+          ? {}
+          : { costPerHour: { ...created.machine.costPerHour, observedAt: created.observedAt } }),
       });
     } else if (eventName === CLOUD_MACHINES_EVENT_NAMES.creationEnded) {
       const ended = decodeEnded(payload);
@@ -642,6 +684,9 @@ export class CloudMachineService {
         ...existing,
         state: changed.state,
         stateObservedAt: changed.observedAt,
+        ...(changed.costPerHour === undefined
+          ? {}
+          : { costPerHour: { ...changed.costPerHour, observedAt: changed.observedAt } }),
       });
     } else if (eventName === CLOUD_MACHINES_EVENT_NAMES.destroyed) {
       const destroyed = decodeDestroyed(payload);

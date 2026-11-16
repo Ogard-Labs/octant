@@ -1,11 +1,13 @@
 import { trackSandboxChild } from "../process/sandboxRuntimePolicy";
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { stopWindowsProcessTree } from "../process/windowsProcessTree";
 import {
   chmodSync,
   constants,
   accessSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -32,12 +34,15 @@ import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
   makeProcessConfinementLive,
   ProcessConfinementError,
+  seatbeltAllowLiteralMetadataRule,
+  seatbeltAllowLiteralReadRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { secretGuardRefusal } from "../process/secretGuard";
 import { makeBoundedProviderStderr } from "./providerProcessDiagnostic";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 import {
@@ -116,9 +121,19 @@ export interface OpenCodeProcessStartInput {
    * The person let OpenCode load its own skills: the launch keeps the
    * `.claude/skills` and `.agents/skills` discovery OpenCode does by itself and
    * does not deny the `skill` permission. Its project configuration and
-   * plugins stay off either way.
+   * plugins stay off unless `projectConfig` is set.
    */
   readonly ownSkills?: true;
+  /**
+   * A Project the person trusted for OpenCode, outside Plan and Chat:
+   * `OPENCODE_DISABLE_PROJECT_CONFIG` goes, so OpenCode loads the Project's
+   * own `opencode.json(c)` and `.opencode` agents, plugins, and commands as it
+   * does on its own (maintainer decision, 2026-11-14). Those files load after
+   * the private configuration and may override Octant's rules, which the
+   * person accepted by trusting the Project; the launch is then never
+   * attested as isolated. Ignored in Plan and Chat, which keep it set.
+   */
+  readonly projectConfig?: true;
   /**
    * The person let OpenCode run as itself with its tool servers: these are the
    * MCP servers they added to their own configuration, written into the
@@ -126,6 +141,13 @@ export interface OpenCodeProcessStartInput {
    * session's rules decide them). Absent keeps every tool server off.
    */
   readonly ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * The person let OpenCode run as itself: a 1.x launch also finds their
+   * global `AGENTS.md` where OpenCode looks for it, as it does on its own
+   * (see `openCodeGlobalAgentsInstructionFile`). Absent, 1.x finds none and
+   * falls back to the global `CLAUDE.md`.
+   */
+  readonly runsAsItself?: true;
 }
 
 export interface OpenCodeProcessPort {
@@ -166,14 +188,20 @@ export interface OpenCodeProcessDependencies {
 
 /**
  * Static switches every OpenCode launch sets: no updater, no model fetch, no
- * borrowed Claude Code integration, no default plugins. The version read keeps
- * them too, since a read with no network and only a scratch home is exactly
- * where an update or fetch attempt can stall.
+ * `.claude` skills, no default plugins. The version read keeps them too, since
+ * a read with no network and only a scratch home is exactly where an update or
+ * fetch attempt can stall.
+ *
+ * `OPENCODE_DISABLE_CLAUDE_CODE` and `OPENCODE_DISABLE_CLAUDE_CODE_PROMPT` are
+ * not set, so OpenCode reads `CLAUDE.md` where it finds no `AGENTS.md`, as it
+ * does on its own: instruction text grants no authority. Read from the opencode
+ * 1.18.21 source, the broad switch disables both that prompt and `.claude`
+ * skills, so it goes too and `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` alone keeps
+ * the skills off; 2.x reads only `AGENTS.md` and gates `.claude` skills on
+ * either switch, so the skills switch covers it there as well.
  */
 const OPENCODE_GUARDS = {
   OPENCODE_DISABLE_AUTOUPDATE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE: "1",
-  OPENCODE_DISABLE_CLAUDE_CODE_PROMPT: "1",
   OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
   OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
   OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
@@ -185,20 +213,40 @@ const OPENCODE_GUARDS = {
 /**
  * The guards for a launch whose person let OpenCode load its own skills: the
  * switches that keep OpenCode from reading `.claude/skills` and
- * `.agents/skills` go, and every other guard (updater, model fetch, the
- * borrowed `CLAUDE.md` prompt, default plugins, project configuration)
- * stays. Read from the installed opencode v2.2.0 binary: its server reads
- * `.claude` skills only when neither `OPENCODE_DISABLE_CLAUDE_CODE` nor
- * `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is set, so both go.
+ * `.agents/skills` go, and every other guard (updater, model fetch, default
+ * plugins, project configuration) stays. Read from the installed opencode
+ * v2.2.0 binary: its server reads `.claude` skills only when neither
+ * `OPENCODE_DISABLE_CLAUDE_CODE` nor `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS` is
+ * set, and no launch sets the first.
  */
 function openCodeGuardsWithOwnSkills(): Readonly<Record<string, string>> {
   const {
-    OPENCODE_DISABLE_CLAUDE_CODE: _compatibilityOff,
     OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: _compatibilitySkillsOff,
     OPENCODE_DISABLE_EXTERNAL_SKILLS: _externalSkillsOff,
     ...kept
   } = OPENCODE_GUARDS;
   return kept;
+}
+
+/** The guards a launch keeps: `projectConfig` lifts only the Project configuration switch. */
+function openCodeLaunchGuards(
+  ownSkills: boolean,
+  projectConfig: boolean,
+): Readonly<Record<string, string>> {
+  const guards = ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS;
+  if (!projectConfig) return guards;
+  const { OPENCODE_DISABLE_PROJECT_CONFIG: _projectConfigOff, ...kept } = guards;
+  return kept;
+}
+
+/** Plan stays read-only and Chat keeps no folder, so neither loads a Project's own configuration. */
+function launchLoadsProjectConfig(input: OpenCodeProcessStartInput): boolean {
+  return (
+    input.projectConfig === true &&
+    input.executionPolicy !== undefined &&
+    input.executionPolicy !== "plan" &&
+    (input.mode === "work" || input.mode === "code")
+  );
 }
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 2_000;
@@ -227,10 +275,38 @@ const READINESS_PATTERN = /^(?:opencode )?server listening on (http:\/\/[^\s]+)$
  * The jail allows fork plus exec of exactly this one binary — no real git,
  * no shell, no other exec. The stand-in is macOS only. Linux confinement
  * cannot grant that one exec without also allowing fork, which reopens the
- * Plan jail, so a 2.x Chat, Plan, or Work launch on Linux keeps both denied
- * and the readiness probe fails closed.
+ * Plan jail, so a 2.x Chat or Plan launch on Linux is refused before it
+ * starts (`openCodeRefusesTurnHere`).
  */
 const GIT_STANDIN_TARGET = "/usr/bin/false";
+
+/**
+ * Why a 2.x Chat or Plan launch is refused off macOS. Linux confinement can
+ * only deny fork outright, and 2.x has to start `git` to serve a work tree,
+ * so the jail those modes need cannot serve one there. Work and Code outside
+ * Plan already allow a shell, so 2.x runs there (maintainer decision,
+ * 2026-11-14).
+ */
+export const OPENCODE_LINUX_CHAT_PLAN_REFUSAL =
+  "OpenCode 2 runs on Linux only in Work and Code outside Plan: Chat and Plan allow no process, and OpenCode 2 cannot serve a Git work tree without starting one. Use Work or Code at Ask first or above, or another provider for Chat and Plan.";
+
+/**
+ * Whether this launch is one the host's confinement cannot give a 2.x
+ * runtime: Chat or Plan (no fork, no exec) wherever the git stand-in is not
+ * available. Work and Code outside Plan launch as they always have.
+ */
+export function openCodeRefusesTurnHere(input: {
+  readonly runtime: OpenCodeRuntime;
+  readonly platform: NodeJS.Platform;
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+}): boolean {
+  return (
+    input.runtime === "beta" &&
+    input.platform !== "darwin" &&
+    (input.mode === "chat" || input.executionPolicy === "plan")
+  );
+}
 /** A 2.x launch whose caller named no posture runs nothing without refusal. */
 const BETA_DENY_ALL: ReadonlyArray<PermissionV2Rule> = [
   { action: "*", resource: "*", effect: "deny" },
@@ -645,16 +721,66 @@ function versionNumbers(version: string): readonly [number, number, number] | un
  */
 const OPEN_CODE_2_NATIVE_ROUTES_SINCE = [2, 2, 0] as const;
 
-/** Whether this runtime version string names a 2.x release read for the routes above. */
-export function openCodeServesNativeRoutes(version: string | undefined): boolean {
+/**
+ * The first 2.x release whose question tool was read: it asks through a
+ * `form.created` form with one field per question (`q0`, `q1`, ...) and takes
+ * the answer at `POST /api/session/{id}/form/{form}/reply` (opencode v2.0.22
+ * and v2.0.27 source, read 2026-11-14).
+ */
+const OPEN_CODE_2_QUESTION_FORMS_SINCE = [2, 0, 22] as const;
+
+function openCode2VersionAtLeast(
+  version: string | undefined,
+  floor: readonly [number, number, number],
+): boolean {
   const match = /^opencode2? v(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
   if (match === null) return false;
   const numbers = [Number(match[1]), Number(match[2]), Number(match[3])];
-  for (const [index, floor] of OPEN_CODE_2_NATIVE_ROUTES_SINCE.entries()) {
+  for (const [index, minimum] of floor.entries()) {
     const value = numbers[index] ?? 0;
-    if (value !== floor) return value > floor;
+    if (value !== minimum) return value > minimum;
   }
   return true;
+}
+
+/** Whether this runtime version string names a 2.x release read for the routes above. */
+export function openCodeServesNativeRoutes(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_NATIVE_ROUTES_SINCE);
+}
+
+/**
+ * The 2.x session posture as the probed release can serve it. A release
+ * before the question forms were read keeps OpenCode's `question` permission
+ * denied: the model is told no and carries on, where an allowed question would
+ * publish a form Octant cannot map and fail the turn. Only Octant writes this
+ * rule, since the person's own rules for `question` are dropped.
+ */
+export function betaPermissionsForRelease(
+  rules: ReadonlyArray<PermissionV2Rule>,
+  version: string | undefined,
+): ReadonlyArray<PermissionV2Rule> {
+  if (openCodeServesQuestionForms(version)) return rules;
+  return rules.map((rule) =>
+    rule.action === "question" ? { ...rule, effect: "deny" as const } : rule,
+  );
+}
+
+/** Whether this runtime version string names a 2.x release read for its question forms. */
+export function openCodeServesQuestionForms(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_QUESTION_FORMS_SINCE);
+}
+
+/**
+ * The first 2.x release whose server was read for OpenCode's own commands:
+ * `GET /api/command` lists them and `POST /api/session/{id}/command` runs one
+ * (read again at 2.2.0). 1.x is left out: its command route answers only once
+ * the whole run has ended, so a turn could not start from it.
+ */
+const OPEN_CODE_2_COMMAND_ROUTES_SINCE = [2, 0, 22] as const;
+
+/** Whether this runtime version string names a 2.x release read for the command routes. */
+export function openCodeServesCommandRoutes(version: string | undefined): boolean {
+  return openCode2VersionAtLeast(version, OPEN_CODE_2_COMMAND_ROUTES_SINCE);
 }
 
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
@@ -712,6 +838,7 @@ export function createPrivateOpenCodeProfile(
   betaPermissions?: ReadonlyArray<PermissionV2Rule>,
   ownSkills = false,
   ownToolServers?: Readonly<Record<string, Readonly<Record<string, unknown>>>>,
+  projectConfig = false,
 ): PrivateOpenCodeProfile {
   const root = temporaryDirectory();
   const directories: string[] = [];
@@ -752,7 +879,7 @@ export function createPrivateOpenCodeProfile(
     Object.assign(environment, {
       OPENCODE_CONFIG: configPath,
       OPENCODE_CONFIG_DIR: configDirectory,
-      ...(ownSkills ? openCodeGuardsWithOwnSkills() : OPENCODE_GUARDS),
+      ...openCodeLaunchGuards(ownSkills, projectConfig),
       TMPDIR: tempHome,
       XDG_CACHE_HOME: cacheHome,
       XDG_CONFIG_HOME: configHome,
@@ -858,7 +985,9 @@ function processGroupExists(child: OpenCodeChild): boolean {
 function signalProcessGroup(child: OpenCodeChild, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
-    if (process.platform === "win32") child.kill(signal);
+    // Windows has no process groups; the tree stop ends the runtime and every
+    // program it started, where `child.kill` ended only the runtime.
+    if (process.platform === "win32") void stopWindowsProcessTree(child.pid);
     else process.kill(-child.pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
@@ -948,6 +1077,110 @@ function openCodeDiscoveryRules(home: string | undefined): ReadonlyArray<string>
   ];
 }
 
+/**
+ * The person's global `CLAUDE.md` when a confined OpenCode 1.x launch may read
+ * it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts`), 1.x reads `os.homedir()/.claude/CLAUDE.md`
+ * where it finds no global `AGENTS.md`, and its global configuration folder is
+ * the launch's private one, so this is the file it reads; it ignores
+ * `CLAUDE_CONFIG_DIR`. 2.x reads only `AGENTS.md`, so nothing is opened there.
+ *
+ * The rest of `~/.claude` (the sign-in in `.credentials.json`, settings,
+ * transcripts) stays denied: the grant names this one file. A protected file
+ * stays denied, and a link, or a file reached through a linked `.claude`, is
+ * refused rather than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalClaudeInstructionFile(
+  runtime: OpenCodeRuntime,
+  home: string | undefined,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  try {
+    const file = join(realpathSync(home), ".claude", "CLAUDE.md");
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The person's global OpenCode `AGENTS.md` when an OpenCode 1.x launch may
+ * read it, or undefined. Read from the opencode 1.18.21 source
+ * (`src/session/instruction.ts` and core `global.ts`), 1.x reads the first of
+ * `<global config>/AGENTS.md` and `~/.claude/CLAUDE.md` that exists, where the
+ * global config folder is `$OPENCODE_CONFIG_DIR`, else
+ * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. A launch sets
+ * `OPENCODE_CONFIG_DIR` to its private folder, so this is the file the
+ * person's own environment names, and the launch links it in there. 2.x is
+ * left as it is.
+ *
+ * The rest of the folder (the person's `opencode.json`, plugins, agents)
+ * stays out: the grant names this one file. A protected file stays denied,
+ * and a link, or a file reached through a linked folder, is refused rather
+ * than followed, so the grant cannot name another file.
+ */
+function openCodeGlobalAgentsInstructionFile(
+  runtime: OpenCodeRuntime,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  const home = environment.HOME;
+  if (runtime !== "legacy" || home === undefined || !isAbsolute(home)) return undefined;
+  const absolute = (value: string | undefined) =>
+    value !== undefined && isAbsolute(value) ? value : undefined;
+  try {
+    const configDirectory = absolute(environment.OPENCODE_CONFIG_DIR);
+    const configHome = absolute(environment.XDG_CONFIG_HOME);
+    const configured =
+      configDirectory !== undefined
+        ? join(configDirectory, "AGENTS.md")
+        : configHome !== undefined
+          ? join(configHome, "opencode", "AGENTS.md")
+          : join(home, ".config", "opencode", "AGENTS.md");
+    // Only the home folder itself is canonicalized (macOS homes and temporary
+    // folders sit behind /private links). Every folder below it, and a
+    // configured folder outside it, is kept as named, so a linked
+    // OPENCODE_CONFIG_DIR or a link inside XDG_CONFIG_HOME fails the check
+    // below instead of being resolved away first.
+    const homeDirectory = join(home);
+    const file =
+      configured === homeDirectory || configured.startsWith(`${homeDirectory}/`)
+        ? join(realpathSync(homeDirectory), configured.slice(homeDirectory.length))
+        : configured;
+    if (!lstatSync(file).isFile() || realpathSync(file) !== file) return undefined;
+    if (secretGuardRefusal(file, { platform, homeDirectory: home }) !== undefined) {
+      return undefined;
+    }
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Links the person's global `AGENTS.md` into the launch's private config
+ * folder, where OpenCode looks for it. Undefined when nothing was linked, so
+ * the wall opens nothing for it.
+ */
+function linkOpenCodeGlobalAgentsInstructions(
+  profile: PrivateOpenCodeProfile,
+  file: string | undefined,
+): string | undefined {
+  const configDirectory = profile.environment.OPENCODE_CONFIG_DIR;
+  if (file === undefined || configDirectory === undefined) return undefined;
+  try {
+    symlinkSync(file, join(configDirectory, "AGENTS.md"));
+    return file;
+  } catch {
+    return undefined;
+  }
+}
+
 interface OpenCodeLaunch {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
@@ -1023,6 +1256,8 @@ function prepareOpenCodeLaunch(
   runtime: OpenCodeRuntime,
   port: number,
   platform: NodeJS.Platform,
+  /** The person's global `AGENTS.md`, linked into the private config folder. */
+  globalAgentsInstructions: string | undefined,
 ): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
   const mode = input.mode ?? "code";
   const executionPolicy = openCodeWallPolicy(input);
@@ -1037,6 +1272,9 @@ function prepareOpenCodeLaunch(
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
+  if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
+    return Effect.fail(failure("unsupported", OPENCODE_LINUX_CHAT_PLAN_REFUSAL));
+  }
   return Effect.try({
     try: () => {
       const root = realpathSync(input.cwd);
@@ -1069,6 +1307,11 @@ function prepareOpenCodeLaunch(
         stateHome,
         providerDataDirectory,
       ]);
+      const globalClaudeInstructions = openCodeGlobalClaudeInstructionFile(
+        runtime,
+        profile.environment.HOME,
+        platform,
+      );
       const privateHomeAllowPaths = existingAbsolutePaths([
         root,
         binaryPath,
@@ -1080,6 +1323,11 @@ function prepareOpenCodeLaunch(
         cacheHome,
         stateHome,
         providerDataDirectory,
+        // Bubblewrap binds this one file read-only. Seatbelt keeps `~/.claude`
+        // denied as a whole and reopens the file by literal rule below: as an
+        // allowed path here it would deny `.claude` entry by entry instead, so
+        // a sign-in written after launch would be readable.
+        ...(platform === "darwin" ? [] : [globalClaudeInstructions, globalAgentsInstructions]),
       ]);
       const writeRoots = existingAbsolutePaths([
         configDirectory,
@@ -1108,7 +1356,7 @@ function prepareOpenCodeLaunch(
       // project". The jail allows fork plus exec of exactly /usr/bin/false
       // and nothing else. Linux confinement cannot express that one exec
       // without also allowing fork, which is the hole the Plan jail exists
-      // to close, so Linux keeps fork denied and the probe fails closed.
+      // to close, so a 2.x Chat or Plan launch on Linux was refused above.
       // OpenCode 1.x and Work and Code modes are unchanged.
       const betaGitStandin = runtime === "beta" && jailDeniesProcess && platform === "darwin";
       if (betaGitStandin) {
@@ -1178,6 +1426,23 @@ function prepareOpenCodeLaunch(
                 // Its provider listing resolves the other coding tools' home
                 // directories first, and a refusal there fails the listing.
                 ...openCodeDiscoveryRules(profile.environment.HOME),
+                // OpenCode 1.x reads the person's global CLAUDE.md as it does
+                // on its own; the person's protected files still follow these
+                // rules, and nothing else under `.claude` opens.
+                ...(globalClaudeInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalClaudeInstructions)),
+                      seatbeltAllowLiteralReadRule(globalClaudeInstructions),
+                    ]),
+                // The person's global AGENTS.md, which the private config
+                // folder links to; nothing else in its folder opens.
+                ...(globalAgentsInstructions === undefined
+                  ? []
+                  : [
+                      seatbeltAllowLiteralMetadataRule(dirname(globalAgentsInstructions)),
+                      seatbeltAllowLiteralReadRule(globalAgentsInstructions),
+                    ]),
                 // The git stand-in's only exec: the always-failing binary the
                 // PATH shim resolves `git` to. No other exec becomes possible.
                 ...(betaGitStandin
@@ -1377,6 +1642,7 @@ function acquireOpenCodeServer(
           runtime === "beta" ? (input.betaPermissions ?? BETA_DENY_ALL) : undefined,
           input.ownSkills === true,
           input.ownToolServers,
+          launchLoadsProjectConfig(input),
         );
       } catch {
         resume(
@@ -1392,8 +1658,27 @@ function acquireOpenCodeServer(
       const password = randomBytes(32).toString("base64url");
       const username = runtime === "beta" ? "opencode" : "octant";
       const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+      const globalAgentsInstructions =
+        input.runsAsItself === true
+          ? linkOpenCodeGlobalAgentsInstructions(
+              profile,
+              openCodeGlobalAgentsInstructionFile(
+                runtime,
+                options.inheritedEnvironment ?? process.env,
+                options.platform,
+              ),
+            )
+          : undefined;
       const prepared = Effect.runSyncExit(
-        prepareOpenCodeLaunch(input, profile, options.confinement, runtime, port, options.platform),
+        prepareOpenCodeLaunch(
+          input,
+          profile,
+          options.confinement,
+          runtime,
+          port,
+          options.platform,
+          globalAgentsInstructions,
+        ),
       );
       if (Exit.isFailure(prepared)) {
         profile.cleanup();
@@ -1694,13 +1979,23 @@ export function makeOpenCodeProcessLive(
           acquireOpenCodeServer(
             {
               ...requested,
+              ...(requested.betaPermissions === undefined
+                ? {}
+                : {
+                    betaPermissions: betaPermissionsForRelease(
+                      requested.betaPermissions,
+                      probe.version,
+                    ),
+                  }),
               ...(network === undefined ? {} : { network }),
               ...(servers === undefined ? {} : { servers }),
             },
             { ...resolvedOptions, runtimeConfig },
             runtime,
             probe.version,
-            supportsOpenCodeIsolation(probe.version),
+            // A Project's own plugins and servers enter a launch that loads
+            // its configuration, so that launch is never isolated.
+            supportsOpenCodeIsolation(probe.version) && !launchLoadsProjectConfig(input),
             input.onProcessStarted,
           ).pipe(
             Effect.tap((managed) =>

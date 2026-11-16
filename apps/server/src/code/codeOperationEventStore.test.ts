@@ -13,6 +13,9 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProviderInstanceId,
+  decodeCodeNativeSessionId,
+  decodeProviderModelId,
+  decodeCodeCheckoutId,
   type CodeConversationTurn,
   type CodeOperationEvent,
   type CodeOperationId,
@@ -20,6 +23,11 @@ import {
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentResultSteered } from "@octant/contracts";
+import {
+  AGENT_RESULT_STEERED,
+  AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+} from "../agentRun/agentResultSteeredRecord";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -115,6 +123,85 @@ describe("CodeOperationEventStore", () => {
       frames: [{ cursor: 1 }, { cursor: 2 }],
       nextCursor: 2,
     });
+    reopened.connection.close();
+  });
+
+  it("replays a turn the runtime started inside the person's turn after a restart", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const firstStore = createStore(first.journal);
+    firstStore.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: { kind: "runtime-turn-started", trigger: "background-task" },
+    });
+    firstStore.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const store = createStore(reopened.journal);
+    expect(store.replay({ threadId, operationId, afterCursor: 0, limit: 10 })).toMatchObject({
+      status: "ok",
+      frames: [
+        { cursor: 1, event: { kind: "operation-state", state: "running" } },
+        { cursor: 2, event: { kind: "runtime-turn-started", trigger: "background-task" } },
+        { cursor: 3, event: { kind: "operation-state", state: "completed" } },
+      ],
+    });
+    expect(() =>
+      decodeCodeOperationEvent({ kind: "runtime-turn-started", trigger: "person" }),
+    ).toThrow();
+    reopened.connection.close();
+  });
+
+  it("replays a thread's adoption of a session begun outside Octant after a restart, and resumes from it", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const firstStore = createStore(first.journal);
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: {
+        kind: "native-session-adopted",
+        nativeSessionId: decodeCodeNativeSessionId("outside-session-1"),
+        providerInstanceId: decodeProviderInstanceId("90000000-0000-4000-8000-000000000041"),
+      },
+    });
+    firstStore.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: {
+        kind: "provider-session-ready",
+        sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000042"),
+        providerInstanceId: decodeProviderInstanceId("90000000-0000-4000-8000-000000000041"),
+        modelId: decodeProviderModelId("sonnet"),
+        checkoutId: decodeCodeCheckoutId("90000000-0000-4000-8000-000000000043"),
+        resumeCursor: { driverKind: "claude", value: "outside-session-1" },
+      },
+    });
+    first.connection.close();
+
+    const reopened = openJournal(path);
+    const store = createStore(reopened.journal);
+    expect(store.adoptedNativeSession(threadId)).toMatchObject({
+      nativeSessionId: "outside-session-1",
+    });
+    expect(store.providerSessionForThread(threadId, operationId)).toMatchObject({
+      status: "ok",
+      priorTurn: false,
+      session: { resumeCursor: { driverKind: "claude", value: "outside-session-1" } },
+    });
+    expect(() =>
+      decodeCodeOperationEvent({
+        kind: "native-session-adopted",
+        nativeSessionId: "../escape",
+        providerInstanceId: "90000000-0000-4000-8000-000000000041",
+      }),
+    ).toThrow();
     reopened.connection.close();
   });
 
@@ -581,6 +668,74 @@ describe("CodeOperationEventStore", () => {
     reopened.connection.close();
   });
 
+  it("shows a child result steered into a running turn on that turn after a restart, once", () => {
+    const path = databasePath();
+    const first = openJournal(path);
+    const store = createStore(first.journal);
+    const runId = "89000000-0000-4000-8000-000000000060";
+    const record = {
+      kind: "agent-result-steered",
+      threadId,
+      turnKey: operationId,
+      delivery: {
+        kind: "agent-result",
+        runId,
+        runIds: [runId],
+        runGenerations: [{ runId, generation: 1 }],
+      },
+      body: "A delegated subagent has finished.",
+      steeredAt: now,
+    };
+    const steer = () =>
+      first.journal.append({
+        aggregate: {
+          aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+          aggregateId: crypto.randomUUID(),
+        },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            eventName: AGENT_RESULT_STEERED,
+            eventVersion: 1,
+            correlationId: crypto.randomUUID(),
+            actor,
+            occurredAt: now,
+            payload: record,
+          },
+        ],
+      });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: turnStarted("89000000-0000-4000-8000-000000000042"),
+    });
+    steer();
+    // The turn ends after the result entered it; the card stays.
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("completed") });
+    // The same delivery read again shows once.
+    steer();
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: turnStarted("89000000-0000-4000-8000-000000000042"),
+    });
+    first.connection.close();
+
+    const reopened = createStore(openJournal(path).journal);
+    const expected = [
+      { delivery: record.delivery, body: record.body, steeredAt: record.steeredAt },
+    ];
+    const page = reopened.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(page[0]?.steeredResults).toEqual(expected);
+    expect(page[1]).not.toHaveProperty("steeredResults");
+    const window = reopened.conversationWindow({ threadId, limit: 10 });
+    if (window.status !== "ok") throw new Error("window refused");
+    expect(window.window.turns[0]?.steeredResults).toEqual(expected);
+  });
+
   it("replays a turn's tool calls and reasoning in order, folded and bounded", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);
@@ -720,6 +875,47 @@ describe("CodeOperationEventStore", () => {
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns).toMatchObject([
       { operationId: failedOperation, status: "failed" },
       { operationId: incompleteOperation, status: "incomplete" },
+    ]);
+    fixture.connection.close();
+  });
+
+  it("carries the usage limit a waiting provider turn stopped at", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt: {
+          contentId: "89000000-0000-4000-8000-000000000031",
+          digest: "e".repeat(64),
+          byteLength: 4,
+        },
+      }),
+    });
+    const usageLimit = { kind: "temporary", resetsAt: "2026-11-15T18:00:00.000Z" };
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "provider-turn-state",
+          operationId,
+          state: "waiting",
+          failure: { category: "unavailable", message: "Usage limit reached.", usageLimit },
+        },
+      }),
+    });
+
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns).toMatchObject([
+      { operationId, status: "waiting", failure: { usageLimit } },
     ]);
     fixture.connection.close();
   });
@@ -1057,7 +1253,10 @@ describe("CodeOperationEventStore", () => {
       0,
     );
     expect(decoded).toBe(5);
-    expect(wholeThread).not.toHaveBeenCalled();
+    // The thread's steered child results are their own small slice.
+    expect(
+      wholeThread.mock.calls.filter(([cursor]) => cursor.aggregateType === "code-operation"),
+    ).toEqual([]);
     fixture.connection.close();
   });
 
@@ -1650,6 +1849,7 @@ function openJournal(path = databasePath()): { journal: Journal; connection: Sql
       connection,
       registry: new EventRegistry()
         .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
+        .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
         .register(CHECKOUT_NOISE_EVENT, 1, Schema.Struct({ observedAt: Schema.String })),
       projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
       clock: () => now,

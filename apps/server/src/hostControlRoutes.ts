@@ -15,6 +15,15 @@ import {
   type SetHostMemoryLimitsOutcome,
   type SetHostMemoryLimitsRequest,
 } from "@octant/contracts/host-control";
+import {
+  decodeSetWebSearchKeyRequest,
+  decodeSetWebSearchSettingsRequest,
+  type SetWebSearchKeyOutcome,
+  type SetWebSearchKeyRequest,
+  type SetWebSearchSettingsOutcome,
+  type SetWebSearchSettingsRequest,
+  type WebSearchSettingsView,
+} from "@octant/contracts/web-search";
 import type { HostDataMap } from "@octant/contracts/host-data-map";
 import {
   composeHostDataMap,
@@ -29,6 +38,7 @@ import {
 } from "@octant/contracts/thread-retention";
 import type { ThreadRetentionService } from "./threadRetentionService";
 import {
+  actsAsHostPerson,
   authorizeHostControlAction,
   deriveHostLifecycleControls,
   encodeHostExportPage,
@@ -82,6 +92,8 @@ const ROUTES = {
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
   memoryLimits: "/api/host-control/memory-limits",
+  webSearch: "/api/host-control/web-search",
+  webSearchKey: "/api/host-control/web-search/key",
   retention: "/api/host-control/thread-retention",
   purge: "/api/host-control/thread-purge",
   export: "/api/host-control/export",
@@ -93,6 +105,11 @@ const RESTORE_GUIDANCE =
   "Stop the Octant host, then run the offline restore command with --confirm.";
 
 export interface HostControlServicePolicyPort {
+  /**
+   * `logon-entry`: the Windows Run value, which is the policy itself and
+   * restarts nothing; Settings then offers neither restart nor a startup change.
+   */
+  readonly supervisor?: "restarts" | "logon-entry";
   read(): Promise<{ readonly enabled: boolean; readonly updatedAt: string }>;
   setEnabled(enabled: boolean): Promise<{ readonly enabled: boolean; readonly updatedAt: string }>;
 }
@@ -142,6 +159,19 @@ export interface HostControlRouteDependencies {
    */
   readonly dataMap?: HostDataMapRouteDependencies;
   readonly threadRetention?: ThreadRetentionService;
+  /** The journaled web search backends and data policy; omitting it makes the setting unavailable. */
+  readonly webSearch?: {
+    readonly view: () => Promise<WebSearchSettingsView>;
+    readonly set: (
+      request: SetWebSearchSettingsRequest,
+      principalKind: PrincipalKind,
+      actor?: EventActor,
+    ) => Promise<SetWebSearchSettingsOutcome>;
+    readonly setKey: (
+      request: SetWebSearchKeyRequest,
+      principalKind: PrincipalKind,
+    ) => Promise<SetWebSearchKeyOutcome>;
+  };
   readonly hostExport?: HostExportRoutePort;
   readonly now?: () => number;
   /** Defers the drain until after the response is written. Test seam. */
@@ -185,7 +215,7 @@ export function createHostControlRouteHandler(
     }
 
     const route = url.pathname as (typeof ROUTES)[keyof typeof ROUTES];
-    if (route === ROUTES.retention) {
+    if (route === ROUTES.retention || route === ROUTES.webSearch) {
       if (request.method !== "GET" && request.method !== "POST") {
         return failure("HTTP method is not supported for this route.", 405, origin);
       }
@@ -234,6 +264,9 @@ export function createHostControlRouteHandler(
     if (route === ROUTES.retention && request.method === "GET") {
       return authorized("retention", () => handleReadRetention(dependencies, origin));
     }
+    if (route === ROUTES.webSearch && request.method === "GET") {
+      return handleReadWebSearch(dependencies, caller, origin);
+    }
 
     const decoded = await readJson(request, BODY_LIMIT);
     if (decoded.kind === "too-large") {
@@ -271,6 +304,24 @@ export function createHostControlRouteHandler(
         return failure("Memory limits request is invalid.", 400, origin);
       }
       return handleSetMemoryLimits(dependencies, caller, body, origin);
+    }
+    if (route === ROUTES.webSearch) {
+      let body;
+      try {
+        body = decodeSetWebSearchSettingsRequest(decoded.value);
+      } catch {
+        return failure("Web search settings request is invalid.", 400, origin);
+      }
+      return handleSetWebSearch(dependencies, caller, body, origin);
+    }
+    if (route === ROUTES.webSearchKey) {
+      let body;
+      try {
+        body = decodeSetWebSearchKeyRequest(decoded.value);
+      } catch {
+        return failure("Web search key request is invalid.", 400, origin);
+      }
+      return handleSetWebSearchKey(dependencies, caller, body, origin);
     }
     if (route === ROUTES.retention) {
       let body;
@@ -587,6 +638,56 @@ function handleSetMemoryLimits(
   return json(outcome, unauthorized ? 403 : 200, origin);
 }
 
+/**
+ * Where a query may go is the host person's to read and change, as with a
+ * provider's native setup; a device another person introduced reaches neither.
+ */
+async function handleReadWebSearch(
+  dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
+  origin: string | null,
+): Promise<Response> {
+  if (!actsAsHostPerson(caller.principalKind)) {
+    return failure("Host control is unauthorized.", 403, origin);
+  }
+  if (dependencies.webSearch === undefined) {
+    return failure("Web search settings are unavailable while the owner is starting.", 503, origin);
+  }
+  return json(await dependencies.webSearch.view(), 200, origin);
+}
+
+async function handleSetWebSearch(
+  dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
+  body: SetWebSearchSettingsRequest,
+  origin: string | null,
+): Promise<Response> {
+  if (dependencies.webSearch === undefined) {
+    return failure("Web search settings are unavailable while the owner is starting.", 503, origin);
+  }
+  const outcome =
+    caller.actor === undefined
+      ? await dependencies.webSearch.set(body, caller.principalKind)
+      : await dependencies.webSearch.set(body, caller.principalKind, caller.actor);
+  const unauthorized = outcome.kind === "refused" && outcome.code === "unauthorized";
+  return json(outcome, unauthorized ? 403 : 200, origin);
+}
+
+/** A key goes to the credential broker; the response carries only the entry's state. */
+async function handleSetWebSearchKey(
+  dependencies: HostControlRouteDependencies,
+  caller: HostControlCaller,
+  body: SetWebSearchKeyRequest,
+  origin: string | null,
+): Promise<Response> {
+  if (dependencies.webSearch === undefined) {
+    return failure("Web search settings are unavailable while the owner is starting.", 503, origin);
+  }
+  const outcome = await dependencies.webSearch.setKey(body, caller.principalKind);
+  const unauthorized = outcome.kind === "refused" && outcome.code === "unauthorized";
+  return json(outcome, unauthorized ? 403 : 200, origin);
+}
+
 function handleReadRetention(
   dependencies: HostControlRouteDependencies,
   origin: string | null,
@@ -644,6 +745,9 @@ function lifecycleControls(
   const derived = deriveHostLifecycleControls({
     serviceMode,
     policy: policy.kind === "known" ? { kind: "known", enabled: policy.enabled } : policy,
+    ...(dependencies.servicePolicy?.supervisor === undefined
+      ? {}
+      : { supervisor: dependencies.servicePolicy.supervisor }),
   });
   if (dependencies.servicePolicy === undefined) {
     const unavailable = {

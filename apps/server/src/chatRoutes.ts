@@ -28,7 +28,10 @@ import { eventActorForPrincipal } from "./principalEventActor";
 import {
   authenticateRouteWindowId,
   boundPrincipalIsRestricted,
+  authenticateRoutePrincipal,
   readPrincipalRouteContext,
+  type PrincipalRouteContext,
+  retainRouteAdmissionCurrent,
 } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -406,7 +409,11 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         }
         // Moving a thread to another account is the person's own choice; a
         // device that acts on this host without the person's powers may not.
-        if (boundPrincipalIsRestricted(request) && command.kind === "move-chat-thread-account") {
+        if (
+          boundPrincipalIsRestricted(request) &&
+          (command.kind === "move-chat-thread-account" ||
+            command.kind === "set-chat-thread-usage-limit-handoff")
+        ) {
           return failureResponse(
             {
               category: "unauthorized",
@@ -420,6 +427,12 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           await dependencies.service.execute(command, {
             windowId: authenticatedWindowId,
             actor: eventActorForPrincipal(readPrincipalRouteContext(request)?.principal),
+            // Only a turn may describe images; other commands carry no check.
+            ...(command.kind === "send-chat-turn" ||
+            command.kind === "retry-chat-turn" ||
+            command.kind === "resume-chat-turn"
+              ? imagesCurrentFor(request, dependencies.windowAuthorityStore, now)
+              : {}),
           }),
           200,
           origin,
@@ -857,3 +870,25 @@ function corsHeaders(origin: string | null): Headers {
 }
 
 export type { ChatBootstrap, ChatCommandResult, ChatThread };
+
+/**
+ * Whether the request still stands while Sees images describes its images:
+ * the same check a Work turn's admission makes, read only by the describe.
+ */
+export function imagesCurrentFor(
+  request: Request,
+  store: WindowAuthorityStore,
+  now: () => number,
+): { readonly imagesCurrent?: () => boolean } {
+  // A local window's request carries no bound context, so it is resolved
+  // again here, exactly as a Work turn's route keeps the one it resolved.
+  let context: PrincipalRouteContext;
+  try {
+    context =
+      readPrincipalRouteContext(request) ??
+      authenticateRoutePrincipal({ request, store, now: now() });
+  } catch {
+    return { imagesCurrent: () => false };
+  }
+  return { imagesCurrent: retainRouteAdmissionCurrent({ request, context, store, now }) };
+}

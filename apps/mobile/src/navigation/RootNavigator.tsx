@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import type { MobileInboxRow } from "@octant/client-runtime";
+import type { Todo } from "@octant/contracts/todos";
 import { DeviceRevokePanel } from "../approvals/DeviceRevokePanel";
 import { LargeTitle, ListRow, ListSection, NavBar } from "../ui/NativeChrome";
 import { TabBar, type MobileTabId } from "../ui/TabBar";
 import { MOBILE_COPY, MOBILE_TAB_LABELS, mobileHostHealthLabel, type MobileRouteId } from "../copy";
 import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen";
+import { TodosScreen } from "../todos/TodosScreen";
+import type { MobileStartedThread } from "../todos/todosPresentation";
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
+import type { MobileThreadArrangement } from "../inbox/threadArrangement";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { hostHealthTone } from "../hosts/hostHealthTone";
 import { GuestHubPanel, GuestHubRefusals } from "../hosts/GuestHubPanel";
@@ -398,9 +402,32 @@ const shellStyles = StyleSheet.create({
 
 export function RootNavigator(props: RootNavigatorProps) {
   const [selectedThread, setSelectedThread] = useState<MobileInboxRow | undefined>();
+  const [focusTurnId, setFocusTurnId] = useState<string | undefined>();
   const [threadReturnRoute, setThreadReturnRoute] = useState<"home" | "agents">("home");
   const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
+  // Each tab keeps its own arrangement while the app runs, as each desktop
+  // mode does; Status is the default.
+  const [arrangements, setArrangements] = useState<
+    Readonly<Record<"work" | "code", MobileThreadArrangement>>
+  >({ work: "status", code: "status" });
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
+  // A Start pressed on To-dos, waiting for the Inbox's new-thread sheet to take it.
+  const [todoStart, setTodoStart] = useState<Todo | undefined>();
+  // Threads a Start made that the list did not take, by to-do id. They stay on
+  // the phone until the person links them again; the threads are unaffected.
+  const [unlinkedTodoStarts, setUnlinkedTodoStarts] = useState<
+    ReadonlyMap<string, MobileStartedThread>
+  >(new Map());
+  const recordTodoLink = useCallback(
+    (todoId: string, thread: MobileStartedThread, linked: boolean) =>
+      setUnlinkedTodoStarts((current) => {
+        const next = new Map(current);
+        if (linked) next.delete(todoId);
+        else next.set(todoId, thread);
+        return next;
+      }),
+    [],
+  );
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
   const {
@@ -497,11 +524,20 @@ export function RootNavigator(props: RootNavigatorProps) {
     <View style={shellStyles.shell} testID="octant-mobile-shell">
       {props.activeRoute === "home" ? (
         <InboxHomeScreen
+          arrangement={homeMode === "inbox" ? "status" : arrangements[homeMode]}
           homeMode={homeMode}
+          onSelectArrangement={(arrangement) => {
+            if (homeMode === "inbox") return;
+            setArrangements((current) => ({ ...current, [homeMode]: arrangement }));
+          }}
           onOpenAgents={(view) => {
             setAgentListView(view);
             props.onSelectRoute("agents");
           }}
+          onOpenTodos={() => props.onSelectRoute("todos")}
+          onTodoLinked={recordTodoLink}
+          onTodoStartOpened={() => setTodoStart(undefined)}
+          todoStart={todoStart}
           onAddWorkspace={() => {
             setHostEntryMode("add");
             props.onSelectRoute("hosts");
@@ -517,16 +553,29 @@ export function RootNavigator(props: RootNavigatorProps) {
           }}
           onOpenThread={(row) => {
             setSelectedThread(row);
+            setFocusTurnId(undefined);
             setThreadReturnRoute("home");
             props.onSelectRoute("thread");
           }}
         />
       ) : null}
+      {props.activeRoute === "todos" ? (
+        <TodosScreen
+          onBack={() => props.onSelectRoute("home")}
+          onLinked={recordTodoLink}
+          onStart={(todo) => {
+            setTodoStart(todo);
+            props.onSelectRoute("home");
+          }}
+          unlinked={unlinkedTodoStarts}
+        />
+      ) : null}
       {props.activeRoute === "agents" ? (
         <AgentsListScreen
           onBack={() => props.onSelectRoute("home")}
-          onOpenThread={(row) => {
+          onOpenThread={(row, turnId) => {
             setSelectedThread(row);
+            setFocusTurnId(turnId);
             setThreadReturnRoute("agents");
             props.onSelectRoute("thread");
           }}
@@ -537,7 +586,11 @@ export function RootNavigator(props: RootNavigatorProps) {
       {props.activeRoute === "thread" ? (
         <ThreadScreen
           onBack={() => props.onSelectRoute(threadReturnRoute)}
-          onOpenThread={setSelectedThread}
+          focusTurnId={focusTurnId}
+          onOpenThread={(row) => {
+            setSelectedThread(row);
+            setFocusTurnId(undefined);
+          }}
           selected={selectedThread}
         />
       ) : null}

@@ -1,5 +1,5 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   CorrelationId,
   UtcTimestamp,
@@ -8,6 +8,7 @@ import {
   decodeProviderProbeResult,
   type ProviderExecutionPolicy,
   type ProviderFailure,
+  type ProviderInputModality,
   type ProviderInstanceId,
   type ProviderOutputStopReason,
   type ProviderRuntimeEvent,
@@ -26,6 +27,7 @@ import {
 } from "@octant/provider-sdk/chat-conformance";
 import { Effect, Exit, PubSub, Scope, Stream } from "effect";
 import {
+  PI_BRIDGE_FILE_NAME,
   piToolCatalogAttestation,
   type PiProcessPort,
   type PiRpcConnection,
@@ -165,6 +167,14 @@ const capabilities = {
   ...unsupportedChatCapabilities,
 } as const;
 const MAX_REMEMBERED_TOOL_CALLS = 256;
+/** Pi's interface requests that expect no answer (`RpcExtensionUIRequest` in Pi's RPC types). */
+const PI_UNANSWERED_UI_METHODS: ReadonlySet<string> = new Set([
+  "notify",
+  "setStatus",
+  "setWidget",
+  "setTitle",
+  "set_editor_text",
+]);
 
 const PROBE_TOOL_BRIDGE = {
   url: "http://127.0.0.1:1/octant/probe",
@@ -190,8 +200,11 @@ export function piVerifiesManagedTools(version: string): boolean {
 /** The one release whose settled process Octant verified for warm reuse; others cold-resume. */
 const PI_WARM_REUSE_VERSION = "0.85.1";
 
-function capabilitiesFor(appManagedTools: "supported" | "unsupported") {
-  return { ...capabilities, appManagedTools } as const;
+function capabilitiesFor(
+  appManagedTools: "supported" | "unsupported",
+  nativeAttachments: "supported" | "unsupported" = "unsupported",
+) {
+  return { ...capabilities, appManagedTools, nativeAttachments } as const;
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
@@ -229,6 +242,20 @@ function bounded(value: unknown, maximum = 1024): string | undefined {
   return Array.from(normalized).slice(0, maximum).join("");
 }
 
+const PI_IMAGE_INPUT_MODALITIES: readonly ProviderInputModality[] = ["text", "image"];
+
+/**
+ * What a model takes, as Pi's own model list says (`input` on each model of
+ * `get_available_models`). Pi's prompt carries images and nothing else, so an
+ * image is the only attachment a model may take, and only where Pi lists it
+ * (maintainer decision, 2026-11-14).
+ */
+function piInputModalities(input: unknown): readonly ProviderInputModality[] {
+  return Array.isArray(input) && input.includes("image")
+    ? PI_IMAGE_INPUT_MODALITIES
+    : textOnlyInputModalities;
+}
+
 function normalizeModels(response: PiRpcResponse) {
   const data = record(response.data);
   const models = Array.isArray(data?.models) ? data.models : [];
@@ -248,7 +275,7 @@ function normalizeModels(response: PiRpcResponse) {
           ? { contextLimit: context }
           : {}),
         reasoning: model?.reasoning === false ? ("unsupported" as const) : ("supported" as const),
-        inputModalities: textOnlyInputModalities,
+        inputModalities: piInputModalities(model?.input),
         options: [],
       },
     ];
@@ -344,7 +371,12 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           processState: "stopped",
           detectedVersion: connection.version,
           models,
-          capabilities: capabilitiesFor(appManagedToolsVerified ? "supported" : "unsupported"),
+          capabilities: capabilitiesFor(
+            appManagedToolsVerified ? "supported" : "unsupported",
+            models.some((model) => model.inputModalities.includes("image"))
+              ? "supported"
+              : "unsupported",
+          ),
           ...(models.length === 0
             ? { message: "Pi did not report an authenticated selectable model." }
             : {}),
@@ -679,6 +711,21 @@ function makeConnection(
         const uiId = bounded(event.id, 256);
         const title = bounded(event.title, 1024);
         const match = title?.match(/^Octant approval:([^:]+):([^:]+)$/);
+        // The person's own extensions load in Work and Code, and they talk to
+        // Pi's interface too. A status line, widget, title or notice expects
+        // no answer and is not shown; any other question of theirs is
+        // answered as dismissed, since Octant has no form for it.
+        if (typeof event.method === "string" && PI_UNANSWERED_UI_METHODS.has(event.method)) return;
+        if (
+          uiId !== undefined &&
+          (event.method !== "confirm" || match === undefined || match === null)
+        ) {
+          void state.client.respondToUi(
+            uiId,
+            event.method === "confirm" ? { confirmed: false } : { cancelled: true },
+          );
+          return;
+        }
         if (
           event.method !== "confirm" ||
           uiId === undefined ||
@@ -778,6 +825,17 @@ function makeConnection(
       }
       if (event.type === "message_update") return;
       if (event.type === "extension_error") {
+        // Only Octant's own bridge failing leaves a side effect unguarded; an
+        // error in one of the person's extensions is theirs, and Pi carries
+        // on as it does on its own. An error naming no path, or a path that
+        // could be the bridge's, still fails the turn.
+        if (
+          typeof event.extensionPath === "string" &&
+          event.extensionPath.length > 0 &&
+          basename(event.extensionPath) !== PI_BRIDGE_FILE_NAME
+        ) {
+          return;
+        }
         return protocolFailure(state, "Pi approval bridge failed.");
       }
     };
@@ -1126,10 +1184,21 @@ function makeConnection(
       },
       send: (input) =>
         stateFor(input.sessionId).pipe(
-          Effect.flatMap((state) =>
-            rejectUnsupportedChatTurn(
+          Effect.flatMap((state) => {
+            // The thread's model as the last probe saw it: an image goes only
+            // to a model Pi's own list says takes one, and any other
+            // attachment is refused rather than dropped.
+            const model = options.runtimeRegistry
+              .observedState(options.instanceId)
+              ?.models.find((candidate) => String(candidate.id) === state.modelId);
+            const imageInput = model?.inputModalities.includes("image") === true;
+            return rejectUnsupportedChatTurn(
               input,
-              capabilitiesFor(factories.appManagedTools.get() ? "supported" : "unsupported"),
+              capabilitiesFor(
+                factories.appManagedTools.get() ? "supported" : "unsupported",
+                imageInput ? "supported" : "unsupported",
+              ),
+              model,
             ).pipe(
               Effect.flatMap(() => {
                 if (state.terminal)
@@ -1140,15 +1209,23 @@ function makeConnection(
                 delete state.usageIncomplete;
                 state.promptActive = true;
                 state.correlationId = factories.makeCorrelation() as CorrelationId;
+                const images = input.attachments.map((attachment) => ({
+                  type: "image",
+                  mimeType: attachment.mediaType,
+                  data: Buffer.from(attachment.bytes).toString("base64"),
+                }));
                 return request(() =>
-                  state.client.request("prompt", { message: renderProviderTurnPrompt(input) }),
+                  state.client.request("prompt", {
+                    message: renderProviderTurnPrompt(input),
+                    ...(images.length === 0 ? {} : { images }),
+                  }),
                 ).pipe(
                   Effect.asVoid,
                   Effect.tapError(() => Effect.sync(() => (state.promptActive = false))),
                 );
               }),
-            ),
-          ),
+            );
+          }),
         ),
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(

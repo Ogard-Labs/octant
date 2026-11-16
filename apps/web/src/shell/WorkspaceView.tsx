@@ -27,7 +27,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
 import { TaskAccessContext, type TaskAccessContextValue } from "../code/TaskAccessDetails";
-import { decodeContextSubjectRef } from "@octant/contracts";
+import { LOCAL_HOST_ID, decodeContextSubjectRef } from "@octant/contracts";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import {
   FollowUpSuggestionContext,
@@ -62,6 +62,7 @@ import type {
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { KeyProviderDriverKinds } from "@octant/contracts/providers";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type { DesktopRecipe, DesktopRecipeKeyChange } from "@octant/contracts/desktop-lease";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -87,6 +88,11 @@ import type { ThreadMoveEnvironment } from "../environment/threadMove/ThreadMove
 import { threadMoveClientForBridge } from "../environment/threadMove/threadMoveClient";
 import { ThreadMoveHold } from "../environment/threadMove/ThreadMoveHold";
 import type { ProviderController } from "../providers/useProviderController";
+import {
+  modelRolePickerGroups,
+  modelRoleProviderOptions,
+  nativeHarnessReadinessById,
+} from "../harness/modelRoleOptions";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
@@ -105,7 +111,7 @@ import {
 } from "react";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
-import type { ChatThread, ChatThreadId } from "@octant/contracts/chat";
+import type { ChatThread, ChatThreadId, ChatTurnId } from "@octant/contracts/chat";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import { useChatController } from "../chat/useChatController";
 import type { ChatController, ChatReadCursorStore } from "../chat/useChatController";
@@ -118,6 +124,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
+import type { WorkTurnId } from "@octant/contracts/work-turns";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
 import { codeSurfaceTitle } from "../code/codeSurfaces";
 import { WorkOverview } from "../work/WorkOverview";
@@ -136,6 +143,12 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessCards } from "../harness/ThreadHarnessCards";
+import {
+  CoordinatorWorkersPanelSlot,
+  type CoordinatorWorkersSource,
+} from "../code/CoordinatorWorkersPanel";
+import { coordinatorWorkerRows } from "../code/coordinatorWorkerPanel";
+import { modelDisplayName } from "../providers/providerModelLabel";
 import {
   CoordinatorWorkerAskRows,
   CoordinatorWorkerRequests,
@@ -192,6 +205,16 @@ const PreviewWorkspaceTab = lazy(() =>
 );
 type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 
+/** A search hit's turn: the pane showing that thread brings it into view once. */
+export type RevealedThreadTurn =
+  | { readonly mode: "chat"; readonly threadId: ChatThreadId; readonly turnId: ChatTurnId }
+  | { readonly mode: "work"; readonly threadId: WorkThreadId; readonly turnId: WorkTurnId }
+  | {
+      readonly mode: "code";
+      readonly threadId: CodeThreadId;
+      readonly operationId: CodeOperationId;
+    };
+
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   /** The host's paired iPhones and iPads, shown in the Apple workbench. */
@@ -210,12 +233,9 @@ export interface WorkspaceViewProps {
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
-  readonly revealChatTurn?: {
-    readonly threadId: import("@octant/contracts/chat").ChatThreadId;
-    readonly turnId: import("@octant/contracts/chat").ChatTurnId;
-  };
-  /** Called once the Chat pane has shown `revealChatTurn`; the jump is spent. */
-  readonly onChatTurnRevealed?: () => void;
+  readonly revealTurn?: RevealedThreadTurn;
+  /** Called once the pane has shown `revealTurn`, or found its thread no longer holds it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   readonly codeController: CodeController;
   /**
    * One controller per open Code thread. Every Code surface reads the one for
@@ -316,6 +336,7 @@ export interface WorkspaceViewProps {
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
   /** A pane's own thread items for its header menu, such as a Code thread's coordinator items. */
   readonly threadMenuItems?: SplitWorkspaceProps["threadMenuItems"];
+  readonly threadHeader?: SplitWorkspaceProps["threadHeader"];
   readonly onOpenWorkThread?: (
     threadId: WorkThreadId,
     projectId: ProjectId,
@@ -360,6 +381,8 @@ export interface WorkspaceViewProps {
   /** Text a draft starts with, handed over from a Canvas plan task. */
   readonly draftPendingPrompt?: string;
   readonly onDraftPendingPromptConsumed?: () => void;
+  /** The to-do the draft was started from; see DraftThreadWorkspace. */
+  readonly draftTodoSource?: { readonly title: string; readonly onRemove: () => void };
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -516,6 +539,8 @@ export interface WorkspaceViewProps {
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
   readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly projectClient?: ProjectClient;
+  /** Each Project's instructions, shown beside its memory. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
   readonly previewClient?: PreviewClient;
@@ -889,6 +914,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               {...(props.threadMenuItems === undefined
                 ? {}
                 : { threadMenuItems: props.threadMenuItems })}
+              {...(props.threadHeader === undefined ? {} : { threadHeader: props.threadHeader })}
               activePaneId={props.workspace.activePaneIds[props.mode]}
               {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
               renderSurface={(surface, paneId) => (
@@ -1151,6 +1177,9 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
           ? {}
           : { interactionsClient: props.nativeHarnessClient })}
         {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
+        {...(props.providerController.instances === undefined
+          ? {}
+          : { providerInstances: props.providerController.instances })}
         threadId={threadId}
       />
     );
@@ -1192,6 +1221,38 @@ function coordinatorWorkersFor(
     workers: workers.map((thread) => ({ threadId: String(thread.threadId), title: thread.title })),
     onOpenWorker: (worker) => {
       const thread = workers.find((candidate) => String(candidate.threadId) === worker.threadId);
+      if (thread !== undefined)
+        props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
+    },
+  };
+}
+
+/**
+ * A coordinator's workers for its Workers panel and transcript cards, from the
+ * window's Code thread list, or undefined for any other thread. Like the
+ * request rows, only a thread on this window's host reads them.
+ */
+function coordinatorWorkersSourceFor(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+): CoordinatorWorkersSource | undefined {
+  if (tab.kind !== "code-overview") return undefined;
+  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
+  const threads = props.codeController.navigation ?? [];
+  const coordinator = threads.find((thread) => String(thread.threadId) === String(tab.threadId));
+  if (coordinator?.coordinator !== true) return undefined;
+  const groups = props.codeProviderGroups ?? props.draftProviderGroups ?? [];
+  return {
+    rows: coordinatorWorkerRows(threads, String(tab.threadId), (thread) =>
+      thread.modelId === undefined
+        ? "Model unknown"
+        : modelDisplayName(groups, {
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }),
+    ),
+    onOpenWorker: (threadId) => {
+      const thread = threads.find((candidate) => String(candidate.threadId) === threadId);
       if (thread !== undefined)
         props.onOpenCodeThread(thread.threadId, thread.title, thread.projectId);
     },
@@ -1450,6 +1511,7 @@ function renderCodeTab(
   const harnessAutoReviewSupported = autoReview?.status === "reviewer" ? true : undefined;
   const coordinatorProposals = coordinatorProposalsFor(tab, props, codeController, project);
   const coordinatorWorkerAsks = coordinatorWorkerAsksFor(tab, props);
+  const coordinatorWorkers = coordinatorWorkersSourceFor(tab, props);
   const content = (
     <Suspense
       fallback={
@@ -1462,6 +1524,15 @@ function renderCodeTab(
       }
     >
       <CodeWorkspaceTab
+        {...(props.revealTurn?.mode === "code" &&
+        String(props.revealTurn.threadId) === String(tab.threadId)
+          ? {
+              revealOperationId: props.revealTurn.operationId,
+              ...(props.onTurnRevealed === undefined
+                ? {}
+                : { onTurnRevealed: props.onTurnRevealed }),
+            }
+          : {})}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -1477,6 +1548,7 @@ function renderCodeTab(
         onOpenCodeThread={props.onOpenCodeThread}
         {...(coordinatorProposals === undefined ? {} : { coordinatorProposals })}
         {...(coordinatorWorkerAsks === undefined ? {} : { coordinatorWorkerAsks })}
+        {...(coordinatorWorkers === undefined ? {} : { coordinatorWorkers })}
         {...(props.onNewThreadInProject === undefined
           ? {}
           : { onNewThreadInProject: props.onNewThreadInProject })}
@@ -1715,6 +1787,18 @@ function renderCodeTab(
               : { onOpenUsageDashboard: props.onOpenUsageDashboard })}
           >
             {content}
+            {coordinatorWorkers === undefined ? null : (
+              <CoordinatorWorkersPanelSlot
+                coordinatorThreadId={String(tab.threadId)}
+                coordinatorTitle={activeThread?.title ?? tab.title}
+                onSelectPullRequest={(row) =>
+                  row.pullRequest === undefined
+                    ? undefined
+                    : props.onSelectPullRequest?.(row.pullRequest.identity)
+                }
+                source={coordinatorWorkers}
+              />
+            )}
           </CodeThreadEnvironment>
         </ThreadActivityPictureInPicture>
       </ThreadPlanProvider>
@@ -1850,6 +1934,7 @@ function renderNonCodeTab(
           {...(props.draftPendingPrompt === undefined
             ? {}
             : { pendingPrompt: props.draftPendingPrompt })}
+          {...(props.draftTodoSource === undefined ? {} : { todoSource: props.draftTodoSource })}
           {...(props.onDraftPendingPromptConsumed === undefined
             ? {}
             : { onPendingPromptConsumed: props.onDraftPendingPromptConsumed })}
@@ -2009,13 +2094,13 @@ function renderNonCodeTab(
         projects={props.projects}
         tab={tab}
         providerController={props.providerController}
-        {...(props.revealChatTurn !== undefined &&
-        String(props.revealChatTurn.threadId) === String(tab.threadId)
+        {...(props.revealTurn?.mode === "chat" &&
+        String(props.revealTurn.threadId) === String(tab.threadId)
           ? {
-              revealTurnId: props.revealChatTurn.turnId,
-              ...(props.onChatTurnRevealed === undefined
+              revealTurnId: props.revealTurn.turnId,
+              ...(props.onTurnRevealed === undefined
                 ? {}
-                : { onTurnRevealed: props.onChatTurnRevealed }),
+                : { onTurnRevealed: props.onTurnRevealed }),
             }
           : {})}
         {...(props.projectServerUrl === undefined
@@ -2122,6 +2207,15 @@ function renderNonCodeTab(
             >
               <WorkThreadWorkspace
                 projects={props.projects}
+                {...(props.revealTurn?.mode === "work" &&
+                String(props.revealTurn.threadId) === String(tab.threadId)
+                  ? {
+                      revealTurnId: props.revealTurn.turnId,
+                      ...(props.onTurnRevealed === undefined
+                        ? {}
+                        : { onTurnRevealed: props.onTurnRevealed }),
+                    }
+                  : {})}
                 {...(props.browserAutomationClient === undefined
                   ? {}
                   : { browserAutomationClient: props.browserAutomationClient })}
@@ -2356,7 +2450,22 @@ function renderNonCodeTab(
                 }),
             })}
         {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+        {...(props.octantInstructionsClient === undefined
+          ? {}
+          : { octantInstructionsClient: props.octantInstructionsClient })}
         memoryProjects={props.projects}
+        {...(props.nativeHarnessClient === undefined
+          ? {}
+          : {
+              modelRoles: {
+                client: props.nativeHarnessClient,
+                groups: modelRolePickerGroups(props.providerController),
+                hostId: LOCAL_HOST_ID,
+                readiness: nativeHarnessReadinessById(
+                  modelRoleProviderOptions(props.providerController),
+                ),
+              },
+            })}
         {...(props.spendCeilingClient === undefined
           ? {}
           : { spendCeilingClient: props.spendCeilingClient })}

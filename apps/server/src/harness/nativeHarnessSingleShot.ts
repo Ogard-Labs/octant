@@ -1,4 +1,5 @@
 import type {
+  ProviderAttachmentInput,
   ProviderFailure,
   ProviderInstanceId,
   ProviderModelId,
@@ -54,6 +55,12 @@ export interface OneShotInput {
   readonly prompt: string;
   readonly instructions?: string;
   readonly timeoutMs: number;
+  /**
+   * Images sent with the prompt. Only a provider that takes native
+   * attachments for the model accepts them; any other refuses the request,
+   * so an image is never dropped silently.
+   */
+  readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
 }
 
 export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotOutcome> {
@@ -125,7 +132,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
           input.instructions === undefined
             ? []
             : [{ kind: "instructions", text: input.instructions }],
-        attachments: [],
+        attachments: [...(input.attachments ?? [])],
         tools: [],
       }),
     });

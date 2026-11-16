@@ -44,8 +44,10 @@ import { WORK_PERMISSION_MODES, workAccessOfMode, workModeOf } from "./workPermi
 import { ThreadGuardrailLevel } from "../code/GuardrailLevelIndicator";
 import { PermissionModePicker, threadKeepsFullAccessSandbox } from "../code/PermissionModePicker";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
+import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import { browserApprovalDetail, browserApprovalSummary } from "../browser/browserProfileCopy";
 import {
+  parkedStopReleased,
   prependEarlierTurns,
   refreshNewestTurns,
   startedConversationPickerGroups,
@@ -89,6 +91,12 @@ import {
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
+import { CodeLiveTasks } from "../code/CodeLiveTasks";
+import { CodeNativeSession } from "../code/CodeNativeSession";
+import type { ThreadSessionClient } from "../code/codeSessionClient";
+import { createWorkSessionClient } from "./workSessionClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
@@ -97,6 +105,7 @@ import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { useDelayedForceStop } from "../composer/useDelayedForceStop";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -134,6 +143,8 @@ import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { useSeesImages } from "../harness/useSeesImages";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import {
   threadImageOfferKey,
   useThreadImageOffers,
@@ -149,7 +160,7 @@ import { samePollingData } from "../polling/samePollingData";
 import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import {
   documentIsVisible,
@@ -194,6 +205,7 @@ import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -230,6 +242,11 @@ type WorkTranscriptRow =
       readonly key: string;
       readonly turn: WorkTurnState;
       readonly tasks: NonNullable<WorkTurnState["tasks"]>;
+    }
+  | {
+      readonly kind: "steered";
+      readonly key: string;
+      readonly steered: NonNullable<WorkTurnState["steeredResults"]>;
     }
   | {
       readonly kind: "side-tasks";
@@ -374,6 +391,10 @@ function WorkTurnHeader(props: {
           windowCapability={props.windowCapability}
         />
       )}
+      <DescribedImagesNote
+        className="work-thread-workspace__handoff"
+        images={props.turn.describedImages}
+      />
       {props.turn.handoff === undefined ? null : (
         <p className="work-thread-workspace__handoff" role="note">
           {threadHandoffDisclosure(props.turn.handoff, (selection) =>
@@ -479,6 +500,13 @@ function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
   readonly threadId: WorkThreadId;
+  /**
+   * A search hit's turn to bring into view once. Earlier pages load until the
+   * turn is among them, so the reader lands on it with every newer turn below.
+   */
+  readonly revealTurnId?: WorkTurnId;
+  /** Called once `revealTurnId` is on screen or the thread proves not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   /** Machine-owned navigation snapshot; avoids rescanning every Project before transcript read. */
   readonly initialThread?: WorkThread;
   readonly projects?: ReadonlyArray<ProjectSummary>;
@@ -502,6 +530,10 @@ export interface WorkThreadWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
+  /** The thread's live tasks and outside sessions; absent builds one from the server address. */
+  readonly sessionClient?: ThreadSessionClient<WorkThreadId>;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -829,6 +861,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     props.providerGroups,
     thread?.providerInstanceId,
   );
+  const projectTrustNotice = useProjectTrustNotice({
+    mode: "work",
+    threadId: String(props.threadId),
+    projectId: thread?.projectId,
+    providerInstanceId: thread?.providerInstanceId,
+  });
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
@@ -840,6 +878,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
+    provider: composerProviderCommands(props.providerGroups, thread?.providerInstanceId),
   });
   const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
   const turns = loaded.turns;
@@ -961,6 +1000,15 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           selected: thread,
           latest: turns.at(-1)?.authority,
         });
+  const { serverUrl, windowCapability, sessionClient: givenSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      givenSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createWorkSessionClient({ serverUrl, windowCapability })),
+    [givenSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "work",
     hostId: props.hostId,
@@ -982,9 +1030,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     windowCapability: props.windowCapability,
     client: props.messageQueueClient,
   });
-  const latestStatus = turns.at(-1)?.status;
+  const latestTurn = turns.at(-1);
+  const latestStatus = latestTurn?.status;
+  // A turn parked on a usage limit stops holding the thread once it has moved
+  // off that account: the host records the released stop on the move, and the
+  // queue reads the same record.
+  const latestStopReleased =
+    thread !== undefined &&
+    latestTurn !== undefined &&
+    parkedStopReleased(thread, String(latestTurn.turnId));
   const turnRunning =
-    latestStatus === "accepted" || latestStatus === "running" || latestStatus === "waiting";
+    latestStatus === "accepted" ||
+    latestStatus === "running" ||
+    (latestStatus === "waiting" && !latestStopReleased);
   // A rewind or fork acts on settled turns only, so either waits while any
   // turn of the thread is still going.
   const anyTurnActive = turns.some(
@@ -1307,10 +1365,19 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           ? "idle"
           : "none-left";
   const images = useWorkComposerImages();
-  const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
-    ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
-    ...(thread === undefined ? {} : { modelId: thread.modelId }),
-  });
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const imageSupport = useSeesImages({
+    readsImages: selectedModelReadsImages(props.providerGroups ?? [], {
+      ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
+      ...(thread === undefined ? {} : { modelId: thread.modelId }),
+    }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: thread === undefined ? undefined : String(thread.projectId),
+    providerInstanceId: thread === undefined ? undefined : String(thread.providerInstanceId),
+    modelId: thread === undefined ? undefined : String(thread.modelId),
+  }).takesImages;
   const threadMentions = useThreadMentions({
     ...(props.threadMentionClient === undefined ? {} : { client: props.threadMentionClient }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -1369,6 +1436,32 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
   const settledTurnCount = turns.filter(
     (turn) => turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting",
   ).length;
+  const revealTurnId = props.revealTurnId;
+  const revealTurn =
+    revealTurnId === undefined
+      ? undefined
+      : turns.find((turn) => String(turn.turnId) === String(revealTurnId));
+  const onTurnRevealed = props.onTurnRevealed;
+  useEffect(() => {
+    if (revealTurnId === undefined || !firstPageSettled || revealTurn !== undefined) return;
+    // The hit is older than the loaded run: walk back a page at a time so the
+    // run stays contiguous with the newest turns. A thread with nothing
+    // earlier no longer holds the turn (a rewind dropped it), and a failed
+    // page leaves the reader at the newest turns with the Load earlier retry.
+    if (!loaded.hasEarlier || earlierState === "failed") {
+      onTurnRevealed?.();
+      return;
+    }
+    if (earlierState === "idle") void loadEarlier();
+  }, [
+    earlierState,
+    firstPageSettled,
+    loadEarlier,
+    loaded.hasEarlier,
+    onTurnRevealed,
+    revealTurn,
+    revealTurnId,
+  ]);
   const sideTasks = useThreadSideTasks();
   const loadedTurnIds = useMemo(() => new Set(turns.map((turn) => String(turn.turnId))), [turns]);
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
@@ -1407,6 +1500,13 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
         });
       }
       if (!headPlaced) rows.push(head);
+      if (turn.steeredResults !== undefined && turn.steeredResults.length > 0) {
+        rows.push({
+          kind: "steered",
+          key: `${String(turn.requestId)}-steered`,
+          steered: turn.steeredResults,
+        });
+      }
       // The provider's restated task list lands where the turn it belongs to
       // ends, so the transcript reads as what was said and then what it is
       // working through.
@@ -1450,6 +1550,12 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
   }, [firstPageSettled, loadedTurnIds, pendingRequests, sideTasks, status, turns]);
+  // The turn's first row, whichever kind opens it (its prompt, or the header
+  // a reply opens with), is where the reader lands.
+  const revealKey =
+    revealTurn === undefined
+      ? undefined
+      : transcriptRows.find((row) => row.key.startsWith(`${String(revealTurn.requestId)}-`))?.key;
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;
@@ -2409,6 +2515,8 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             itemAt={workRowHappenedAt}
             itemKey={(row) => row.key}
             items={transcriptRows}
+            {...(revealKey === undefined ? {} : { revealKey })}
+            {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
             lead={
               <>
                 <ImportedTerminalHistory
@@ -2653,6 +2761,14 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                   />
                 );
               }
+              if (row.kind === "steered") {
+                return (
+                  <SteeredChildResults
+                    providerGroups={props.providerGroups}
+                    steered={row.steered}
+                  />
+                );
+              }
               if (row.kind === "tasks") {
                 return (
                   <ThreadTasksPanel
@@ -2841,19 +2957,23 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                 >
                   {pendingBrowserApproval.signIn !== undefined
                     ? "Continue"
-                    : pendingBrowserApproval.download !== undefined
-                      ? "Save once"
-                      : pendingBrowserApproval.upload === undefined
-                        ? "Approve once"
-                        : "Upload once"}
+                    : pendingBrowserApproval.pageTool !== undefined
+                      ? "Call once"
+                      : pendingBrowserApproval.download !== undefined
+                        ? "Save once"
+                        : pendingBrowserApproval.upload === undefined
+                          ? "Approve once"
+                          : "Upload once"}
                 </OctantButton>
                 {/*
-                  A sign-in's or a script's answer is never remembered. An upload's
+                  A sign-in's, a script's, or a page tool call's answer is never
+                  remembered. An upload's
                   or a download's is remembered for that site and this thread's
                   workspace, never for a whole profile.
                 */}
                 {pendingBrowserApproval.signIn === undefined &&
-                pendingBrowserApproval.script === undefined ? (
+                pendingBrowserApproval.script === undefined &&
+                pendingBrowserApproval.pageTool === undefined ? (
                   <>
                     <OctantButton
                       disabled={browserApprovalBusy}
@@ -2896,17 +3016,36 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
             label={
               pendingBrowserApproval.signIn !== undefined
                 ? "Browser sign-in"
-                : pendingBrowserApproval.download !== undefined
-                  ? "Browser download approval"
-                  : pendingBrowserApproval.upload === undefined
-                    ? "Browser origin approval"
-                    : "Browser upload approval"
+                : pendingBrowserApproval.pageTool !== undefined
+                  ? "Browser page tool"
+                  : pendingBrowserApproval.download !== undefined
+                    ? "Browser download approval"
+                    : pendingBrowserApproval.upload === undefined
+                      ? "Browser origin approval"
+                      : "Browser upload approval"
             }
             summary={browserApprovalSummary(pendingBrowserApproval)}
           />
         )}
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="work"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={turns.length > 0}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
@@ -2954,6 +3093,41 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
                       onPolicyChange={continuation.change}
                       onProviderChange={changeProvider}
                       disabled={providerChanging || creating || completionLocked || turnRunning}
+                    />
+                    <ThreadAccountControl
+                      groups={props.providerGroups ?? []}
+                      providerInstanceId={thread.providerInstanceId}
+                      modelId={thread.modelId}
+                      usageLimitHandoff={thread.usageLimitHandoff}
+                      disabled={creating || completionLocked}
+                      onMove={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "move-work-thread-account",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          providerInstanceId,
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The conversation could not be moved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
+                      onUsageLimitHandoffChange={async (providerInstanceId) => {
+                        const result = await props.threadClient.execute({
+                          kind: "set-work-thread-usage-limit-handoff",
+                          threadId: thread.id,
+                          expectedVersion: thread.version,
+                          ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                        });
+                        if (!("kind" in result) || result.kind !== "thread-updated") {
+                          return "The choice could not be saved. Nothing changed.";
+                        }
+                        setThread(result.thread);
+                        props.onThreadUpdated?.(result.thread);
+                        return undefined;
+                      }}
                     />
                   </ThreadInfo>
                 ),
@@ -3237,6 +3411,7 @@ export function WorkThreadWorkspace(given: WorkThreadWorkspaceProps) {
           }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(images.message === undefined
               ? []
               : [{ key: "image", tone: "warning" as const, text: images.message }]),

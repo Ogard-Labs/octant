@@ -54,6 +54,10 @@ private let appStoreConnectKeyService = services + "app-store-connect-keys.v1"
 // replace one.
 private let pushPlatformCredentialService = services + "push-platform-credentials.v1"
 private let pushPlatformCredentialNamespace = "push-platform-credential"
+// The API keys a person gives a web search backend live in a service of their
+// own. A person may replace one.
+private let webSearchCredentialService = services + "web-search-credentials.v1"
+private let webSearchCredentialNamespace = "web-search-credential"
 // The SSH sign-in keys Octant made for registered servers live in a service of
 // their own. The broker makes each key and signs with it; no route reads one
 // back, and a set never replaces a key: a server's key is deleted when the
@@ -106,6 +110,7 @@ private let octantOwnedServices = [
     desktopProviderCredentialService,
     appStoreConnectKeyService,
     pushPlatformCredentialService,
+    webSearchCredentialService,
     ownerUnlockService,
 ]
 
@@ -145,6 +150,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     ),
     pushPlatformCredentialNamespace: SeparateNamespace(
         service: pushPlatformCredentialService,
+        idField: "credentialRef",
+        replaceable: true
+    ),
+    webSearchCredentialNamespace: SeparateNamespace(
+        service: webSearchCredentialService,
         idField: "credentialRef",
         replaceable: true
     ),

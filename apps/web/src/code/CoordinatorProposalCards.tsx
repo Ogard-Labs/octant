@@ -1,5 +1,7 @@
-import type { CodeThreadId } from "@octant/contracts";
+import type { CodePlannerWorkProposal, CodeThreadId } from "@octant/contracts";
+import { WORKER_ROLE_NAMES } from "@octant/domain";
 import { useState } from "react";
+import { coordinatorChoiceNote } from "../agents/coordinatorWorkers";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
@@ -56,6 +58,7 @@ export function CoordinatorProposalCards(
       )}
       {proposals.map((entry) => {
         const attempt = readPlannerAttempt(entry);
+        const line = roleLine(entry.proposal);
         return (
           <article
             aria-label={`Proposed worker: ${entry.proposal.title}`}
@@ -66,6 +69,7 @@ export function CoordinatorProposalCards(
               <span className="follow-up-card__kind">Worker · waiting for your approval</span>
             </div>
             <p className="follow-up-card__title">{entry.proposal.title}</p>
+            {line === undefined ? null : <p className="oct-row-detail">{line}</p>}
             <p className="follow-up-card__prompt">{entry.proposal.intent}</p>
             {attempt.status === "none" ? null : (
               <p className="oct-row-detail" role="status">
@@ -106,6 +110,32 @@ export function CoordinatorProposalCards(
               >
                 Review and approve
               </OctantButton>
+              {entry.proposal.workerOptions?.choice === undefined ||
+              entry.proposal.workerOptions.choice.role === "default" ? null : (
+                <OctantButton
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  disabled={
+                    disabled ||
+                    attempt.status !== "none" ||
+                    client.executePlannerProposal === undefined
+                  }
+                  onClick={() =>
+                    void planner.mutate(async () =>
+                      client.executePlannerProposal === undefined
+                        ? { status: "refused", message: "Proposal decisions are unavailable." }
+                        : client.executePlannerProposal({
+                            kind: "use-builder-for-planner-work-proposal",
+                            proposalId: entry.proposal.id,
+                            expectedVersion: entry.proposalVersion,
+                          }),
+                    )
+                  }
+                >
+                  Use Builder instead
+                </OctantButton>
+              )}
               <OctantButton
                 type="button"
                 variant="ghost"
@@ -146,4 +176,18 @@ export function CoordinatorProposalCards(
       </OctantDialogPresence>
     </section>
   );
+}
+
+/**
+ * "Hard problems · Opus 5.5 · <why>": the role the host chose from, the
+ * model, and the coordinator's reason, for a proposal chosen from the roles.
+ */
+function roleLine(proposal: CodePlannerWorkProposal): string | undefined {
+  const options = proposal.workerOptions;
+  const choice = options?.choice;
+  if (options === undefined || choice === undefined) return undefined;
+  const note = choice.why === undefined ? coordinatorChoiceNote(choice) : choice.why;
+  return [WORKER_ROLE_NAMES[choice.role], options.modelName ?? options.modelId, note]
+    .filter((part): part is string => part !== undefined)
+    .join(" · ");
 }

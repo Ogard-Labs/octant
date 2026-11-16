@@ -2375,7 +2375,7 @@ describe("ProviderService", () => {
     ).rejects.toMatchObject({ failure: { category: "unsupported" } });
   });
 
-  it("journals a person letting a key provider run as itself without stopping its sessions, and refuses other providers", async () => {
+  it("journals a person turning a key provider's own setup off and back on without stopping its sessions, and refuses other providers", async () => {
     const piId = decodeProviderInstanceId("70000000-0000-4000-8000-0000000000aa");
     const fixture = serviceFixture({
       instances: [
@@ -2402,9 +2402,9 @@ describe("ProviderService", () => {
         kind: "set-provider-native-setup",
         instanceId,
         expectedVersion: 1,
-        enabled: true,
+        enabled: false,
       }),
-    ).resolves.toMatchObject({ kind: "provider-updated", instance: { nativeSetup: true } });
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { nativeSetup: false } });
     expect(fixture.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         events: [
@@ -2413,17 +2413,18 @@ describe("ProviderService", () => {
       }),
     );
     expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
-      nativeSetup: true,
+      nativeSetup: false,
     });
     expect(invalidate).not.toHaveBeenCalled();
 
-    const off = await fixture.service.execute(windowId, {
+    // On is the default, so turning it back on leaves no field behind.
+    const on = await fixture.service.execute(windowId, {
       kind: "set-provider-native-setup",
       instanceId,
       expectedVersion: 2,
-      enabled: false,
+      enabled: true,
     });
-    expect(off.kind === "provider-updated" ? off.instance : undefined).not.toHaveProperty(
+    expect(on.kind === "provider-updated" ? on.instance : undefined).not.toHaveProperty(
       "nativeSetup",
     );
 
@@ -2464,16 +2465,16 @@ describe("ProviderService", () => {
         kind: "set-provider-own-memory",
         instanceId,
         expectedVersion: 1,
-        enabled: true,
+        enabled: false,
       }),
-    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: true } });
+    ).resolves.toMatchObject({ kind: "provider-updated", instance: { ownMemory: false } });
     expect(fixture.append).toHaveBeenLastCalledWith(
       expect.objectContaining({
         events: [expect.objectContaining({ eventName: "provider.instance-own-memory-changed@1" })],
       }),
     );
     expect(fixture.persistence.readProviderInstance(instanceId)).toMatchObject({
-      ownMemory: true,
+      ownMemory: false,
     });
     expect(fixture.persistence.readProviderInstance(instanceId)).not.toHaveProperty("nativeSetup");
     expect(invalidate).not.toHaveBeenCalled();

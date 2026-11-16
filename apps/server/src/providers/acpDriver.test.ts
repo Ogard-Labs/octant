@@ -3,6 +3,7 @@ import {
   decodeProviderSessionId,
   type ProviderFailure,
   type ProviderModelId,
+  type ProviderNativeSetup,
   type ProviderRuntimeEvent,
   type ProviderToolDefinition,
 } from "@octant/contracts";
@@ -899,7 +900,10 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         resume: "supported",
         interruption: "supported",
         approvals: "supported",
-        userQuestions: profile.userQuestions,
+        // A form-asking agent's questions are unavailable on a release
+        // outside its verified list, as this fixture's is.
+        userQuestions:
+          profile.elicitationVersions === undefined ? profile.userQuestions : "unavailable",
         reasoning: "supported",
         usage: "unsupported",
         fileChanges: "unavailable",
@@ -1120,6 +1124,46 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
       message: `${profile.displayName} did not report a selectable model.`,
     });
     expect(result.lastSuccessfulProbeAt).toBeDefined();
+  });
+
+  it("sends an attached image only to an agent whose handshake advertises image prompts", async () => {
+    const image = {
+      attachmentId: "image-1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    };
+    const run = async (advertised: boolean) => {
+      const f = fixture(profile);
+      Object.assign(f.connection.initialized.agentCapabilities, {
+        promptCapabilities: { image: advertised },
+      });
+      const probed = await Effect.runPromise(Effect.scoped(f.driver.probe({ instanceId })));
+      const sent = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            return yield* Effect.either(
+              connection.send({ sessionId, prompt: "look", attachments: [image], tools: [] }),
+            );
+          }),
+        ),
+      );
+      return { probed, sent, prompt: f.client.prompt };
+    };
+    const offered = await run(true);
+    expect(offered.probed.capabilities.nativeAttachments).toBe("supported");
+    expect(offered.probed.models[0]?.inputModalities).toEqual(["text", "image"]);
+    expect(offered.sent._tag).toBe("Right");
+    expect(offered.prompt).toHaveBeenCalledWith(expect.any(String), expect.any(String), [
+      { mimeType: "image/png", data: "AQID" },
+    ]);
+    const textOnly = await run(false);
+    expect(textOnly.probed.capabilities.nativeAttachments).toBe("unsupported");
+    expect(textOnly.probed.models[0]?.inputModalities).toEqual(["text"]);
+    expect(textOnly.sent).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
+    expect(textOnly.prompt).not.toHaveBeenCalled();
   });
 
   it("reports app-managed tools only when the ACP handshake advertises HTTP MCP", async () => {
@@ -2418,11 +2462,24 @@ describe("ACP provider driver profile quirks", () => {
     expect(guards).not.toHaveProperty("VIBE_DISABLED_AGENTS");
     expect(enabled).toContain(guards.VIBE_DEFAULT_AGENT);
     for (const mode of ["chat", "work", "code"] as const) {
-      for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+      for (const policy of [
+        "approval-gated",
+        "plan",
+        "auto-accept-edits",
+        "full-access",
+      ] as const) {
         expect(enabled).toContain(vibe.sessionMode(mode, policy));
       }
     }
-    expect(enabled).not.toContain("accept-edits");
+  });
+
+  it("runs Mistral Vibe in its own accept-edits mode only for a Work or Code thread at Accept edits", () => {
+    expect(vibe.sessionMode("code", "auto-accept-edits")).toBe("accept-edits");
+    expect(vibe.sessionMode("work", "auto-accept-edits")).toBe("accept-edits");
+    expect(vibe.sessionMode("chat", "auto-accept-edits")).toBe("ask");
+    for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+      expect(vibe.sessionMode("code", policy)).not.toBe("accept-edits");
+    }
   });
 
   it("does not select the Kimi auto mode for any execution policy", () => {
@@ -2445,22 +2502,44 @@ describe("ACP provider driver profile quirks", () => {
     });
   });
 
-  it("rejects provider slash commands before they reach Kimi Code ACP", async () => {
+  it("runs Kimi Code's own reviewed slash commands in Code and refuses them in Plan before they reach it", async () => {
     const { driver, client } = fixture(kimi);
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
-          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
           const failure = yield* Effect.flip(
             connection.send({ sessionId, prompt: "  /skill:embedded", attachments: [], tools: [] }),
           );
           expect(failure).toEqual({
             category: "unauthorized",
             message:
-              "Kimi Code slash commands are disabled. Rephrase the request without a leading slash.",
+              "Kimi Code slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.",
           });
           expect(client.prompt).not.toHaveBeenCalled();
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+    const code = fixture(kimi);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* code.driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          // A command Kimi Code did not list and Octant did not review stays refused.
+          const unreviewed = yield* Effect.flip(
+            connection.send({ sessionId, prompt: "/skill:embedded", attachments: [], tools: [] }),
+          );
+          expect(unreviewed).toEqual({
+            category: "unauthorized",
+            message:
+              "Kimi Code runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.",
+          });
+          expect(code.client.prompt).not.toHaveBeenCalled();
+          yield* connection.send({ sessionId, prompt: "/compact", attachments: [], tools: [] });
+          expect(code.client.prompt).toHaveBeenCalled();
           yield* connection.stop(sessionId);
         }),
       ),
@@ -2516,6 +2595,208 @@ describe("ACP provider driver profile quirks", () => {
       );
     },
   );
+
+  it("shows a Mistral Vibe subagent's unnamed request at Guarded with honest text and refuses it on Deny", async () => {
+    const { driver, client } = fixture(vibe, { authentication: "subscription" });
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const approvals: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (event.kind === "approval-request" || event.kind === "failed") {
+                  approvals.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Vibe 3.0.3 names only the subagent's own history entry, which the
+          // parent's updates never announced.
+          client.request({
+            kind: "request",
+            id: "subagent-permission",
+            method: "session/request_permission",
+            params: {
+              sessionId: "agent-session-1",
+              toolCall: { toolCallId: "child-entry-7" },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+          });
+          yield* Effect.sleep("5 millis");
+          expect(approvals).toHaveLength(1);
+          const card = approvals[0];
+          if (card?.kind !== "approval-request") throw new Error("approval missing");
+          expect(card.description).toBe(
+            "A Mistral Vibe subagent asks to run a tool. Vibe doesn't say which.",
+          );
+          expect(client.respondPermission).not.toHaveBeenCalled();
+          yield* connection.answerApproval({
+            sessionId,
+            requestId: card.requestId,
+            approved: false,
+          });
+          expect(client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
+  it("shows another ACP agent's unattributed subagent request at Guarded with honest text, refuses it on Deny, and fails it in Plan", async () => {
+    const goose = acpProviderProfiles.goose;
+    const ownSetup = {
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    } as const;
+    const run = (executionPolicy: "approval-gated" | "plan") => {
+      const { driver, client } = fixture(goose);
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy,
+              nativeSetup:
+                executionPolicy === "plan"
+                  ? { ...ownSetup, toolServers: false, hooks: false }
+                  : ownSetup,
+            });
+            const events: ProviderRuntimeEvent[] = [];
+            yield* Effect.forkScoped(
+              Stream.runForEach(yield* connection.subscribe, (event) =>
+                Effect.sync(() => {
+                  if (event.kind === "approval-request" || event.kind === "failed") {
+                    events.push(event);
+                  }
+                }),
+              ),
+            );
+            yield* Effect.sleep("1 millis");
+            client.request({
+              kind: "request",
+              id: "subagent-permission",
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+            const card = events[0];
+            if (card?.kind === "approval-request") {
+              yield* connection.answerApproval({
+                sessionId,
+                requestId: card.requestId,
+                approved: false,
+              });
+            }
+            return { events, client };
+          }),
+        ),
+      );
+    };
+
+    const guarded = await run("approval-gated");
+    expect(guarded.events).toHaveLength(1);
+    const card = guarded.events[0];
+    if (card?.kind !== "approval-request") throw new Error("approval missing");
+    expect(card.description).toBe("A Goose subagent asks to run a tool. Goose doesn't say which.");
+    expect(guarded.client.respondPermission).toHaveBeenCalledWith("subagent-permission", "reject");
+
+    // Plan runs no subagents, so such a request still fails the turn.
+    const plan = await run("plan");
+    expect(plan.events.some((event) => event.kind === "approval-request")).toBe(false);
+  });
+
+  it("journals another ACP agent's unseen subagent run once, saying Octant cannot see its calls, and marks outside content", async () => {
+    const { driver, client } = fixture(acpProviderProfiles.goose);
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            nativeSetup: {
+              subagents: true,
+              webTools: true,
+              skills: true,
+              toolServers: true,
+              hooks: true,
+              projectCode: false,
+            },
+          });
+          const seen: ProviderRuntimeEvent[] = [];
+          yield* Effect.forkScoped(
+            Stream.runForEach(yield* connection.subscribe, (event) =>
+              Effect.sync(() => {
+                if (
+                  event.kind === "approval-request" ||
+                  event.kind === "child-agent-activity" ||
+                  event.kind === "outside-content-read"
+                ) {
+                  seen.push(event);
+                }
+              }),
+            ),
+          );
+          yield* Effect.sleep("1 millis");
+          // Two requests from the same unseen call are one subagent run.
+          for (const id of ["subagent-permission-1", "subagent-permission-2"]) {
+            client.request({
+              kind: "request",
+              id,
+              method: "session/request_permission",
+              params: {
+                sessionId: "agent-session-1",
+                toolCall: { toolCallId: "child-call-3" },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "reject", name: "Reject", kind: "reject_once" },
+                ],
+              },
+            });
+            yield* Effect.sleep("5 millis");
+          }
+          return seen;
+        }),
+      ),
+    );
+    expect(events.map((event) => event.kind)).toEqual([
+      "child-agent-activity",
+      "outside-content-read",
+      "approval-request",
+      "approval-request",
+    ]);
+    expect(events[0]).toMatchObject({
+      childAgentId: "child-call-3",
+      status: "running",
+      summary:
+        "Goose is running a subagent. Octant cannot see its tool calls or when it ends, only the approvals it asks for.",
+    });
+    expect(events[1]).toMatchObject({ toolCallId: "child-call-3", source: "hosted-tool" });
+    // Each event takes its own place in the session's sequence.
+    const sequences = events.map((event) => event.sequence);
+    expect(new Set(sequences).size).toBe(sequences.length);
+  });
 
   it("answers a gated session form exactly once and cancels only its pending native callback", async () => {
     const { driver, client } = fixture(
@@ -2683,18 +2964,11 @@ describe("ACP provider driver profile quirks", () => {
     },
   );
 
+  const { elicitationVersions: _forms, ...vibeWithoutForms } = vibe;
   it.each([
-    { profile: vibe, version: "3.0.3", expected: "unsupported" },
-    {
-      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
-      version: "3.0.4",
-      expected: "unavailable",
-    },
-    {
-      profile: { ...vibe, elicitationVersions: ["3.0.3"] },
-      version: "3.0.3",
-      expected: "supported",
-    },
+    { profile: vibeWithoutForms, version: "3.0.3", expected: "unsupported" },
+    { profile: vibe, version: "3.0.4", expected: "unavailable" },
+    { profile: vibe, version: "3.0.3", expected: "supported" },
   ])(
     "reports questions as $expected for the selected verified version",
     async ({ profile, version, expected }) => {
@@ -2736,7 +3010,7 @@ describe("ACP provider driver profile quirks", () => {
     );
   });
 
-  it("fails closed on user questions for Mistral Vibe and skips them at the agent", async () => {
+  it("fails closed on a permission-shaped question from Mistral Vibe and skips it at the agent", async () => {
     const { driver, client } = fixture(vibe, { authentication: "subscription" });
     await Effect.runPromise(
       Effect.scoped(
@@ -2766,7 +3040,8 @@ describe("ACP provider driver profile quirks", () => {
           const failure = yield* Effect.flip(
             connection.answerUserInput({ sessionId, requestId: "request-1", answer: "A" }),
           );
-          expect(failure.category).toBe("unsupported");
+          // Questions travel as forms on the verified release only; this one is not.
+          expect(failure.category).toBe("unavailable");
           yield* connection.stop(sessionId);
         }),
       ),
@@ -3666,14 +3941,24 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
     return root;
   };
 
-  const startIn = (profile: AcpProviderProfile, root: string, mode: "code" | "chat" = "code") => {
+  const startIn = (
+    profile: AcpProviderProfile,
+    root: string,
+    mode: "code" | "chat" = "code",
+    nativeSetup?: ProviderNativeSetup,
+  ) => {
     const { driver, starts } = fixture(profile);
     const outcome = Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode });
           const result = yield* Effect.either(
-            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            connection.start({
+              sessionId,
+              modelId,
+              executionPolicy: "approval-gated",
+              ...(nativeSetup === undefined ? {} : { nativeSetup }),
+            }),
           );
           if (result._tag === "Right") yield* connection.stop(sessionId);
           return result;
@@ -3701,9 +3986,36 @@ describe("Gemini CLI and Qwen Code Project tools", () => {
       expect(result.left).toMatchObject({ category: "incompatible" });
       const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
       expect(result.left.message).toContain(`\`${entry}\``);
-      expect(result.left.message).toMatch(/without Octant's approval/);
-      expect(result.left.message).toMatch(/Remove or rename/);
+      expect(result.left.message).toMatch(/only once you trust this Project/);
+      expect(result.left.message).toMatch(/remove or rename/);
       expect(starts).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "starts %s in a Project trusted for it, which loads its %s as on its own, and refuses it again without that trust",
+    async (kind, file) => {
+      const root = projectWith(file);
+      const trusted = {
+        subagents: true,
+        webTools: true,
+        skills: true,
+        toolServers: true,
+        hooks: true,
+        projectCode: true,
+      } as const;
+      const started = startIn(acpProviderProfiles[kind], root, "code", trusted);
+      expect((await started.outcome)._tag).toBe("Right");
+      expect(started.starts).toHaveLength(1);
+      // Plan and an untrusted Project carry no Project code.
+      const held = startIn(acpProviderProfiles[kind], root, "code", {
+        ...trusted,
+        projectCode: false,
+      });
+      expect((await held.outcome)._tag).toBe("Left");
     },
   );
 

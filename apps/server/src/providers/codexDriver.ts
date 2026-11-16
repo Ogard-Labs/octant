@@ -27,7 +27,9 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
   type ProviderApprovalCall,
+  type ProviderChildUsage,
 } from "@octant/contracts";
+import { reportedChildUsage } from "@octant/provider-sdk/child-observations";
 import type {
   ProviderAcquireInput,
   ProviderCompactionPoint,
@@ -57,6 +59,7 @@ import {
   type CodexEventContext,
   type CodexMappedMessage,
   type CodexPendingApproval,
+  type CodexPendingQuestion,
 } from "./codexEventMapper";
 import { providerApprovalCall } from "./providerApprovalCall";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
@@ -142,7 +145,6 @@ export interface CodexThreadConfig {
   readonly "features.view_image"?: false;
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
-  readonly project_doc_max_bytes?: 0;
   /**
    * The person's compaction point for this thread, in tokens: Codex compacts
    * once the context passes it, mid-turn too. Passed in the thread's own
@@ -150,6 +152,8 @@ export interface CodexThreadConfig {
    */
   readonly model_auto_compact_token_limit?: number;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  /** Codex's own web search, switched off unless the session's native setup has it on. */
+  readonly web_search?: "disabled";
   readonly skills?: {
     readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
   };
@@ -174,25 +178,6 @@ export interface CodexThreadResumeInput {
 const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
-} as const satisfies CodexThreadConfig;
-
-/**
- * A Work turn does not read an agent brief already in the Project's folder.
- * Codex loads every `AGENTS.md` (and `AGENTS.override.md` or a configured
- * fallback name) from the repository root down to `cwd` into the model's
- * instructions by itself; a project doc budget of zero bytes skips that
- * discovery and leaves the user's own `$CODEX_HOME/AGENTS.md` in place.
- * Measured against codex-cli 0.162.1 with turns sent to a local stand-in
- * endpoint: a thread started in a Project holding an `AGENTS.md` sent its
- * contents with the first turn, the same thread started or resumed with
- * `project_doc_max_bytes = 0` did not, and a resume without the override sent
- * them again, so it is stated on every resume like the shell overrides. Read
- * at the Codex source tags, a zero budget has skipped discovery since 0.24.0
- * and `thread/start` has applied its `config` since it arrived in 0.56.0, so
- * every release with this protocol honors it.
- */
-const CODEX_WORK_CONFIG = {
-  project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -232,6 +217,20 @@ const CODEX_CHAT_CONFIG = {
 const CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG = {
   ...CODEX_SHELL_OFF_CONFIG,
   "features.view_image": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * Codex's built-in web search runs only where the session's native setup has
+ * `webTools` on: left unset, Codex searches by default, so a session whose
+ * person or account turned web tools off would still search. Read from the codex-cli 0.169.0 source: the `web_search` config key
+ * (disabled, cached, indexed, or live) wins over the legacy feature flags,
+ * defaults to cached when unset, and `disabled` leaves out both the hosted
+ * search tool and the standalone `web.run` tool; a managed requirement always
+ * accepts `disabled`. Like the other overrides it is forgotten on a plain
+ * resume, so it is sent on every start and resume.
+ */
+const CODEX_WEB_SEARCH_OFF_CONFIG = {
+  web_search: "disabled",
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -385,7 +384,7 @@ export interface CodexTurnStartInput {
     | { readonly type: "dangerFullAccess" }
     | { readonly type: "workspaceWrite" }
     | { readonly type: "readOnly" }
-    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" };
+    | { readonly type: "externalSandbox"; readonly networkAccess: "restricted" | "enabled" };
   readonly approvalsReviewer: "auto_review" | "user";
   /**
    * The thread's current model and reasoning effort, restated per turn once a
@@ -395,6 +394,50 @@ export interface CodexTurnStartInput {
    */
   readonly model?: string;
   readonly effort?: string;
+  /** Codex's own collaboration mode (see {@link codexCollaborationMode}). */
+  readonly collaborationMode?: CodexCollaborationMode;
+}
+
+/**
+ * `turn/start.collaborationMode`, an experimental field the connection opts
+ * into at `initialize`. It takes precedence over `model` and `effort`, so it
+ * restates both; `developer_instructions: null` asks for the mode's built-in
+ * instructions (`TurnStartParams` in codex-rs `app-server-protocol` at
+ * `rust-v0.169.0`, present since `rust-v0.155.1`).
+ */
+export interface CodexCollaborationMode {
+  readonly mode: "plan" | "default";
+  readonly settings: {
+    readonly model: string;
+    readonly reasoning_effort: string | null;
+    readonly developer_instructions: null;
+  };
+}
+
+/**
+ * The collaboration mode a session's turns carry. A Plan session runs in
+ * Codex's own Plan mode: Codex plans as it does on its own, proposes its plan
+ * as a plan item, and may ask the person through its question form. Plan's
+ * read-only sandbox and declined approvals are unchanged by it, since Codex's
+ * mode only instructs the model. Codex keeps a mode for the thread's later
+ * turns, so a session outside Plan on a thread that recorded Plan names the
+ * default mode; any other session sends none and runs as it did before.
+ */
+export function codexCollaborationMode(
+  policy: ProviderExecutionPolicy,
+  thread: Pick<CodexThreadResult, "reasoningEffort" | "collaborationMode">,
+  model: string,
+  turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
+): CodexCollaborationMode | undefined {
+  if (policy !== "plan" && thread.collaborationMode?.mode !== "plan") return undefined;
+  return {
+    mode: policy === "plan" ? "plan" : "default",
+    settings: {
+      model: turnOverrides?.model ?? model,
+      reasoning_effort: turnOverrides?.effort ?? thread.reasoningEffort ?? null,
+      developer_instructions: null,
+    },
+  };
 }
 
 export interface CodexApprovalResponse {
@@ -472,6 +515,7 @@ interface SessionState {
   readonly threadId: string;
   readonly correlationId: CorrelationId;
   readonly turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">;
+  readonly collaborationMode?: CodexCollaborationMode;
   /**
    * The app tools the thread started with, which Codex keeps for good: a
    * resume that offers others is accepted and ignored (measured on 0.164.0).
@@ -496,6 +540,13 @@ interface SessionState {
   >;
   /** The compaction `compact` asked for, until the run that carries it ends. */
   compaction?: CodexPendingCompaction | undefined;
+  /**
+   * Codex's question set waiting on the person, and the answers given so far
+   * by question position. Codex blocks its turn on one set at a time.
+   */
+  pendingQuestion?:
+    | { readonly question: CodexPendingQuestion; readonly answers: Map<number, string> }
+    | undefined;
 }
 
 interface CodexPendingCompaction {
@@ -520,7 +571,7 @@ const capabilities = {
   resume: "supported",
   interruption: "supported",
   approvals: "supported",
-  userQuestions: "unsupported",
+  userQuestions: "supported",
   reasoning: "supported",
   usage: "supported",
   toolActivity: "supported",
@@ -540,7 +591,8 @@ const capabilities = {
   nativeSetup: {
     // A subagent's requests reach the parent's approval path at every level.
     subagents: "supported",
-    // Codex's own web search was never switched off; each search marks.
+    // Codex's own web search runs only where the setup has it on; each
+    // search marks the thread.
     webTools: "supported",
     skills: "supported",
     toolServers: "supported",
@@ -770,15 +822,42 @@ export function codexExecutionSettings(
       approvalsReviewer: "user",
     };
   }
+  if (policy === "approval-gated" && autoApprove === true) {
+    // Auto runs as Codex's own Auto does: `on-request` with Codex's reviewer.
+    // Codex's own Auto pairs that with its workspace-write sandbox; here the
+    // sandbox is Octant's profile, named to Codex as external, because macOS
+    // refuses a second Seatbelt inside the first (see below). Under an
+    // external sandbox `on-request` runs a command without asking unless
+    // Codex flags it as dangerous (codex-rs `exec_policy.rs`,
+    // `render_decision_for_unmatched_command_for_platform`, rust-v0.169.0),
+    // and applies an in-root patch without asking (`safety.rs`,
+    // `assess_patch_safety`); whatever still prompts goes to the reviewer. So
+    // a command runs unasked inside Octant's wall, as it runs unasked inside
+    // Codex's own sandbox in Codex's own Auto (maintainer decision,
+    // 2026-11-14).
+    //
+    // Codex raises no escalation here: the same function asks for a
+    // `require_escalated` command only under a restricted sandbox and allows
+    // it unasked under an external one, its bypass removes only Codex's own
+    // sandbox, which is not running, and `orchestrator.rs` never retries a
+    // denied command unsandboxed under `on-request`. A command that needs to
+    // leave Octant's wall fails at the wall instead of asking; carrying that
+    // ask is not built yet.
+    //
+    // Delegation is clamped off by taint and capability before it reaches
+    // here (`harnessAutoReviewEffective`), so a withdrawn reviewer falls
+    // through to Ask first's `untrusted` below.
+    return { approvalPolicy: "on-request", sandbox: "read-only", approvalsReviewer: "auto_review" };
+  }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
-    // Every posture below Full access runs inside Octant's profile, and macOS
+    // Ask first and Accept edits run inside Octant's profile, and macOS
     // refuses a second Seatbelt inside the first (`sandbox_apply: Operation not
     // permitted`, measured on macOS 27.0.1), so each turn tells Codex the
     // sandbox is external (`codexTurnExecutionSettings`). Under an external
     // sandbox `on-request` runs every command without asking (codex-rs
     // `exec_policy.rs`, rust-v0.164.0), which would waive the `shell-commands`
-    // class the sandbox rules keep independent and the edit waiver keeps prompting under both of these
-    // postures. `untrusted` asks for every command Codex does not itself know
+    // class the sandbox rules keep independent and the edit waiver keeps
+    // prompting under both of these postures. `untrusted` asks for every command Codex does not itself know
     // to be read-only, and for every patch: a patch edit arrives as
     // `file-change` (auto-accept edits answers those itself) and a command as
     // `command`, which neither posture waives. What a command may touch once
@@ -788,11 +867,14 @@ export function codexExecutionSettings(
     // `commandActions` as `unknown` for a plain `> file` redirect, so "this
     // command only writes in-root" is not something either side can prove.
     //
-    // The reviewer answers both prompting postures (maintainer decision,
-    // 2026-10-31, ending the approval-gated-only exception). Codex's reviewer
-    // is thread-wide, so on auto-accept-edits it also answers the escalation
-    // an in-root patch edit raises, and may deny one: the person asked for
-    // its review there. `user` is sent rather than nothing whenever
+    // Auto is `approval-gated` with `autoApprove` (`threadAccessOf`). A
+    // posture that carries `auto-accept-edits` with `autoApprove` still reads
+    // as Accept edits (`permissionModeOf`), so it keeps Accept edits'
+    // `untrusted` and only hands its prompts to the reviewer (maintainer
+    // decision, 2026-10-31, ending the approval-gated-only exception). Codex's
+    // reviewer is thread-wide, so there it also answers the escalation an
+    // in-root patch edit raises, and may deny one: the person asked for its
+    // review there. `user` is sent rather than nothing whenever
     // delegation is off: omitting the field leaves a thread that once
     // delegated still routing to the reviewer after taint, after the user
     // turns it off, or on a resume under this posture.
@@ -819,16 +901,25 @@ export function codexTurnExecutionSettings(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   fullAccessSandbox?: boolean,
+  networkOpen?: boolean,
 ): Pick<CodexTurnStartInput, "approvalPolicy" | "sandboxPolicy" | "approvalsReviewer"> {
   const { sandbox, ...rest } = codexExecutionSettings(policy, autoApprove, fullAccessSandbox);
   // Below Full access the process already runs in Octant's profile, which is
-  // the boundary; Codex's own Seatbelt cannot start inside it. `restricted`
-  // keeps Codex from telling the model it has open network. A sandboxed Full
-  // access thread takes the same external sandbox, with `never`.
+  // the boundary; Codex's own Seatbelt cannot start inside it. Auto's
+  // `on-request` is what makes Codex run commands unasked inside it, and Ask
+  // first's and Accept edits' `untrusted` is what keeps them asking. A
+  // sandboxed Full access thread takes the same external sandbox, with
+  // `never`. The
+  // network claim follows the launch: `enabled` when the process launched
+  // without Octant's egress proxy (Network limits off, the default), so
+  // Codex tells the model what it really has; `restricted` behind the proxy.
   const sandboxPolicy =
     sandbox === "danger-full-access"
       ? ({ type: "dangerFullAccess" } as const)
-      : ({ type: "externalSandbox", networkAccess: "restricted" } as const);
+      : ({
+          type: "externalSandbox",
+          networkAccess: networkOpen === true ? "enabled" : "restricted",
+        } as const);
   return { ...rest, sandboxPolicy };
 }
 
@@ -1061,6 +1152,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
   const clientFactory = options.clientFactory ?? makeCodexClient;
   // Codex's own subagent threads outlive the turn and connection that started them.
   const subagentLineage = new Map<string, string>();
+  const subagentUsage = new Map<string, ProviderChildUsage>();
   const clock = options.clock ?? (() => new Date().toISOString());
   const makeCorrelation = options.correlationId ?? (() => crypto.randomUUID());
   const contextFacts = makeCodexContextFacts(options, clientFactory, clock);
@@ -1222,6 +1314,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             makeTaskId,
             makeToolCallId,
             subagentLineage,
+            subagentUsage,
           },
         );
       });
@@ -1235,6 +1328,8 @@ interface CodexLeasedRuntime {
   readonly client: CodexClientPort;
   readonly version: string;
   readonly exited: Promise<void>;
+  /** Whether the process launched without Octant's egress proxy, so its commands reach every host. */
+  readonly networkOpen: boolean;
 }
 
 /** The root and mode a thread lease key names, or undefined for any other lease. */
@@ -1292,6 +1387,7 @@ function acquireRuntime(
             client: clientFactory(connection),
             version: connection.version,
             exited: connection.exited,
+            networkOpen: connection.networkOpen === true,
           },
           pid: connection.pid,
           ...(receipt === undefined ? {} : { receipt }),
@@ -1497,6 +1593,8 @@ interface ConnectionFactories {
   readonly makeToolCallId: () => string;
   /** Each of Codex's own subagent threads, by the thread that started it; shared by the driver's connections. */
   readonly subagentLineage: Map<string, string>;
+  /** The latest usage Codex reported on each of its own subagent threads, bounded like the lineage. */
+  readonly subagentUsage: Map<string, ProviderChildUsage>;
 }
 
 /** How far a subagent's subagents are followed back to the thread that owns them. */
@@ -1556,6 +1654,7 @@ function makeConnection(
     let leasedPolicy: ProviderExecutionPolicy | undefined;
     let leasedOwnSubagents = false;
     let leasedFullAccessSandbox = false;
+    let leasedNetworkOpen = false;
     let closed = false;
     const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ProviderSessionId, SessionState>();
@@ -1614,10 +1713,12 @@ function makeConnection(
             ? nativeSetup?.toolServers === true
               ? CODEX_CHAT_OWN_TOOL_SERVERS_CONFIG
               : yield* codexChatThreadConfig(client, projectRoot)
-            : mode === "work"
-              ? CODEX_WORK_CONFIG
-              : {};
-        return skills === undefined ? modeConfig : { ...modeConfig, skills };
+            : {};
+        const webConfig =
+          nativeSetup?.webTools === true
+            ? modeConfig
+            : { ...modeConfig, ...CODEX_WEB_SEARCH_OFF_CONFIG };
+        return skills === undefined ? webConfig : { ...webConfig, skills };
       });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
@@ -1674,6 +1775,9 @@ function makeConnection(
         }
       }
       state.pendingApprovals.clear();
+      // A question set waits on the person like an approval and goes with
+      // the turn the same way; Codex drops its request at the turn's end.
+      state.pendingQuestion = undefined;
     };
     const clearPendingTools = (state: SessionState) => {
       for (const pending of state.pendingTools.values()) {
@@ -1750,6 +1854,22 @@ function makeConnection(
     const observeSubagentThread = (message: CodexServerMessage) => {
       if (message.kind === "request") {
         answerSubagentRequest(message);
+        return;
+      }
+      if (
+        message.kind === "notification" &&
+        message.method === "thread/tokenUsage/updated" &&
+        subagentOwner(message.params.threadId) !== undefined
+      ) {
+        // The thread's running total; read when the agent is seen finishing.
+        const usage = reportedChildUsage(message.params.tokenUsage.total);
+        if (usage === undefined) return;
+        factories.subagentUsage.delete(message.params.threadId);
+        factories.subagentUsage.set(message.params.threadId, usage);
+        if (factories.subagentUsage.size > MAX_CODEX_SUBAGENT_LINEAGE) {
+          const oldest = factories.subagentUsage.keys().next().value;
+          if (oldest !== undefined) factories.subagentUsage.delete(oldest);
+        }
         return;
       }
       if (
@@ -1875,6 +1995,12 @@ function makeConnection(
     ) => {
       const owner = subagentOwner(message.params.threadId);
       if (owner === undefined) return;
+      // Codex offers its question form to the root thread only; a subagent's
+      // set is answered empty, as Codex reads a client that could not ask.
+      if (message.method === "item/tool/requestUserInput") {
+        refuseSubagentRequest(message.id, { kind: "approval", result: { answers: {} } });
+        return;
+      }
       if (owner.terminal || owner.context === undefined) {
         refuseSubagentRequest(
           message.id,
@@ -1938,6 +2064,26 @@ function makeConnection(
         if (item.kind === "approval" || item.kind === "tool") {
           state.outputAccepted = true;
           if (admitRequest(state, item, message) === "stopped") return;
+          continue;
+        }
+        // A question asks the person and changes nothing, so every posture
+        // shows it, Plan and Full access included, as Codex itself does.
+        if (item.kind === "question-refused") {
+          state.outputAccepted = true;
+          respondInBackground(state, item.providerRequestId, () => item.result);
+          continue;
+        }
+        if (item.kind === "question") {
+          state.outputAccepted = true;
+          if (state.pendingQuestion !== undefined) {
+            terminalEvent(state, {
+              kind: "failed",
+              failure: failure("protocol", "Codex asked a second question set while one waited."),
+            });
+            return;
+          }
+          state.pendingQuestion = { question: item.question, answers: new Map() };
+          for (const asked of item.question.events) offer(asked);
           continue;
         }
         if (!isTerminal(item.event)) state.outputAccepted = true;
@@ -2041,6 +2187,7 @@ function makeConnection(
               leasedPolicy = executionPolicy;
               leasedOwnSubagents = ownSubagents;
               leasedFullAccessSandbox = fullAccessSandbox;
+              leasedNetworkOpen = runtime.networkOpen;
               const lost = () => {
                 if (!closed) runtimeLost();
               };
@@ -2096,6 +2243,12 @@ function makeConnection(
         deactivate(previous);
         sessionsByThread.delete(previous.threadId);
       }
+      const collaborationMode = codexCollaborationMode(
+        input.executionPolicy,
+        thread,
+        modelId,
+        turnOverrides,
+      );
       const state: SessionState = {
         sessionId: input.sessionId,
         projectRoot,
@@ -2105,6 +2258,7 @@ function makeConnection(
         fullAccessSandbox: input.fullAccessSandbox,
         threadId: thread.thread.id,
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
+        ...(collaborationMode === undefined ? {} : { collaborationMode }),
         carriedTools,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
@@ -2378,8 +2532,12 @@ function makeConnection(
                         state.executionPolicy,
                         state.autoApprove,
                         state.fullAccessSandbox,
+                        leasedNetworkOpen,
                       ),
                       ...state.turnOverrides,
+                      ...(state.collaborationMode === undefined
+                        ? {}
+                        : { collaborationMode: state.collaborationMode }),
                       ...(mode === "chat" ? { environments: [] as const } : {}),
                     });
                     if (state.activeTurnId !== undefined && state.activeTurnId !== turn.turn.id) {
@@ -2583,8 +2741,50 @@ function makeConnection(
             );
           }),
         ),
-      answerUserInput: () =>
-        Effect.fail(failure("unsupported", "Codex stable user questions are unsupported.")),
+      answerUserInput: (input) =>
+        stateFor(input.sessionId).pipe(
+          Effect.flatMap((state) => {
+            const pending = state.pendingQuestion;
+            const index = pending?.question.requestIds.indexOf(input.requestId) ?? -1;
+            if (
+              state.terminal ||
+              pending === undefined ||
+              index === -1 ||
+              pending.question.turnId !== state.activeTurnId ||
+              pending.answers.has(index)
+            ) {
+              return Effect.fail(
+                failure("protocol", "Codex question request is not pending for this turn."),
+              );
+            }
+            pending.answers.set(index, input.answer);
+            if (pending.answers.size < pending.question.questionIds.length) return Effect.void;
+            state.pendingQuestion = undefined;
+            const answers = Object.fromEntries(
+              pending.question.questionIds.map((questionId, position) => [
+                questionId,
+                { answers: [pending.answers.get(position) ?? ""] },
+              ]),
+            );
+            // The JSON-RPC reply to Codex's question request, sent the way
+            // an approval's reply is.
+            return request(() =>
+              client.respondApproval({
+                providerRequestId: pending.question.providerRequestId,
+                result: { answers },
+              }),
+            ).pipe(
+              Effect.catchAll((providerFailure) =>
+                Effect.sync(() =>
+                  terminalEvent(state, {
+                    kind: "waiting",
+                    message: "Codex question response failed; resume must be verified.",
+                  }),
+                ).pipe(Effect.zipRight(Effect.fail(providerFailure))),
+              ),
+            );
+          }),
+        ),
       answerTool: (input) =>
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
@@ -2761,6 +2961,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     agentMessages: new Map(),
     taskIds: new Map(),
     toolStates: new Map(),
+    subagentUsage: factories.subagentUsage,
     makeRequestId: factories.makeRequestId,
     makeTaskId: factories.makeTaskId,
     makeToolCallId: factories.makeToolCallId,

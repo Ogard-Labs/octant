@@ -158,8 +158,13 @@ else from the settings document, through `GET /api/reply-detail`
 thread opens and when the app returns to the foreground, a paired browser when
 its workspace opens, when the mode changes, and when the window regains focus.
 Until an answer arrives, or if none can, they draw Low. On the phone the
-reasoning panel opens at High and shows its first line at Medium, and a
-finished tool card opens at High; a change of level remounts them.
+reasoning panel opens at High and shows its first line at Medium. A run of
+consecutive tool calls draws as one rail of 28pt rows, each with a round
+status mark (a finished call shows its check alone; Running and Failed keep
+their words); a settled run folds behind "N tool calls" at Low (naming any
+failed calls) and starts open at Medium and High, a finished call's detail
+opens at High, and an open run past five rows shows its latest five behind
+"+N earlier". A change of level remounts them.
 
 ## Streaming and earlier messages
 
@@ -260,11 +265,20 @@ behind a Details disclosure. The card is one component in Chat, Work and
 Code; a delivery the card cannot read is shown as its text under a plain
 "Subagent result" head.
 
-Provider-observed children remain separate from managed runs. Their detail shows
-reported activity, observation timing, available lineage and explicit partial,
-truncated or conflicting history. An unknown model stays unknown. Observations
-have no managed conversation, execution controls, workspace authority or result
-acknowledgement.
+Subagents the provider runtime started itself are rows in the same card,
+counted and previewed by the same rules as managed runs, finished ones
+included, each reading "Started by <provider>" with its model or "Model
+unknown". Their detail shows reported activity, observation timing, available
+lineage and explicit partial, truncated or conflicting history. They have no
+managed conversation, workspace authority or result acknowledgement; their one
+control is Stop, offered only where the running turn can stop that subagent
+alone, and a stop request leaves the reported state until the provider reports
+the subagent finished. Its detail shows the final summary (folded) and token
+usage where the runtime reports them, "Usage not reported" otherwise. Every
+row, managed or not, names its provider.
+
+A result steered into the parent's running turn shows as the same child-result
+card after that turn's reply, headed "Delivered into the running turn".
 
 Managed result previews identify their execution generation and recorded model.
 The result detail leads with the reported summary, files, checks and blockers;
@@ -517,6 +531,67 @@ resending it. Queue controls remain keyboard accessible and wrap at narrow
 widths. A running-turn steering control is separate and appears only where the
 runtime supports it.
 
+## Scheduled wake-ups
+
+A Work or Code thread whose agent scheduled a wake-up shows one row per
+waiting wake-up above the message queue, in the composer: an alarm-clock
+icon, **Wakes** and the next fire time (weekday and local time), the
+wake-up's prompt on one line (its full text on hover), and **Cancel**. A
+wake-up that came due while Octant was not running reads **Missed** with its
+time and "Octant was not running", in primary text, with **Run now** beside
+Cancel; nothing runs it until the person chooses. With no waiting wake-up the
+rows take no space. At a narrow width the prompt drops below the time so the
+buttons never cover it. A refused change (the wake-up already fired or was
+cancelled, or the thread is busy for Run now) shows the host's sentence under
+the rows. The rows refresh on the thread's follow-up notices and on a slow
+visible-page interval. The turn a wake-up starts opens with the host heading
+`Wake-up you scheduled earlier in this thread:` above its prompt. The rules
+are in [Architecture: wake-ups](../architecture.md#modes-chat-work-and-code).
+
+## Live tasks
+
+A Work or Code thread whose last turn completed while background work it
+started (a dev server, a watch) still runs shows one row above the message queue, in
+the composer: an activity icon, each task's command on one line in monospace
+(its full text on hover, wrapping under each other at a narrow width),
+**Running** or the count running, and **Stop**, which stops the session and
+every task in it. With no live task, and while a turn holds the session (the
+turn shows its own task rows), the row takes no space. A failed stop shows a
+sentence under the row. The row refreshes on the thread's follow-up notices
+and on a slow visible-page interval. A turn the runtime starts by itself on
+the idle thread opens with the host's line `The agent started this turn by
+itself after background work it was running reported.` in place of a
+person's message. The rules are in
+[Provider runtimes](provider-runtimes.md#background-commands-and-runtime-started-turns).
+
+## Plan-mode asks
+
+When a Code thread's agent asks to plan first (Work has no Plan, so a Work
+thread's agent never asks), the pending request reads
+**Plan first**: the agent's sentence, then "This turn ends; the next one
+runs in Plan, read-only.", with **Switch to Plan** and **Keep working**.
+When it asks to leave Plan, the request reads **Approve the plan**: the
+plan in a bordered monospace block under the sentence, keyboard-focusable
+and scrolling inside the card past 18rem so the buttons stay in reach, then
+"This turn ends; the next one runs at" the level it returns to, with
+**Approve plan ·** that level and **Keep planning**. The rules are in
+[Provider runtimes](provider-runtimes.md#plan-mode-as-level-changes).
+
+## Sessions started outside Octant
+
+An empty Work or Code thread whose provider keeps sessions of its own for the
+folder its turns run in and its account, begun outside Octant, shows one row above the
+message queue: a history icon, how many sessions there are, and **Continue
+one**, which opens a list of them in place. Each choice shows the session's
+title (its name, or the provider's summary of it) on one line, then its
+branch and when it was last written; **Continue in this thread** starts the
+thread from the chosen one. A refusal shows the host's sentence under the
+row. Once the thread has a message the row is gone. A thread started from a
+session shows, in the same place, its details row: **Continues a session
+started outside Octant**, the session's own id in monospace (cut with an
+ellipsis at a narrow width, whole on hover), and **Copy**. The rules are in
+[Provider runtimes](provider-runtimes.md#sessions-started-outside-octant).
+
 ## Credential requests
 
 A one-use credential request appears inline at the end of the Code conversation.
@@ -566,6 +641,28 @@ quiet line.
 Authority confirmations appear beside the owning composer in a trusted surface
 owned by the desktop main process;
 ordinary notice content cannot issue an approval receipt.
+
+### Project trust prompt
+
+When a Work or Code thread opens and its Project holds untrusted Project code
+for the thread's key provider, the composer shows one quiet notice card above
+the box (maintainer decision, 2026-11-14: one trust prompt per Project). It is
+the neutral card, announced as a status rather than an alert, and names the
+provider and what would load: "This Project has its own Claude Code settings
+and MCP servers. They load once you trust this Project for Claude Code." Its
+actions are **Trust for <provider>** (secondary) and **Not now** (ghost) at the
+trailing edge. Trust sends the Project's trust command, the same one Project
+settings' Trusted providers sends, and the card goes once the Project lists
+the provider. Not now hides it for that Project and provider in this viewer's
+browser only; Trusted providers in Project settings still offers the trust. A
+window with no Project controller shows the words and Not now without Trust,
+and the host refuses the command from anyone but its own person. The card never
+shows for a trusted Project, a Project folder without that provider's Project
+code, or a provider whose trust loads none (any provider that is not a key
+provider, and Codex). Every ACP agent is a key provider, so the card names
+Gemini CLI, Goose, Kimi Code, and the others for the Project files their
+launches hold until trust (maintainer decision, 2026-11-14). The host's answer and the entries it reads are
+in [Architecture: Key providers run as themselves](../architecture.md#providers).
 
 ## Turn menu panels
 

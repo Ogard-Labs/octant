@@ -13,10 +13,16 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
+import { ProviderNativeSessionId } from "./providerNativeSession";
 import { ThreadPublishedPage } from "./threadToolSteps";
 import { ThreadRoutineReceipt } from "./threadRoutineReceipt";
+import { DescribedImageName, DescribedTurnImages, ImageDescribedBy } from "./imageDescription";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
+import {
+  AgentResultsSteeredIntoTurn,
+  AgentRunResultDeliveryMark,
+  MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS,
+} from "./agentRun";
 import { ExtensionSelection } from "./extensions";
 import { ComputerUseDestinationSelection } from "./desktopLease";
 import { AppleActionRequest } from "./appleToolchain";
@@ -63,6 +69,7 @@ import {
   ProviderModelId,
   ProviderSessionId,
   ProviderContextBreakdown,
+  ProviderNativeAnchor,
   ProviderResumeCursor,
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
@@ -1752,6 +1759,12 @@ const OperationStateEvent = Schema.Struct({
   kind: Schema.Literal("operation-state"),
   state: Schema.Literal("running", "waiting", "completed", "interrupted", "failed"),
   failure: Schema.optional(CodeOperationFailure),
+  /**
+   * On the provider's own completion: where the turn ends in the runtime's
+   * session, which a native fork or rewind cuts at. Absent on every other
+   * state, and on turns journaled before Octant recorded it.
+   */
+  nativeAnchor: Schema.optional(ProviderNativeAnchor),
 }).annotations(strict);
 const ConversationTurnStartedEvent = Schema.Struct({
   toolCatalogHandoff: Schema.optional(Schema.Boolean),
@@ -1767,6 +1780,22 @@ const ConversationTurnStartedEvent = Schema.Struct({
   /** Images sent with this turn. Absent when the turn attached none. */
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
+  /**
+   * The attached images Sees images described because the thread's model
+   * cannot read images, each with the model that described it and where the
+   * description is kept. The model gets the description; the image stays
+   * attached for the record. A restart sends the same descriptions again.
+   */
+  describedImages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        attachmentId: CodeAttachmentId,
+        name: DescribedImageName,
+        describedBy: ImageDescribedBy,
+        description: CodeEvidenceReference,
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
   /**
    * The checkout as it stood just before the provider was asked, so the user
@@ -1847,8 +1876,21 @@ const ApprovalEvent = Schema.Struct({
     "git-push",
     "pull-request-create",
     "provider-tool",
+    "level-change",
   ),
   summary: CodeApprovalSummaryText,
+  /**
+   * With `level-change`: the level the agent asks the thread to move to, and
+   * the plan it asks the person to approve when it asks to leave Plan. An
+   * approval changes the thread's level from its next turn; the turn that
+   * asked ends. Absent on every other approval.
+   */
+  levelChange: Schema.optional(
+    Schema.Struct({
+      to: ProviderExecutionPolicy,
+      plan: Schema.optional(CodeEvidenceReference),
+    }).annotations(strict),
+  ),
   /**
    * Legacy mark from approvals for physical-device and distribution effects,
    * which no longer exist. Nothing sets or reads it now. It stays in the schema
@@ -1984,9 +2026,38 @@ const ChildActivityEvent = Schema.Struct({
 const ProviderRetryEvent = Schema.Struct(HarnessRetryEventFields)
   .annotations(strict)
   .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts));
+/** A provider runtime's own id for a session it keeps; see {@link ProviderNativeSessionId}. */
+export const CodeNativeSessionId = ProviderNativeSessionId;
+export type CodeNativeSessionId = typeof CodeNativeSessionId.Type;
+export const decodeCodeNativeSessionId = Schema.decodeUnknownSync(CodeNativeSessionId);
+
+/**
+ * The runtime started a turn by itself inside this one: background work the
+ * turn started finished or reported, and the runtime woke the model to act on
+ * it. What follows in the operation is the runtime's turn, not the person's;
+ * it ran under the same gate and level. Absent from every turn journaled
+ * before Octant held such turns.
+ */
+const RuntimeTurnStartedEvent = Schema.Struct({
+  kind: Schema.Literal("runtime-turn-started"),
+  trigger: Schema.Literal("background-task", "person-message"),
+}).annotations(strict);
 const ResultEvent = Schema.Struct({
   kind: Schema.Literal("operation-result"),
   result: CodeOperationResult,
+}).annotations(strict);
+/**
+ * The person started this thread from a provider session begun outside
+ * Octant, on the same account and folder. Journaled ahead of the
+ * `provider-session-ready` that records its resume cursor, in an operation
+ * of its own that holds no turn. Only the runtime's own session id is kept,
+ * never its title or history. Absent from every thread journaled before
+ * adoption existed.
+ */
+const NativeSessionAdoptedEvent = Schema.Struct({
+  kind: Schema.Literal("native-session-adopted"),
+  nativeSessionId: CodeNativeSessionId,
+  providerInstanceId: ProviderInstanceId,
 }).annotations(strict);
 
 const ProviderSessionReadyEvent = Schema.Struct({
@@ -2238,6 +2309,8 @@ export const CodeOperationEvent = Schema.Union(
   ProviderLimitEvent,
   ChildActivityEvent,
   ProviderRetryEvent,
+  RuntimeTurnStartedEvent,
+  NativeSessionAdoptedEvent,
   ResultEvent,
 );
 export type CodeOperationEvent = typeof CodeOperationEvent.Type;
@@ -2358,6 +2431,8 @@ export const CodeConversationTurn = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   /** The checkout as it stood before this turn ran, when the host caught it. */
   checkpoint: Schema.optional(CodeCheckpoint),
   /**
@@ -2401,11 +2476,16 @@ export const CodeConversationTurn = Schema.Struct({
    * still running, and every turn journaled before the host kept the record.
    */
   changedFiles: Schema.optional(CodeTurnChangedFiles),
+  /**
+   * Finished children's results the host steered into this turn while it
+   * ran, in arrival order. Absent on a turn that took none.
+   */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   /**
-   * Why a failed turn failed, as the provider or the host reported it. Absent
-   * on a turn that did not fail, and on one journaled before the host kept
-   * the reason.
+   * Why a failed turn failed, or the usage limit a waiting turn stopped at, as
+   * the provider or the host reported it. Absent on a turn that did neither,
+   * and on one journaled before the host kept the reason.
    */
   failure: Schema.optional(CodeOperationFailure),
   startedAt: UtcTimestamp,

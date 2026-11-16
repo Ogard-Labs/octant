@@ -13,7 +13,22 @@ import {
   type AgentHierarchyRow,
   type AgentRunGraphRow,
 } from "./buildAgentHierarchyModel";
-import { SubagentStatusIcon, subagentRoleWord, subagentStatusWord } from "./subagentStatus";
+import {
+  SubagentStatusIcon,
+  subagentElapsedLabel,
+  subagentRoleWord,
+  subagentStatusWord,
+} from "./subagentStatus";
+import { AgentResultPreview, latestResultPacket } from "./AgentRunResults";
+import {
+  buildSubagentRows,
+  groupSubagentRows,
+  isActiveSubagentRow,
+  nestSubagentRows,
+  type SubagentCompareGroup,
+  type SubagentListItem,
+  type SubagentRow,
+} from "./subagentRows";
 import { useDockBarControls } from "../shell/dockBarControls";
 import "./agent-hierarchy.css";
 
@@ -47,6 +62,10 @@ export interface SubagentWorker {
   readonly threadId: string;
   readonly title: string;
   readonly provider?: SubagentProviderIdentity;
+  /** The model the worker runs on, by name. */
+  readonly model?: string;
+  /** Why the host did not start the role's main model, or the coordinator's why. */
+  readonly choiceNote?: string;
   readonly state: "working" | "attention" | "done" | "idle";
   readonly runs: ReadonlyArray<AgentRunGraphRow>;
   /** The worker has more runs than the host listed. */
@@ -89,10 +108,36 @@ export function AgentHierarchyPanel(props: {
     [props.entries, props.creationPosture],
   );
 
+  const observations = props.observations ?? NO_OBSERVATIONS;
+  const rows = useMemo(
+    () =>
+      buildSubagentRows({
+        entries: props.entries,
+        observations,
+        ...(props.providers === undefined ? {} : { providers: props.providers }),
+      }),
+    [props.entries, observations, props.providers],
+  );
+  const sections = useMemo(() => subagentSections(rows), [rows]);
+  const managedRows = useMemo(
+    () => new Map([...model.working, ...model.finished].map((row) => [row.runId, row])),
+    [model],
+  );
+
   const onViewChange = props.onViewChange;
-  const graphRows = useMemo(() => [...model.working, ...model.finished], [model]);
-  // An observed child has no dependency facts, so a thread with only those
-  // has nothing to arrange and keeps the list.
+  // A provider-started subagent has no dependency facts: it is a leaf card
+  // under whichever subagent started it, with no arrows of its own.
+  const graphRows = useMemo(
+    () => [
+      ...model.working,
+      ...model.finished,
+      ...rows.flatMap(
+        (row): ReadonlyArray<AgentRunGraphRow> =>
+          row.kind === "provider-started" ? [providerStartedGraphRow(row)] : [],
+      ),
+    ],
+    [model, rows],
+  );
   const showGraph = props.view === "graph" && graphRows.length > 0;
   const workers = props.workers ?? [];
   // A coordinator hands most of its work to workers, so their runs are a
@@ -157,30 +202,12 @@ export function AgentHierarchyPanel(props: {
 
       {/* A coordinator with workers is not empty: saying "No subagents yet"
           above rows that count their subagents would contradict them. */}
-      {model.emptyReason === undefined ||
-      (props.observations?.length ?? 0) > 0 ||
-      workers.length > 0 ? null : (
+      {model.emptyReason === undefined || rows.length > 0 || workers.length > 0 ? null : (
         <p className="agent-hierarchy__empty" role="status">
           {model.emptyReason}
         </p>
       )}
 
-      {(props.observations?.length ?? 0) > 0 ? (
-        <section aria-label="Observed children" className="agent-hierarchy__section">
-          <h3>Observed children · {props.observations?.length}</h3>
-          <ul className="agent-hierarchy__list">
-            {props.observations?.map((child) => (
-              <li key={child.observationId} className="agent-hierarchy__row">
-                <ObservedChildRow
-                  child={child}
-                  now={Date.now()}
-                  {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
       {props.observationsTruncated ? (
         <p className="agent-hierarchy__banner">Earlier observed children are not retained.</p>
       ) : null}
@@ -192,8 +219,18 @@ export function AgentHierarchyPanel(props: {
         />
       ) : (
         <>
-          <AgentHierarchySection label="Working" onOpen={props.onOpen} rows={model.working} />
-          <AgentHierarchySection label="Finished" onOpen={props.onOpen} rows={model.finished} />
+          <AgentHierarchySection
+            items={sections.working}
+            label="Working"
+            managedRows={managedRows}
+            onOpen={props.onOpen}
+          />
+          <AgentHierarchySection
+            items={sections.finished}
+            label="Finished"
+            managedRows={managedRows}
+            onOpen={props.onOpen}
+          />
         </>
       )}
       {workers.length === 0 ? null : (
@@ -280,6 +317,8 @@ function workerFacts(worker: SubagentWorker): string {
   ).length;
   return [
     WORKER_STATE_WORDS[worker.state],
+    worker.model,
+    worker.choiceNote,
     worker.runs.length === 0
       ? undefined
       : `${worker.runs.length} ${worker.runs.length === 1 ? "subagent" : "subagents"}`,
@@ -289,52 +328,239 @@ function workerFacts(worker: SubagentWorker): string {
     .join(" · ");
 }
 
+const NO_OBSERVATIONS: ReadonlyArray<AgentObservedChild> = [];
+
+/**
+ * Working leads in the host's order, so a row does not jump as its status
+ * changes; Finished follows newest first. In each, a subagent sits under the
+ * one that started it, and a compare group is listed once.
+ */
+function subagentSections(rows: ReadonlyArray<SubagentRow>): {
+  readonly working: ReadonlyArray<SubagentListItem>;
+  readonly finished: ReadonlyArray<SubagentListItem>;
+} {
+  const groups = new Set(
+    groupSubagentRows(rows).flatMap((item) => (item.kind === "group" ? [item.label] : [])),
+  );
+  // A compare group stays whole in one section: Working while any member works.
+  const groupWorking = new Set(
+    rows.flatMap((row) =>
+      row.kind === "octant-started" &&
+      row.compareGroup !== undefined &&
+      groups.has(row.compareGroup) &&
+      isActiveSubagentRow(row)
+        ? [row.compareGroup]
+        : [],
+    ),
+  );
+  const working = (row: SubagentRow) =>
+    row.kind === "octant-started" && row.compareGroup !== undefined && groups.has(row.compareGroup)
+      ? groupWorking.has(row.compareGroup)
+      : isActiveSubagentRow(row);
+  const finished = rows
+    .filter((row) => !working(row))
+    .sort((a, b) => {
+      if (a.updatedAt === b.updatedAt) return a.id.localeCompare(b.id);
+      return a.updatedAt < b.updatedAt ? 1 : -1;
+    });
+  return {
+    working: groupSubagentRows(nestSubagentRows(rows.filter(working))),
+    finished: groupSubagentRows(nestSubagentRows(finished)),
+  };
+}
+
+/** A provider-started subagent as a graph card: what started it, and no links. */
+function providerStartedGraphRow(
+  row: Extract<SubagentRow, { kind: "provider-started" }>,
+): AgentRunGraphRow {
+  return {
+    runId: row.id,
+    ...(row.parentId === undefined ? {} : { parentRunId: row.parentId }),
+    role: "",
+    task: row.task,
+    lifecycleStatus: row.lifecycleStatus,
+    needsReview: false,
+    model: row.model,
+    ...(row.providerInstanceId === undefined ? {} : { providerInstanceId: row.providerInstanceId }),
+    startedByProvider: row.providerName,
+    runsAfter: [],
+    createdAt: row.child.firstObservedAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function AgentHierarchySection(props: {
   readonly label: string;
-  readonly rows: ReadonlyArray<AgentHierarchyRow>;
+  readonly items: ReadonlyArray<SubagentListItem>;
+  readonly managedRows: ReadonlyMap<string, AgentHierarchyRow>;
   readonly onOpen: ((runId: string) => void) | undefined;
 }) {
-  if (props.rows.length === 0) return null;
+  if (props.items.length === 0) return null;
+  const count = props.items.reduce(
+    (total, item) => total + (item.kind === "group" ? item.members.length : 1),
+    0,
+  );
   return (
     <section aria-label={props.label} className="agent-hierarchy__section">
       <h3>
-        {props.label} · {props.rows.length}
+        {props.label} · {count}
       </h3>
       <ul className="agent-hierarchy__list">
-        {props.rows.map((row) => (
-          <li
-            className="agent-hierarchy__row"
-            key={row.runId}
-            // Nesting is whatever parent the host reported, capped at two
-            // levels by the model; the indent is the only place it shows.
-            style={{ paddingInlineStart: `${row.depth * 16}px` }}
-          >
-            <OctantButton
-              className="agent-hierarchy__open"
-              onClick={() => props.onOpen?.(row.runId)}
-              title={row.task}
-              type="button"
-              variant="ghost"
+        {props.items.map((item) => {
+          if (item.kind === "group") {
+            return (
+              <li
+                className="agent-hierarchy__row"
+                key={`group:${item.label}`}
+                style={{ paddingInlineStart: `${(item.members[0]?.depth ?? 0) * 16}px` }}
+              >
+                <CompareGroup group={item} onOpen={props.onOpen} />
+              </li>
+            );
+          }
+          const row = item.row;
+          return (
+            <li
+              className="agent-hierarchy__row"
+              key={row.id}
+              // Nesting is whatever parent the host or runtime reported; the
+              // indent is the only place it shows.
+              style={{ paddingInlineStart: `${row.depth * 16}px` }}
             >
-              <SubagentStatusIcon lifecycleStatus={row.lifecycleStatus} />
-              <span className="agent-hierarchy__row-text">
-                <span className="agent-hierarchy__task">{row.task}</span>
-                <span className="agent-hierarchy__meta">{rowFacts(row)}</span>
-              </span>
-              {row.needsReview ? <span className="agent-hierarchy__flag">Needs review</span> : null}
-            </OctantButton>
-          </li>
-        ))}
+              {row.kind === "provider-started" ? (
+                <ObservedChildRow
+                  child={row.child}
+                  now={Date.now()}
+                  providerName={row.providerName}
+                  {...(row.driverKind === undefined ? {} : { driverKind: row.driverKind })}
+                  {...(props.onOpen === undefined ? {} : { onOpen: props.onOpen })}
+                />
+              ) : (
+                <ManagedRow
+                  onOpen={props.onOpen}
+                  row={row}
+                  {...(props.managedRows.get(row.id) === undefined
+                    ? {}
+                    : { facts: props.managedRows.get(row.id) })}
+                />
+              )}
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
 }
 
-/** "Done · Review · gpt-6-astra · 3m ago": state in words first, then what ran it. */
-function rowFacts(row: AgentHierarchyRow): string {
+function ManagedRow(props: {
+  readonly row: Extract<SubagentRow, { kind: "octant-started" }>;
+  readonly facts?: AgentHierarchyRow | undefined;
+  readonly onOpen: ((runId: string) => void) | undefined;
+}) {
+  const { row } = props;
+  return (
+    <OctantButton
+      className="agent-hierarchy__open"
+      onClick={() => props.onOpen?.(row.id)}
+      title={row.task}
+      type="button"
+      variant="ghost"
+    >
+      <SubagentStatusIcon lifecycleStatus={row.lifecycleStatus} />
+      {row.driverKind === undefined ? null : (
+        <ProviderGlyph
+          className="agent-hierarchy__worker-mark"
+          displayName={row.providerName}
+          driverKind={row.driverKind}
+          size={14}
+        />
+      )}
+      <span className="agent-hierarchy__row-text">
+        <span className="agent-hierarchy__task">{row.task}</span>
+        <span className="agent-hierarchy__meta">{rowFacts(row)}</span>
+      </span>
+      {props.facts?.needsReview === true ? (
+        <span className="agent-hierarchy__flag">Needs review</span>
+      ) : null}
+    </OctantButton>
+  );
+}
+
+/**
+ * Siblings the thread's agent labelled alike, side by side so a person can
+ * compare them. The host states facts and ranks nothing, so neither does this:
+ * no order but the host's, no winner, no score.
+ */
+function CompareGroup(props: {
+  readonly group: SubagentCompareGroup;
+  readonly onOpen: ((runId: string) => void) | undefined;
+}) {
+  const { group } = props;
+  const now = Date.now();
+  return (
+    <section aria-label={`Compare ${group.label}`} className="agent-hierarchy__compare">
+      <h4 className="agent-hierarchy__compare-label">
+        Compare · {group.label} · {group.members.length}
+      </h4>
+      <ul className="agent-hierarchy__compare-members">
+        {group.members.map((member) => {
+          const result = latestResultPacket(member.entry.resultPackets ?? []);
+          return (
+            <li className="agent-hierarchy__compare-member" key={member.id}>
+              <OctantButton
+                className="agent-hierarchy__compare-open"
+                onClick={() => props.onOpen?.(member.id)}
+                title={member.task}
+                type="button"
+                variant="ghost"
+              >
+                <span className="agent-hierarchy__compare-provider">
+                  {member.driverKind === undefined ? null : (
+                    <ProviderGlyph
+                      displayName={member.providerName}
+                      driverKind={member.driverKind}
+                      size={12}
+                    />
+                  )}
+                  <span>{member.providerName}</span>
+                </span>
+                <span className="agent-hierarchy__meta">{member.model}</span>
+                <span className="agent-hierarchy__compare-state">
+                  <SubagentStatusIcon lifecycleStatus={member.lifecycleStatus} />
+                  <span>{subagentStatusWord(member.lifecycleStatus)}</span>
+                </span>
+                <span className="agent-hierarchy__meta">{durationFact(member, now)}</span>
+                <span className="agent-hierarchy__task">{member.task}</span>
+                {result === undefined ? null : <AgentResultPreview packet={result} />}
+              </OctantButton>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * "Ran 4m" once settled, from request to last change; "Updated 12s ago"
+ * while working. Only what the host recorded, nothing estimated.
+ */
+function durationFact(row: SubagentRow, now: number): string {
+  const createdAt = row.kind === "octant-started" ? row.entry.createdAt : undefined;
+  if (!isActiveSubagentRow(row) && createdAt !== undefined) {
+    const ran = subagentElapsedLabel(createdAt, Date.parse(row.updatedAt));
+    if (ran !== "") return `Ran ${ran}`;
+  }
+  const since = subagentElapsedLabel(row.updatedAt, now);
+  return since === "" ? "Time unavailable" : `Updated ${since} ago`;
+}
+
+/** "Done · Review · Codex · gpt-6-astra · 3m ago": state in words first, then what ran it. */
+function rowFacts(row: Extract<SubagentRow, { kind: "octant-started" }>): string {
   return [
     subagentStatusWord(row.lifecycleStatus),
-    subagentRoleWord(row.role),
+    subagentRoleWord(row.entry.role),
+    row.providerName,
     row.model,
     relativeTimeLabel(row.updatedAt),
   ]

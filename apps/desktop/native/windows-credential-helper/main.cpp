@@ -266,7 +266,7 @@ int run(HANDLE input, HANDLE output, const std::array<unsigned char, 4>& prefix)
     return reply(output, Status::invalid) ? 0 : 1;
   const DWORD size = little_endian(header.data() + 79);
   const auto operation = header[5];
-  bool valid = header[4] == 2 && operation >= 1 && operation <= 4 && header[6] <= 1 && header[83] < 8 &&
+  bool valid = header[4] == 2 && operation >= 1 && operation <= 4 && header[6] <= 1 && header[83] < 9 &&
     uuid(header.data() + 7) && uuid(header.data() + 43) && size <= max_secret &&
     (operation == 1 ? size > 0 : size == 0);
   for (size_t i = 0; i < magic.size(); ++i) valid = valid && header[i] == magic[i];
@@ -286,10 +286,11 @@ int run(HANDLE input, HANDLE output, const std::array<unsigned char, 4>& prefix)
 
   // The purpose is closed in both peers. In particular the existing provider
   // prefix is unchanged; auxiliary requests can never name that target.
-  constexpr std::array<const wchar_t*, 8> purposes{
+  constexpr std::array<const wchar_t*, 9> purposes{
     L"provider", L"replica-device-key", L"replica-store-credential",
     L"canvas-public-share-secret", L"mcp-server-credential",
-    L"desktop-provider-credential", L"push-platform-credential", L"ssh-key"
+    L"desktop-provider-credential", L"push-platform-credential", L"ssh-key",
+    L"web-search-credential"
   };
   std::wstring target = L"Octant/";
   target += purposes[header[83]];

@@ -32,7 +32,15 @@ import {
   createPersonMemoryClient,
   type PersonMemoryClient,
 } from "@octant/client-runtime/person-memory-client";
-import { createTodoClient, type TodoClient } from "@octant/client-runtime/todo-client";
+import {
+  createTodoClient,
+  type TodoClient,
+  type TodoListHostClient,
+} from "@octant/client-runtime/todo-client";
+import {
+  createOctantInstructionsClient,
+  type OctantInstructionsClient,
+} from "@octant/client-runtime/octant-instructions-client";
 import {
   createAgentMessageClient,
   type AgentMessageClient,
@@ -118,6 +126,10 @@ import {
   createHostResourceClient,
   type HostResourceClient,
 } from "@octant/client-runtime/host-resource-client";
+import {
+  createThreadSearchClient,
+  type ThreadSearchClient,
+} from "@octant/client-runtime/thread-search-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createSafeNetworksClient } from "@octant/client-runtime/safe-networks-client";
 import { createImageGenerationClient } from "@octant/client-runtime/image-generation-client";
@@ -170,7 +182,10 @@ export interface CreateLaunchedShellClientsOptions {
   readonly navigatorAssistantClient: NavigatorAssistantClient | undefined;
   readonly planClient: PlanClient | undefined;
   readonly shipClient: ShipClient | undefined;
+  readonly todoClient?: TodoClient | undefined;
+  readonly todoListHostClient?: TodoListHostClient | undefined;
   readonly workThreadClient: WorkThreadClient | undefined;
+  readonly threadSearchClient?: ThreadSearchClient | undefined;
   readonly workTurnClient: WorkTurnClient | undefined;
 }
 
@@ -206,6 +221,7 @@ export interface LaunchedShellClients {
   readonly goalLoopClient: ReturnType<typeof createGoalLoopClient>;
   readonly hostClient: HostClient;
   readonly hostResourceClient: HostResourceClient;
+  readonly threadSearchClient: ThreadSearchClient;
   readonly hostControlClient: ReturnType<typeof createHostControlClient>;
   readonly safeNetworksClient: ReturnType<typeof createSafeNetworksClient>;
   readonly imageGenerationClient: ReturnType<typeof createImageGenerationClient>;
@@ -247,6 +263,8 @@ export interface LaunchedShellClients {
   readonly diskCleanupClient: DiskCleanupClient;
   readonly personMemoryClient: PersonMemoryClient;
   readonly todoClient: TodoClient;
+  readonly todoListHostClient: TodoListHostClient;
+  readonly octantInstructionsClient: OctantInstructionsClient;
   readonly workMutationClient: ReturnType<typeof createWorkMutationClient>;
   readonly workOverviewClient: ReturnType<typeof createWorkOverviewClient>;
   readonly workRequestClient: ReturnType<typeof createWorkRequestClient>;
@@ -357,6 +375,7 @@ export function createLaunchedShellClients(
     replicaMembershipClient = undefined;
   }
 
+  const localTodos = createTodoClient(port);
   return {
     agentProfileClient: options.agentProfileClient ?? createAgentProfileClient(port),
     agentRunClient: options.agentRunClient ?? createAgentRunClient(port),
@@ -391,6 +410,7 @@ export function createLaunchedShellClients(
       fetch,
       windowCapability: options.windowCapability,
     }),
+    threadSearchClient: options.threadSearchClient ?? createThreadSearchClient(port),
     hostControlClient: createHostControlClient(port),
     safeNetworksClient: createSafeNetworksClient(port),
     imageGenerationClient: createImageGenerationClient(port),
@@ -421,7 +441,9 @@ export function createLaunchedShellClients(
     archivedWorktreesClient: createArchivedWorktreesClient(port),
     diskCleanupClient: createDiskCleanupClient(port),
     personMemoryClient: createPersonMemoryClient(port),
-    todoClient: createTodoClient(port),
+    todoClient: options.todoClient ?? localTodos,
+    todoListHostClient: options.todoListHostClient ?? localTodos,
+    octantInstructionsClient: createOctantInstructionsClient(port),
     localUsageHistoryClient:
       providerUsageLimitsClient === undefined ? undefined : createLocalUsageHistoryClient(port),
     workMutationClient: createWorkMutationClient(port),

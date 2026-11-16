@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ToolActionAuthority } from "@octant/contracts";
 import {
   decodeCapacityReservationId,
   decodeChatAttemptId,
@@ -124,7 +127,7 @@ function researchRoute(
   if ("kind" in decision && decision.kind === "unavailable") {
     return {
       kind: "unavailable",
-      reason: "searxng-not-configured",
+      reason: "no-eligible-web-search-backend",
     };
   }
   if ("backend" in decision && decision.backend === "provider-native") {
@@ -137,9 +140,45 @@ function researchRoute(
   return {
     kind: "ready",
     backend: "searxng",
-    attribution: "SearXNG",
+    attribution: "Octant web search",
     execute: async () => ({ query: "x", backend: "searxng", results: [] }),
   };
+}
+
+/**
+ * The native harness composition as the host wires it for a provider whose own
+ * search Octant can name, reading each thread's taint from `tainted`.
+ */
+function providerSearchComposition(tainted: ReadonlySet<string>) {
+  const granted = {
+    hostId: "00000000-0000-4000-8000-0000000000aa",
+    mode: "chat",
+    providerInstanceId: "00000000-0000-4000-8000-0000000000ee",
+    extension: { kind: "core" },
+  } as unknown as ToolActionAuthority;
+  return createNativeHarnessComposition({
+    isChildAuthorityCurrent: () => true,
+    authority: {
+      resolve: () => granted,
+      service: new ToolCallAuthorityService({
+        resolveGrantedAuthority: () => granted,
+        resolveLiveFacts: () => ({
+          providerAppManagedTools: "supported",
+          host: { computerUseEnabled: false },
+          executionPolicy: "approval-gated",
+          approvalSatisfied: false,
+          externalContentIngested: false,
+        }),
+      }),
+    },
+    isHarnessProvider: () => true,
+    hostId: granted.hostId,
+    readThreadTaint: (threadId) => tainted.has(threadId),
+    providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+    recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+    uuid: () => "00000000-0000-4000-8000-000000000099",
+    clock: () => "2026-11-15T00:00:00.000Z",
+  });
 }
 
 describe("ChatTurnRunner", () => {
@@ -179,7 +218,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -271,7 +310,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -346,7 +385,7 @@ describe("ChatTurnRunner", () => {
       },
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -422,7 +461,7 @@ describe("ChatTurnRunner", () => {
       },
       contextHarness: harness,
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -506,7 +545,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -595,7 +634,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: {
+        webSearch: {
           search: async () => ({
             query: "Octant",
             backend: "searxng",
@@ -635,7 +674,7 @@ describe("ChatTurnRunner", () => {
           researchRoute: {
             kind: "ready",
             backend: "searxng",
-            attribution: "SearXNG",
+            attribution: "Octant web search",
             execute: executeResearch,
           },
           appManagedTools: createWebSearchTools(executeResearch),
@@ -717,7 +756,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -782,7 +821,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 25,
     });
@@ -868,7 +907,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 1_000,
     });
@@ -952,7 +991,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -1032,7 +1071,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 5_000,
     });
@@ -1114,7 +1153,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -1190,7 +1229,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 150,
     });
@@ -1251,7 +1290,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       stalledTurnLimitMs: () => 25,
     });
@@ -1317,7 +1356,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -1390,7 +1429,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -1458,7 +1497,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -1527,7 +1566,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
     });
 
@@ -1601,7 +1640,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -1686,7 +1725,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -1749,6 +1788,84 @@ describe("ChatTurnRunner", () => {
     expect(interrupted).toEqual([sessionId]);
   });
 
+  it("withdraws the provider's own search when settling an owed outside-content mark marks the thread before the turn is sent", async () => {
+    const tainted = new Set<string>();
+    const sent: Array<{ readonly providerWebSearch?: unknown }> = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: (input: { readonly providerWebSearch?: unknown }) => {
+        sent.push(input);
+        return Queue.offerAll(queue, [
+          { kind: "text-delta", sessionId, text: "Done." },
+          { kind: "completed", sessionId },
+        ] as never[]);
+      },
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    // Composed before the run, as ChatService composes a turn's tools.
+    const tools = providerSearchComposition(tainted).forChat({
+      thread: { ...thread(), researchEnabled: true, researchRouting: "automatic" },
+      windowId: "window-1",
+    });
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+      timeoutMs: 1_000,
+    });
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "What shipped?",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          ...(tools === undefined ? {} : { appManagedTools: tools }),
+          // An earlier attempt's read is recorded now, which marks the thread.
+          outsideContentMarks: {
+            mark: () => ({ status: "marked" }),
+            settleOwed: (threadId) => {
+              tainted.add(threadId);
+              return { status: "clear" };
+            },
+            watch: () => ({ status: "watched", labels: [] }),
+          },
+          persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "f".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+    expect(exit._tag).toBe("Success");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.providerWebSearch).toBeUndefined();
+  });
+
   const runWithRuntimeWebTool = async (
     record: RecordExternalContentIngestion | undefined,
     extra: ReadonlyArray<unknown> = [],
@@ -1788,7 +1905,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 1_000,
     });
@@ -1931,7 +2048,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2016,7 +2133,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2125,7 +2242,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2306,7 +2423,7 @@ describe("ChatTurnRunner", () => {
         capacityScheduler: scheduler,
         contextHarness: makeHarness(),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
             query: "x",
             backend: "provider-native",
@@ -2441,7 +2558,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2544,7 +2661,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2644,7 +2761,7 @@ describe("ChatTurnRunner", () => {
         capacityScheduler: scheduler,
         contextHarness: makeHarness(),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         }),
       });
 
@@ -2710,7 +2827,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2809,7 +2926,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: harness,
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -2911,7 +3028,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: harness,
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3005,7 +3122,7 @@ describe("ChatTurnRunner", () => {
         capacityScheduler: scheduler,
         contextHarness: harness,
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
             query: "x",
             backend: "provider-native",
@@ -3238,7 +3355,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: harness,
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3326,7 +3443,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3409,7 +3526,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3539,7 +3656,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3646,7 +3763,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3735,7 +3852,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -3916,7 +4033,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -4010,7 +4127,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -4093,7 +4210,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -4186,7 +4303,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       // The fixture tool sleeps past a one-second window; the deadline is the
       // turn's idle window, so give the tool room to answer.
@@ -4291,7 +4408,7 @@ describe("ChatTurnRunner", () => {
         capacityScheduler: scheduler,
         contextHarness: makeHarness(),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
           providerNativeExecute: async () => ({
             query: "x",
             backend: "provider-native",
@@ -4381,7 +4498,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         providerNativeExecute: async () => ({
           query: "x",
           backend: "provider-native",
@@ -4475,7 +4592,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 200,
     });
@@ -4563,7 +4680,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 200,
     });
@@ -4640,7 +4757,7 @@ describe("ChatTurnRunner", () => {
       capacityScheduler: scheduler,
       contextHarness: makeHarness(),
       researchRouter: new ResearchRouter({
-        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
       timeoutMs: 200,
     });
@@ -4699,7 +4816,7 @@ describe("ChatTurnRunner", () => {
         capacityScheduler: scheduler,
         contextHarness: makeHarness(),
         researchRouter: new ResearchRouter({
-          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+          webSearch: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
         }),
       });
       const connection = (send: (queue: Queue.Queue<never>) => Effect.Effect<void, never>) => {
@@ -4819,7 +4936,7 @@ describe("ChatTurnRunner", () => {
           capacityScheduler: scheduler,
           contextHarness: makeHarness(),
           researchRouter: new ResearchRouter({
-            searxngClient: {
+            webSearch: {
               search: async () => ({ query: "x", backend: "searxng", results: [] }),
             },
           }),

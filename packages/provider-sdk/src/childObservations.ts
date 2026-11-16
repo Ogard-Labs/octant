@@ -1,10 +1,51 @@
 import {
+  MAX_PROVIDER_CHILD_FINAL_SUMMARY,
   MAX_PROVIDER_CHILD_HISTORY,
   MAX_PROVIDER_CHILD_OBSERVATIONS,
   type ProviderChildActivityEvent,
   type ProviderChildObservation,
   type ProviderChildObservationState,
+  type ProviderChildUsage,
 } from "@octant/contracts";
+
+/**
+ * A subagent's closing report trimmed to the bound the contract allows,
+ * cut on a character boundary; blank yields nothing.
+ */
+export function boundedChildFinalSummary(value: string | undefined): string | undefined {
+  const trimmed = value?.trim() ?? "";
+  if (trimmed.length === 0) return undefined;
+  if (trimmed.length <= MAX_PROVIDER_CHILD_FINAL_SUMMARY) return trimmed;
+  let kept = "";
+  for (const character of trimmed) {
+    if (kept.length + character.length > MAX_PROVIDER_CHILD_FINAL_SUMMARY - 1) break;
+    kept += character;
+  }
+  return `${kept.trimEnd()}…`;
+}
+
+/**
+ * Usage built only from counts a runtime reported as safe non-negative
+ * integers; a missing or malformed count stays unknown rather than zero.
+ */
+export function reportedChildUsage(counts: {
+  readonly inputTokens?: unknown;
+  readonly outputTokens?: unknown;
+  readonly totalTokens?: unknown;
+}): ProviderChildUsage | undefined {
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const inputTokens = count(counts.inputTokens);
+  const outputTokens = count(counts.outputTokens);
+  const totalTokens = count(counts.totalTokens);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined)
+    return undefined;
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+  };
+}
 
 /** Fold reports within one host-admitted parent, never across authority scopes. */
 export function recordProviderChildObservation(
@@ -69,6 +110,8 @@ export function recordProviderChildObservation(
   }
   const history = [...(previous?.history ?? []), entry];
   const parentChildAgentId = event.parentChildAgentId ?? previous?.parentChildAgentId;
+  const finalSummary = event.finalSummary ?? previous?.finalSummary;
+  const usage = event.usage ?? previous?.usage;
   const child: ProviderChildObservation = {
     providerInstanceId: event.instanceId,
     sessionId: event.sessionId,
@@ -80,6 +123,8 @@ export function recordProviderChildObservation(
     ...((event.task ?? previous?.task) ? { task: event.task ?? previous?.task } : {}),
     lifecycleStatus: event.status,
     latestSummary: entry.summary,
+    ...(finalSummary === undefined ? {} : { finalSummary }),
+    ...(usage === undefined ? {} : { usage }),
     firstObservedAt: previous?.firstObservedAt ?? event.occurredAt,
     updatedAt: event.occurredAt,
     historyStatus:

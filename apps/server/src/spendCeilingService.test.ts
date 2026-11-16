@@ -11,7 +11,11 @@ import {
   type ProviderCapabilitySupport,
 } from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
-import { recordShieldReviewUsage } from "./shield/shieldUsageLedger";
+import { recordOneShotUsage, recordShieldReviewUsage } from "./shield/shieldUsageLedger";
+import {
+  IMAGE_DESCRIPTION_REQUEST_SHAPE,
+  IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
+} from "@octant/contracts";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
@@ -358,6 +362,45 @@ describe("SpendCeilingService", () => {
       countsAsTurn: false,
     });
     expect(admission.status).toBe("refused");
+  });
+
+  it("counts an image Sees images described against the thread's ceiling", () => {
+    const { connection, journal, service } = openService();
+    const ledger = { connection, journal, clock: () => now, uuid: () => crypto.randomUUID() };
+    service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "thread", threadType: "code-thread", threadId: ids.thread },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "lifetime" },
+    });
+    recordOneShotUsage(ledger, {
+      threadId: ids.thread,
+      providerInstanceId: ids.provider as never,
+      modelId: "vision-model" as never,
+      usage: { inputTokens: 880, outputTokens: 20 },
+      aggregateType: IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE,
+      requestShape: IMAGE_DESCRIPTION_REQUEST_SHAPE,
+    });
+    expect(
+      remainingOf(
+        service.snapshot({
+          principalKind: "local-window",
+          threadId: ids.thread,
+          threadType: "code-thread",
+        }),
+        "thread",
+      ),
+    ).toMatchObject({ committedTokens: 900 });
+    expect(
+      service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "code-thread",
+        turnUpperBoundTokens: 200,
+        countsAsTurn: false,
+      }).status,
+    ).toBe("refused");
   });
 
   it("counts Octant Shield's reviews against the reviewed Work thread's ceiling", () => {

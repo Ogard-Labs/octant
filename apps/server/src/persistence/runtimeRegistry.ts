@@ -28,6 +28,8 @@ import {
   ChildWorktreeSourceUpdated,
   CHILD_WORKTREE_SEED_UPDATED,
   ChildWorktreeSeedUpdated,
+  THREAD_WAKEUP_CHANGED,
+  ThreadWakeupChanged,
 } from "@octant/contracts";
 import {
   OWNER_BROWSER_AUDIT_EVENT,
@@ -183,6 +185,7 @@ import {
   AgentRunRequested,
   AgentRunResultAcknowledged,
   AgentRunResultDeliverySettled,
+  AgentResultSteered,
   AgentRunStatusChanged,
   AutomationNotificationDeliveryRecorded,
   AutomationNotificationPreferences,
@@ -261,6 +264,10 @@ import {
   BrowserStep,
   HOST_MEMORY_LIMITS_EVENT_NAME,
   HostMemoryLimitsChanged,
+  WEB_SEARCH_SETTINGS_EVENT_NAME,
+  WebSearchSettingsChanged,
+  WEB_SEARCH_CALL_ROUTED_EVENT_NAME,
+  WebSearchCallRouted,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
@@ -360,6 +367,7 @@ import { AgentProfileProjection } from "./agentProfileProjection";
 import { ChatProjection } from "./chatProjection";
 import { CodeProjection } from "./codeProjection";
 import { CodeTranscriptSearchProjection } from "./codeTranscriptSearchProjection";
+import { ThreadSearchProjection } from "./threadSearchProjection";
 import { ContextProjection } from "./contextProjection";
 import { EventRegistry } from "./eventRegistry";
 import { ProjectionRegistry } from "./projection";
@@ -408,6 +416,7 @@ import {
   AgentTurnSentV1,
 } from "@octant/contracts/agent-access";
 import { HostMemoryLimitsProjection } from "./hostMemoryLimitsProjection";
+import { WebSearchSettingsProjection } from "./webSearchSettingsProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { UsageResumeProjection } from "./usageResumeProjection";
@@ -425,6 +434,7 @@ import {
   DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1,
 } from "./diagnosticsExportProjection";
 import { AgentRunProjection } from "../agentRun/agentRunProjection";
+import { AGENT_RESULT_STEERED } from "../agentRun/agentResultSteeredRecord";
 import {
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
@@ -463,6 +473,7 @@ import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareServ
 import { registerPersonMemoryEvents } from "../personMemory/personMemoryStore";
 import { registerSandboxRestrictionsEvents } from "../sandboxRestrictionsService";
 import { registerTodoEvents } from "../todos/todoStore";
+import { registerOctantInstructionsEvents } from "../octantInstructions/octantInstructionsStore";
 import { registerProtectedFilesEvents } from "../protectedFilesService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasNetworkAccessEvents } from "../canvas/canvasNetworkAccessService";
@@ -727,6 +738,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(AGENT_RUN_STATUS_CHANGED, 1, AgentRunStatusChanged)
     .register(AGENT_RUN_RESULT_ACKNOWLEDGED, 1, AgentRunResultAcknowledged)
     .register(AGENT_RUN_RESULT_DELIVERY_SETTLED, 1, AgentRunResultDeliverySettled)
+    .register(AGENT_RESULT_STEERED, 1, AgentResultSteered)
     .register(AGENT_RUN_SETTINGS_UPDATED, 1, AgentRunPolicySettings)
     .register(AGENT_MESSAGE_EVENT_NAMES.sent, 1, AgentMessageSent)
     .register(AGENT_MESSAGE_EVENT_NAMES.delivered, 1, AgentMessageDelivered)
@@ -758,6 +770,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.promotion-recorded@1", 1, WorkPromotionFrame)
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
+    .register(THREAD_WAKEUP_CHANGED, 1, ThreadWakeupChanged)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
     .register("zen.space-snapshot-recorded@1", 1, ZenSpaceSnapshotRecordedV1)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)
@@ -852,6 +865,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(BROWSER_FLOW_EVENT_NAMES.deleted, 1, BrowserFlowDeleted)
     .register(BROWSER_STEP_RECORDED, 1, BrowserStep)
     .register(HOST_MEMORY_LIMITS_EVENT_NAME, 1, HostMemoryLimitsChanged)
+    .register(WEB_SEARCH_SETTINGS_EVENT_NAME, 1, WebSearchSettingsChanged)
+    .register(WEB_SEARCH_CALL_ROUTED_EVENT_NAME, 1, WebSearchCallRouted)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
     .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload)
@@ -874,6 +889,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerSandboxRestrictionsEvents(events);
   registerPersonMemoryEvents(events);
   registerTodoEvents(events);
+  registerOctantInstructionsEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasNetworkAccessEvents(events);
   registerCanvasOutsideContentEvents(events);
@@ -935,6 +951,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ChatProjection())
       .register(new CodeProjection())
       .register(new CodeTranscriptSearchProjection())
+      .register(new ThreadSearchProjection())
       .register(agentRunProjection)
       .register(canvasProjection)
       .register(automationProjection)
@@ -959,6 +976,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new AgentAccessProjection())
       .register(new ThreadRetentionProjection())
       .register(new HostMemoryLimitsProjection())
+      .register(new WebSearchSettingsProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())
       .register(new SpendCeilingProjection())

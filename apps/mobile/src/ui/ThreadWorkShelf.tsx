@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
+import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 
@@ -33,7 +34,7 @@ export function ThreadWorkShelf(props: {
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        wrap: { gap: space.sm, marginBottom: space.sm },
+        wrap: { gap: space.xs },
         summary: {
           flexDirection: "row",
           alignItems: "center",
@@ -48,9 +49,9 @@ export function ThreadWorkShelf(props: {
           fontSize: typography.caption.fontSize,
           fontWeight: "500",
         },
-        chevron: { color: colors.textSecondary, fontSize: 14, fontWeight: "500" },
         followUp: {
-          paddingVertical: space.sm,
+          paddingTop: 0,
+          paddingBottom: space.sm,
           paddingHorizontal: space.md,
           gap: space.xs,
         },
@@ -74,6 +75,7 @@ export function ThreadWorkShelf(props: {
         itemPad: { paddingVertical: space.sm, paddingHorizontal: space.md, gap: space.xs },
         actions: { flexDirection: "row", gap: space.xs, marginTop: space.xs },
         actionChip: {
+          alignSelf: "flex-start",
           paddingVertical: 4,
           paddingHorizontal: 8,
           borderRadius: radii.sm,
@@ -97,6 +99,7 @@ export function ThreadWorkShelf(props: {
       <GlassSurface material="thin" radius={radii.md}>
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ expanded }}
           onPress={() => setExpanded((value) => !value)}
           style={styles.summary}
           testID="mobile-thread-work-toggle"
@@ -105,7 +108,12 @@ export function ThreadWorkShelf(props: {
             {MOBILE_COPY.workListLabel}: {currentItems.length} {MOBILE_COPY.workRemaining},{" "}
             {blockedCount} {MOBILE_COPY.workBlocked}
           </Text>
-          <Text style={styles.chevron}>{expanded ? "−" : "+"}</Text>
+          {/* A chevron, like every other row that opens: a plus read as "add an item". */}
+          <Ionicons
+            color={colors.textSecondary}
+            name={expanded ? "chevron-down" : "chevron-forward"}
+            size={14}
+          />
         </Pressable>
         {openFollowUp !== undefined ? (
           <View style={styles.followUp} testID="mobile-thread-follow-up">

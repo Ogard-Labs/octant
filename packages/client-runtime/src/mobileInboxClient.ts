@@ -19,6 +19,19 @@ import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
 export type MobileInboxMode = "chat" | "work" | "code";
 export type MobileCodeReviewState = CodeThreadReviewState["state"];
 
+/**
+ * What the host's runtime sidecar says a thread is doing now: a turn running,
+ * or a running turn parked on the person. Absent means the host reported
+ * neither, which is idle, not unknown-and-therefore-working.
+ */
+export type MobileThreadLiveState = "working" | "needs-input";
+
+export interface MobileThreadRuntimeReport {
+  readonly threadId: string;
+  readonly executing: boolean;
+  readonly awaitingInput?: boolean | undefined;
+}
+
 export interface MobileInboxRow {
   readonly hostId: string;
   readonly mode: MobileInboxMode;
@@ -27,6 +40,46 @@ export interface MobileInboxRow {
   readonly status: string;
   readonly freshness: string;
   readonly reviewState?: MobileCodeReviewState;
+  /** The thread's Project; a Chat with no folder has none. */
+  readonly projectId?: string;
+  readonly pinned?: boolean;
+  readonly live?: MobileThreadLiveState;
+  /** The thread's aggregate version, which a row action sends as its expected version. */
+  readonly version?: number;
+  /** Put away (completed) at this time; absent while the thread is on the active list. */
+  readonly completedAt?: string;
+  readonly snooze?: { readonly until: string; readonly at: string; readonly duringTurn?: boolean };
+}
+
+function restFields(thread: {
+  readonly version: number;
+  readonly completedAt?: string | undefined;
+  readonly snooze?:
+    | { readonly until: string; readonly at: string; readonly duringTurn?: boolean | undefined }
+    | undefined;
+}): Pick<MobileInboxRow, "version" | "completedAt" | "snooze"> {
+  return {
+    version: thread.version,
+    ...(thread.completedAt === undefined ? {} : { completedAt: thread.completedAt }),
+    ...(thread.snooze === undefined
+      ? {}
+      : {
+          snooze: {
+            until: thread.snooze.until,
+            at: thread.snooze.at,
+            ...(thread.snooze.duringTurn === true ? { duringTurn: true } : {}),
+          },
+        }),
+  };
+}
+
+/** The live state a runtime report gives, if any. */
+export function mobileThreadLiveState(
+  report: MobileThreadRuntimeReport | undefined,
+): MobileThreadLiveState | undefined {
+  if (report === undefined) return undefined;
+  if (report.awaitingInput === true) return "needs-input";
+  return report.executing ? "working" : undefined;
 }
 
 export interface MobileRemoteTransport {
@@ -87,10 +140,12 @@ function chatRow(hostId: string, thread: ChatThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    ...restFields(thread),
+    ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
   };
 }
 
-function workRow(hostId: string, thread: WorkThread): MobileInboxRow {
+function workRow(hostId: string, thread: WorkThread, live?: MobileThreadLiveState): MobileInboxRow {
   return {
     hostId,
     mode: "work",
@@ -98,6 +153,9 @@ function workRow(hostId: string, thread: WorkThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    projectId: String(thread.projectId),
+    ...restFields(thread),
+    ...(live === undefined ? {} : { live }),
   };
 }
 
@@ -105,6 +163,7 @@ function codeRow(
   hostId: string,
   thread: CodeThread,
   reviewState?: MobileCodeReviewState,
+  live?: MobileThreadLiveState,
 ): MobileInboxRow {
   return {
     hostId,
@@ -113,7 +172,11 @@ function codeRow(
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    projectId: String(thread.projectId),
+    ...restFields(thread),
+    ...(thread.pinned === true ? { pinned: true } : {}),
     ...(reviewState === undefined ? {} : { reviewState }),
+    ...(live === undefined ? {} : { live }),
   };
 }
 
@@ -122,6 +185,8 @@ interface MobileInboxBootstrapRows {
   readonly chatThreads: ReadonlyArray<ChatThread>;
   readonly workThreads: ReadonlyArray<WorkThread>;
   readonly codeThreads: ReadonlyArray<CodeThread>;
+  readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
   readonly failure?: MobileInboxFailure;
 }
 
@@ -142,12 +207,29 @@ export function normalizeMobileInbox(input: {
   readonly workThreads: ReadonlyArray<WorkThread>;
   readonly codeThreads: ReadonlyArray<CodeThread>;
   readonly codeReviewStates?: ReadonlyMap<string, MobileCodeReviewState>;
+  readonly workRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
+  readonly codeRuntime?: ReadonlyArray<MobileThreadRuntimeReport>;
 }): ReadonlyArray<MobileInboxRow> {
+  const reportFor = (
+    reports: ReadonlyArray<MobileThreadRuntimeReport> | undefined,
+    threadId: string,
+  ) => reports?.find((report) => String(report.threadId) === threadId);
   return sortMobileInboxRows([
     ...input.chatThreads.map((thread) => chatRow(input.hostId, thread)),
-    ...input.workThreads.map((thread) => workRow(input.hostId, thread)),
+    ...input.workThreads.map((thread) =>
+      workRow(
+        input.hostId,
+        thread,
+        mobileThreadLiveState(reportFor(input.workRuntime, String(thread.id))),
+      ),
+    ),
     ...input.codeThreads.map((thread) =>
-      codeRow(input.hostId, thread, input.codeReviewStates?.get(String(thread.id))),
+      codeRow(
+        input.hostId,
+        thread,
+        input.codeReviewStates?.get(String(thread.id)),
+        mobileThreadLiveState(reportFor(input.codeRuntime, String(thread.id))),
+      ),
     ),
   ]);
 }
@@ -213,6 +295,8 @@ async function fetchMobileInboxBootstrapRows(
     chatThreads: chat?.threads ?? [],
     workThreads: work?.threads ?? [],
     codeThreads: code?.threads ?? [],
+    workRuntime: work?.runtime ?? [],
+    codeRuntime: code?.runtime ?? [],
     ...(failures[0] === undefined ? {} : { failure: failures[0] }),
   };
 }
@@ -438,6 +522,11 @@ export async function createMobileChatWithFirstTurn(input: {
   readonly prompt: string;
   readonly providerInstanceId?: string;
   readonly modelId?: string;
+  /**
+   * Told as soon as the host has made the thread, before its first turn: a
+   * turn that then fails to start still leaves a thread the caller can name.
+   */
+  readonly onCreated?: (row: MobileInboxRow) => void;
 }): Promise<MobileInboxRow> {
   const trimmed = input.prompt.trim();
   if (trimmed.length === 0) {
@@ -447,6 +536,7 @@ export async function createMobileChatWithFirstTurn(input: {
     transport: input.transport,
     title: titleFromPrompt(trimmed),
   });
+  input.onCreated?.(chatRow(input.transport.hostId, thread));
   if (
     input.providerInstanceId !== undefined &&
     input.modelId !== undefined &&

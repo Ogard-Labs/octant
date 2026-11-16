@@ -130,6 +130,27 @@ vi.mock("./chat/ChatWorkspace", async (original) => {
   };
 });
 
+// Observe which Project the `/` skills and plugins affordance is asked about,
+// without altering what it returns.
+const commandAudience = vi.hoisted(() => ({
+  latest: undefined as
+    | { readonly mode: string; readonly projectId: string | null; readonly threadId: string | null }
+    | undefined,
+}));
+vi.mock("./palette/useCommandSkills", async (original) => {
+  const actual = await original<typeof import("./palette/useCommandSkills")>();
+  return {
+    ...actual,
+    useCommandExtensions: (
+      client: Parameters<typeof actual.useCommandExtensions>[0],
+      options: Parameters<typeof actual.useCommandExtensions>[1],
+    ) => {
+      if (options?.audience !== undefined) commandAudience.latest = options.audience;
+      return actual.useCommandExtensions(client, options);
+    },
+  };
+});
+
 const automationGate = vi.hoisted(() => ({ enabled: false }));
 vi.mock("./automation/automationCenterGate", () => ({
   get AUTOMATION_CENTER_NAVIGATION_ENABLED() {
@@ -4110,6 +4131,265 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
   });
 
+  const otherCodeThreadId = decodeCodeThreadId("00000000-0000-4000-8000-0000000006a1");
+
+  /** The Code host knowing one more thread, which lives in "Other repo". */
+  function codesWithOtherProjectThread() {
+    const base = codes();
+    const otherThread = async (view: { readonly thread: object }) => ({
+      ...view,
+      thread: {
+        ...view.thread,
+        id: otherCodeThreadId,
+        projectId: otherProjectId,
+        title: "Other repo thread",
+      },
+    });
+    return {
+      ...base,
+      bootstrap: vi.fn(async () => {
+        const value = await base.bootstrap();
+        const first = value.threads[0];
+        if (first === undefined) throw new Error("Expected the fixture thread.");
+        return {
+          ...value,
+          threads: [...value.threads, (await otherThread({ thread: first })).thread],
+        } as never;
+      }),
+      navigation: vi.fn(async () => {
+        const value = await base.navigation();
+        const first = value.threads[0];
+        if (first === undefined) throw new Error("Expected the fixture thread.");
+        return {
+          ...value,
+          threads: [...value.threads, (await otherThread({ thread: first })).thread],
+        } as never;
+      }),
+      thread: vi.fn(async (threadId: Parameters<typeof base.thread>[0]) => {
+        const view = await base.thread(threadId);
+        return String(threadId) === String(otherCodeThreadId)
+          ? ((await otherThread(view)) as never)
+          : view;
+      }),
+    } as typeof base;
+  }
+
+  /**
+   * One Code window whose lead pane holds a thread of Octant and whose second
+   * pane holds a tool surface of "Other repo", a different Project.
+   */
+  function mixedProjectCodeWindow(second: "tool" | "thread" = "tool") {
+    const initial = codeShellBootstrap();
+    const code = initial.workspace.layouts.code;
+    if (code.kind !== "pane") throw new Error("Default Code layout must be a pane.");
+    const bound = {
+      ...initial.workspace,
+      contextByMode: {
+        ...initial.workspace.contextByMode,
+        code: {
+          ...initial.workspace.contextByMode.code,
+          projectId,
+          boundRoot: "/Users/example/Dev/Repos/octant",
+        },
+      },
+    };
+    const split = applyWorkspaceOperation(bound, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: code.paneId,
+      surface:
+        second === "tool"
+          ? {
+              kind: "browser",
+              id: "00000000-0000-4000-8000-000000000641" as never,
+              mode: "code",
+              title: "Other repo preview",
+            }
+          : {
+              kind: "code-overview",
+              id: "00000000-0000-4000-8000-000000000641" as never,
+              threadId: otherCodeThreadId,
+              mode: "code",
+              title: "Other repo thread",
+            },
+      splitNodeId: "00000000-0000-4000-8000-000000000642" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000643" as never,
+      newPaneId: "00000000-0000-4000-8000-000000000644" as never,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5 as never,
+    });
+    const layout = split.layouts.code;
+    if (layout.kind !== "split" || layout.second.kind !== "pane") {
+      throw new Error("Expected a split Code layout.");
+    }
+    const workspace = {
+      ...split,
+      activePaneIds: { ...split.activePaneIds, code: code.paneId },
+      layouts: {
+        ...split.layouts,
+        code: {
+          ...layout,
+          second: {
+            ...layout.second,
+            context: {
+              host: LOCAL_HOST_ID,
+              mode: "code" as const,
+              projectId: otherProjectId,
+              boundRoot: "/Users/example/Dev/Repos/other",
+            },
+          },
+        },
+      },
+    };
+    const action = (id: string, name: string, command: string) => ({
+      id: id as never,
+      name,
+      command,
+      directory: ".",
+    });
+    const base = projectBootstrap();
+    const octant = {
+      ...base.active[0]!,
+      actions: [action("a0000000-0000-4000-8000-000000000001", "Test Octant", "bun test")],
+    };
+    const other = {
+      ...octant,
+      id: otherProjectId,
+      name: "Other repo",
+      binding: { canonicalRoot: "/Users/example/Dev/Repos/other" },
+      actions: [action("a0000000-0000-4000-8000-000000000002", "Build Other", "make")],
+    };
+    const projectApi = projects({ ...base, active: [octant, other] as never, availability: [] });
+    return {
+      projectApi,
+      codeApi: codesWithOtherProjectThread(),
+      shellApi: client({
+        ...initial,
+        workspace,
+        workspaceVersion: workspace.version,
+      }),
+    };
+  }
+
+  async function paletteActions(user: ReturnType<typeof userEvent.setup>) {
+    await user.keyboard("{Control>}k{/Control}");
+    const search = await screen.findByRole("combobox", { name: "Search commands" });
+    await waitFor(() => expect(search).toHaveFocus());
+    const offered = screen
+      .queryAllByRole("option")
+      .map((option) => option.textContent ?? "")
+      .filter((text) => /Test Octant|Build Other/.test(text));
+    await user.keyboard("{Escape}");
+    return offered;
+  }
+
+  it("serves the Project of whichever split pane is active in a window showing two Projects", async () => {
+    const user = userEvent.setup();
+    const { projectApi, shellApi } = mixedProjectCodeWindow();
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    const lead = await screen.findByRole("region", {
+      name: "Workspace pane: Octant, Controller foundation",
+    });
+    const other = screen.getByRole("region", {
+      name: "Workspace pane: Other repo, Other repo preview",
+    });
+    expect(await paletteActions(user)).toEqual([expect.stringContaining("Test Octant")]);
+
+    await user.click(other);
+    await waitFor(async () =>
+      expect(await paletteActions(user)).toEqual([expect.stringContaining("Build Other")]),
+    );
+
+    await user.click(lead);
+    await waitFor(async () =>
+      expect(await paletteActions(user)).toEqual([expect.stringContaining("Test Octant")]),
+    );
+  });
+
+  it("asks for skills and plugins of the active pane's own Project, not the lead's", async () => {
+    const user = userEvent.setup();
+    const { projectApi, shellApi } = mixedProjectCodeWindow();
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    const lead = await screen.findByRole("region", {
+      name: "Workspace pane: Octant, Controller foundation",
+    });
+    const other = screen.getByRole("region", {
+      name: "Workspace pane: Other repo, Other repo preview",
+    });
+    await waitFor(() => expect(commandAudience.latest?.projectId).toBe(String(projectId)));
+
+    await user.click(other);
+    await waitFor(() => expect(commandAudience.latest?.projectId).toBe(String(otherProjectId)));
+
+    await user.click(lead);
+    await waitFor(() => expect(commandAudience.latest?.projectId).toBe(String(projectId)));
+  });
+
+  it("shows an approval a thread of the other Project raised inside that thread's pane while the lead pane is active", async () => {
+    const { projectApi, shellApi, codeApi } = mixedProjectCodeWindow("thread");
+    const extensionApi = {
+      toolGrantsAvailable: false,
+      snapshot: vi.fn(async () => ({ packages: [], skills: [] })) as never,
+      listToolApprovals: vi.fn(async () => [
+        {
+          approvalId: "a0000000-0000-4000-8000-0000000006b1",
+          threadId: String(otherCodeThreadId),
+          projectId: String(otherProjectId),
+          extensionId: "a0000000-0000-4000-8000-0000000006b2",
+          packageId: "a0000000-0000-4000-8000-0000000006b3",
+          componentId: "files-server",
+          serverName: "files",
+          providerToolName: "plugin__files__read",
+          mcpToolName: "read_file",
+          inputJson: "{}",
+          requestedAt: "2026-10-12T10:00:00.000Z",
+          rememberable: false,
+          answerCovers: "call",
+        },
+      ]) as never,
+      decideToolApproval: vi.fn(),
+    } as unknown as NonNullable<React.ComponentProps<typeof App>["extensionClient"]>;
+    render(
+      <App
+        codeClient={codeApi}
+        extensionClient={extensionApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={shellApi}
+      />,
+    );
+
+    const lead = await screen.findByRole("region", {
+      name: "Workspace pane: Octant, Controller foundation",
+    });
+    const other = screen.getByRole("region", {
+      name: "Workspace pane: Other repo, Other repo thread",
+    });
+    expect(await within(other).findByText(/Allow read_file from/)).toBeVisible();
+    expect(within(lead).queryByText(/Allow read_file from/)).toBeNull();
+  });
+
   it("starts the global New thread action without carrying the previous Code Project", async () => {
     const user = userEvent.setup();
     const projectApi = projects({ ...projectBootstrap(), availability: [] });
@@ -4421,7 +4701,7 @@ describe("App", () => {
       } else if (entry === "thread search") {
         await user.keyboard("{Control>}k{/Control}");
         await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-        const dialog = await screen.findByRole("dialog", { name: "Search Code threads" });
+        const dialog = await screen.findByRole("dialog", { name: "Search threads" });
         await user.click(within(dialog).getByRole("button", { name: "New task" }));
       } else {
         await act(async () => startNewAgent?.());
@@ -5203,12 +5483,12 @@ describe("App", () => {
     // one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
     await user.type(screen.getByRole("searchbox", { name: "Filter threads" }), "{Enter}");
-    const search = screen.getByRole("combobox", { name: "Search Code threads" });
+    const search = screen.getByRole("combobox", { name: "Search threads" });
     expect(search).toBeVisible();
     await waitFor(() => expect(search).toHaveFocus());
-    expect(screen.getByRole("dialog", { name: "Search Code threads" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Search threads" })).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Search threads" })).toBeNull();
   }, 15_000);
 
   it("lists an archived Chat thread the host search reports in the Archived group", async () => {
@@ -5229,7 +5509,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     // The Chat bootstrap is deliberately active-only, so the Archived group can
     // only ever be filled by the host's own lifecycle-spanning thread search.
@@ -5257,7 +5537,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Retired");
 
     expect(
       await screen.findByText(
@@ -5306,7 +5586,7 @@ describe("App", () => {
 
     await user.keyboard("{Control>}k{/Control}");
     await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
-    await user.type(screen.getByRole("combobox", { name: "Search Code threads" }), "Controller");
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "Controller");
     await user.click(await screen.findByRole("option", { name: /Controller foundation/ }));
 
     // The hit's thread lives in "Octant" while this window's Code context is
@@ -5324,6 +5604,61 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("opens the Canvas itself, in its thread's mode and Project, from a Canvas search hit", async () => {
+    const user = userEvent.setup();
+    const canvasId = "00000000-0000-4000-8000-0000000009c1";
+    const shellApi = client(codeShellBootstrap());
+    const threadSearchClient = {
+      search: vi.fn(async () => ({
+        status: "ready" as const,
+        search: {
+          query: "pricing",
+          scope: "all" as const,
+          truncated: false,
+          unavailable: [],
+          hits: [
+            {
+              mode: "code" as const,
+              threadId: codeThreadId,
+              field: "canvas" as const,
+              canvasId: canvasId as never,
+              canvasTitle: "Launch plan",
+              title: "Controller foundation",
+              lifecycle: "active" as const,
+              projectId,
+              updatedAt: "2026-11-15T10:00:00.000Z",
+              snippet: "Ship the pricing page on Friday.",
+            },
+          ],
+        },
+      })),
+    };
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+        threadSearchClient={threadSearchClient}
+      />,
+    );
+
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
+    await user.type(screen.getByRole("combobox", { name: "Search threads" }), "pricing");
+    const hit = await screen.findByRole("option", { name: /Ship the pricing page/ });
+    expect(hit).toHaveTextContent("Canvas");
+    await user.click(hit);
+
+    await waitFor(() =>
+      expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain(canvasId),
+    );
+    expect(JSON.stringify(vi.mocked(shellApi.execute).mock.calls)).toContain("Launch plan");
   });
 
   it("opens a palette thread command from a non-active Project with the thread's own Project", async () => {

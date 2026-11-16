@@ -11,7 +11,10 @@ import { decodeBindingRevisionId, type BindingRevisionId } from "@octant/contrac
 import type { ServerProject } from "@octant/contracts/server-projects";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CodeCheckoutObservationPort } from "../code/codeService";
-import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import type {
+  NativeHarnessComposition,
+  ServerFileTools,
+} from "../harness/nativeHarnessComposition";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ServerConnection } from "./serverConnection";
 import { ServerFileSystem } from "./serverFiles";
@@ -220,7 +223,8 @@ const SERVER_NOT_REGISTERED =
 export function bindServerCodeTurn(
   options: {
     readonly store: Pick<ServerProjectStore, "codeProject" | "addressOf" | "serverOf">;
-    readonly connection: Pick<ServerConnection, "run">;
+    /** `refusal` names why no call may go to the server now, such as a suspended machine. */
+    readonly connection: Pick<ServerConnection, "run"> & Partial<Pick<ServerConnection, "refusal">>;
     readonly composition: Pick<NativeHarnessComposition, "forServerCode">;
     readonly record: (
       input: Parameters<ServerShellOptions["record"]>[0] & {
@@ -238,20 +242,27 @@ export function bindServerCodeTurn(
   if (place === undefined) return { status: "refused", message: SERVER_NOT_REGISTERED };
   const project = place.project;
   const projectId = String(project.id);
-  if (options.store.addressOf(projectId).kind !== "address") {
+  const bound = options.store.addressOf(projectId);
+  if (bound.kind !== "address") {
     return { status: "refused", message: SERVER_NOT_REGISTERED };
   }
+  // Refused before the turn launches, so a suspended machine is named as
+  // such instead of every call failing as an unreachable server.
+  const refusal = options.connection.refusal?.(bound.server);
+  if (refusal !== undefined) return { status: "refused", message: refusal };
   // The registry is read on every call, so a server removed mid-turn refuses
   // the next call rather than reaching a host it no longer names.
   const address = () => {
     const now = options.store.addressOf(projectId);
     return now.kind === "address" ? now.server : undefined;
   };
-  const filesystem = new ServerFileSystem({
-    connection: options.connection,
-    server: address,
-    root: place.folder,
-  });
+  const filesystem: ServerFileTools = ({ fullAccess }) =>
+    new ServerFileSystem({
+      connection: options.connection,
+      server: address,
+      root: place.folder,
+      fullAccess,
+    });
   const shell = createServerShell({
     connection: options.connection,
     server: () => {

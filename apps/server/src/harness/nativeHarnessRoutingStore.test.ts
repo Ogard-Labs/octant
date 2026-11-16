@@ -178,6 +178,148 @@ describe("native harness routing store", () => {
   });
 });
 
+describe("native harness routing store, per role", () => {
+  const projectId = decodeProjectId("00000000-0000-4000-8000-0000000000dd");
+  function openStore() {
+    return new NativeHarnessRoutingStore({
+      journal: journalFor(openConnection()),
+      uuid: uuidFactory(),
+      actor,
+      clock: () => now,
+    });
+  }
+
+  it("keeps a role's two flags with the role and leaves them absent until a person sets them", () => {
+    const store = openStore();
+    store.updateHost({
+      configuration: {
+        slots: [
+          { id: "plan" as never, candidates: [candidate("big")] },
+          {
+            id: "deep" as never,
+            candidates: [candidate("big"), candidate("spare")],
+            askBeforeUsing: true,
+            continueOnFallback: false,
+          },
+        ],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    const [plan, deep] = store.host().configuration.slots;
+    expect(plan?.askBeforeUsing).toBeUndefined();
+    expect(plan?.continueOnFallback).toBeUndefined();
+    expect(deep?.askBeforeUsing).toBe(true);
+    expect(deep?.continueOnFallback).toBe(false);
+  });
+
+  it("lets a Project choose one role and leaves every other role to Settings", () => {
+    const store = openStore();
+    store.updateHost({
+      configuration: {
+        slots: [
+          { id: "plan" as never, candidates: [candidate("big"), candidate("spare")] },
+          { id: "quick" as never, candidates: [candidate("small")] },
+        ],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    const set = store.applyProjectCommand({
+      kind: "set-project-routing-override",
+      projectId,
+      configuration: {
+        slots: [{ id: "plan" as never, candidates: [candidate("spare")], askBeforeUsing: true }],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    expect(set.kind).toBe("project-routing-override");
+    const override = store.projectOverride(projectId);
+    expect(override?.configuration.slots.map((slot) => String(slot.id))).toEqual(["plan"]);
+    expect(override?.configuration.slots[0]?.askBeforeUsing).toBe(true);
+  });
+
+  it("still refuses a Project role that names a model Settings does not list for that role", () => {
+    const store = openStore();
+    store.updateHost({
+      configuration: {
+        slots: [
+          { id: "plan" as never, candidates: [candidate("big")] },
+          { id: "quick" as never, candidates: [candidate("small")] },
+        ],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    const refused = store.applyProjectCommand({
+      kind: "set-project-routing-override",
+      projectId,
+      // "small" is in Settings, but for Quick edit, not for Planner.
+      configuration: {
+        slots: [{ id: "plan" as never, candidates: [candidate("small")] }],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    expect(refused).toMatchObject({ kind: "routing-refused", reason: "not-a-subset" });
+    expect(store.projectOverride(projectId)).toBeUndefined();
+  });
+
+  it("keeps a role that lists models from several providers, and a Project may narrow to one", () => {
+    const store = openStore();
+    const other = decodeNativeHarnessSlotCandidate({
+      hostId: host,
+      providerInstanceId: "00000000-0000-4000-8000-000000000009",
+      modelId: "sonnet",
+    });
+    const saved = store.updateHost({
+      configuration: {
+        slots: [{ id: "default" as never, candidates: [other, candidate("small")] }],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    expect(saved.kind).toBe("routing-settings");
+    const narrowed = store.applyProjectCommand({
+      kind: "set-project-routing-override",
+      projectId,
+      configuration: { slots: [{ id: "default" as never, candidates: [other] }], jobSlots: [] },
+      expectedVersion: 0 as never,
+    });
+    expect(narrowed.kind).toBe("project-routing-override");
+  });
+
+  it("refuses a Project change made from an older version", () => {
+    const store = openStore();
+    store.updateHost({
+      configuration: {
+        slots: [{ id: "plan" as never, candidates: [candidate("big")] }],
+        jobSlots: [],
+      },
+      expectedVersion: 0 as never,
+    });
+    const configuration = {
+      slots: [{ id: "plan" as never, candidates: [candidate("big")] }],
+      jobSlots: [],
+    };
+    store.applyProjectCommand({
+      kind: "set-project-routing-override",
+      projectId,
+      configuration,
+      expectedVersion: 0 as never,
+    });
+    expect(
+      store.applyProjectCommand({
+        kind: "set-project-routing-override",
+        projectId,
+        configuration,
+        expectedVersion: 0 as never,
+      }),
+    ).toMatchObject({ kind: "routing-refused", reason: "stale-version" });
+  });
+});
+
 describe("native harness session store", () => {
   it("journals a session's routes and pause and rebuilds them after a restart", () => {
     const connection = openConnection();

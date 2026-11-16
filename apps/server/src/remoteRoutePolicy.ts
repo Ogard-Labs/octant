@@ -135,6 +135,9 @@ const PERSON_PAIRED_DEVICE_ROUTES = [
   "/api/person-memory/commands",
   // The person's own to-do list: every change.
   "/api/todos/commands",
+  // Your instructions for Octant; the route refuses a change from any
+  // principal that does not act as the host's person.
+  "/api/octant-instructions/commands",
   "/api/benchmarks/suites/save",
   "/api/benchmarks/suites/delete",
   "/api/benchmarks/runs/start",
@@ -1036,7 +1039,12 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   // approval and question their scope can answer and putting one off, the
   // fleet read, provider limits and an asked-for refresh, and the protected
   // files list and its changes. None has a catalogued action.
-  ...[PENDING_REQUESTS_PATH, "/api/fleet-activity", "/api/provider-usage-limits"].map((path) => ({
+  ...[
+    PENDING_REQUESTS_PATH,
+    "/api/fleet-activity",
+    "/api/provider-usage-limits",
+    "/api/octant-instructions",
+  ].map((path) => ({
     kind: "exact" as const,
     path,
     methods: ["GET"] as const,
@@ -1111,23 +1119,29 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     namesProjectInQuery: true as const,
   },
   // Host control, for a device the host's own person paired: status, the
-  // data map and the retention windows are reads; service lifecycle, backup,
-  // memory limits, retention and purge are changes the route holds to 8 KiB.
-  ...["status", "data-map", "thread-retention"].map((name) => ({
+  // data map, the retention windows and web search are reads; service
+  // lifecycle, backup, memory limits, retention, web search and purge are
+  // changes the route holds to 8 KiB.
+  ...["status", "data-map", "thread-retention", "web-search"].map((name) => ({
     kind: "exact" as const,
     path: `/api/host-control/${name}`,
-    methods: name === "thread-retention" ? (["GET", "POST"] as const) : (["GET"] as const),
+    methods:
+      name === "thread-retention" || name === "web-search"
+        ? (["GET", "POST"] as const)
+        : (["GET"] as const),
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 8_192,
   })),
-  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge"].map((name) => ({
-    kind: "exact" as const,
-    path: `/api/host-control/${name}`,
-    methods: ["POST"] as const,
-    allowedContentTypes: ["application/json"] as const,
-    maxBodyBytes: 8_192,
-  })),
+  ...["lifecycle", "backup", "restore", "memory-limits", "thread-purge", "web-search/key"].map(
+    (name) => ({
+      kind: "exact" as const,
+      path: `/api/host-control/${name}`,
+      methods: ["POST"] as const,
+      allowedContentTypes: ["application/json"] as const,
+      maxBodyBytes: 8_192,
+    }),
+  ),
   // Paired devices and pairing requests, for a device the host's own person
   // paired: the lists are reads, every change a POST.
   ...PAIRED_DEVICE_ADMINISTRATION_ROUTES.map(({ path, method }) => ({
@@ -1213,6 +1227,14 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
   },
   {
     kind: "exact" as const,
+    path: "/api/search",
+    methods: ["GET"] as const,
+    // `?q=&scope=`; the route refuses every other query key itself.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
     path: "/api/replica-sync/status",
     methods: ["GET"] as const,
     allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
@@ -1269,7 +1291,15 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
     ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
-    allowQuery: match.kind === "prefix" || "namesProjectInQuery" in match,
+    // An exact route takes a query only when it says so: one naming a Project
+    // there, or one that declares `allowQuery` because its own handler reads
+    // and bounds the query (the load read's `?detail=vitals`, search's
+    // `?q=&scope=`). Dropping the declaration refused those reads from every
+    // paired device before they reached their route.
+    allowQuery:
+      match.kind === "prefix" ||
+      "namesProjectInQuery" in match ||
+      ("allowQuery" in match && match.allowQuery === true),
   };
 });
 

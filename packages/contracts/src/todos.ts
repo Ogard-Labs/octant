@@ -160,6 +160,8 @@ export const TodoRefusalReason = Schema.Literal(
   "not-found",
   "changed-elsewhere",
   "list-full",
+  "list-not-empty",
+  "kept-elsewhere",
 );
 export type TodoRefusalReason = typeof TodoRefusalReason.Type;
 
@@ -247,7 +249,53 @@ export type TodoEvent =
   | { readonly eventName: typeof TODO_THREAD_LINKED; readonly payload: TodoThreadLinked }
   | { readonly eventName: typeof TODO_DELETED; readonly payload: TodoDeleted };
 
+/**
+ * Which host keeps the person's list, as this host's person chose it. Absent
+ * a choice, this host keeps it. Another host is named by its stable id and the
+ * name it was last seen under; reaching it is the window's own pairing, and the
+ * choice grants nothing on it.
+ */
+export const TodoListHostChoice = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("this-host") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("other-host"),
+    hostId: StableHostId,
+    name: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(TODO_PROJECT_NAME_MAX_CHARACTERS)),
+  }).annotations(strict),
+);
+export type TodoListHostChoice = typeof TodoListHostChoice.Type;
+
+export const TodoListHostView = Schema.Struct({
+  kind: Schema.Literal("todo-list-host"),
+  /** This host's own stable id: a thread or Project here is linked by it. */
+  thisHostId: StableHostId,
+  choice: TodoListHostChoice,
+  /** The choice moves to another host only while this host's own list is empty. */
+  ownListEmpty: Schema.Boolean,
+}).annotations(strict);
+export type TodoListHostView = typeof TodoListHostView.Type;
+
+export const TodoListHostCommand = Schema.Struct({
+  kind: Schema.Literal("choose-todo-list-host"),
+  choice: TodoListHostChoice,
+}).annotations(strict);
+export type TodoListHostCommand = typeof TodoListHostCommand.Type;
+
+export const TodoListHostResult = Schema.Union(TodoListHostView, TodoRefused);
+export type TodoListHostResult = typeof TodoListHostResult.Type;
+
+export const TODO_LIST_HOST_AGGREGATE_TYPE = "todo-list-host";
+/** One choice per host, so one fixed aggregate; journal aggregate ids are UUIDs. */
+export const TODO_LIST_HOST_AGGREGATE_ID = "6f2d3a1e-7c44-4b8e-9d21-5a0f3c8e7b10";
+export const TODO_LIST_HOST_CHOSEN = "todo.list-host-chosen@1";
+
+export const TodoListHostChosen = Schema.Struct({ choice: TodoListHostChoice }).annotations(strict);
+export type TodoListHostChosen = typeof TodoListHostChosen.Type;
+
 export const decodeTodoId = Schema.decodeUnknownSync(TodoId);
 export const decodeTodoCommand = Schema.decodeUnknownSync(TodoCommand);
 export const decodeTodoResult = Schema.decodeUnknownSync(TodoResult);
 export const decodeTodoListView = Schema.decodeUnknownSync(TodoListView);
+export const decodeTodoListHostView = Schema.decodeUnknownSync(TodoListHostView);
+export const decodeTodoListHostCommand = Schema.decodeUnknownSync(TodoListHostCommand);
+export const decodeTodoListHostResult = Schema.decodeUnknownSync(TodoListHostResult);

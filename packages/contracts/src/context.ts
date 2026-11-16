@@ -73,7 +73,9 @@ export const ContextEntryCategory = Schema.Literal(
   "provider-framing",
   "octant-policy",
   "user-instructions",
+  "person-instructions",
   "project-instructions",
+  "orchestration-instructions",
   "person-memory",
   "project-memory",
   "conversation",
@@ -529,6 +531,14 @@ export const PERSON_MEMORY_USAGE_AGGREGATE_TYPE = "person-memory-usage";
 export const DECISION_REVIEW_REQUEST_SHAPE = "decision-review";
 export const DECISION_REVIEW_USAGE_AGGREGATE_TYPE = "decision-review-usage";
 
+/**
+ * One image described by the Sees images model for a thread whose model
+ * cannot read images. Like a second opinion it has no context plan, and it is
+ * recorded under the Chat, Work, or Code thread whose image it was.
+ */
+export const IMAGE_DESCRIPTION_REQUEST_SHAPE = "image-description";
+export const IMAGE_DESCRIPTION_USAGE_AGGREGATE_TYPE = "image-description-usage";
+
 export const UsageReconciliation = Schema.Struct({
   id: UsageReconciliationId,
   planId: Schema.optional(ContextPlanId),
@@ -570,7 +580,8 @@ export const UsageReconciliation = Schema.Struct({
         reconciliation.requestShape === SHIELD_REVIEW_REQUEST_SHAPE ||
         reconciliation.requestShape === PROVIDER_CLOUD_TURN_REQUEST_SHAPE ||
         reconciliation.requestShape === PERSON_MEMORY_REQUEST_SHAPE ||
-        reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE
+        reconciliation.requestShape === DECISION_REVIEW_REQUEST_SHAPE ||
+        reconciliation.requestShape === IMAGE_DESCRIPTION_REQUEST_SHAPE
       ) {
         return reconciliation.planId === undefined && reconciliation.imageUnits === undefined;
       }

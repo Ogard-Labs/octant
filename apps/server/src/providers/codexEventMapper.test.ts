@@ -126,17 +126,6 @@ describe("mapCodexMessage", () => {
       },
       expected: { kind: "reasoning-delta", text: "Evaluating" },
     },
-    {
-      name: "plan delta",
-      method: "item/plan/delta" as const,
-      params: {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        itemId: "provider-plan-1",
-        delta: "Implement mapper",
-      },
-      expected: { kind: "reasoning-delta", text: "Implement mapper" },
-    },
   ])("maps a $name delta without exposing provider item IDs", ({ method, params, expected }) => {
     const [result] = map(context(), notification(method, params));
 
@@ -304,6 +293,49 @@ describe("mapCodexMessage", () => {
       ).toBe("I will inspect.\n\nResult ready.");
     },
   );
+
+  it("shows the plan Codex proposes in Plan once, as marked reply text after its commentary", () => {
+    const ctx = context();
+    const lifecycle = (
+      item:
+        | { readonly type: "agentMessage"; readonly id: string; readonly text: string }
+        | { readonly type: "plan"; readonly id: string; readonly text: string },
+    ) =>
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item,
+        completedAtMs: 20,
+      });
+    const events = [
+      ...map(
+        ctx,
+        lifecycle({ type: "agentMessage", id: "commentary", text: "I read the module." }),
+      ),
+      ...map(
+        ctx,
+        notification("item/plan/delta", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "plan-1",
+          delta: "1. Add the route.",
+        }),
+      ),
+      ...map(
+        ctx,
+        lifecycle({ type: "plan", id: "plan-1", text: "1. Add the route.\n2. Test it." }),
+      ),
+    ];
+    const kinds = events.flatMap((entry) => (entry.kind === "event" ? [entry.event.kind] : []));
+    expect(kinds).not.toContain("reasoning-delta");
+    expect(
+      events
+        .flatMap((entry) =>
+          entry.kind === "event" && entry.event.kind === "text-delta" ? [entry.event.text] : [],
+        )
+        .join(""),
+    ).toBe("I read the module.\n\n**Proposed plan**\n\n1. Add the route.\n2. Test it.\n");
+  });
 
   it("reconciles an incomplete agent delta stream from the authoritative completed item", () => {
     const ctx = context();
@@ -2156,7 +2188,7 @@ describe("mapCodexMessage", () => {
 
   it.each([
     { kind: "response" as const, id: 1, result: { account: "private@example.test" } },
-    { kind: "unsupported-request" as const, id: 2, method: "item/tool/requestUserInput" },
+    { kind: "unsupported-request" as const, id: 2, method: "mcpServer/elicitation/request" },
   ])("honestly rejects a mapper input that Task 2/transport must handle elsewhere", (message) => {
     const failure = map(context(), message);
     expect(failure).toEqual([
@@ -2168,7 +2200,7 @@ describe("mapCodexMessage", () => {
         },
       },
     ]);
-    expect(JSON.stringify(failure)).not.toMatch(/private@example|requestUserInput/);
+    expect(JSON.stringify(failure)).not.toMatch(/private@example|elicitation/);
   });
 
   it("ignores benign lifecycle items that have no normalized runtime representation", () => {

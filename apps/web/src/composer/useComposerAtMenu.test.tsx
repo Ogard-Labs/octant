@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import type { OctantCommand } from "../palette/commandModel";
-import { ComposerSlashTypeahead, useComposerSlashCommands } from "./useComposerSlashCommands";
+import {
+  ComposerSlashTypeahead,
+  useComposerSlashCommands,
+  type ComposerProviderCommands,
+} from "./useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu, type AtMenuFiles } from "./useComposerAtMenu";
 
 const COMMANDS: ReadonlyArray<OctantCommand> = [
@@ -43,6 +47,7 @@ const COMMANDS: ReadonlyArray<OctantCommand> = [
 function Harness(props: {
   readonly resolve: (reference: string) => Promise<boolean>;
   readonly files?: AtMenuFiles;
+  readonly provider?: ComposerProviderCommands;
 }) {
   const [draft, setDraft] = useState("");
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -57,6 +62,7 @@ function Harness(props: {
     draft,
     onDraftChange: setDraft,
     textarea: () => textarea.current,
+    provider: props.provider,
   });
   return (
     <>
@@ -90,6 +96,48 @@ function renderComposer(resolve: (reference: string) => Promise<boolean>, files?
     </OctantCommandProvider>,
   );
 }
+
+describe("composer / menu", () => {
+  const provider: ComposerProviderCommands = {
+    label: "Claude Code",
+    commands: [{ name: "review", description: "Review a pull request", argumentHint: "<pr>" }],
+  };
+
+  it("lists the provider's own commands beside Octant's and writes the chosen one into the message", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantCommandProvider commands={COMMANDS}>
+        <Harness resolve={vi.fn(async () => true)} provider={provider} />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "/");
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Open SettingsSettings",
+      "/reviewProvider commands · Claude Code's own · <pr> · Review a pull request",
+    ]);
+    await user.click(screen.getByRole("option", { name: /\/review/ }));
+    expect(message).toHaveValue("/review ");
+  });
+
+  it("shows why Plan cannot run a provider command and leaves the message alone", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantCommandProvider commands={COMMANDS}>
+        <Harness
+          resolve={vi.fn(async () => true)}
+          provider={{ ...provider, refusal: "Not in Plan: Plan stays read-only" }}
+        />
+      </OctantCommandProvider>,
+    );
+    const message = screen.getByRole("textbox", { name: "Message" });
+    await user.type(message, "/rev");
+    const option = screen.getByRole("option", { name: /\/review/ });
+    expect(option).toHaveTextContent("Not in Plan: Plan stays read-only");
+    await user.click(option);
+    expect(message).toHaveValue("/rev");
+  });
+});
 
 describe("composer @ menu", () => {
   it("lists skills, plugin servers, and connectors, and leaves commands to the slash menu", async () => {

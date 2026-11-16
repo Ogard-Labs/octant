@@ -10,11 +10,33 @@ export function isKeyProviderDriverKind(kind: ProviderDriverKind): kind is KeyPr
   return (KEY_PROVIDER_DRIVER_KINDS as ReadonlyArray<string>).includes(kind);
 }
 
+/**
+ * Whether a key provider account runs as itself. On unless the person turned
+ * it off: Octant adds to a provider and does not take its own features away
+ * (maintainer decision, 2026-11-14).
+ */
+export function accountRunsAsItself(instance: {
+  readonly nativeSetup?: boolean | undefined;
+}): boolean {
+  return instance.nativeSetup !== false;
+}
+
+/**
+ * Whether a Claude Code or Codex account keeps the provider's own memory. On
+ * unless the person turned it off: Octant does not take a provider's own
+ * features away (maintainer decision, 2026-11-14).
+ */
+export function accountKeepsOwnMemory(instance: {
+  readonly ownMemory?: boolean | undefined;
+}): boolean {
+  return instance.ownMemory !== false;
+}
+
 export interface ProviderNativeSetupInput {
   readonly driverKind: ProviderDriverKind;
   readonly mode: "chat" | "work" | "code";
   readonly executionPolicy: ProviderExecutionPolicy;
-  /** The account's own switch: `nativeSetup` on the provider instance. */
+  /** The account's own switch, on unless the person turned it off (`accountRunsAsItself`). */
   readonly accountAllows: boolean;
   /** The Work or Code Project lists this provider in `nativeProviders`. Always false in Chat. */
   readonly projectTrusts: boolean;
@@ -27,14 +49,18 @@ export interface ProviderNativeSetupInput {
 }
 
 /**
- * What a key provider's session may load of its own. At Guarded and Reviewed
- * nothing loads until the person turns it on for the account or trusts the
- * Project for that provider; at Full access it is on, as it is in the
- * provider's own app. Undefined means every feature stays off, which is the
- * answer for every provider that is not a key provider.
+ * What a key provider's session may load of its own. The account's switch is
+ * on unless the person turned it off, so at every level a session loads the
+ * person's own subagents, web tools, skills, and tool servers, as it does in
+ * the provider's own app; each call still meets the thread's level. With the
+ * account turned off, Full access and a trusted Project still turn the rest
+ * on, but never the runtime's own web search and fetch: an account that does
+ * not run as itself keeps them off in every mode and at every level
+ * (maintainer decision, 2026-11-15). Undefined means every feature stays off,
+ * which is the answer for every provider that is not a key provider.
  *
- * A thread's own choice overrides all of it: off loads nothing, on loads as
- * the account switch does.
+ * A thread's own choice overrides the rest: off loads nothing, on loads as
+ * the account switch does, except the web tools of an account turned off.
  *
  * Plan stays read-only and Chat keeps its filesystem and shell withheld at
  * every level, so neither loads hooks or a Project's own code: a hook is a
@@ -53,12 +79,12 @@ export function resolveProviderNativeSetup(
   const accountAllows = input.accountAllows || input.threadChoice === "on";
   const projectTrusts = input.mode !== "chat" && input.projectTrusts;
   const fullAccess = input.mode !== "chat" && input.executionPolicy === "full-access";
-  if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
   const plan = input.executionPolicy === "plan";
+  if (!accountAllows && !projectTrusts && !fullAccess) return undefined;
   const chat = input.mode === "chat";
   return {
     subagents: true,
-    webTools: true,
+    webTools: input.accountAllows,
     skills: true,
     toolServers: !plan,
     hooks: !plan && !chat,
@@ -67,15 +93,29 @@ export function resolveProviderNativeSetup(
 }
 
 /**
+ * Whether a setup loads anything of the person's own configuration: rules,
+ * skills, tool servers, hooks, subagents, or a Project's code. The runtime's
+ * web tools alone do not, so a session with only those on is not running as
+ * itself and keeps Octant's own permissions and approvals.
+ */
+export function providerRunsAsItself(setup: ProviderNativeSetup | undefined): boolean {
+  return (
+    setup !== undefined &&
+    (setup.subagents || setup.skills || setup.toolServers || setup.hooks || setup.projectCode)
+  );
+}
+
+/**
  * Whether a session launches with the provider's own memory on. The account's
- * own setting decides, and nothing else turns it on: not "Run as itself", not
- * a trusted Project, not Full access. Plan keeps it off because a Plan launch
+ * own setting decides (on unless the person turned it off,
+ * `accountKeepsOwnMemory`), and nothing else turns it on: not "Run as itself",
+ * not a trusted Project, not Full access. Plan keeps it off because a Plan launch
  * may write nothing a later session would load, and the runtime's memory
  * folder is exactly that. Chat keeps it off too: its launch is confined the
  * same way, and no Chat launch has been run with a provider's memory on.
  */
 export function providerOwnMemoryLaunches(input: {
-  /** The account's own switch: `ownMemory` on the provider instance. */
+  /** The account's own switch (`accountKeepsOwnMemory`). */
   readonly accountAllows: boolean;
   readonly mode: "chat" | "work" | "code" | undefined;
   readonly executionPolicy: ProviderExecutionPolicy;

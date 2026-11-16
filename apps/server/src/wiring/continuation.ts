@@ -50,14 +50,18 @@ import { uncertainToolCallHold, type ToolEffectLedger } from "../toolEffects/too
 import type { HarnessWiring } from "./harness";
 import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDeliveryPort";
 import { UsageResumeService } from "../usage/usageResumeService";
+import { ThreadWakeupService } from "../wakeups/threadWakeupService";
 import { createUsageResumePorts } from "../usage/usageResumePorts";
 import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencyScheduler";
 import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import { recordAgentRunResultIngestion } from "../agentRun/agentRunDelegation";
+import { journalAgentResultSteered } from "../agentRun/agentResultSteeredRecord";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { continueAgentRunsCutOffByRestart } from "../agentRun/agentRunRestartContinuation";
 import { continueCoordinatorWakesAfterRestart } from "../coordinator/coordinatorWakeRestartContinuation";
 import {
+  createAgentResultSteering,
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
 } from "../agentRun/agentResultDeliveryPorts";
@@ -78,6 +82,7 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
     | "agentRunPersistence"
     | "agentRunsCutOffByRestart"
     | "toolEffectLedger"
+    | "liveTurns"
   > &
   Pick<
     AgentRunsWiring,
@@ -86,17 +91,25 @@ export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<
     CodeRuntimeWiring,
-    "codeOperationRuntime" | "coordinatorService" | "coordinatorWakes" | "routeCodeService"
+    | "codeOperationRuntime"
+    | "coordinatorService"
+    | "coordinatorWakes"
+    | "routeCodeService"
+    | "codeThreadWakeupPort"
   > &
   Pick<ChatWiring, "chatAttemptsCutOffByRestart" | "chatService"> &
   Pick<HarnessWiring, "liftRestartRecovery"> &
-  Pick<WorkWiring, "goalLoopService" | "threadMessageQueue" | "workTurnService"> &
+  Pick<
+    WorkWiring,
+    "goalLoopService" | "threadMessageQueue" | "workTurnService" | "workThreadWakeupPort"
+  > &
   Pick<
     FoundationsWiring,
     | "codeBoardEventStore"
     | "workThreadProjection"
     | "workTurnProjection"
     | "workTurnsCutOffByRestart"
+    | "threadWakeups"
   >;
 
 export function wireContinuation(deps: ContinuationDependencies) {
@@ -113,8 +126,34 @@ export function wireContinuation(deps: ContinuationDependencies) {
     workThreadProjection,
     workTurnProjection,
     workTurnService,
+    threadWakeups,
+    workThreadWakeupPort,
+    codeThreadWakeupPort,
   } = deps;
   return Effect.gen(function* () {
+    // Wake-ups a thread's agent asked for: the journal is the record, the
+    // service rebuilds what waits after a restart (calling missed what came
+    // due while the host was down), and each due one starts its thread's
+    // turn through the mode's ordinary admission.
+    const threadWakeupService = new ThreadWakeupService({
+      journal: persistence.journal,
+      clock: () => new Date(),
+      uuid: randomUUID,
+      ports: { work: workThreadWakeupPort, code: codeThreadWakeupPort },
+      onError: (message, error) => console.error(`[wake-ups] ${message}`, error),
+    });
+    const unsubscribeThreadWakeups = persistence.journal.subscribeCommitted((append) =>
+      threadWakeupService.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeThreadWakeups();
+        threadWakeupService.stop();
+        threadWakeups.service = undefined;
+      }),
+    );
+    threadWakeupService.start();
+    threadWakeups.service = threadWakeupService;
     // Host-owned recovery for provider usage-limited stops: the journal record
     // is the opt-in, the projection rebuilds what is armed after a restart, and
     // every reset fires through the mode's ordinary turn admission.
@@ -218,6 +257,41 @@ export function wireContinuation(deps: ContinuationDependencies) {
           run,
           randomUUID,
         ),
+      steer: createAgentResultSteering({
+        liveTurn: (threadId) => deps.liveTurns.connection(threadId),
+        resultText: (id) => agentRunPersistence.resultText(id),
+        // The turn that took the results is the parent's newest: it was
+        // running when the runtime accepted them.
+        recordSteered: (runs, message) => {
+          const run = runs[0];
+          if (run === undefined) return;
+          const threadId = String(run.parentThreadId);
+          const turnKey =
+            run.workspaceReceipt.mode === "chat"
+              ? persistence.readChatThreadView(decodeChatThreadId(threadId))?.turns.at(-1)?.id
+              : run.workspaceReceipt.mode === "work"
+                ? workTurnProjection.latestForThread(decodeWorkThreadId(threadId))?.requestId
+                : run.workspaceReceipt.mode === "code"
+                  ? persistence.journal.latestThreadEvents({
+                      aggregateType: "code-operation",
+                      threadId,
+                      kind: "conversation-turn-started",
+                      limit: 1,
+                    })[0]?.aggregateId
+                  : undefined;
+          if (turnKey === undefined) return;
+          const record = journalAgentResultSteered(persistence.journal, {
+            runs,
+            body: message,
+            turnKey: String(turnKey),
+            steeredAt: new Date().toISOString(),
+            uuid: randomUUID,
+            actorId: OCTANT_LOCAL_ACTOR_ID,
+          });
+          // Work keeps its turns in memory; the journal rebuilds them at start.
+          if (run.workspaceReceipt.mode === "work") workTurnProjection.applySteered(record);
+        },
+      }),
       ports: {
         chat: createChatAgentResultDeliveryPort({
           readThread: (threadId) => persistence.readChatThread(threadId),

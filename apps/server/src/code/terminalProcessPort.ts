@@ -2,8 +2,8 @@ import { registerSandboxCleanup, sandboxToolPolicy } from "../process/sandboxRun
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { constants as osConstants, homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { constants as osConstants, homedir, tmpdir } from "node:os";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
@@ -12,6 +12,7 @@ import {
   persistProcessReceipt,
   readProcessIdentity,
   reconcileProcessReceipts,
+  reconcileWindowsProcessReceipts,
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
@@ -20,6 +21,9 @@ import {
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
+import { stopWindowsProcessTree, type WindowsProcessTreeStop } from "../process/windowsProcessTree";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
+import { windowsShellArguments } from "./terminalShell";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
 const execFileAsync = promisify(execFile);
@@ -113,6 +117,8 @@ export interface TerminalLaunchInput {
 interface TerminalProcessDependencies {
   readonly spawn?: (shell: string, args: readonly string[], options: PtyForkOptions) => PtyProcess;
   readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
+  /** Ends a Windows shell and every program it started. */
+  readonly stopWindowsTree?: (pid: number) => Promise<WindowsProcessTreeStop>;
   readonly waitForExit?: (process: PtyProcess, timeoutMs: number) => Promise<boolean>;
   readonly processGroupExists?: (pid: number) => boolean;
   readonly gracefulTimeoutMs?: number;
@@ -270,6 +276,7 @@ export class TerminalProcessPort {
   readonly #dependencies: {
     readonly spawn: NonNullable<TerminalProcessDependencies["spawn"]>;
     readonly killProcessGroup: NonNullable<TerminalProcessDependencies["killProcessGroup"]>;
+    readonly stopWindowsTree: NonNullable<TerminalProcessDependencies["stopWindowsTree"]>;
     readonly waitForExit: NonNullable<TerminalProcessDependencies["waitForExit"]>;
     readonly processGroupExists: NonNullable<TerminalProcessDependencies["processGroupExists"]>;
     readonly gracefulTimeoutMs: number;
@@ -286,11 +293,14 @@ export class TerminalProcessPort {
   };
 
   constructor(dependencies: TerminalProcessDependencies = {}) {
+    const platform = dependencies.platform ?? process.platform;
+    // Bun's terminal is a POSIX pseudo-terminal; a Windows shell opens through
+    // node-pty's ConPTY instead.
     const nativeBunPtyAvailable =
       dependencies.spawn === undefined &&
+      platform !== "win32" &&
       typeof globalThis.Bun !== "undefined" &&
       typeof globalThis.Bun.Terminal === "function";
-    const platform = dependencies.platform ?? process.platform;
     this.#dependencies = {
       spawn:
         dependencies.spawn ??
@@ -299,6 +309,7 @@ export class TerminalProcessPort {
           : (shell, args, options) => nodePty.spawn(shell, [...args], options)),
       killProcessGroup:
         dependencies.killProcessGroup ?? ((pid, signal) => process.kill(pid, signal)),
+      stopWindowsTree: dependencies.stopWindowsTree ?? stopWindowsProcessTree,
       waitForExit: dependencies.waitForExit ?? waitForPtyExit,
       processGroupExists: dependencies.processGroupExists ?? defaultProcessGroupExists,
       gracefulTimeoutMs: dependencies.gracefulTimeoutMs ?? 1_000,
@@ -318,7 +329,7 @@ export class TerminalProcessPort {
         process.env.TMPDIR ??
         process.env.TMP ??
         process.env.TEMP ??
-        "/tmp",
+        tmpdir(),
       networkEgress: dependencies.networkEgress ?? "allow",
       homeDirectory: dependencies.seatbeltHomeDirectory ?? homedir(),
       shellStateDirectory:
@@ -328,7 +339,7 @@ export class TerminalProcessPort {
             process.env.TMPDIR ??
             process.env.TMP ??
             process.env.TEMP ??
-            "/tmp",
+            tmpdir(),
           "octant-terminal-shell",
         ),
       confinement:
@@ -349,7 +360,7 @@ export class TerminalProcessPort {
   }
 
   start(input: TerminalLaunchInput): TerminalProcessHandle {
-    validateLaunch(input);
+    validateLaunch(input, this.#dependencies.platform);
     if (input.executionPolicy === "plan") {
       throw new ProcessConfinementError(
         "invalid-configuration",
@@ -357,6 +368,123 @@ export class TerminalProcessPort {
       );
     }
     this.#dependencies.ensurePtyHelperExecutable();
+    const pty =
+      this.#dependencies.platform === "win32"
+        ? this.#spawnWindowsShell(input)
+        : this.#spawnConfinedShell(input);
+    const rootIdentity = (this.#dependencies.processIdentity ?? readProcessIdentity)(pty.pid).catch(
+      () => undefined,
+    );
+    this.#ownedRoots.set(pty.pid, rootIdentity);
+    const releaseOwnership = () => {
+      if (this.#ownedRoots.get(pty.pid) === rootIdentity) this.#ownedRoots.delete(pty.pid);
+    };
+    let receipt: OwnedProcessReceiptHandle = {
+      ready: Promise.resolve(),
+      remove: async () => undefined,
+    };
+    const receiptReady = persistProcessReceipt(
+      {
+        supervisor: "terminal",
+        ...(this.#dependencies.receiptDirectory === undefined
+          ? {}
+          : { receiptDirectory: this.#dependencies.receiptDirectory }),
+        processIdentity: () => rootIdentity,
+      },
+      `${input.cwd}:${pty.pid}`,
+      pty.pid,
+    )
+      .then((value) => {
+        receipt = value;
+        return value.ready;
+      })
+      .catch((error) => {
+        if (this.#dependencies.receiptDirectory !== undefined) {
+          // A Windows shell has no process group; its tree stop ends it.
+          if (this.#dependencies.platform === "win32")
+            void this.#dependencies.stopWindowsTree(pty.pid);
+          else
+            try {
+              this.#dependencies.killProcessGroup(-Math.abs(pty.pid), "SIGKILL");
+            } catch {
+              // The failed receipt remains a fail-closed launch failure.
+            }
+        }
+        throw error;
+      });
+    // The shell's own exit, remembered: a close that comes after it must not
+    // wait for an exit event that already fired, which the Windows close
+    // otherwise did for a PowerShell that had run its command and exited.
+    let shellExited = false;
+    pty.onExit(() => {
+      shellExited = true;
+      releaseOwnership();
+      void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
+    });
+    let closeOperation: Promise<void> | undefined;
+    const removeSandboxOwner = registerSandboxCleanup(
+      sandboxToolPolicy(),
+      () => (closeOperation ??= this.#close(pty, () => shellExited)),
+    );
+    pty.onExit(removeSandboxOwner);
+    return {
+      write: (data) => {
+        if (Buffer.byteLength(data, "utf8") > MAX_TERMINAL_INPUT_BYTES) {
+          throw new Error("Terminal input is too large.");
+        }
+        pty.write(data);
+      },
+      resize: (columns, rows) => {
+        validateGeometry(columns, rows);
+        pty.resize(columns, rows);
+      },
+      onData: (listener) => {
+        const disposable = pty.onData(listener);
+        return () => disposable.dispose();
+      },
+      onExit: (listener) => {
+        const disposable = pty.onExit(listener);
+        return () => disposable.dispose();
+      },
+      pause: () => pty.pause(),
+      resume: () => pty.resume(),
+      close: () => {
+        releaseOwnership();
+        closeOperation ??= this.#close(pty, () => shellExited);
+        return closeOperation.then(async () => {
+          await receiptReady.catch(() => undefined);
+          await receipt.remove();
+        });
+      },
+      receiptReady,
+    };
+  }
+
+  /**
+   * A Windows terminal runs only at Full access, the one level that uses no
+   * sandbox, because Windows has none Octant can use yet. It opens the shell
+   * Settings › Code names with its own arguments (never POSIX `-l`), in the
+   * folder, with the inherited environment the terminal service allowed.
+   */
+  #spawnWindowsShell(input: TerminalLaunchInput): PtyProcess {
+    if (input.executionPolicy !== "full-access")
+      throw new ProcessConfinementError("incompatible", WINDOWS_SANDBOX_MISSING_REASON);
+    const args = windowsShellArguments(input.shell, input.command);
+    if (args === undefined)
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "A Windows terminal opens Windows PowerShell, PowerShell 7 or Command Prompt.",
+      );
+    return this.#dependencies.spawn(input.shell, args, {
+      name: "xterm-256color",
+      cwd: input.cwd,
+      env: { ...input.environment },
+      cols: input.columns,
+      rows: input.rows,
+    });
+  }
+
+  #spawnConfinedShell(input: TerminalLaunchInput): PtyProcess {
     const shellState = shellStateDirectoryForRoot(
       this.#dependencies.shellStateDirectory,
       input.cwd,
@@ -433,7 +561,7 @@ export class TerminalProcessPort {
       );
     }
     const baseEnv = shellStateEnvironment(shellState);
-    const pty = this.#dependencies.spawn(launch.command, launch.args, {
+    return this.#dependencies.spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cwd: input.cwd,
       env: {
@@ -445,86 +573,23 @@ export class TerminalProcessPort {
       cols: input.columns,
       rows: input.rows,
     });
-    const rootIdentity = (this.#dependencies.processIdentity ?? readProcessIdentity)(pty.pid).catch(
-      () => undefined,
-    );
-    this.#ownedRoots.set(pty.pid, rootIdentity);
-    const releaseOwnership = () => {
-      if (this.#ownedRoots.get(pty.pid) === rootIdentity) this.#ownedRoots.delete(pty.pid);
-    };
-    let receipt: OwnedProcessReceiptHandle = {
-      ready: Promise.resolve(),
-      remove: async () => undefined,
-    };
-    const receiptReady = persistProcessReceipt(
-      {
+  }
+
+  async reconcile(): Promise<void> {
+    // A Windows terminal left by a crashed host is stopped with its tree, and
+    // one that cannot be shown stopped keeps its receipt rather than holding
+    // up the start: the negated-pid signal below reaches nothing there.
+    if (this.#dependencies.platform === "win32")
+      return await reconcileWindowsProcessReceipts({
         supervisor: "terminal",
         ...(this.#dependencies.receiptDirectory === undefined
           ? {}
           : { receiptDirectory: this.#dependencies.receiptDirectory }),
-        processIdentity: () => rootIdentity,
-      },
-      `${input.cwd}:${pty.pid}`,
-      pty.pid,
-    )
-      .then((value) => {
-        receipt = value;
-        return value.ready;
-      })
-      .catch((error) => {
-        if (this.#dependencies.receiptDirectory !== undefined) {
-          try {
-            this.#dependencies.killProcessGroup(-Math.abs(pty.pid), "SIGKILL");
-          } catch {
-            // The failed receipt remains a fail-closed launch failure.
-          }
-        }
-        throw error;
+        ...(this.#dependencies.processIdentity === undefined
+          ? {}
+          : { processIdentity: this.#dependencies.processIdentity }),
+        stopTree: this.#dependencies.stopWindowsTree,
       });
-    pty.onExit(() => {
-      releaseOwnership();
-      void this.#removeReceiptWhenReleased(pty, receiptReady, () => receipt);
-    });
-    let closeOperation: Promise<void> | undefined;
-    const removeSandboxOwner = registerSandboxCleanup(
-      sandboxToolPolicy(),
-      () => (closeOperation ??= this.#close(pty)),
-    );
-    pty.onExit(removeSandboxOwner);
-    return {
-      write: (data) => {
-        if (Buffer.byteLength(data, "utf8") > MAX_TERMINAL_INPUT_BYTES) {
-          throw new Error("Terminal input is too large.");
-        }
-        pty.write(data);
-      },
-      resize: (columns, rows) => {
-        validateGeometry(columns, rows);
-        pty.resize(columns, rows);
-      },
-      onData: (listener) => {
-        const disposable = pty.onData(listener);
-        return () => disposable.dispose();
-      },
-      onExit: (listener) => {
-        const disposable = pty.onExit(listener);
-        return () => disposable.dispose();
-      },
-      pause: () => pty.pause(),
-      resume: () => pty.resume(),
-      close: () => {
-        releaseOwnership();
-        closeOperation ??= this.#close(pty);
-        return closeOperation.then(async () => {
-          await receiptReady.catch(() => undefined);
-          await receipt.remove();
-        });
-      },
-      receiptReady,
-    };
-  }
-
-  async reconcile(): Promise<void> {
     await reconcileProcessReceipts({
       supervisor: "terminal",
       ...(this.#dependencies.receiptDirectory === undefined
@@ -544,7 +609,9 @@ export class TerminalProcessPort {
     });
   }
 
-  async #close(pty: PtyProcess): Promise<void> {
+  async #close(pty: PtyProcess, shellExited: () => boolean): Promise<void> {
+    if (this.#dependencies.platform === "win32")
+      return await this.#closeWindowsTree(pty, shellExited);
     // The shell gives every job a process group of its own, so ending the
     // shell's group left a job that had outlived its parent running: measured
     // on macOS 27, a command's orphaned child survived the close. Every
@@ -560,6 +627,24 @@ export class TerminalProcessPort {
     } finally {
       for (const member of members) await endTerminalSessionMember(member);
     }
+  }
+
+  /**
+   * Windows has no process groups, so the stop ends the shell and every
+   * program it started through the tree stop, where a signal to the negated
+   * pid reached nothing.
+   */
+  async #closeWindowsTree(pty: PtyProcess, shellExited: () => boolean): Promise<void> {
+    // A shell that already exited has no tree left to reach: taskkill finds
+    // children through their parent, which is gone.
+    if (shellExited()) return;
+    const stopped = await this.#dependencies.stopWindowsTree(pty.pid);
+    if (stopped === "failed") throw new Error("Terminal process tree did not stop.");
+    // Judged by the shell's pid, not ConPTY's exit event: measured on
+    // windows-2025, the event for a PowerShell that had already ended came
+    // about 25 seconds later, while the process itself was gone at once.
+    if (!(await this.#waitForProcessGroupExit(pty.pid)))
+      throw new Error("Terminal process tree did not exit.");
   }
 
   async #closeProcessGroup(pty: PtyProcess): Promise<void> {
@@ -731,14 +816,15 @@ function resolveNodePtyPackageRoot(): string {
   return resolve(dirname(entry), "..");
 }
 
-function validateLaunch(input: TerminalLaunchInput): void {
+function validateLaunch(input: TerminalLaunchInput, platform: NodeJS.Platform): void {
+  const paths = platform === "win32" ? win32 : posix;
   if (
     input.command !== undefined &&
     (input.command.includes("\0") ||
       Buffer.byteLength(input.command, "utf8") > MAX_TERMINAL_INPUT_BYTES)
   )
     throw new Error("Terminal command is invalid.");
-  if (!isAbsolute(input.shell) || !isAbsolute(input.cwd))
+  if (!paths.isAbsolute(input.shell) || !paths.isAbsolute(input.cwd))
     throw new Error("Terminal launch is invalid.");
   validateGeometry(input.columns, input.rows);
   for (const [name, value] of Object.entries(input.environment)) {

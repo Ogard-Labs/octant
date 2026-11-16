@@ -3,7 +3,7 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   nativeHarnessSlotCandidateKey,
   type AgentRunRole,
-  type MultiModelCandidateRejectionReason,
+  type NativeHarnessCandidateRejectionReason,
   type NativeHarnessJob,
   type NativeHarnessRejectedCandidate,
   type NativeHarnessRouteDecision,
@@ -18,6 +18,18 @@ import {
 /** What the resolver may know about one candidate before it is chosen. */
 export interface NativeHarnessCandidateFacts {
   readonly ready: boolean;
+  /**
+   * Whether the harness can run this candidate itself. A role may list any
+   * connected provider's model; absent means runnable, and a candidate that
+   * is not is skipped like an ineligible one, never run in the harness.
+   */
+  readonly harnessRunnable?: boolean;
+  /**
+   * Reasons this caller refuses the candidate for this one call, such as a
+   * Project's data rules or an input the model cannot take. Each is
+   * journaled with the candidate like the resolver's own.
+   */
+  readonly refusals?: ReadonlyArray<NativeHarnessCandidateRejectionReason>;
   /** A recent failure that keeps this candidate out of the chain until then. */
   readonly coolingDown?: {
     readonly reason: NativeHarnessRouteFailureReason;
@@ -59,8 +71,10 @@ export function nativeHarnessJobForRole(role: AgentRunRole): NativeHarnessJob {
  * decision says so. A binding to a slot nobody configured routes to `default`
  * with a visible warning, except the advisor's: it costs an extra request on
  * every turn and the guide promises it runs only once configured, so an
- * advisor with no model of its own is off. No decision ever falls back to a
- * vendor list the user did not write.
+ * advisor with no model of its own is off. Reading images is off the same way:
+ * the Builder may not read images at all, and an image goes to another model
+ * only where the person chose one for Sees images. No decision ever falls back
+ * to a vendor list the user did not write.
  */
 export function resolveNativeHarnessRoute(
   input: ResolveNativeHarnessRouteInput,
@@ -72,11 +86,15 @@ export function resolveNativeHarnessRoute(
   const base = { job: input.job, decidedAt: input.now } as const;
   let slot = requestedSlotId === undefined ? undefined : slotFor(requestedSlotId, input);
   let unconfigured = false;
-  if (slot === undefined && input.job === "advisor") {
+  if (slot === undefined && (input.job === "advisor" || input.job === "image-understanding")) {
     return {
       ...base,
       kind: "unroutable",
-      slotId: requestedSlotId ?? NATIVE_HARNESS_BUILT_IN_SLOTS.advisor,
+      slotId:
+        requestedSlotId ??
+        (input.job === "advisor"
+          ? NATIVE_HARNESS_BUILT_IN_SLOTS.advisor
+          : NATIVE_HARNESS_BUILT_IN_SLOTS.vision),
       reason: "slot-empty",
       rejected: [],
     };
@@ -101,7 +119,9 @@ export function resolveNativeHarnessRoute(
   let primaryFailure: NativeHarnessCandidateFacts["coolingDown"] | undefined;
   for (const [index, candidate] of slot.candidates.entries()) {
     const facts = input.facts(candidate);
-    const reasons: MultiModelCandidateRejectionReason[] = [];
+    const reasons: NativeHarnessCandidateRejectionReason[] = [];
+    if (facts.harnessRunnable === false) reasons.push("not-harness-runnable");
+    reasons.push(...(facts.refusals ?? []));
     if (!facts.ready) reasons.push("provider-not-ready");
     if (facts.coolingDown !== undefined && facts.coolingDown.until > input.now) {
       reasons.push("provider-not-ready");

@@ -14,24 +14,31 @@ import type {
 } from "@opencode-ai/sdk/v2/types";
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Exit, Fiber, Stream } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   adaptBetaOpenCodeEvent,
   betaAgentPermissionRules,
+  betaSessionPermissionRules,
   betaPermissionEffect,
   makeOpenCodeDriver,
   normalizeOpenCodeProbe,
+  OpenCodeCommandNotRun,
   openCodePromptParts,
   permissionRules,
   type OpenCodeClientPort,
 } from "./openCodeDriver";
 import type { OpenCodeEvent } from "./openCodeEventMapper";
-import type { OpenCodeOwnSetup } from "./openCodeOwnSetup";
+import { NO_OPENCODE_OWN_SETUP, type OpenCodeOwnSetup } from "./openCodeOwnSetup";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import type { OpenCodeProcessPort, OpenCodeProcessStartInput } from "./openCodeProcess";
+import {
+  betaPermissionsForRelease,
+  type OpenCodeProcessPort,
+  type OpenCodeProcessStartInput,
+} from "./openCodeProcess";
+import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000101");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000102");
@@ -167,9 +174,11 @@ describe("OpenCode driver", () => {
       expect(fixture.calls.some((call) => call.startsWith("mcp.disconnect:"))).toBe(true);
     } else {
       expect(probe.capabilities.appManagedTools).toBe("unsupported");
+      // Off macOS turns run only in Work and Code outside Plan, so the probe
+      // attests that jail.
       expect(fixture.processInputs[0]).toMatchObject({
-        mode: "chat",
-        executionPolicy: "plan",
+        mode: "code",
+        executionPolicy: "approval-gated",
       });
       expect(fixture.processInputs[0]?.loopbackPorts).toBeUndefined();
       expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(false);
@@ -920,18 +929,27 @@ describe("OpenCode driver", () => {
     ["full-access", "bash", "allow"],
     ["full-access", "task", "allow"],
     ["full-access", "todowrite", "allow"],
-    ["full-access", "external_directory", "deny"],
+    ["full-access", "external_directory", "allow"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "task", "ask"],
     ["approval-gated", "todowrite", "ask"],
-    ["approval-gated", "external_directory", "deny"],
-    ["plan", "read", "ask"],
+    ["approval-gated", "external_directory", "ask"],
+    ["plan", "read", "allow"],
+    ["approval-gated", "read", "allow"],
+    ["approval-gated", "glob", "allow"],
+    ["plan", "grep", "allow"],
     ["plan", "edit", "deny"],
     ["plan", "bash", "deny"],
     ["plan", "task", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "deny"],
+    ["plan", "websearch", "deny"],
   ] as const)(
     "maps %s %s through official last-match permission semantics",
     async (policy, permission, action) => {
@@ -974,7 +992,9 @@ describe("OpenCode driver", () => {
       const shell = executionPolicy === "full-access" ? "allow" : "ask";
       expect(evaluatePermission(work, "bash")).toBe(shell);
       expect(evaluatePermission(work, "task")).toBe(shell);
-      expect(evaluatePermission(work, "external_directory")).toBe("deny");
+      expect(evaluatePermission(work, "external_directory")).toBe(
+        executionPolicy === "full-access" ? "allow" : "ask",
+      );
     },
   );
 
@@ -1055,7 +1075,7 @@ describe("OpenCode driver", () => {
         ),
       ),
     );
-    for (const permission of ["edit", "bash", "task", "external_directory", "todowrite"]) {
+    for (const permission of ["edit", "bash", "task", "external_directory"]) {
       expect(evaluatePermission(fixture.createdPermissions[0]!, permission)).toBe("deny");
     }
 
@@ -1640,8 +1660,9 @@ describe("OpenCode driver", () => {
     },
   );
 
-  it("reports 2.x resume, interruption, tool activity, and approvals, and questions as unsupported", async () => {
+  it("reports 2.x resume, interruption, tool activity, approvals, and questions from the first release read for its question forms", async () => {
     const fixture = driverFixture({
+      healthVersion: "opencode v2.0.22",
       process: {
         start: () =>
           Effect.acquireRelease(
@@ -1666,9 +1687,21 @@ describe("OpenCode driver", () => {
       interruption: "supported",
       toolActivity: "supported",
       approvals: "supported",
-      userQuestions: "unsupported",
+      userQuestions: "supported",
       fileChanges: "unsupported",
     });
+    // Off macOS the launch refuses Chat and Plan, and the report says so.
+    expect(probe.capabilities.turnModes).toEqual(
+      process.platform === "darwin"
+        ? undefined
+        : {
+            chat: "unsupported",
+            plan: "unsupported",
+            work: "supported",
+            code: "supported",
+            unsupportedReason: "host-confinement",
+          },
+    );
   });
 
   it("lists a 2.x runtime without offering turns when its confined server cannot resolve a Git work tree", async () => {
@@ -1728,6 +1761,177 @@ describe("OpenCode driver", () => {
     expect(probe.readiness).toBe("incompatible");
     expect(probe.reason).toBe("runtime-incompatible");
     expect(probe.models.length).toBeGreaterThan(0);
+  });
+
+  it("lists OpenCode 2's own commands on the probe", async () => {
+    const commands = [{ name: "review", description: "review changes" }];
+    const fixture = betaDriver({ commands });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(probe.readiness).toBe("ready");
+    expect(probe.commands).toEqual(commands);
+  });
+
+  it("runs a chosen OpenCode 2 command through its command route in Code", async () => {
+    const fixture = betaDriver({ commands: [{ name: "review" }] });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                connection.send({
+                  sessionId,
+                  prompt: "/review main",
+                  attachments: [],
+                  tools: [],
+                  context: [{ kind: "instructions", text: "Octant instructions" }],
+                }),
+              ),
+              Effect.tap(() =>
+                connection.send({
+                  sessionId,
+                  prompt: "/tmp is a path",
+                  attachments: [],
+                  tools: [],
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(fixture.calls).toContain("session.command:review:main:context");
+    // Text that only starts with a slash names no listed command.
+    expect(fixture.calls.filter((call) => call === "session.promptAsync")).toHaveLength(1);
+  });
+
+  it("routes a command by its own Project's list, not by the list another Project's session left", async () => {
+    const fixture = betaDriver({
+      commands: (root) => (root === "/tmp/project" ? [{ name: "review" }] : [{ name: "deploy" }]),
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const sent = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.tap(() =>
+                // Another Project's session started since and left its own list.
+                fixture.registry.setObservedCommands(instanceId, [{ name: "deploy" }]),
+              ),
+              Effect.flatMap(() =>
+                Effect.all([
+                  Effect.exit(
+                    connection.send({
+                      sessionId,
+                      prompt: "/deploy now",
+                      attachments: [],
+                      tools: [],
+                    }),
+                  ),
+                  Effect.exit(
+                    connection.send({
+                      sessionId,
+                      prompt: "/review main",
+                      attachments: [],
+                      tools: [],
+                    }),
+                  ),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    // This Project lists no /deploy: it is neither run nor sent to the model as text.
+    expect(String(sent[0])).toContain("not one of OpenCode's commands in this Project");
+    expect(fixture.calls).not.toContain("session.command:deploy:now:");
+    expect(fixture.calls).not.toContain("session.promptAsync");
+    // Its own /review runs, though the list the other Project left lacks it.
+    expect(Exit.isSuccess(sent[1])).toBe(true);
+    expect(fixture.calls).toContain("session.command:review:main:");
+  });
+
+  it("never resumes a session holding a turn's context that its failed command left queued", async () => {
+    const fixture = betaDriver({
+      commands: [{ name: "review" }],
+      commandFailure: "context-queued",
+    });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const first = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }).pipe(
+              Effect.flatMap((handle) =>
+                Effect.exit(
+                  connection.send({
+                    sessionId,
+                    prompt: "/review main",
+                    attachments: [],
+                    tools: [],
+                    context: [{ kind: "instructions", text: "Octant instructions" }],
+                  }),
+                ).pipe(Effect.map((exit) => ({ exit, handle }))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(Exit.isFailure(first.exit)).toBe(true);
+    expect(String(first.exit)).toContain("stale-resume");
+    const resumeCursor = first.handle.resumeCursor;
+    expect(resumeCursor).toBeDefined();
+    const resumed = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.exit(
+              connection.resume({
+                sessionId,
+                resumeCursor: resumeCursor!,
+                executionPolicy: "approval-gated",
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(resumed)).toContain("did not run its command");
+  });
+
+  it("refuses a listed OpenCode command in Plan before it reaches the runtime", async () => {
+    const fixture = betaDriver({ commands: [{ name: "review" }] });
+    const probe = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState(probe);
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection
+                .start({ sessionId, modelId, executionPolicy: "plan" })
+                .pipe(
+                  Effect.flatMap(() =>
+                    Effect.exit(
+                      connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+                    ),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    );
+    expect(String(result)).toContain("Plan runs none");
+    expect(fixture.calls.some((call) => call.startsWith("session.command:"))).toBe(false);
+    expect(fixture.calls).not.toContain("session.promptAsync");
   });
 
   it("offers a 2.x turn in every mode once the jail serves a Git work tree", async () => {
@@ -2300,10 +2504,10 @@ describe("OpenCode driver", () => {
         {
           type: "permission.v2.asked",
           properties: {
-            id: "perm-outside",
+            id: "perm-skill",
             sessionID: "provider-session",
-            action: "external_directory",
-            resources: ["/etc/hosts"],
+            action: "skill",
+            resources: ["review"],
           },
         } as unknown as Event,
         {
@@ -2496,8 +2700,9 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("permission.reply:"))).toBe(false);
   });
 
-  it("fails a 2.x turn closed when 2.0.22 asks a question through a form", async () => {
-    // The shape 2.0.22's question tool publishes: the session sits inside the form.
+  it("asks a 2.x question form through the questionnaire and answers OpenCode at the form", async () => {
+    // The shape 2.0.22's question tool publishes: the session sits inside the
+    // form, and each question is a field keyed by its position.
     const fixture = betaDriver({
       events: [
         {
@@ -2511,14 +2716,180 @@ describe("OpenCode driver", () => {
               fields: [
                 {
                   key: "q0",
-                  title: "Continue?",
+                  title: "Continue",
+                  description: "Continue with the migration?",
                   type: "string",
-                  options: [{ value: "Yes" }, { value: "No" }],
+                  options: [
+                    { value: "Yes", label: "Yes", description: "Run it now" },
+                    { value: "No", label: "No", description: "Stop here" },
+                  ],
+                  custom: true,
                 },
               ],
             },
           },
         } as unknown as Event,
+      ],
+    });
+    const { events, answer } = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["user-input-request", "completed", "failed"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              const events = Array.from(yield* Fiber.join(collector));
+              const question = events.find((event) => event.kind === "user-input-request");
+              if (question?.kind !== "user-input-request") return { events, answer: undefined };
+              const answer = yield* Effect.exit(
+                connection.answerUserInput({
+                  sessionId,
+                  requestId: question.requestId,
+                  answer: "Yes",
+                }),
+              );
+              return { events, answer };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    expect(events.find((event) => event.kind === "user-input-request")).toMatchObject({
+      prompt: "Continue with the migration?",
+      options: [
+        { label: "Yes", description: "Run it now" },
+        { label: "No", description: "Stop here" },
+      ],
+    });
+    expect(answer?._tag).toBe("Success");
+    expect(fixture.calls).toContain("question.reply:Yes");
+  });
+
+  it("asks a 2.x subagent's question form and answers it in the subagent's own session", async () => {
+    // The root's own read is allowed and answered by the host, after which
+    // OpenCode delegates; the child then asks through a form.
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "permission.v2.asked",
+          properties: {
+            id: "perm-read",
+            sessionID: "provider-session",
+            action: "read",
+            resources: ["/tmp/project/a.ts"],
+          },
+        } as unknown as Event,
+      ],
+      eventsOnReply: [
+        {
+          type: "session.created",
+          properties: {
+            sessionID: "child-session",
+            info: { id: "child-session", parentID: "provider-session", title: "Plan it" },
+          },
+        } as unknown as Event,
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_child",
+              sessionID: "child-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Scope",
+                  description: "Include the tests?",
+                  type: "string",
+                  options: [{ value: "Yes", label: "Yes" }],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const { events, answer } = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["user-input-request", "completed", "failed"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+              const events = Array.from(yield* Fiber.join(collector));
+              const question = events.find((event) => event.kind === "user-input-request");
+              if (question?.kind !== "user-input-request") return { events, answer: undefined };
+              const answer = yield* Effect.exit(
+                connection.answerUserInput({
+                  sessionId,
+                  requestId: question.requestId,
+                  answer: "Yes",
+                }),
+              );
+              return { events, answer };
+            }),
+          ),
+        ),
+      ),
+    );
+    expect(events.find((event) => event.kind === "user-input-request")).toMatchObject({
+      prompt: "Include the tests?",
+    });
+    expect(answer?._tag).toBe("Success");
+    expect(fixture.questionReplies).toEqual(["child-session:frm_child"]);
+  });
+
+  it("refuses a 2.x question form that asks for a secret and never shows or journals it", async () => {
+    const fixture = betaDriver({
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_secret",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Region",
+                  description: "Which region should the deploy use?",
+                  type: "string",
+                  options: [{ value: "eu", label: "eu", description: "Europe" }],
+                },
+                {
+                  key: "q1",
+                  title: "Credentials",
+                  description: "Paste the API key for the deploy account.",
+                  type: "string",
+                  options: [],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+        idleEvent("provider-session"),
       ],
     });
     const output = await Effect.runPromise(
@@ -2536,7 +2907,7 @@ describe("OpenCode driver", () => {
                   ),
                 ),
               );
-              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
               return yield* Fiber.join(collector);
             }),
           ),
@@ -2545,14 +2916,13 @@ describe("OpenCode driver", () => {
     );
     const events = Array.from(output);
     expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
-    expect(
-      events.some(
-        (event) =>
-          event.kind === "failed" &&
-          event.failure.category === "unsupported" &&
-          event.failure.message.includes("questions"),
-      ),
-    ).toBe(true);
+    expect(events.some((event) => event.kind === "failed")).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("API key");
+    await vi.waitFor(() =>
+      expect(fixture.calls.filter((call) => call.startsWith("question.reply:"))).toEqual([
+        `question.reply:${SECRET_QUESTION_REFUSAL}|${SECRET_QUESTION_REFUSAL}`,
+      ]),
+    );
   });
 
   it("ends a 2.x turn OpenCode's shutdown cut off as held for recovery, and sends nothing again", async () => {
@@ -2751,40 +3121,131 @@ describe("OpenCode driver", () => {
     ["plan", "shell", "deny"],
     ["plan", "subagent", "deny"],
     ["plan", "external_directory", "deny"],
-    ["plan", "todowrite", "deny"],
-    ["plan", "webfetch", "deny"],
-    ["plan", "websearch", "deny"],
-    ["plan", "read", "ask"],
+    ["plan", "todowrite", "allow"],
+    ["plan", "todoread", "allow"],
+    ["plan", "codesearch", "allow"],
+    ["plan", "lsp", "allow"],
+    ["plan", "list", "allow"],
+    ["plan", "webfetch", "allow"],
+    ["plan", "websearch", "allow"],
+    ["plan", "read", "allow"],
+    ["approval-gated", "read", "allow"],
+    ["approval-gated", "list", "allow"],
     ["approval-gated", "edit", "ask"],
     ["approval-gated", "bash", "ask"],
     ["approval-gated", "shell", "ask"],
-    ["approval-gated", "external_directory", "deny"],
+    ["approval-gated", "external_directory", "ask"],
     ["auto-accept-edits", "edit", "allow"],
     ["auto-accept-edits", "bash", "ask"],
-    ["auto-accept-edits", "external_directory", "deny"],
+    ["auto-accept-edits", "external_directory", "ask"],
     ["full-access", "edit", "allow"],
     ["full-access", "bash", "allow"],
-    ["full-access", "external_directory", "deny"],
+    ["full-access", "external_directory", "allow"],
   ] as const)("maps 2.x agent permission rules for %s %s as %s", (policy, action, effect) => {
     const rules = betaAgentPermissionRules(policy, "code");
     expect(evaluateV2Permission(rules, action)).toBe(effect);
   });
 
-  it("lets a session reach a Project's extra folder and still denies every other outside folder", () => {
+  it("reads a Project file without asking at Guarded and in Plan and still refuses a protected file", () => {
+    const projectFile = "/work/project/src/index.ts";
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const credentials = join(homedir(), ".aws", "credentials");
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), credentials],
+      atFullAccess: [],
+    };
+    for (const policy of ["approval-gated", "plan"] as const) {
+      const legacy = permissionRules(
+        policy,
+        "code",
+        undefined,
+        [],
+        false,
+        undefined,
+        protectedPaths,
+      ).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      }));
+      const beta = betaAgentPermissionRules(policy, "code", [], [], protectedPaths);
+      for (const rules of [legacy, beta]) {
+        expect(lastMatch(rules, "read", projectFile), policy).toBe("allow");
+        expect(lastMatch(rules, "grep", "TODO"), policy).toBe("allow");
+        expect(lastMatch(rules, "read", key), policy).toBe("deny");
+        expect(lastMatch(rules, "read", credentials), policy).toBe("deny");
+        expect(lastMatch(rules, "list", join(homedir(), ".ssh")), policy).toBe("deny");
+        // OpenCode's own `.env` refusal is kept under the read allow.
+        expect(lastMatch(rules, "read", "/work/project/.env"), policy).toBe("deny");
+        expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("allow");
+        // Below Full access an outside folder asks; Plan cannot approve, so it refuses.
+        expect(lastMatch(rules, "external_directory", "/elsewhere/a.ts"), policy).toBe(
+          policy === "plan" ? "deny" : "ask",
+        );
+      }
+    }
+  });
+
+  it("keeps a person's own read deny of an env example over OpenCode's exception and protected files last", () => {
+    const own = {
+      rules: [
+        { action: "read", resource: "*", effect: "allow" },
+        { action: "read", resource: "*.env.example", effect: "deny" },
+      ],
+      toolServers: false,
+      webTools: true,
+    } as const;
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const protectedPaths = { belowFullAccess: [join(homedir(), ".ssh")], atFullAccess: [] };
+    for (const policy of ["approval-gated", "plan"] as const) {
+      const legacy = permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map(
+        (rule) => ({ action: rule.permission, resource: rule.pattern, effect: rule.action }),
+      );
+      const beta = betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths);
+      for (const rules of [legacy, beta]) {
+        expect(lastMatch(rules, "read", "/work/project/.env.example"), policy).toBe("deny");
+        // The person's own allow-everything never reopens a protected file.
+        expect(lastMatch(rules, "read", key), policy).toBe("deny");
+      }
+    }
+  });
+
+  it("keeps a person's own web-fetch deny in Plan while Plan's edits stay denied over their allow", () => {
+    const own = {
+      rules: [
+        { action: "webfetch", resource: "*", effect: "deny" },
+        { action: "edit", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+      webTools: true,
+    } as const;
+    const legacy = permissionRules("plan", "code", undefined, [], false, own);
+    expect(evaluatePermission(legacy, "webfetch")).toBe("deny");
+    expect(evaluatePermission(legacy, "websearch")).toBe("allow");
+    expect(evaluatePermission(legacy, "edit")).toBe("deny");
+    const beta = betaAgentPermissionRules("plan", "code", [], own.rules);
+    expect(evaluateV2Permission(beta, "webfetch")).toBe("deny");
+    expect(evaluateV2Permission(beta, "edit")).toBe("deny");
+  });
+
+  it("lets a session reach a Project's extra folder, asks for every other outside folder, and denies them in Plan", () => {
     for (const policy of ["plan", "approval-gated", "auto-accept-edits"] as const) {
+      const outsideRule = policy === "plan" ? "deny" : "ask";
       const beta = betaAgentPermissionRules(policy, "code", ["/work/notes"]);
       const allowed = beta.filter(
         (rule) => rule.action === "external_directory" && rule.effect === "allow",
       );
       expect(allowed.map((rule) => rule.resource)).toEqual(["/work/notes", "/work/notes/*"]);
-      // The outside-folder deny for every other path stays, and comes first,
-      // so only the folder is reopened; the posture's edit rule is unchanged.
-      const denyIndex = beta.findIndex(
+      // The rule for every other outside path comes first, so only the folder
+      // is reopened; the posture's edit rule is unchanged.
+      const otherIndex = beta.findIndex(
         (rule) =>
-          rule.action === "external_directory" && rule.resource === "*" && rule.effect === "deny",
+          rule.action === "external_directory" &&
+          rule.resource === "*" &&
+          rule.effect === outsideRule,
       );
-      expect(denyIndex).toBeGreaterThanOrEqual(0);
-      expect(denyIndex).toBeLessThan(beta.indexOf(allowed[0]!));
+      expect(otherIndex).toBeGreaterThanOrEqual(0);
+      expect(otherIndex).toBeLessThan(beta.indexOf(allowed[0]!));
       expect(evaluateV2Permission(beta, "edit")).toBe(
         evaluateV2Permission(betaAgentPermissionRules(policy, "code"), "edit"),
       );
@@ -2792,10 +3253,153 @@ describe("OpenCode driver", () => {
       expect(
         legacy.filter((rule) => rule.permission === "external_directory").map((rule) => rule),
       ).toEqual([
-        { permission: "external_directory", pattern: "*", action: "deny" },
+        { permission: "external_directory", pattern: "*", action: outsideRule },
         { permission: "external_directory", pattern: "/work/notes", action: "allow" },
         { permission: "external_directory", pattern: "/work/notes/*", action: "allow" },
       ]);
+    }
+  });
+
+  it("denies OpenCode's own web search and fetch at every level unless the setup has web tools on", () => {
+    const allowedOwn = {
+      rules: [
+        { action: "websearch", resource: "*", effect: "allow" },
+        { action: "webfetch", resource: "*", effect: "allow" },
+      ],
+      toolServers: false,
+    } as const;
+    for (const policy of ["plan", "approval-gated", "auto-accept-edits", "full-access"] as const) {
+      for (const action of ["websearch", "webfetch"]) {
+        // Off: denied on both runtimes, the person's own allow included.
+        expect(
+          evaluatePermission(
+            permissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluatePermission(permissionRules(policy, "code"), action)).toBe("deny");
+        expect(
+          evaluateV2Permission(
+            betaSessionPermissionRules(policy, "code", undefined, [], false, {
+              ...allowedOwn,
+              webTools: false,
+            }),
+            action,
+          ),
+        ).toBe("deny");
+        expect(evaluateV2Permission(betaSessionPermissionRules(policy, "code"), action)).toBe(
+          "deny",
+        );
+      }
+    }
+    // On, Full access lets them run as the level allows, and Plan allows them
+    // as it allows every other read.
+    const on = { rules: [], toolServers: false, webTools: true } as const;
+    expect(
+      evaluatePermission(
+        permissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("full-access", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+    expect(
+      evaluateV2Permission(
+        betaSessionPermissionRules("plan", "code", undefined, [], false, on),
+        "websearch",
+      ),
+    ).toBe("allow");
+  });
+
+  it("asks for a folder outside the Project at Guarded, reaches it at Full access, refuses it in Plan, and still refuses a protected file there below Full access", () => {
+    const outside = "/elsewhere/notes/a.ts";
+    const key = join(homedir(), ".ssh", "id_ed25519");
+    const signIn = join(homedir(), ".codex", "auth.json");
+    const protectedPaths = {
+      belowFullAccess: [join(homedir(), ".ssh"), signIn],
+      atFullAccess: [signIn],
+    };
+    const rulesFor = (policy: "full-access" | "approval-gated" | "plan") => [
+      permissionRules(
+        policy,
+        "code",
+        undefined,
+        ["/work/notes"],
+        false,
+        undefined,
+        protectedPaths,
+      ).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      })),
+      betaAgentPermissionRules(policy, "code", ["/work/notes"], [], protectedPaths),
+    ];
+    for (const rules of rulesFor("full-access")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("allow");
+      expect(lastMatch(rules, "read", signIn)).toBe("deny");
+    }
+    for (const rules of rulesFor("approval-gated")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("ask");
+      // A protected file outside the Project is refused, not asked.
+      expect(lastMatch(rules, "read", key)).toBe("deny");
+      // The Project's extra folder stays reachable below Full access.
+      expect(lastMatch(rules, "external_directory", "/work/notes/todo.md")).toBe("allow");
+    }
+    for (const rules of rulesFor("plan")) {
+      expect(lastMatch(rules, "external_directory", outside)).toBe("deny");
+    }
+  });
+
+  it("refuses only provider sign-ins at Full access and every protected file below it, the person's own deny still over the env exception", () => {
+    const cloud = join(homedir(), ".aws", "credentials");
+    const added = "/opt/vault/token";
+    const codexSignIn = join(homedir(), ".codex", "auth.json");
+    const claudeSignIn = join(homedir(), ".claude", ".credentials.json");
+    // The host resolves both lists; the driver only chooses one by level.
+    const protectedPaths = {
+      belowFullAccess: [cloud, added, codexSignIn, claudeSignIn],
+      atFullAccess: [codexSignIn, claudeSignIn],
+    };
+    const own = {
+      rules: [{ action: "read", resource: "*.env.example", effect: "deny" }],
+      toolServers: false,
+      webTools: true,
+    } as const;
+    const rulesFor = (policy: "full-access" | "approval-gated" | "auto-accept-edits" | "plan") => [
+      permissionRules(policy, "code", undefined, [], false, own, protectedPaths).map((rule) => ({
+        action: rule.permission,
+        resource: rule.pattern,
+        effect: rule.action,
+      })),
+      betaAgentPermissionRules(policy, "code", [], own.rules, protectedPaths),
+    ];
+    for (const rules of rulesFor("full-access")) {
+      expect(lastMatch(rules, "read", cloud)).toBe("allow");
+      expect(lastMatch(rules, "list", added)).toBe("allow");
+      expect(lastMatch(rules, "read", codexSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", claudeSignIn)).toBe("deny");
+      expect(lastMatch(rules, "read", "/work/project/.env.example")).toBe("deny");
+      // Provider sign-ins stay the last rules, so no allow reopens them.
+      expect(rules.at(-1)).toEqual({
+        action: "list",
+        resource: `${claudeSignIn}/*`,
+        effect: "deny",
+      });
+    }
+    for (const policy of ["approval-gated", "auto-accept-edits", "plan"] as const) {
+      for (const rules of rulesFor(policy)) {
+        expect(lastMatch(rules, "read", cloud), policy).toBe("deny");
+        expect(lastMatch(rules, "list", added), policy).toBe("deny");
+        expect(lastMatch(rules, "read", codexSignIn), policy).toBe("deny");
+      }
     }
   });
 
@@ -2836,11 +3440,101 @@ describe("OpenCode driver", () => {
     expect(bridge).toBeDefined();
     expect(evaluateV2Permission(rules, "edit")).toBe("ask");
     expect(evaluateV2Permission(rules, "shell")).toBe("ask");
-    expect(evaluateV2Permission(rules, "external_directory")).toBe("deny");
+    expect(evaluateV2Permission(rules, "external_directory")).toBe("ask");
     expect(evaluateV2Permission(rules, "skill")).toBe("deny");
-    expect(evaluateV2Permission(rules, "question")).toBe("deny");
+    expect(evaluateV2Permission(rules, "question")).toBe("allow");
     expect(evaluateV2Permission(rules, "other-server_tool")).toBe("deny");
     expect(evaluateV2Permission(rules, `${bridge}_octant_browser`)).toBe("allow");
+  });
+
+  it.each([
+    ["opencode v2.0.21", "deny"],
+    ["opencode v2.0.22", "allow"],
+    ["opencode v2.2.0", "allow"],
+  ] as const)(
+    "lets %s's question tool ask only from the first release whose question forms were read (%s)",
+    (version, effect) => {
+      for (const policy of ["plan", "approval-gated", "full-access"] as const) {
+        const rules = betaPermissionsForRelease(
+          betaSessionPermissionRules(policy, "code"),
+          version,
+        );
+        expect(evaluateV2Permission([...rules], "question")).toBe(effect);
+        // Nothing but the question rule follows the release.
+        expect(evaluateV2Permission([...rules], "edit")).toBe(
+          evaluateV2Permission([...betaSessionPermissionRules(policy, "code")], "edit"),
+        );
+      }
+    },
+  );
+
+  it("fails a turn on a release before 2.0.22 when a question form arrives anyway, and asks nobody", async () => {
+    const fixture = driverFixture({
+      process: {
+        start: () =>
+          Effect.acquireRelease(
+            Effect.succeed({
+              isolatedConfiguration: true as const,
+              authorization: "Basic redacted",
+              pid: process.pid,
+              runtime: "beta" as const,
+              version: "opencode v2.0.21",
+              temporaryDirectory: launchScratchDirectory(),
+              url: new URL("http://127.0.0.1:1/"),
+            }),
+            () => Effect.void,
+          ),
+      },
+      events: [
+        {
+          type: "form.created",
+          properties: {
+            form: {
+              id: "frm_old",
+              sessionID: "provider-session",
+              title: "Questions",
+              metadata: { kind: "question" },
+              fields: [
+                {
+                  key: "q0",
+                  title: "Continue",
+                  description: "Continue?",
+                  type: "string",
+                  options: [{ value: "Yes", label: "Yes", description: "Continue" }],
+                },
+              ],
+            },
+          },
+        } as unknown as Event,
+      ],
+    });
+    const output = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "code" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.gen(function* () {
+              const stream = yield* connection.subscribe;
+              const collector = yield* Effect.fork(
+                Stream.runCollect(
+                  stream.pipe(
+                    Stream.takeUntil((event) =>
+                      ["completed", "failed", "interrupted"].includes(event.kind),
+                    ),
+                  ),
+                ),
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              return yield* Fiber.join(collector);
+            }),
+          ),
+        ),
+      ),
+    );
+    const events = Array.from(output);
+    expect(events.some((event) => event.kind === "user-input-request")).toBe(false);
+    expect(
+      events.some((event) => event.kind === "failed" && event.failure.category === "unsupported"),
+    ).toBe(true);
   });
 
   it("launches with OpenCode's own skills only for a session that carries the person's setup", async () => {
@@ -2878,6 +3572,8 @@ describe("OpenCode driver", () => {
     };
     const own = await launch(true);
     expect(own?.ownSkills).toBe(true);
+    // Running as itself, 1.x also finds the person's global AGENTS.md.
+    expect(own?.runsAsItself).toBe(true);
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "skill")).toBe("ask");
     // The person's tool servers follow the level, and shell still asks.
     expect(evaluateV2Permission([...(own?.betaPermissions ?? [])], "other-server_tool")).toBe(
@@ -2887,6 +3583,7 @@ describe("OpenCode driver", () => {
 
     const locked = await launch(false);
     expect(locked).not.toHaveProperty("ownSkills");
+    expect(locked).not.toHaveProperty("runsAsItself");
     expect(evaluateV2Permission([...(locked?.betaPermissions ?? [])], "skill")).toBe("deny");
   });
 
@@ -2931,7 +3628,7 @@ describe("OpenCode driver", () => {
     const gatedRules = [...(gated?.betaPermissions ?? [])];
     expect(evaluateV2Permission(gatedRules, "shell")).toBe("allow");
     expect(evaluateV2Permission(gatedRules, "edit")).toBe("allow");
-    expect(evaluateV2Permission(gatedRules, "external_directory")).toBe("deny");
+    expect(evaluateV2Permission(gatedRules, "external_directory")).toBe("ask");
     expect(gated?.ownToolServers).toEqual(own.mcp);
 
     const plan = await launch("plan", false);
@@ -2940,6 +3637,56 @@ describe("OpenCode driver", () => {
     expect(evaluateV2Permission(planRules, "edit")).toBe("deny");
     expect(evaluateV2Permission(planRules, "other-server_tool")).toBe("deny");
     expect(plan).not.toHaveProperty("ownToolServers");
+  });
+
+  it("lets OpenCode load a trusted Project's own configuration outside Plan, and keeps it off while untrusted or in Plan", async () => {
+    const launch = async (executionPolicy: "approval-gated" | "plan", projectCode: boolean) => {
+      const fixture = betaDriver({ readOwnSetup: () => NO_OPENCODE_OWN_SETUP });
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* fixture.driver.acquire({
+              instanceId,
+              projectRoot: "/tmp/project",
+              mode: "code",
+            });
+            yield* connection.start({
+              sessionId,
+              modelId,
+              executionPolicy,
+              nativeSetup: {
+                subagents: true,
+                webTools: true,
+                skills: true,
+                toolServers: executionPolicy !== "plan",
+                hooks: executionPolicy !== "plan",
+                projectCode,
+              },
+            });
+          }),
+        ),
+      );
+      return fixture.processInputs.at(-1);
+    };
+
+    expect((await launch("approval-gated", true))?.projectConfig).toBe(true);
+    expect(await launch("approval-gated", false)).not.toHaveProperty("projectConfig");
+    expect(await launch("plan", false)).not.toHaveProperty("projectConfig");
+  });
+
+  it("keeps Plan's denials and the outside-folder refusal over a Project rule that allows them", () => {
+    const own = {
+      rules: [
+        { action: "edit", resource: "*", effect: "allow" as const },
+        { action: "shell", resource: "*", effect: "allow" as const },
+      ],
+      toolServers: false,
+      webTools: true,
+    };
+    const plan = betaSessionPermissionRules("plan", "code", undefined, [], true, own);
+    expect(evaluateV2Permission([...plan], "edit")).toBe("deny");
+    expect(evaluateV2Permission([...plan], "shell")).toBe("deny");
+    expect(evaluateV2Permission([...plan], "external_directory")).toBe("deny");
   });
 
   it("adapts a 2.x event from data when properties is not an object", () => {
@@ -2989,6 +3736,17 @@ async function callBridgeTool(
   return called.text();
 }
 
+type FixtureCommands =
+  | ReadonlyArray<{ readonly name: string; readonly description?: string }>
+  | ((root: string) => ReadonlyArray<{ readonly name: string; readonly description?: string }>);
+
+function commandsAt(
+  commands: FixtureCommands | undefined,
+  root: string,
+): ReadonlyArray<{ readonly name: string; readonly description?: string }> {
+  return typeof commands === "function" ? commands(root) : (commands ?? []);
+}
+
 function betaDriver(
   options: {
     readonly worktreeProviders?: "refused";
@@ -2999,6 +3757,8 @@ function betaDriver(
     readonly permissionPersistence?: "project-default";
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
+    readonly commands?: FixtureCommands;
+    readonly commandFailure?: "context-queued";
   } = {},
 ) {
   const launchScratch = launchScratchDirectory();
@@ -3059,6 +3819,12 @@ function driverFixture(
     /** Streamed after an approval reply is sent and before that reply resolves. */
     readonly eventsOnReply?: ReadonlyArray<Event> | ((requestId: string) => ReadonlyArray<Event>);
     readonly readOwnSetup?: () => OpenCodeOwnSetup;
+    /** The version a 2.x client reports: its process's, never a health route's. */
+    readonly healthVersion?: string;
+    /** OpenCode's own commands, as a runtime with the command routes lists them. */
+    readonly commands?: FixtureCommands;
+    /** The command route fails after the turn's context was queued. */
+    readonly commandFailure?: "context-queued";
   } = {},
 ) {
   const calls: string[] = [];
@@ -3068,6 +3834,7 @@ function driverFixture(
   const createdPermissions: PermissionRuleset[] = [];
   const mcpBridges: Array<{ readonly url: string; readonly session: string | null }> = [];
   const permissionReplies: string[] = [];
+  const questionReplies: string[] = [];
   const registry = new ProviderRuntimeRegistry();
   const processPort = {
     start: (input: OpenCodeProcessStartInput) =>
@@ -3093,7 +3860,7 @@ function driverFixture(
   const sessionRoots: string[] = [];
   const promptModels: string[] = [];
   const client: OpenCodeClientPort = {
-    health: async () => ({ healthy: true, version: "1.18.0" }),
+    health: async () => ({ healthy: true, version: options.healthVersion ?? "1.18.0" }),
     providers: async () => providerList(),
     subscribe: async (signal) => {
       calls.push("event.subscribe");
@@ -3175,13 +3942,28 @@ function driverFixture(
       );
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     },
-    replyQuestion: async (_sessionId, _id, answers) => {
+    replyQuestion: async (replySession, id, answers) => {
       calls.push(`question.reply:${answers.join("|")}`);
+      questionReplies.push(`${replySession}:${id}`);
     },
     deleteSession: async (id) => {
       calls.push(`session.delete:${id}`);
       if (options.sessionDelete === "refused") throw new Error("session delete -> 500");
     },
+    ...(options.commands === undefined
+      ? {}
+      : {
+          commands: async () => {
+            calls.push("command.list");
+            return commandsAt(options.commands, "/tmp/project");
+          },
+          command: async ({ name, arguments: text, context }) => {
+            calls.push(`session.command:${name}:${text}:${context === undefined ? "" : "context"}`);
+            if (options.commandFailure === "context-queued") {
+              throw new OpenCodeCommandNotRun("OpenCode 2 command failed with status 500.", true);
+            }
+          },
+        }),
   };
   return {
     calls,
@@ -3191,6 +3973,7 @@ function driverFixture(
     processInputs,
     createdPermissions,
     permissionReplies,
+    questionReplies,
     mcpBridges,
     registry,
     driver: makeOpenCodeDriver({
@@ -3210,6 +3993,14 @@ function driverFixture(
           (scratch === undefined || !root.startsWith(`${scratch}/`));
         return {
           ...client,
+          ...(client.commands === undefined
+            ? {}
+            : {
+                commands: async () => {
+                  calls.push(`command.list:${root}`);
+                  return commandsAt(options.commands, root);
+                },
+              }),
           providers: async () => {
             catalogueRoots.push(root);
             if (options.worktreeProviders === "refused" && existsSync(join(root, ".git"))) {
@@ -3340,6 +4131,30 @@ function evaluatePermission(rules: PermissionRuleset, permission: string): strin
     }
   }
   return action;
+}
+
+/** OpenCode's last-match rule over action and resource, `*` matching anything. */
+function lastMatch(
+  rules: ReadonlyArray<{
+    readonly action: string;
+    readonly resource: string;
+    readonly effect: string;
+  }>,
+  action: string,
+  resource: string,
+): string | undefined {
+  const matches = (pattern: string, value: string) =>
+    new RegExp(
+      `^${pattern
+        .split("*")
+        .map((part) => part.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
+        .join(".*")}$`,
+    ).test(value);
+  let effect: string | undefined;
+  for (const rule of rules) {
+    if (matches(rule.action, action) && matches(rule.resource, resource)) effect = rule.effect;
+  }
+  return effect;
 }
 
 function evaluateV2Permission(

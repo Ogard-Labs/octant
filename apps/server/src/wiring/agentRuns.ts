@@ -1,4 +1,9 @@
-import { DEFAULT_HOST_RESOURCE_POLICY } from "@octant/contracts";
+import {
+  DEFAULT_HOST_RESOURCE_POLICY,
+  decodeAgentRunParentThreadId,
+  type NativeHarnessSlotCandidate,
+  type ProviderExecutionPolicy,
+} from "@octant/contracts";
 import { HostResourceBudget } from "../process/hostResourceBudget";
 import { conversationInputSource, supportsConversationInput } from "./conversationInputs";
 import { prepareConversationInputs } from "../attachments/conversationInputs";
@@ -28,6 +33,7 @@ import {
   NATIVE_HARNESS_BUILT_IN_SLOTS,
   type OctantMode,
   type ProjectId,
+  type ProviderChildObservation,
   type ProviderContextBlock,
   type UtcTimestamp,
   type WindowId,
@@ -65,7 +71,7 @@ import {
 } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import {
-  agentRunEligibleTargets as eligibleAgentRunTargets,
+  agentRunTargetAvailability,
   recordAgentRunResultIngestion,
   type RemoteDelegationPort,
 } from "../agentRun/agentRunDelegation";
@@ -113,6 +119,7 @@ import {
   browserToolTransport,
   chatTurnAnsweredAttempt,
   modelCanTakeDelegatedWork,
+  isNativeHarnessDriverKind,
 } from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
@@ -575,6 +582,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
+    | "liveTurns"
     | "onAgentRunExecutionAccepted"
     | "toolEffectLedger"
     | "windowAuthorityStore"
@@ -610,6 +618,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
+    liveTurns,
     nativeHarnessApprovals,
     nativeHarnessSessions,
     onAgentRunExecutionAccepted,
@@ -1082,13 +1091,18 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           modelId,
           mediaType,
         ),
-      isReady: ({ providerInstanceId, modelId }) => {
+      isReady: ({ providerInstanceId, modelId, executionPolicy }) => {
         const instance = persistence.readProviderInstance(providerInstanceId as never);
         if (instance === undefined || !instance.enabled) return false;
         const observed = providerRuntimeRegistry.observedState(providerInstanceId as never);
         return (
           observed !== undefined &&
-          modelCanTakeDelegatedWork(instance.driverKind, observed, modelId as never)
+          modelCanTakeDelegatedWork(
+            instance.driverKind,
+            observed,
+            modelId as never,
+            executionPolicy === undefined ? undefined : { executionPolicy },
+          )
         );
       },
     },
@@ -1200,8 +1214,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     uuid: randomUUID,
   };
-  const agentRunEligibleTargets = (projectId: ProjectId | undefined) =>
-    eligibleAgentRunTargets({
+  const agentRunTargetsFor = (
+    projectId: ProjectId | undefined,
+    executionPolicy?: ProviderExecutionPolicy,
+  ) =>
+    agentRunTargetAvailability({
+      ...(executionPolicy === undefined ? {} : { level: { executionPolicy } }),
       project: projectId === undefined ? undefined : persistence.readProject(projectId),
       instances: persistence.readProviderInstances(),
       observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
@@ -1222,6 +1240,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         providerInstanceId: String(candidate.providerInstanceId),
         modelId: String(candidate.modelId),
       }),
+    canRunInHarness: (candidate) => {
+      const instance = persistence.readProviderInstance(candidate.providerInstanceId as never);
+      return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
+    },
   });
   // Hub membership is wired after this scope, so a helper request that names a
   // target member reaches the delegating service through a holder wireRemote fills.
@@ -1246,20 +1268,78 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     readonly projectId?: ProjectId;
     /**
      * How the calling turn asks its person, in the thread, to allow one thing.
-     * Only a Code turn has one today, so only a Code thread below Full access
-     * asks before a helper once it has read outside content; elsewhere that
-     * delegation is still refused.
+     * A Code turn asks in its own tool approval; a Chat or Work turn passes
+     * `askThroughHost` instead. A thread with neither (a routine run, Plan)
+     * still refuses a helper once it has read outside content.
      */
     readonly ask?: (summary: string) => Promise<"approved" | "denied" | "cancelled" | "expired">;
-  }): AppManagedToolSet =>
-    createAgentsManagedTools({
+    /**
+     * The model a Chat or Work turn runs on, so it can ask its person through
+     * the host's approval card (the one every thread's composer shows). Absent
+     * where nobody can answer: a routine run, a Side Chat, or Plan.
+     */
+    readonly askThroughHost?: { readonly lead: NativeHarnessSlotCandidate };
+  }): AppManagedToolSet => {
+    const parentExecutionPolicy = (): ProviderExecutionPolicy | undefined => {
+      try {
+        return agentRunAdmission.authorizeCreation({
+          parentThreadId: decodeAgentRunParentThreadId(input.parentThreadId),
+          windowId: input.windowId,
+        })?.liveAuthority.executionPolicy;
+      } catch {
+        return undefined;
+      }
+    };
+    const hostLead = input.askThroughHost?.lead;
+    const ask:
+      | ((
+          summary: string,
+          signal?: AbortSignal,
+        ) => Promise<"approved" | "denied" | "cancelled" | "expired">)
+      | undefined =
+      input.ask ??
+      (hostLead === undefined
+        ? undefined
+        : async (summary, signal) => {
+            const outcome = await nativeHarnessApprovals.ask({
+              threadId: input.parentThreadId,
+              mode: input.mode,
+              ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+              lead: hostLead,
+              toolName: "provider-action",
+              summary,
+              approvalClass: "agents.delegate",
+              // The thread has read outside content, so no remembered class
+              // may answer this and an "always" would be a lie.
+              singleUse: true,
+              signal,
+            });
+            return outcome === "too-many-waiting" ? ("denied" as const) : outcome;
+          });
+    const askMarkedDelegation =
+      ask === undefined
+        ? undefined
+        : async (signal?: AbortSignal): Promise<boolean> => {
+            const answer = await ask(
+              "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
+              signal,
+            );
+            if (answer !== "approved") return false;
+            threadStandingAnswers.record(input.parentThreadId, "delegation", true);
+            return true;
+          };
+    return createAgentsManagedTools({
       admission: agentRunAdmission,
       orchestration: agentRunOrchestration,
       persistence: agentRunPersistence,
       mode: input.mode,
       windowId: input.windowId,
       parentThreadId: input.parentThreadId,
-      listTargets: () => agentRunEligibleTargets(input.projectId),
+      // A child runs at most at its parent's live level, so a runtime whose
+      // Octant tools are `mixed` is offered to a Full access parent only.
+      listTargets: () => agentRunTargetsFor(input.projectId, parentExecutionPolicy()).targets,
+      listUnavailableTargets: () =>
+        agentRunTargetsFor(input.projectId, parentExecutionPolicy()).unavailable,
       projectId: input.projectId,
       remote: remoteDelegation,
       routing: {
@@ -1302,18 +1382,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           { runningWorkTurnAccess, codeParentActiveTurn },
           input.parentThreadId,
         ) && !threadStandingAnswers.covers(input.parentThreadId, "delegation", true),
-      ...(input.ask === undefined
-        ? {}
-        : {
-            askMarkedDelegation: async () => {
-              const answer = await input.ask?.(
-                "Let this thread start helper agents? It has read outside content (a helper's reply counts), which may be steering what it asks a helper to do. Approving covers this thread's later helpers.",
-              );
-              if (answer !== "approved") return false;
-              threadStandingAnswers.record(input.parentThreadId, "delegation", true);
-              return true;
-            },
-          }),
+      ...(askMarkedDelegation === undefined ? {} : { askMarkedDelegation }),
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,
@@ -1329,10 +1398,26 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         ),
       uuid: randomUUID,
     });
+  };
+  // A child can be stopped only through the turn that is running now, by a
+  // runtime that stops one child alone, and only a child of that turn's own
+  // session.
+  const stoppableByLiveTurn =
+    (threadId: string) =>
+    (child: ProviderChildObservation): boolean => {
+      const live = liveTurns.connection(threadId);
+      return (
+        live?.connection.stopChildAgent !== undefined &&
+        String(live.providerInstanceId) === String(child.providerInstanceId) &&
+        String(live.sessionId) === String(child.sessionId)
+      );
+    };
   // The routes are built where they are dispatched, with the Canvas snapshot
   // the Canvas area provides.
   const agentRunRouteDependencies: Omit<AgentRunRouteDependencies, "snapshotCanvas"> = {
+    liveTurnConnection: (threadId) => liveTurns.connection(threadId),
     readObservations: ({ parentThreadId }) => {
+      const stoppable = stoppableByLiveTurn(String(parentThreadId));
       const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
       const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
       const code = persistence.readCodeThread(decodeCodeThreadId(String(parentThreadId)));
@@ -1343,6 +1428,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const view = persistence.readChatThreadView(chat.id);
         return observedChildren({
           parentThreadId,
+          stoppable,
           mode: "chat",
           states:
             view?.turns
@@ -1359,6 +1445,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const turns = workTurnProjection.listForThread(work.id);
         return observedChildren({
           parentThreadId,
+          stoppable,
           mode: "work",
           states: turns
             .slice(-64)
@@ -1373,6 +1460,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       );
       return observedChildren({
         parentThreadId,
+        stoppable,
         mode: "code",
         truncated: history.status !== "ok",
         events:
@@ -1386,11 +1474,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       });
     },
     listTargets: (parent) =>
-      agentRunEligibleTargets(
+      agentRunTargetsFor(
         parent.parentRoute.projectId === undefined
           ? undefined
           : decodeProjectId(parent.parentRoute.projectId),
-      ),
+        parent.liveAuthority.executionPolicy,
+      ).targets,
     onExecutionAccepted: onAgentRunExecutionAccepted,
     windowAuthorityStore,
     persistence: agentRunPersistence,

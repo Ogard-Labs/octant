@@ -60,6 +60,12 @@ import {
   type PendingChatPurge,
   type ProjectedChatContent,
 } from "./chatPersistenceSchema";
+import {
+  AGENT_RESULT_STEERED,
+  AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+  agentResultSteeredFrom,
+  withAgentResultSteered,
+} from "../agentRun/agentResultSteeredRecord";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadToolCallRecords } from "./threadToolCallRecordStore";
 import { purgeContextSubjectContent } from "./contextProjection";
@@ -105,6 +111,7 @@ const chatEventNames = new Set([
   "thread.follow-up-updated@1",
   "chat.deletion-requested@1",
   "chat.deleted@1",
+  AGENT_RESULT_STEERED,
 ]);
 
 export class ChatProjection implements Projection {
@@ -179,7 +186,39 @@ export class ChatProjection implements Projection {
       case "chat.deleted@1":
         this.#applyDeleted(connection, event);
         return;
+      case AGENT_RESULT_STEERED:
+        this.#applyAgentResultSteered(connection, event);
+        return;
     }
+  }
+
+  /**
+   * A finished child's result the host steered into a running Chat turn. The
+   * record is its own aggregate and names the turn, so the turn row takes it
+   * without its version moving; a record for another mode's thread names no
+   * Chat turn and changes nothing, and replay finds the delivery already shown.
+   */
+  #applyAgentResultSteered(connection: SqliteConnection, event: EventEnvelope): void {
+    assertEnvelope(event.aggregateType === AGENT_RESULT_STEERING_AGGREGATE_TYPE);
+    const record = agentResultSteeredFrom(event);
+    if (record === undefined) return;
+    const row = connection
+      .prepare("SELECT turn_json FROM chat_turn_projection WHERE turn_id = ? AND thread_id = ?")
+      .get(record.turnKey, String(record.threadId)) as { readonly turn_json: string } | undefined;
+    if (row === undefined) return;
+    const turn = decodeChatTurn(JSON.parse(row.turn_json));
+    const steeredResults = withAgentResultSteered(turn.steeredResults, record);
+    if (steeredResults === turn.steeredResults) return;
+    connection
+      .prepare(
+        "UPDATE chat_turn_projection SET turn_json = ?, last_sequence = ? WHERE turn_id = ? AND thread_id = ?",
+      )
+      .run(
+        JSON.stringify({ ...turn, steeredResults }),
+        event.globalSequence,
+        record.turnKey,
+        String(record.threadId),
+      );
   }
 
   #applySettings(connection: SqliteConnection, event: EventEnvelope): void {
@@ -1174,6 +1213,11 @@ function readChatContentBodies(
       if (attempt.researchRef !== undefined) {
         contentIds.add(String(attempt.researchRef.contentId));
       }
+      // The words Sees images wrote for the turn's images, read back into
+      // a later turn's history.
+      for (const image of attempt.describedImages ?? []) {
+        contentIds.add(String(image.description.contentId));
+      }
     }
   }
   for (const citation of citations) {
@@ -1576,6 +1620,14 @@ function hydrateThreadUsageResume(connection: SqliteConnection, thread: ChatThre
  * activity cannot be read from its own row; it takes the fold over the thread.
  * A rewound turn is marked on its own row but takes part in the same fold.
  */
+/** The turns a Chat thread shows: not superseded by an edit, not rewound. */
+export function readActiveChatTurnIds(
+  connection: SqliteConnection,
+  threadId: string,
+): ReadonlyArray<string> {
+  return readTurnIds(connection, threadId).active;
+}
+
 function readTurnIds(
   connection: SqliteConnection,
   threadId: string,

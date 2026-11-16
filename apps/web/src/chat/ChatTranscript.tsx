@@ -1,4 +1,5 @@
 import { AgentTurnSender, useAgentTurnSenders } from "../agentAccess/agentThreadAttribution";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { useRetainQuestionnaireDrafts } from "../transcript/questionnaireDrafts";
 import { ConversationInputs } from "../continuity/ConversationInputs";
 import { QuestionnaireSummary } from "../transcript/QuestionnaireCard";
@@ -48,7 +49,7 @@ import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { followSelectionWithin } from "../transcript/selectionOwner";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import {
   LoadEarlierMessages,
@@ -651,6 +652,10 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 />
               ))}
             </TurnActionMenu>
+            <SteeredChildResults
+              providerGroups={props.providerGroups}
+              steered={turn.steeredResults}
+            />
             <SideTaskInline
               last={detached === undefined && String(turn.id) === String(turns.at(-1)?.id)}
               loadedTurnIds={loadedTurnIds}
@@ -902,6 +907,14 @@ const AttemptBlock = memo(function AttemptBlock(props: {
       {handoff === undefined ? null : (
         <OctantSeparatorWithLabel aria-label={handoff}>{handoff}</OctantSeparatorWithLabel>
       )}
+      <DescribedImagesNote
+        className="chat-transcript__handoff"
+        images={props.attempt.describedImages?.map((image) => ({
+          attachmentId: String(image.attachmentId),
+          name: image.name,
+          describedBy: image.describedBy,
+        }))}
+      />
       {props.attempt.inputReceipt === undefined ? null : (
         <ConversationInputs
           mode="chat"
@@ -1235,7 +1248,8 @@ function CitationList(props: { readonly citations: ChatThreadView["citations"] }
   return (
     <ul aria-label="Sources" className="chat-transcript__citations">
       {props.citations.map((citation) => {
-        const backend = citation.backend === "searxng" ? "SearXNG" : "Provider-native";
+        // `searxng` is the wire value of Octant's own search, whatever backend answered.
+        const backend = citation.backend === "searxng" ? "Octant web search" : "Provider-native";
         const label = `${citation.sourceTitle} · ${backend}`;
         const sourceUrl = safeCitationUrl(citation.sourceUrl);
         return (

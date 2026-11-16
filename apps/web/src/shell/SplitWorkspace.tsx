@@ -85,6 +85,12 @@ export interface SplitWorkspaceProps {
    * nothing for a surface with no thread items.
    */
   readonly threadMenuItems?: (surface: WorkspaceTab) => React.ReactNode;
+  /**
+   * Controls a surface's own thread puts in the pane's header, beside its
+   * title: a coordinator's Workers button, or a worker's way back to its
+   * coordinator. Answers nothing for a surface with no such controls.
+   */
+  readonly threadHeader?: (surface: WorkspaceTab) => React.ReactNode;
   /** Provider identity for thread-owned surfaces, used by the pane's content tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /**
@@ -838,6 +844,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   </OctantTabsList>
                 </OctantTabs>
               ) : null}
+              {props.threadHeader?.(surface)}
               <span
                 aria-hidden="true"
                 className="workspace-pane__window-drag-space window-drag-region"

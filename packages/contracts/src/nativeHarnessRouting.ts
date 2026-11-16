@@ -35,6 +35,8 @@ export const NATIVE_HARNESS_BUILT_IN_SLOT_IDS = [
   "smol",
   "vision",
   "advisor",
+  "quick",
+  "deep",
 ] as const;
 
 export const NativeHarnessSlotId = Schema.NonEmptyTrimmedString.pipe(
@@ -53,6 +55,8 @@ export const NATIVE_HARNESS_BUILT_IN_SLOTS = {
   smol: slotId("smol"),
   vision: slotId("vision"),
   advisor: slotId("advisor"),
+  quick: slotId("quick"),
+  deep: slotId("deep"),
 } as const satisfies Record<(typeof NATIVE_HARNESS_BUILT_IN_SLOT_IDS)[number], NativeHarnessSlotId>;
 
 /**
@@ -97,6 +101,15 @@ function uniqueCandidates(candidates: ReadonlyArray<NativeHarnessSlotCandidate>)
  * failure fallbacks. `overflowPromotion` is the one explicitly configured
  * larger-context model an oversized request promotes to; it is never walked by
  * the failure chain, because same-sized siblings fail an overflow identically.
+ *
+ * Two person-set flags ride with the role. `askBeforeUsing` (absent = off)
+ * turns a start in this role into a proposal the person approves.
+ * `continueOnFallback` (absent = on) lets a thread with this role carry on
+ * with the next model when its own stops. A coordinator worker's start reads
+ * `askBeforeUsing`, and a running worker whose model stops reads
+ * `continueOnFallback`; the harness resolver reads neither. Absent means the
+ * default, so settings
+ * stored before the flags existed decode unchanged.
  */
 export const NativeHarnessSlot = Schema.Struct({
   id: NativeHarnessSlotId,
@@ -106,6 +119,8 @@ export const NativeHarnessSlot = Schema.Struct({
     Schema.filter(uniqueCandidates),
   ),
   overflowPromotion: Schema.optional(NativeHarnessSlotCandidate),
+  askBeforeUsing: Schema.optional(Schema.Boolean),
+  continueOnFallback: Schema.optional(Schema.Boolean),
 })
   .annotations(strict)
   // A promotion target that already sits in the chain has the same window as
@@ -168,7 +183,12 @@ export const DEFAULT_NATIVE_HARNESS_JOB_SLOTS: ReadonlyArray<NativeHarnessJobSlo
   { job: "custom", slotId: NATIVE_HARNESS_BUILT_IN_SLOTS.default },
 ];
 
-/** The host default. A Project override may narrow it but never exceed it. */
+/**
+ * The host default. A Project override may narrow it but never exceed it.
+ *
+ * A Project override is per role: a slot the override lists replaces the
+ * host's slot for that role, and a role it does not list uses the host's.
+ */
 export const NativeHarnessRoutingSettings = Schema.Struct({
   configuration: NativeHarnessRoutingConfiguration,
   version: AggregateVersion,
@@ -250,9 +270,22 @@ export const NativeHarnessRouteFailureReason = Schema.Literal(
 );
 export type NativeHarnessRouteFailureReason = typeof NativeHarnessRouteFailureReason.Type;
 
+/**
+ * Why the harness skipped a role's candidate. A role may hold any connected
+ * provider's model, because coordinator workers run as ordinary Code threads;
+ * the harness runs only its own endpoints, so it steps past the rest with
+ * `not-harness-runnable` and never runs them itself.
+ */
+export const NativeHarnessCandidateRejectionReason = Schema.Union(
+  MultiModelCandidateRejectionReason,
+  Schema.Literal("not-harness-runnable"),
+);
+export type NativeHarnessCandidateRejectionReason =
+  typeof NativeHarnessCandidateRejectionReason.Type;
+
 export const NativeHarnessRejectedCandidate = Schema.Struct({
   candidate: NativeHarnessSlotCandidate,
-  reasons: Schema.Array(MultiModelCandidateRejectionReason).pipe(Schema.minItems(1)),
+  reasons: Schema.Array(NativeHarnessCandidateRejectionReason).pipe(Schema.minItems(1)),
 }).annotations(strict);
 export type NativeHarnessRejectedCandidate = typeof NativeHarnessRejectedCandidate.Type;
 

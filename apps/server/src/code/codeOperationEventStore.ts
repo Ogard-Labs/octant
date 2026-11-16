@@ -17,6 +17,7 @@ import {
   decodeCodeConversationWindowRequest,
   decodeCodeOperationId,
   decodeCodeThreadId,
+  type CodeAttachmentReference,
   type CodeOperationEvent,
   type EventEnvelope,
   type CodeConversationPage,
@@ -33,8 +34,14 @@ import {
   type CodeThreadId,
   type ProviderContextBreakdown,
   type ProviderInstanceId,
+  type ProviderResumeCursor,
   type ProviderSessionId,
 } from "@octant/contracts";
+import type { AgentResultSteered } from "@octant/contracts";
+import {
+  agentResultsSteeredInto,
+  readAgentResultsSteered,
+} from "../agentRun/agentResultSteeredRecord";
 import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -128,6 +135,9 @@ export interface ReplayCodeOperationEventsInput {
 const MAX_FORK_CONTEXT_MERGE_RECORDS = 1_000;
 /** One read's worth of session records; a thread with more is refused, not truncated. */
 const MAX_SESSION_READY_RECORDS = 1_000;
+/** A native anchor is looked for this far back in a thread, then given up on. */
+const ANCHOR_PAGE_SIZE = 500;
+const MAX_ANCHOR_PAGES = 20;
 
 export interface ReadCodeConversationInput {
   readonly threadId: CodeThreadId;
@@ -576,6 +586,110 @@ export class CodeOperationEventStore {
   }
 
   /**
+   * Where one completed turn ends in its runtime's own session: the session
+   * its `provider-session-ready` recorded and the anchor its provider
+   * completion carried. Undefined for a turn that recorded either one
+   * nothing (older turns, a runtime that names no anchor, a turn that did not
+   * complete), or when the records do not decode, so a fork or rewind goes
+   * back with a text handoff instead.
+   */
+  nativeTurnAnchor(
+    threadId: CodeThreadId,
+    operationId: CodeOperationId,
+  ):
+    | {
+        readonly providerInstanceId: ProviderInstanceId;
+        readonly resumeCursor: ProviderResumeCursor;
+        readonly anchor: string;
+      }
+    | undefined {
+    try {
+      const find = (kind: string, matches: (event: CodeOperationEvent) => boolean) => {
+        let before: number | undefined;
+        for (let page = 0; page < MAX_ANCHOR_PAGES; page += 1) {
+          const envelopes = this.#journal.latestThreadEvents({
+            aggregateType: "code-operation",
+            threadId: String(threadId),
+            kind,
+            limit: ANCHOR_PAGE_SIZE,
+            ...(before === undefined ? {} : { beforeSequence: before }),
+          });
+          for (const envelope of envelopes) {
+            before = envelope.globalSequence;
+            if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+              continue;
+            const frame = decodeCodeOperationEventFrame(envelope.payload);
+            if (
+              String(frame.threadId) === String(threadId) &&
+              String(frame.operationId) === String(operationId) &&
+              matches(frame.event)
+            )
+              return frame.event;
+          }
+          if (envelopes.length < ANCHOR_PAGE_SIZE) return undefined;
+        }
+        return undefined;
+      };
+      const completed = find(
+        "operation-state",
+        (event) =>
+          event.kind === "operation-state" &&
+          event.state === "completed" &&
+          event.nativeAnchor !== undefined,
+      );
+      const ready = find(
+        "provider-session-ready",
+        (event) => event.kind === "provider-session-ready",
+      );
+      if (
+        completed?.kind !== "operation-state" ||
+        completed.nativeAnchor === undefined ||
+        ready?.kind !== "provider-session-ready" ||
+        ready.resumeCursor === undefined
+      )
+        return undefined;
+      return {
+        providerInstanceId: ready.providerInstanceId,
+        resumeCursor: ready.resumeCursor,
+        anchor: completed.nativeAnchor,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The session begun outside Octant that the thread was started from, as
+   * its adoption journaled it. Undefined for any other thread, or when the
+   * record does not decode.
+   */
+  adoptedNativeSession(
+    threadId: CodeThreadId,
+  ): Extract<CodeOperationEvent, { readonly kind: "native-session-adopted" }> | undefined {
+    try {
+      const envelope = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "native-session-adopted",
+        limit: 1,
+      })[0];
+      if (
+        envelope === undefined ||
+        envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
+        envelope.eventVersion !== 1
+      )
+        return undefined;
+      const frame = decodeCodeOperationEventFrame(envelope.payload);
+      return String(frame.threadId) === String(threadId) &&
+        frame.event.kind === "native-session-adopted"
+        ? frame.event
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * The provider session the thread's newest turn ran on, as its
    * `provider-session-ready` recorded it. A running turn records it before its
    * first message is sent. Undefined when none was recorded or the record does
@@ -721,6 +835,38 @@ export class CodeOperationEventStore {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * One image a recent turn of this thread sent, by its attachment id, as
+   * the turn's start recorded it. Undefined for an id no recent turn of this
+   * thread names, so another thread's image is never reached by id.
+   */
+  turnAttachmentOfThread(
+    threadId: CodeThreadId,
+    attachmentId: string,
+  ): CodeAttachmentReference | undefined {
+    try {
+      for (const envelope of this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: 256,
+      })) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1)
+          continue;
+        const frame = decodeCodeOperationEventFrame(envelope.payload);
+        if (String(frame.threadId) !== String(threadId)) continue;
+        if (frame.event.kind !== "conversation-turn-started") continue;
+        const found = frame.event.attachments?.find(
+          (attachment) => String(attachment.attachmentId) === attachmentId,
+        );
+        if (found !== undefined) return found;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -1237,10 +1383,11 @@ export class CodeOperationEventStore {
       .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
       .map((entry) => entry.limit);
 
+    const steered = turns.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
     return decodeCodeConversationPage({
       version: 3,
       threadId,
-      turns: turns.map(finishTurn),
+      turns: turns.map((builder) => withSteeredResults(finishTurn(builder), steered)),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
@@ -1448,9 +1595,10 @@ export class CodeOperationEventStore {
     const turns: Array<CodeConversationTurn> = [];
     let bytes = 0;
     let included = 0;
+    const steered = starts.length === 0 ? [] : readAgentResultsSteered(this.#journal, threadId);
     for (const { envelope, builder } of starts.slice(0, request.limit)) {
       this.#foldTurn(envelope, builder, decode);
-      const turn = finishTurn(builder);
+      const turn = withSteeredResults(finishTurn(builder), steered);
       const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
       if (included > 0 && bytes + size > CODE_CONVERSATION_WINDOW_BYTES) break;
       bytes += size;
@@ -1754,6 +1902,10 @@ function foldTurnFrame(
   } else if (frame.event.kind === "operation-result") {
     if (frame.event.result.kind === "provider-turn-state") {
       builder.status = conversationStatus(frame.event.result.state);
+      // A turn the provider stopped at a usage limit waits with the limit on
+      // this result; no operation-state frame carries it, so a reader of the
+      // conversation alone (the phone) could not tell the turn may resume.
+      if (frame.event.result.failure !== undefined) builder.failure = frame.event.result.failure;
     } else if (frame.event.result.kind === "operation-failed") {
       builder.status = "failed";
       builder.failure = frame.event.result.failure;
@@ -1807,6 +1959,16 @@ function startTurn(
     ...(frame.event.executionPolicy === undefined
       ? {}
       : { executionPolicy: frame.event.executionPolicy }),
+    // Who described each image is shown; the words stay in the content store.
+    ...(frame.event.describedImages === undefined
+      ? {}
+      : {
+          describedImages: frame.event.describedImages.map((image) => ({
+            attachmentId: String(image.attachmentId),
+            name: image.name,
+            describedBy: image.describedBy,
+          })),
+        }),
     assistant: [],
     forkMergeBacks: [],
     steps: [],
@@ -1815,6 +1977,19 @@ function startTurn(
     startedAt: frame.occurredAt,
     updatedAt: frame.occurredAt,
   };
+}
+
+/**
+ * The turn with the children's results the host steered into it while it ran.
+ * Those records are journaled apart from the turn's own operation, so its
+ * writers never contend with them, and are read beside the turn.
+ */
+function withSteeredResults(
+  turn: CodeConversationTurn,
+  records: ReadonlyArray<AgentResultSteered>,
+): CodeConversationTurn {
+  const steeredResults = agentResultsSteeredInto(records, String(turn.operationId));
+  return steeredResults.length === 0 ? turn : { ...turn, steeredResults };
 }
 
 /** The turn as a page or a window carries it. */
@@ -1911,6 +2086,7 @@ type CodeConversationBuilder = {
   reviewFindingReferences?: CodeConversationTurn["reviewFindingReferences"];
   checkpoint?: CodeConversationTurn["checkpoint"];
   executionPolicy?: CodeConversationTurn["executionPolicy"];
+  describedImages?: CodeConversationTurn["describedImages"];
   usage?: CodeConversationTurn["usage"];
   handoff?: CodeConversationTurn["handoff"];
   forkMergeBacks: Array<CodeForkMergeBack>;

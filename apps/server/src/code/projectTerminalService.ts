@@ -36,7 +36,7 @@ import { projectExtraFolderRoots } from "@octant/domain";
 import type { Journal } from "../persistence/journal";
 import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
 import { ProcessConfinementError } from "../process/seatbeltProfile";
-import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
 import type { WorktreePreparationService } from "./worktreePreparationService";
@@ -139,7 +139,8 @@ export interface ProjectTerminalServiceOptions {
   readonly actor: EventActorValue;
   readonly uuid: () => string;
   readonly clock: () => string;
-  readonly shell?: string;
+  /** The shell a local Project terminal opens, read as each one starts. */
+  readonly shell?: () => string;
   /**
    * A Work or Code Project on a registered server, which the local catalog never
    * holds. Absent for every local Project.
@@ -157,7 +158,8 @@ export interface ServerProjectTerminalTarget {
   /** Derived from the Project, server, and folder, so a rebound Project ends its shells. */
   readonly bindingRevisionId: BindingRevisionId;
   /** The login now, or undefined once its server left the registry. */
-  readonly login: () => ServerTerminalLogin | undefined;
+  /** Or the host's refusal for the server now, such as a suspended machine. */
+  readonly login: () => ServerTerminalLogin | ServerTerminalRefusal | undefined;
 }
 
 interface Owner {
@@ -728,6 +730,10 @@ export class ProjectTerminalService {
             authority.project.codeAccessPersistence === "project-default"
           ? "full-access"
           : "approval-gated";
+    // A Project action is written for a POSIX shell (`cd '…' && { … }`), which
+    // a Windows terminal never opens; refused before it is journaled.
+    if (action !== undefined && process.platform === "win32")
+      return refused("unavailable", "Project actions do not run on Windows yet.");
     if (action !== undefined) {
       try {
         this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
@@ -771,7 +777,7 @@ export class ProjectTerminalService {
                 );
               },
             }),
-        shell: this.#options.shell ?? defaultTerminalShell(),
+        shell: this.#options.shell?.() ?? defaultTerminalShell(),
         cwd: folder,
         // Every folder of the Project is bound like the main one, so the
         // shell can move between them; the pick only chooses where it starts.
@@ -860,6 +866,7 @@ export class ProjectTerminalService {
         "This Project's server is not registered. Register it again in Settings › Permissions › Servers.",
       );
     }
+    if ("kind" in login) return refused("unavailable", login.message);
     if (work)
       this.#startingServerWork.set(String(command.terminalId), {
         windowId,

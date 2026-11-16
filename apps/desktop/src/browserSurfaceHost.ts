@@ -73,6 +73,11 @@ import {
   MAX_BROWSER_SNAPSHOT_REFS,
   originAllowed as sameSiteOriginAllowed,
   readBrowserPage,
+  readBrowserPageTools,
+  BROWSER_PAGE_TOOLS_LIST_REQUEST,
+  browserPageToolCallRequest,
+  type BrowserPageToolsRequest,
+  type BrowserPageToolsResult,
   readFramedBrowserSnapshot,
   resolveBrowserElement,
   splitBrowserFrameTarget,
@@ -644,6 +649,7 @@ const SETTLING_ACTIONS: ReadonlySet<string> = new Set([
   "drag",
   "upload",
   "resize",
+  "page-tool-call",
 ]);
 
 /** What the server asks a page to do; it carries no authority of its own. */
@@ -670,6 +676,7 @@ export type BrowserSurfaceAction = Pick<BrowserActionRequest, "kind"> &
       | "diagnosticsWarnings"
       | "auditKind"
       | "dialog"
+      | "pageTool"
     >
   > & {
     /**
@@ -737,6 +744,10 @@ export interface BrowserSurfaceRuntimeObservation {
   }>;
   /** Only an audit fills this: what the fixed reader measured; the server shapes it. */
   readonly audit?: BrowserPageAuditReading;
+  /** Only a `page-tools` read fills this: the page's declaration; the server bounds it. */
+  readonly pageTools?: unknown;
+  /** Only a `page-tool-call` fills this: what the call did in the page. */
+  readonly pageToolCall?: BrowserPageToolsResult;
   /** Only a `record-stop` fills this: the recording that ended, as the server reads it. */
   readonly recording?:
     | {
@@ -3015,6 +3026,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             // stop's animation is never handed back.
             const recording =
               request.kind === "record-stop" ? await finishRecording(owned) : undefined;
+            let pageToolCall: BrowserPageToolsResult | undefined;
             // Reading or driving a page is authorized by the origin approval put
             // on this context, and the page in front is not always one approval
             // covered: the person can take their own view somewhere else, and
@@ -3214,6 +3226,32 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
                     : { title: contents.getTitle().slice(0, 1_024) }),
                   audit: await auditOf(contentsView(owned), request.auditKind),
                 };
+              case "page-tools":
+                // A read like an audit: the page's declared forms, nothing filled.
+                refuseUnapprovedPage(owned, contents);
+                return {
+                  ...(contents.getURL() === ""
+                    ? {}
+                    : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
+                  ...(contents.getTitle() === ""
+                    ? {}
+                    : { title: contents.getTitle().slice(0, 1_024) }),
+                  pageTools: await readPageTools(
+                    contentsView(owned),
+                    BROWSER_PAGE_TOOLS_LIST_REQUEST,
+                  ),
+                };
+              case "page-tool-call": {
+                if (request.pageTool === undefined) {
+                  throw new Error("A page tool call names the tool it calls.");
+                }
+                const called = await readPageTools(
+                  contentsView(owned),
+                  browserPageToolCallRequest(request.pageTool),
+                );
+                pageToolCall = called.mode === "call" ? called : undefined;
+                break;
+              }
               case "close-tab":
                 await contents.loadURL("about:blank");
                 break;
@@ -3276,6 +3314,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ...(viewport === undefined ? {} : { viewport }),
               ...(emulation === undefined ? {} : { emulation }),
               ...(recording === undefined ? {} : { recording }),
+              ...(pageToolCall === undefined ? {} : { pageToolCall }),
             };
           })();
           if (
@@ -4022,6 +4061,27 @@ async function readPage(
     throw new Error("Browser page read returned nothing.");
   }
   return result as BrowserPageReadResult;
+}
+
+/**
+ * Read or call the tools the page in front declares, in the isolated world,
+ * where a page's own scripts cannot replace the reader. A call fills the
+ * form's fields and submits it there, which the page's handlers see as
+ * ordinary DOM events.
+ */
+async function readPageTools(
+  view: BrowserSurfaceViewPort,
+  request: BrowserPageToolsRequest,
+): Promise<BrowserPageToolsResult> {
+  const result = await execute(
+    view,
+    `(${readBrowserPageTools.toString()})(${JSON.stringify(request)})`,
+    true,
+  );
+  if (typeof result !== "object" || result === null || !("mode" in result)) {
+    throw new Error("Browser page tools read returned nothing.");
+  }
+  return result as BrowserPageToolsResult;
 }
 
 /** The page outline and what each of its refs names, under the context's protection. */

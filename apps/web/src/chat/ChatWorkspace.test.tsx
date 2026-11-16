@@ -945,6 +945,36 @@ describe("ChatWorkspace", () => {
     expect(await screen.findByText("Replacement guide")).toBeVisible();
   });
 
+  it("tells the host which Chat thread is composing, so the # list holds only what its own Project reaches", async () => {
+    const user = userEvent.setup();
+    const search = vi.fn(
+      async (..._args: ReadonlyArray<unknown>): Promise<ReadonlyArray<never>> => [],
+    );
+    const threadMentionClient = {
+      search,
+      searchThread: vi.fn(async () => []),
+      resolve: vi.fn(async () => ({ mentions: [], unavailable: [] })),
+      openSideChat: vi.fn(),
+      execute: vi.fn(),
+    } as unknown as ThreadMentionClient;
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({ pendingDraft: draft, setPendingDraft: setDraft })}
+          providerSnapshot={providerSnapshot()}
+          threadMentionClient={threadMentionClient}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "#plan");
+
+    await waitFor(() => expect(search).toHaveBeenCalled());
+    expect(search.mock.calls.at(-1)?.[3]).toBe(threadId);
+  });
+
   it("does not remove a thread mention re-added while the send is in flight", async () => {
     const user = userEvent.setup();
     let finish: ((value: boolean) => void) | undefined;

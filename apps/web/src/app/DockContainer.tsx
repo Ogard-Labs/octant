@@ -25,6 +25,7 @@ import { composerContextOccupancy } from "../context/ComposerContextMeter";
 import type { ComposerContextMeterProvider } from "../context/composerContextMeterScope";
 import { ProjectReviewModule as DockProjectPullRequestReviewTool } from "../dockModules/ProjectReviewModule";
 import type { AgentResultReviewRequest } from "../gitHistory/SavedAgentReview";
+import { modelDisplayName } from "../providers/providerModelLabel";
 import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { DockBrowserCard } from "../shell/DockBrowserCard";
@@ -296,8 +297,11 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   const codeProjectThreads = navigation.codeProjectThreads;
   const coordinatorThreadId = dockThread?.mode === "code" ? dockThread.threadId : undefined;
   const coordinatorWorkers = useMemo(
-    () => coordinatorWorkersOf(codeProjectThreads, coordinatorThreadId),
-    [codeProjectThreads, coordinatorThreadId],
+    () =>
+      coordinatorWorkersOf(codeProjectThreads, coordinatorThreadId, (worker) =>
+        modelDisplayName(codeProviderGroups, worker),
+      ),
+    [codeProjectThreads, coordinatorThreadId, codeProviderGroups],
   );
 
   function threadUtility(surface: RightUtilityDockSurfaceId, utilityTab?: ThreadUtilityDockTab) {

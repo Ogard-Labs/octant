@@ -4,7 +4,11 @@ import {
   decodeUtcTimestamp,
   type CodeOperationEvent,
 } from "@octant/contracts";
-import { EMPTY_TURN_ACTIVITY, activeRowCount } from "../transcript/turnActivity";
+import {
+  EMPTY_TURN_ACTIVITY,
+  activeRowCount,
+  settledTurnActivitySummary,
+} from "../transcript/turnActivity";
 import { appendReasoning, applyActivityEvent, liveTaskProgress } from "./transcriptActivity";
 
 function tool(state: "started" | "running" | "completed" | "failed"): CodeOperationEvent {
@@ -39,6 +43,24 @@ describe("Octant Shield in a Code turn's activity", () => {
     expect(twice.rows[0]).toMatchObject({ kind: "review", summary: "edit: src/a.ts", decision });
     expect(new Set(twice.rows.map((row) => row.id)).size).toBe(2);
     expect(activeRowCount(twice)).toBe(0);
+  });
+});
+
+describe("A runtime's own turns in a Code turn's activity", () => {
+  it("says how often the runtime continued the turn after background work", () => {
+    const continued = decodeCodeOperationEvent({
+      kind: "runtime-turn-started",
+      trigger: "background-task",
+    });
+    const once = applyActivityEvent(
+      applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("completed")),
+      continued,
+    );
+    expect(settledTurnActivitySummary(once)).toBe("1 tool call · Continued after background work");
+    expect(settledTurnActivitySummary(applyActivityEvent(once, continued))).toBe(
+      "1 tool call · Continued 2 times after background work",
+    );
+    expect(settledTurnActivitySummary(EMPTY_TURN_ACTIVITY)).toBe("");
   });
 });
 

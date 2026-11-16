@@ -1,5 +1,6 @@
 import {
   MAX_THREAD_TOOL_STEP_SUMMARY_BYTES,
+  RUNTIME_EVENTS_PER_TOOL_STEP,
   type ProviderRuntimeEvent,
   type ShieldDecision,
   type ThreadRoutineReceipt,
@@ -33,6 +34,15 @@ export function threadToolStepLimit(input: {
   return input.settings.fullAccessToolStepsPerTurn === 0
     ? undefined
     : input.settings.fullAccessToolStepsPerTurn;
+}
+
+/**
+ * The discrete runtime events a turn handles before the host stops it, read
+ * from the same tool-step limit: `undefined`, no stop, when the limit is off,
+ * so no fixed ceiling ends a turn the person did not choose to bound.
+ */
+export function turnRuntimeEventBudget(stepLimit: number | undefined): number | undefined {
+  return stepLimit === undefined ? undefined : stepLimit * RUNTIME_EVENTS_PER_TOOL_STEP;
 }
 
 /** Whether a call with no step yet has no room under the turn's limit. */

@@ -1,5 +1,12 @@
 import { decodeHostAnswer } from "@octant/contracts";
-import { TodoListView, TodoResult, type TodoCommand } from "@octant/contracts/todos";
+import {
+  TodoListHostResult,
+  TodoListHostView,
+  TodoListView,
+  TodoResult,
+  type TodoCommand,
+  type TodoListHostCommand,
+} from "@octant/contracts/todos";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface TodoClientOptions {
@@ -23,9 +30,45 @@ export interface TodoClient {
   change(command: TodoCommand, signal?: AbortSignal): Promise<TodoResult>;
 }
 
-export function createTodoClient(options: TodoClientOptions): TodoClient {
+/** Which host keeps the list: this host's own windows read and set it. */
+export interface TodoListHostClient {
+  readListHost(signal?: AbortSignal): Promise<TodoListHostView>;
+  chooseListHost(command: TodoListHostCommand, signal?: AbortSignal): Promise<TodoListHostResult>;
+}
+
+export function createTodoClient(options: TodoClientOptions): TodoClient & TodoListHostClient {
   const fetch = bindFetchPort(options.fetch);
   return {
+    async readListHost(signal) {
+      const body = await send(
+        fetch,
+        new URL("/api/todos/list-host", options.baseUrl).toString(),
+        {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          ...(signal === undefined ? {} : { signal }),
+        },
+        "Where the to-do list is kept could not be read.",
+      );
+      return decodeHostAnswer(TodoListHostView)(body);
+    },
+    async chooseListHost(command, signal) {
+      const body = await send(
+        fetch,
+        new URL("/api/todos/list-host", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: {
+            "x-octant-window-capability": options.windowCapability,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(command),
+          ...(signal === undefined ? {} : { signal }),
+        },
+        "Where the to-do list is kept could not be changed.",
+      );
+      return decodeHostAnswer(TodoListHostResult)(body);
+    },
     async read(signal) {
       const body = await send(
         fetch,

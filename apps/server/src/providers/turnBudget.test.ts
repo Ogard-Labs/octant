@@ -2,7 +2,9 @@ import { decodeProviderRuntimeEvent, type ProviderRuntimeEvent } from "@octant/c
 import { Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
+  MAX_REMEMBERED_ANSWERED_REQUESTS,
   makeEventLoopShare,
   makeIdleTimeout,
   makeTurnTextParagraphs,
@@ -32,6 +34,19 @@ function answerText(events: ReadonlyArray<Record<string, unknown>>): string {
 }
 
 describe("turn budget", () => {
+  it("refuses a repeated answer and forgets only the oldest answers past its bound", () => {
+    const answered = new AnsweredRequests();
+    expect(answered.answer("first")).toBe(true);
+    expect(answered.answer("first")).toBe(false);
+    for (let index = 0; index < MAX_REMEMBERED_ANSWERED_REQUESTS; index += 1) {
+      answered.answer(`request-${index}`);
+    }
+    expect(answered.count).toBe(MAX_REMEMBERED_ANSWERED_REQUESTS + 1);
+    // The newest are still refused; the oldest was forgotten.
+    expect(answered.answer(`request-${MAX_REMEMBERED_ANSWERED_REQUESTS - 1}`)).toBe(false);
+    expect(answered.answer("first")).toBe(true);
+  });
+
   it("lets a waiting timer run once a turn has held the event loop for its slice", async () => {
     let clock = 0;
     const share = makeEventLoopShare(10, () => clock);

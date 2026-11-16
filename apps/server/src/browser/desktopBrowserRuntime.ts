@@ -441,6 +441,7 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
           ...(request.auditKind === undefined ? {} : { auditKind: request.auditKind }),
           ...(request.downloads === undefined ? {} : { downloads: request.downloads }),
           ...(request.dialog === undefined ? {} : { dialog: request.dialog }),
+          ...(request.pageTool === undefined ? {} : { pageTool: request.pageTool }),
         },
       },
       signal,

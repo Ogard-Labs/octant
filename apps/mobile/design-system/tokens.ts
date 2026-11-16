@@ -43,6 +43,8 @@ export type ThemeColors = {
   glassStroke: string;
   glassStrokeStrong: string;
   glassHighlight: string;
+  /** The chosen segment's raised thumb on a glass segmented control. */
+  glassThumb: string;
   textPrimary: string;
   textSecondary: string;
   textTertiary: string;
@@ -124,13 +126,14 @@ export const lightColors: ThemeColors = {
   atmospherePrimary: "rgba(27, 27, 27, 0.03)",
   atmosphereSecondary: "rgba(27, 27, 27, 0.02)",
   /** Translucent glass keeps a quiet neutral read over the canvas. */
-  glassFillThin: "rgba(255, 255, 255, 0.55)",
-  glassFillRegular: "rgba(255, 255, 255, 0.68)",
-  glassFillThick: "rgba(253, 253, 252, 0.82)",
-  glassFillChrome: "rgba(250, 250, 249, 0.76)",
+  glassFillThin: "rgba(255, 255, 255, 0.40)",
+  glassFillRegular: "rgba(255, 255, 255, 0.52)",
+  glassFillThick: "rgba(253, 253, 252, 0.64)",
+  glassFillChrome: "rgba(250, 250, 249, 0.58)",
   glassStroke: shared("border", "light"),
   glassStrokeStrong: shared("border-strong", "light"),
   glassHighlight: "rgba(255, 255, 255, 0.65)",
+  glassThumb: "rgba(255, 255, 255, 0.65)",
   textPrimary: shared("text-primary", "light"),
   textSecondary: shared("text-secondary", "light"),
   textTertiary: shared("text-muted", "light"),
@@ -161,8 +164,8 @@ export const lightColors: ThemeColors = {
   attention: shared("palette-blue", "light"),
   backdrop: "rgba(0, 0, 0, 0.30)",
   background: shared("workspace", "light"),
-  surface: "rgba(255, 255, 255, 0.68)",
-  surfaceElevated: "rgba(253, 253, 252, 0.82)",
+  surface: "rgba(255, 255, 255, 0.52)",
+  surfaceElevated: "rgba(253, 253, 252, 0.64)",
   border: shared("border", "light"),
   separator: shared("border-strong", "light"),
   surfaceSolid: shared("workspace", "light"),
@@ -201,13 +204,14 @@ export const darkColors: ThemeColors = {
   atmospherePrimary: "rgba(240, 240, 240, 0.03)",
   atmosphereSecondary: "rgba(240, 240, 240, 0.02)",
   /** Neutral dark glass over the application ground. */
-  glassFillThin: "rgba(35, 35, 35, 0.55)",
-  glassFillRegular: "rgba(35, 35, 35, 0.70)",
-  glassFillThick: "rgba(43, 43, 43, 0.82)",
-  glassFillChrome: "rgba(43, 43, 43, 0.76)",
+  glassFillThin: "rgba(40, 40, 44, 0.34)",
+  glassFillRegular: "rgba(40, 40, 44, 0.44)",
+  glassFillThick: "rgba(46, 46, 50, 0.56)",
+  glassFillChrome: "rgba(46, 46, 50, 0.50)",
   glassStroke: shared("border", "dark"),
   glassStrokeStrong: shared("border-strong", "dark"),
   glassHighlight: "rgba(255, 255, 255, 0.07)",
+  glassThumb: "rgba(255, 255, 255, 0.16)",
   textPrimary: shared("text-primary", "dark"),
   textSecondary: shared("text-secondary", "dark"),
   textTertiary: shared("text-muted", "dark"),
@@ -238,8 +242,8 @@ export const darkColors: ThemeColors = {
   attention: shared("palette-blue", "dark"),
   backdrop: "rgba(0, 0, 0, 0.55)",
   background: shared("workspace", "dark"),
-  surface: "rgba(35, 35, 35, 0.70)",
-  surfaceElevated: "rgba(43, 43, 43, 0.82)",
+  surface: "rgba(40, 40, 44, 0.44)",
+  surfaceElevated: "rgba(46, 46, 50, 0.56)",
   border: shared("border", "dark"),
   separator: shared("border-strong", "dark"),
   surfaceSolid: shared("floating", "dark"),

@@ -11,6 +11,7 @@ import {
   type ProjectId,
   type ThreadRetentionThreadId,
 } from "@octant/contracts";
+import { PROJECT_INSTRUCTIONS_AGGREGATE_TYPE } from "@octant/contracts/octant-instructions";
 import {
   CODE_LANGUAGE_SERVER_APPROVAL_AGGREGATE,
   CODE_LANGUAGE_SERVER_EGRESS_AGGREGATE,
@@ -213,6 +214,9 @@ const THREAD_OWNERSHIP_PATHS = [
   // these a restart replays the message and the purged thread's id back.
   "$.senderThreadId",
   "$.recipientThreadId",
+  // A wake-up is its own `thread-wakeup` aggregate; without this a purged
+  // thread's wake-ups and their prompts survive the purge.
+  "$.wakeup.threadId",
 ] as const;
 
 const CANVAS_LINK_PATHS = [
@@ -363,6 +367,11 @@ export function erasePurgedProjectData(input: {
       .get(memoryAggregate.aggregateType, memoryAggregate.aggregateId) !== undefined;
   const aggregates = new Map<string, AggregateKey>([
     [`project-memory:${projectId}`, memoryAggregate],
+    // The person's instructions for this Project go with it.
+    [
+      `${PROJECT_INSTRUCTIONS_AGGREGATE_TYPE}:${projectId}`,
+      { aggregateType: PROJECT_INSTRUCTIONS_AGGREGATE_TYPE, aggregateId: projectId },
+    ],
     [
       `${TOOL_EGRESS_PROJECT_AGGREGATE}:${projectId}`,
       { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE, aggregateId: projectId },

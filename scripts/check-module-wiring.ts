@@ -667,10 +667,6 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
-    "/api/cloud-machines",
-    "Machines in the person's own cloud account, served by the host since 2026-11-14 ahead of any target plugin or screen that calls it (docs/design/server-projects.md, slice 2). Remove once the Server Projects screen creates and controls cloud machines.",
-  ],
-  [
     "/api/code/language/documents",
     "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
   ],
@@ -749,6 +745,10 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
     "/api/v1/shares",
     "Served by the public Canvas share service (apps/share in this repository, self-hosted by each user) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
+  ],
+  [
+    "/api/command",
+    "Not served by Octant (2026-11-15): OpenCode 2's own server answers it, and the OpenCode driver in apps/server calls it to list OpenCode's commands, building the address from the runtime's server URL. The checker reads every /api path in apps/server as one Octant serves. Remove when the checker counts apps/server as a caller of a provider runtime's routes.",
   ],
 ]);
 

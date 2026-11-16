@@ -32,7 +32,7 @@ const wide = {
 };
 
 describe("native harness slots", () => {
-  it("keeps the seven built-in slot ids the jobs default onto", () => {
+  it("keeps the built-in slot ids the jobs and the Settings roles default onto", () => {
     expect([...NATIVE_HARNESS_BUILT_IN_SLOT_IDS]).toEqual([
       "default",
       "plan",
@@ -41,10 +41,29 @@ describe("native harness slots", () => {
       "smol",
       "vision",
       "advisor",
+      "quick",
+      "deep",
     ]);
     for (const id of NATIVE_HARNESS_BUILT_IN_SLOT_IDS) {
       expect(decodeNativeHarnessSlotId(id)).toBe(id);
     }
+  });
+
+  it("decodes a role stored before its flags existed and keeps the flags a person set", () => {
+    const stored = decodeNativeHarnessSlot({ id: "deep", candidates: [opus] });
+    expect(stored.askBeforeUsing).toBeUndefined();
+    expect(stored.continueOnFallback).toBeUndefined();
+    const set = decodeNativeHarnessSlot({
+      id: "deep",
+      candidates: [opus],
+      askBeforeUsing: true,
+      continueOnFallback: false,
+    });
+    expect(set.askBeforeUsing).toBe(true);
+    expect(set.continueOnFallback).toBe(false);
+    expect(() =>
+      decodeNativeHarnessSlot({ id: "deep", candidates: [opus], askBeforeUsing: "yes" }),
+    ).toThrow();
   });
 
   it("accepts a custom slot id in the same shape and refuses one that is not", () => {

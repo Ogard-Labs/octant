@@ -1,10 +1,17 @@
-name: Windows native confinement feasibility
+name: Windows native confinement
 
 on:
   pull_request:
     paths:
       - .github/workflows/windows-confinement.yml
       - scripts/windows-confinement/**
+      - apps/desktop/native/windows-confine/**
+      - apps/server/src/process/windowsConfinement*
+      - apps/server/src/process/seatbeltProfile.ts
+      - apps/server/src/process/secretGuard.ts
+      - packages/domain/src/windowsConfinementPolicy*
+      - packages/domain/src/secretGuardPolicy.ts
+      - scripts/smoke-windows-confinement.ts
   workflow_dispatch:
 
 permissions:
@@ -51,3 +58,31 @@ jobs:
           path: ${{ runner.temp }}/windows-confinement.json
           if-no-files-found: error
           retention-days: 7
+
+  launcher:
+    # The dormant launcher's real AppContainer, ACL and job evidence on a
+    # hosted runner (an administrator account). It runs no provider and
+    # admits no Windows launch: the port still refuses Windows by default.
+    name: Confine owned fixtures through the launcher
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - name: Install locked dependencies without package scripts
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build the fixed native launcher
+        shell: pwsh
+        run: |
+          cmake -S apps/desktop/native/windows-confine -B "$env:RUNNER_TEMP/confine-build" -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native configuration failed' }
+          cmake --build "$env:RUNNER_TEMP/confine-build" --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Native compilation failed' }
+      - name: Confine owned fixtures through the server's port
+        shell: pwsh
+        run: |
+          bun scripts/smoke-windows-confinement.ts "$env:RUNNER_TEMP/confine-build/Release/octant-windows-confine.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'A confinement check failed' }

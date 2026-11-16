@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { WINDOWS_SANDBOX_MISSING_REASON } from "@octant/domain/guardrail-policy";
 import {
   accessSync,
   chmodSync,
@@ -154,6 +155,26 @@ afterAll(() => {
 });
 
 describe("sanitizeCodexEnvironment", () => {
+  it("keeps a Windows host's system, profile and path names whatever their case, and still drops Octant's own", () => {
+    expect(
+      sanitizeCodexEnvironment(
+        {
+          Path: "C:\\Windows\\System32",
+          SystemRoot: "C:\\Windows",
+          USERPROFILE: "C:\\Users\\fixture",
+          OPENAI_API_KEY: "provider-owned",
+          OCTANT_PRIVATE_SECRET: "must-not-cross",
+        },
+        "win32",
+      ),
+    ).toEqual({
+      PATH: "C:\\Windows\\System32",
+      SYSTEMROOT: "C:\\Windows",
+      USERPROFILE: "C:\\Users\\fixture",
+      OPENAI_API_KEY: "provider-owned",
+    });
+  });
+
   it("carries only what the Codex CLI reads and drops every other host variable", () => {
     expect(
       sanitizeCodexEnvironment({
@@ -829,24 +850,85 @@ describe("Codex launch confinement", () => {
     expect(prepared.status === "prepared" ? prepared.launch.command : undefined).toBe("/bin/sh");
   });
 
-  it("refuses Windows Full access before an unconfined process can be prepared", () => {
+  it("launches Windows Full access unwrapped in the thread's folder and refuses a guarded Windows launch before any confinement is prepared", () => {
     const prepare = vi.fn(() => {
-      throw Error("No process may be prepared.");
+      throw Error("No confinement may be prepared.");
     });
-    const result = prepareCodexLaunch({
-      binaryPath: "C:\\fixture\\provider.exe",
-      args: [],
+    const full = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
       authority: {
         kind: "thread",
-        root: "C:\\fixture",
+        root: "C:\\fixture\\project",
         mode: "code",
         executionPolicy: "full-access",
       },
+      environment: { USERPROFILE: "C:\\Users\\fixture" },
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(full).toMatchObject({
+      status: "prepared",
+      launch: {
+        command: "C:\\fixture\\codex.exe",
+        args: ["app-server"],
+        cwd: "C:\\fixture\\project",
+      },
+    });
+    for (const authority of [
+      { executionPolicy: "approval-gated" },
+      { executionPolicy: "full-access", fullAccessSandbox: true },
+    ] as const) {
+      const guarded = prepareCodexLaunch({
+        binaryPath: "C:\\fixture\\codex.exe",
+        args: [],
+        authority: { kind: "thread", root: "C:\\fixture\\project", mode: "code", ...authority },
+        environment: {},
+        confinement: { prepare },
+        platform: "win32",
+      });
+      expect(guarded).toMatchObject({
+        status: "refused",
+        failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
+      });
+    }
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("reads the Windows catalog unconfined only for a host that starts threads at open Full access", () => {
+    const prepare = vi.fn(() => {
+      throw Error("No confinement may be prepared.");
+    });
+    const refused = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog" },
       environment: {},
       confinement: { prepare },
       platform: "win32",
     });
-    expect(result.status).toBe("refused");
+    expect(refused).toMatchObject({
+      status: "refused",
+      failure: { message: WINDOWS_SANDBOX_MISSING_REASON },
+    });
+    const read = prepareCodexLaunch({
+      binaryPath: "C:\\fixture\\codex.exe",
+      args: ["app-server"],
+      authority: { kind: "catalog", forOpenFullAccess: true },
+      environment: {},
+      confinement: { prepare },
+      platform: "win32",
+    });
+    expect(read).toMatchObject({
+      status: "prepared",
+      launch: { command: "C:\\fixture\\codex.exe", args: ["app-server"] },
+    });
+    if (read.status !== "prepared" || read.launch.cwd === undefined)
+      throw new Error("The catalog read was not prepared in a folder of its own.");
+    const folder = read.launch.cwd;
+    expect(existsSync(folder)).toBe(true);
+    read.launch.release();
+    expect(existsSync(folder)).toBe(false);
     expect(prepare).not.toHaveBeenCalled();
   });
 

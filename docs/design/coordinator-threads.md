@@ -95,10 +95,21 @@ make changes itself.
   and truncation stated. The roster names no titles, since a title is text an
   agent wrote, so it does not mark the coordinator. The host writes it again at
   every turn, so compaction never loses it. What the coordinator learns belongs
-  in Project memory, as for any thread.
-- **It is set apart in the workspace.** A coordinator sits in its own section
-  at the top of its Project, with its workers folded under it
-  ([Workspace: Coordinators](workspace.md#coordinators)).
+  in Project memory, as for any thread. It also carries the person's
+  Orchestration text, which no ordinary thread gets; the text guides when and
+  how it starts workers and grants nothing
+  ([Octant instructions](octant-instructions.md)).
+- **It is set apart in the workspace, and its workers live inside it.** A
+  coordinator sits in its own section at the top of its Project. Its workers are
+  not part of the thread list: by default they are not listed in the sidebar or
+  on the board, and a person reaches them from the coordinator's Workers panel,
+  the worker cards in its transcript, and Needs you. The **Show workers**
+  setting lists them in the sidebar, on the board, or both, outside the
+  coordinator, as a view preference with no authority (maintainer decision,
+  2026-11-15; [Workspace: Coordinators](workspace.md#coordinators)). A worker is
+  still an ordinary Code thread on its own worktree, with its own delivery
+  target, review, and Done, and a person can open, stop, or archive it from the
+  panel or from the worker itself.
 
 Rationale: a thread that may start other threads without asking, whose context
 keeps growing and keeps reading what its workers wrote, is the worst place to
@@ -117,8 +128,17 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   they keep `octant_agents` for their own child runs. `start` is left out in
   Plan, and a non-empty profile allowlist must name `octant_threads.start`.
 - **Input.** A title (at most 80 characters), the worker's opening prompt (at
-  most 4,000 characters), and optionally a provider, model, and reasoning value,
-  and a guardrail level. The model supplies no Project, path, checkout, or
+  most 4,000 characters), and optionally a guardrail level. Once model roles
+  are set up (Builder has a model), the call also names `task` (`small-fix`,
+  `feature`, `ui`, `tests`, `docs` or `review`) and `size` (`quick`, `normal`
+  or `hard`), and may name `retries` and `reviews` (a worker of its own, by
+  reference), `risk: high`, `needsImages`, and an override: `role`
+  (`quick-edit`, `builder`, `hard-problems`, `reviewer`) or `model` (a handle
+  from the role card), each with `why` (at most 200 characters). With roles set
+  up, a raw provider or model id is refused (`policy`); the host chooses
+  ([Choosing the worker's model](#choosing-the-workers-model)). With no roles
+  set up, the call may name a provider and model as before, and `role` and
+  `model` are refused. The model supplies no Project, path, checkout, or
   window.
 - **What it creates.** An ordinary Code thread in the coordinator's own
   Project, through the ordinary Code creation command, on a new managed worktree
@@ -126,8 +146,9 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   opening prompt is its first message, sent through the normal first-message
   path. Its first turn has the `agent` initiator with the kind
   `coordinator-start`, the way a routine's turn starts, so every approval waits
-  for a person. With no provider named, the worker runs on the coordinator's
-  own provider and model; a named provider the host does not know refuses
+  for a person. With roles set up it runs on the model the host chose from
+  them. With none, and no provider named, it runs on the coordinator's own
+  provider and model; a named provider the host does not know refuses
   `provider-unavailable`, a provider or model the Project's policy disallows
   is refused by the ordinary creation command, and nothing falls back to
   another model.
@@ -158,14 +179,174 @@ A coordinator starts a worker with the `start` operation of `octant_threads`.
   for that coordinator any more.
 - **Journal.** An admitted start is journaled as the worker's own
   `code.thread-created@1`, whose thread record carries the coordinator, the
-  provider, model, and level, never the prompt. The prompt lives where any
-  first message lives.
+  provider, model, and level, and, when the roles chose the model, how
+  (`coordinatorChoice`: the role, where the model sits in its list, the
+  host's reason, and the coordinator's `why`), never the prompt. The prompt
+  lives where any first message lives. No wire command carries the choice; a
+  later model change by anyone but the host's own restart on the next model
+  records it as a person's pick.
 - **Refusals.** A refused call returns one closed reason: `unauthorized` (the
   caller is not a coordinator), `policy` (Plan, a profile without the operation,
-  a malformed input, a level above the ceiling), `limit-reached` (the open-worker
-  bound), `rate-limited` (the hourly bound), `provider-unavailable`, or
-  `unavailable` (the host could not create or journal the worker). A refusal
-  creates nothing.
+  a malformed input, a level above the ceiling, a raw id or a missing `task` or `size` with
+  roles set up, an override without `why`, a retry below the tier it must
+  climb to), `limit-reached` (the open-worker
+  bound), `rate-limited` (the hourly bound), `provider-unavailable`,
+  `model-not-eligible` (the named handle cannot start now), `no-eligible-model`
+  (nothing in the role or the roles it may borrow can), or `unavailable` (the
+  host could not create or journal the worker). A refusal creates nothing. A
+  refusal about models lists each model's reason and the role card, so the
+  next call can be right.
+
+### Choosing the worker's model
+
+Workers take their model from the [model roles](model-endpoints.md#model-roles)
+in Settings, which a Project may choose per role (maintainer decision,
+2026-11-15). One pure policy, `chooseWorkerModel`, decides on the host at
+every `start`; the renderer and the agent decide nothing.
+
+1. **Role.** `role` when named; else one tier above the `retries` worker
+   (Quick edit → Builder → Hard problems; Reviewer and Hard problems retry as
+   Hard problems), never lower than `size` picks; else `size`: `quick` → Quick
+   edit, `normal` → Builder, `hard` → Hard problems. A `review` goes to
+   Reviewer, or to Hard problems with `risk: high`. A retry never goes down: a
+   `role`, or a `model` handle listed only in roles below the tier the retry
+   starts in (Builder when that role is empty), is refused. An empty role uses
+   Builder's list and says so.
+2. **Models.** The role's list as the Project chose it, else as Settings has
+   it: the main model first, then the fallbacks.
+3. **Hard rules.** A model is passed over when its provider is turned off,
+   signed out or down (its check failed, or its last request failed with an
+   availability error within 5 minutes), the model is not offered, the account
+   is at a usage limit (a failed request's own limit signal, or the host's
+   plan-usage reading of a window the provider flagged exhausted or at 100%,
+   a quota flagged exhausted with no window, or a request or token bucket
+   with nothing left, until its reset; a reached limit whose reading names
+   no reset counts for 5 minutes from the reading's own time, like a down
+   mark; a reading below the limit never filters), the Project's
+   policy or data rules disallow it, an endpoint Octant runs has not proven its
+   tools, or `needsImages` is set and it cannot read images while Sees images
+   cannot describe one for this Project. With Sees images able to (a model in
+   the role the Project's rules allow, ready, and on a connection that takes
+   images from Octant), image work may go to a builder that cannot read
+   images: the builder is offered `look`, and an image attached to its turn
+   is described for it ([Architecture: Sees images](../architecture.md#sees-images)). A review passes over models on the reviewed worker's provider
+   while one on another provider is left.
+4. **Answer.** The first model left starts. The host records whether it was
+   the main model or the n-th fallback, and why ("main Opus 5.5 at usage limit
+   until 14:00 UTC").
+5. **Borrowing.** When every model of the role is passed over, the role
+   borrows the next tier's list: Quick edit → Builder → Hard problems, Reviewer
+   → Builder → Hard problems, Hard problems → Builder, recorded as "lower tier:
+   all Hard problems models unavailable". Nothing left anywhere refuses
+   `no-eligible-model`.
+6. **A named model.** `model` names a handle from the role card; it starts
+   only if it passes the same rules, the review's independence included,
+   else `model-not-eligible` with its reasons. It never reaches a model
+   outside the roles.
+
+The availability marks are host memory, fed by the runtime-event tap every
+driver's turns pass through: a failed request whose failure is `unavailable`
+or an overload marks its provider down for 5 minutes, a usage limit marks it
+until its reset (5 minutes when the provider named none), and a completed
+request clears both. A restart forgets them.
+
+- **The first request fails.** When a worker's first turn fails with an
+  availability error before any text, reasoning or tool call, and it has done
+  no other work, the host marks the provider down, moves the worker to the
+  next eligible model of its role (the ordinary provider change, with its
+  disclosed hand-off, journaled as the host), records that choice with "first
+  request on <model> failed before any work", and sends the same opening
+  prompt again. This is still the start. It moves again if that model's first
+  request fails the same way, and stops once every listed model has failed
+  once; a worker a person archived, marked Done or moved to another model
+  meanwhile is left alone, and the model they chose is not marked down for
+  the earlier failure. The host knows a turn failed before any output only when the
+  provider recorded a session for it; a turn whose provider never got that far
+  is left as it is, and the coordinator hears of it as a state notice. A next
+  model that would ask a person first, or none at all, leaves the worker too.
+  The prompt is kept in memory for up to 15 minutes for this, never journaled.
+- **Ask before using.** A start whose role has **Ask before using** becomes a
+  proposal through the proposal path below, even under Start without asking,
+  and a retry that climbs into such a role asks too; a named model asks when a
+  role listing it asks. The proposal carries the role, the model and its
+  name, the choice, and the request's filters (needs images, the provider a
+  review avoids); its card reads "Hard problems · Opus 5.5 · <why>" and
+  offers **Use Builder instead** beside approve and decline, which runs the
+  choice again in Builder with those filters and keeps the proposal pending on that model, under
+  the proposal's version. Approving on the proposed model journals the host's
+  choice on the worker; approving on another model records the person's pick.
+- **The role card.** Every coordinator turn with roles set up carries a
+  host-written role card right after the roster: per worker role (Builder,
+  Quick edit, Hard problems, Reviewer) its models by handle (`b1`…), each with
+  its name, provider, context size when known, images yes or no, and ready,
+  at limit until, down, not signed in, turned off, not allowed or tools not
+  verified; whether the role asks first; Sees images; and a track record per
+  handle from this coordinator's own last 20 workers (started, Done, closed
+  without Done). Cost tiers are not shown, since no provider reports one. The
+  card holds only host facts, provider-reported model names and names the
+  person chose, so it never marks the coordinator.
+
+### Running workers
+
+A worker that stops mid-run because its model hit a usage limit (the
+provider's own signal, or a failure while the host's facts hold the account
+at its limit) or failed for availability (refused connection, 5xx,
+overloaded, timeout) carries on with the next model of its role when the
+role's **Continue on the fallback if the model stops** box is on. The box is
+per role, in Settings with a Project's choice for the role first, and on by
+default (absent is on). The person's fallback list is their consent
+(maintainer decision, 2026-11-15).
+
+- **Who moves.** Only a coordinator's worker whose model the roles chose. A
+  thread a person started never moves on its own, nor does a coordinator, a
+  worker a person moved to a model of their own (its choice then reads
+  "chosen by you"), one with the person's own **On usage limit → Hand off
+  to**, or one put away, marked Done, snoozed or archived. A worker's first
+  request that failed before any work is still the start and moves by the
+  rule above. The harness's own helper runs keep the fallback they already
+  have.
+- **Where to.** The next eligible model after the current one in the same
+  walk a start takes: the role's list, then the lists it may borrow, with the
+  start's own filters (ready, allowed, tools, images when the start needed
+  them, a review's other provider), which the worker's recorded choice keeps.
+  The model that stopped is out; its siblings on the same account are judged
+  by the host's facts, since some limits are per model. Never a model outside
+  the roles, and never one in a role that has **Ask before using**: a start
+  there would ask a person, so the worker pauses instead, and a worker in an
+  ask-first role keeps the one model a person approved.
+- **How.** The ordinary provider change, made as the host and recorded on the
+  worker's choice with `continued-on-fallback` and a host-written reason
+  ("Opus 5.5 (Work) at usage limit; continued on Astra (Personal)"). On the
+  same provider, the runtime carries the session on with a model switch
+  where it supports `modelSwitch`, and otherwise, as on another provider or
+  account, the next turn starts with the disclosed hand-off the model picker
+  uses. Then one host turn continues the work, under the ordinary admission
+  (spend ceilings, capacity, the Done lock; approvals still wait for a
+  person). Its message names the old and new model and account and why, and
+  tells the model to continue where it left off. The move only counts for
+  the turn that stopped, on the model it ran on: when a person's turn started
+  or anyone changed the model since, the host does nothing. A refused turn is
+  an ordinary refusal: the worker stays idle on its new model.
+- **Disclosure.** The provider change records the reason on the thread's
+  hand-off record, and the transcript shows "Octant moved this thread:
+  <reason>" after the turn that stopped, whether or not the continuing turn
+  was admitted. The worker row shows "fallback: <reason>", and the
+  coordinator gets a `continued-on-fallback` notice (below). The transcript
+  line follows the thread's latest hand-off, so a later move or a person's
+  model change replaces it; every move stays in the thread's journal and in
+  the coordinator's notices.
+- **Propose for approval.** The Starting workers setting covers starting new
+  workers only; it does not stop a running worker continuing on its role's
+  fallback, since the role's list is the person's consent (maintainer
+  decision, 2026-11-15). **Ask before using** on a role does stop it.
+- **Bounds.** The walk only goes forward and passes over every model it
+  already reached, so a worker moves through its lists at most once and never
+  back; one stop moves it once. With nothing eligible left it pauses as
+  before (a Needs you row), and the coordinator hears of it as an ordinary
+  state notice. With the box off it pauses too, and the coordinator may start
+  a worker on the fallback itself.
+
+Not built: an `escalate` reply.
 
 ### The start setting
 
@@ -185,7 +366,7 @@ restrict that can do it for the whole host or for one Project.
   proposal with the title, the prompt as its intent, and the requested provider,
   model, and level, through the planner's proposal path, with its bound of ten
   waiting proposals per Project; the proposal keeps the provider and model the
-  call named and the level it resolved, and approving it cannot start the
+  call named or the roles chose (with the choice), and the level it resolved, and approving it cannot start the
   worker above that level (`creation-above-proposed-level`). The coordinator is
   told `proposed`. A person approves or declines it from a card above the
   coordinator's composer or from the Project overview, with the same **Review
@@ -287,9 +468,11 @@ capped ([Starting workers](#starting-workers)).
 - **State notices.** When a worker's turn ends, when it starts waiting for a
   person (an approval, a question, or a usage-limit pause), and when it becomes
   Done, the host queues a notice for its coordinator: the worker's reference,
-  the new state from a closed set, and the time. A notice carries no text an
-  agent wrote, so it does not mark the coordinator. At most one notice waits per
-  worker; a newer state replaces it. Notices reach the coordinator's next turn
+  the new state from a closed set, and the time. When the host moved a running
+  worker on to its role's next model, the notice says `continued-on-fallback`
+  instead, beside its state notice rather than in its place. A notice carries
+  no text an agent wrote, so it does not mark the coordinator. At most one
+  state notice waits per worker; a newer state replaces it. Notices reach the coordinator's next turn
   beside its roster and wake it when it is idle, under the wake bounds below.
 - **Bounds on waking.** Wake turns keep the messaging bounds: one at a time per
   thread, an hourly count per thread, and the hop count. The hourly count and
@@ -340,9 +523,10 @@ reaches the person through the coordinator they are already talking to.
   `ask-user`, and `send` the worker what the person decided, but a pending
   approval stays the person's.
 - **Needs you.** A worker's request stays a Needs you row naming the worker,
-  with "via" its coordinator beside it, in Needs you and the Inbox. The board's
-  and Review's embedded rows show no thread title, and a board card names the
-  coordinator itself.
+  with the worker mark and "via" its coordinator beside it, in Needs you and the
+  Inbox, whatever the Show workers setting says: requests are never hidden. The
+  board's and Review's embedded rows show no thread title, and a board card
+  names the coordinator itself.
 - **Where the composer's list and the rows come from.** The window's existing
   pending-requests read, filtered to the coordinator's workers in the window's
   thread list, so a window sees no request it could not already see. The
@@ -357,7 +541,8 @@ worker's subagents under it ([Workspace: Coordinators](workspace.md#coordinators
 
 - **The workers come from the window.** The rows are the workers in the
   window's own thread list, with the state that list shows, so the dock names no
-  thread the sidebar does not.
+  thread this window could not already list. The coordinator's Workers panel
+  reads the same list.
 - **Their subagents come from one host read.** `GET
 /api/agent-runs/coordinator-graph` answers for one coordinator: per worker,
   that worker's child runs as facts (task, role, state, the route that ran it,
@@ -388,6 +573,21 @@ worker's title is, and the window already lists that; what the worker found
 stays behind the worker. Reading facts through the coordinator is the smallest
 widening that shows the orchestration (maintainer request, 2026-11-11).
 
+## Model roles
+
+Workers pick their model from the model roles in Settings, which a Project
+may override per role (maintainer decision, 2026-11-15; see
+[Model endpoints: Model roles](model-endpoints.md#model-roles)): Planner,
+Scout, Quick edit, Builder, Hard problems, Reviewer, Sees images and Small
+jobs, each a list with a main model and fallbacks, and two choices per role,
+**Ask before using** and **Continue on the fallback if the model stops**.
+Choosing by task and size, falling back at the start, borrowing the next
+tier, asking before a role, and continuing a running worker on the fallback
+are built ([Choosing the worker's model](#choosing-the-workers-model),
+[Running workers](#running-workers)), and Sees images describes an image for
+a worker whose model cannot read one
+([Architecture: Sees images](../architecture.md#sees-images)).
+
 ## Not in this design
 
 - A coordinator cannot stop, steer mid-turn, complete, put away, archive, or
@@ -408,10 +608,30 @@ device; a marked coordinator's worker starting marked, and a mark that cannot be
 journaled refusing the start; the open-worker and hourly bounds; state notices
 not marking the coordinator; the hop count stopping a coordinator and worker
 after the round bound; and a coordinator's own write, shell, and Git actions
-refused by the read-only gate. For the workers' subagents: the graph read
+refused by the read-only gate. For the model choice: every hard rule, the size
+map, an empty role using Builder, a Project's role beating Settings, a retry
+climbing and never dropping, borrowing and the lower-tier flag, a review
+avoiding the reviewed provider, an override without `why` refused, a named
+model refused with its reasons, nothing outside the roles ever returned, raw
+ids refused once roles exist and today's model with none, an ask-first role
+proposing under Start without asking, the choice journaled without the
+prompt, a usage-limited main model starting the fallback with its reason, a
+first request that failed before any work moving the worker, the marks
+expiring after 5 minutes, a reached reading with no reset capped at 5
+minutes, and the role card not marking. For a running worker: a usage limit
+or outage mid-run moving it to the next model with one host turn under the
+ordinary admission; the box off, a person's model, a person's thread, a
+coordinator and a thread at rest never moved; the end of the list pausing
+with no loop; and the `continued-on-fallback` notice not marking. For the workers' subagents: the graph read
 refused for a window that does not hold the coordinator and for a thread that is
 not a coordinator, before any run is read; and its answer carrying no reply,
-result, recovery text or version. Rendered checks cover the sidebar section, the
-folded workers, the composer's worker requests, the worker request rows in the
+result, recovery text or version. For where workers appear: with Show workers off no worker
+row is listed in the sidebar and no worker card on the board, while the
+coordinator row's counts and the Needs you rows still carry every request; with
+it on, rows and cards carry the worker mark; a Project's choice beats Settings;
+the Workers panel's sections and row opening; a transcript card following the
+worker's live state; and an open worker not being added to the sidebar. Rendered
+checks cover the sidebar section, the Workers panel at desktop and phone width,
+the composer's worker requests, the worker request rows in the
 thread view, and the dock's worker rows and
 graphs.

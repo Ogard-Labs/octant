@@ -1,3 +1,4 @@
+import type { RevealedThreadTurn } from "./shell/WorkspaceView";
 import { OctantEmpty } from "./ui/base/OctantEmpty";
 import { AgentThreadAttributionProvider } from "./agentAccess/agentThreadAttribution";
 import { QuestionnaireDraftsProvider } from "./transcript/questionnaireDrafts";
@@ -54,7 +55,10 @@ import {
   permissionModeOf,
 } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
-import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
+import {
+  automationServerProviderChoices,
+  buildAutomationEditorCatalog,
+} from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useWorkSettings } from "./work/useWorkSettings";
@@ -106,7 +110,6 @@ import {
   decodeChatTurnId,
   type ChatAttachmentId,
   type ChatThreadId,
-  type ChatTurnId,
 } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import {
@@ -365,9 +368,35 @@ import { projectPullRequestKey } from "./code/CodeProjectPullRequests";
 import { OctantToast } from "./ui/base/OctantToast";
 import { OctantDialogPresence } from "./ui/base/OctantDialogPresence";
 import { useProjectController } from "./projects/useProjectController";
-import { countTodos } from "./todos/todoListModel";
-import type { TodosPageProps } from "./todos/TodosView";
+import { countTodos, todoListIsReadOnly } from "./todos/todoListModel";
+import {
+  createTodoClient,
+  type TodoClient,
+  type TodoListHostClient,
+} from "@octant/client-runtime/todo-client";
+import type { TodoUnlinkedStart, TodosPageProps } from "./todos/TodosView";
+import { todoThreadStates, type TodoStartTarget } from "./todos/todoThreadModel";
+import {
+  decodeTodoCommand,
+  type Todo,
+  type TodoListView,
+  type TodoThreadLink,
+} from "@octant/contracts/todos";
+
+/** A to-do whose Start opened the current new-thread draft. */
+interface TodoStartInProgress {
+  readonly todoId: string;
+  readonly title: string;
+  readonly mode: OctantMode;
+  /** The Project the draft is for; absent for a Chat start in no Project. */
+  readonly projectId?: string;
+  /** The draft it opened, as `pane:surface`, once that draft is in front. */
+  readonly draft?: string;
+}
 import { useTodoList } from "./todos/useTodoList";
+import { useTodoListHost } from "./todos/useTodoListHost";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { TodoListHostSettingsContext } from "./todos/TodoListHostSettings";
 import { TodoQuickAddDialog, useNewTodoShortcut } from "./todos/TodoQuickAddDialog";
 import { ProjectActionButtons } from "./projects/ProjectActionButtons";
 import { CoordinatorBoundsDialog } from "./projects/CoordinatorBoundsDialog";
@@ -391,12 +420,9 @@ import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
 import { hasSelectableProviderModels } from "./providers/providerBootstrapPolicy";
 import { useArchivedChatThreadSearch } from "./chat/useArchivedChatThreadSearch";
-import {
-  chatTranscriptAnswer,
-  codeTranscriptAnswer,
-  useTranscriptSearch,
-  workTranscriptAnswer,
-} from "./shell/useTranscriptSearch";
+import { threadSearchAnswer, useTranscriptSearch } from "./shell/useTranscriptSearch";
+import type { ThreadSearchClient } from "@octant/client-runtime/thread-search-client";
+import type { ThreadSearchScope } from "./shell/threadSearchViewModel";
 import { createChatReadCursorStore, useChatController } from "./chat/useChatController";
 import { autoConfigureChatDefaults } from "./chat/autoConfigureChatDefaults";
 import { ShellFrame } from "./shell/ShellFrame";
@@ -483,6 +509,7 @@ import {
 import { useAppleSimulatorPaneOffer } from "./apple/useAppleSimulatorPaneOffer";
 import { useAndroidEmulatorPaneOffer } from "./android/useAndroidEmulatorPaneOffer";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
+import { decodeCanvasId } from "@octant/contracts/canvas";
 import { resolveThreadHandOffClient } from "./thread/threadHandOff";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import {
@@ -500,6 +527,7 @@ import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
 import { useContinueCards } from "./code/useContinueCards";
 import { coordinatorTitleByWorker } from "./code/codeBoardGrouping";
+import { sidebarThreadsWithWorkers } from "./code/coordinatorWorkerListing";
 import {
   CodeThreadControllerSlots,
   createCodeThreadControllers,
@@ -599,6 +627,7 @@ export interface AppProps {
   readonly computerUseClient?: ComputerUseClient;
   readonly contextClient?: ContextClient;
   readonly workThreadClient?: WorkThreadClient;
+  readonly threadSearchClient?: ThreadSearchClient;
   readonly workTurnClient?: WorkTurnClient;
   readonly hostBridge?: OctantHostBridge;
   readonly hostClient?: HostClient;
@@ -617,6 +646,8 @@ export interface AppProps {
   readonly planClient?: PlanClient;
   readonly shellClient?: ShellClient;
   readonly shipClient?: ShipClient;
+  readonly todoClient?: TodoClient;
+  readonly todoListHostClient?: TodoListHostClient;
   readonly canvasClient?: CanvasClient;
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
@@ -1043,6 +1074,7 @@ function LaunchedShell(
     [props.launch.serverUrl, props.launch.windowId],
   );
   function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
+    if (todoStartRef.current !== undefined) setTodoStart(undefined);
     const target = paneId ?? controller.workspace?.activePaneIds[mode];
     if (target !== undefined) {
       const paneKey = String(target);
@@ -1087,6 +1119,19 @@ function LaunchedShell(
   const [inboxOpen, setInboxOpen] = useState(false);
   // The person's to-do list spans every mode, as the Inbox does.
   const [todosOpen, setTodosOpen] = useState(false);
+  // The to-do the open new-thread draft was started from. Any other new draft
+  // clears it (resetNewTaskDraft), and the thread that draft creates is linked
+  // to the to-do. Held in a ref too: the create handlers are async and read it
+  // after their own awaits.
+  const [todoStart, setTodoStartState] = useState<TodoStartInProgress>();
+  const todoStartRef = useRef<TodoStartInProgress>(undefined);
+  function setTodoStart(start: TodoStartInProgress | undefined): void {
+    todoStartRef.current = start;
+    setTodoStartState(start);
+  }
+  const [unlinkedTodoStarts, setUnlinkedTodoStarts] = useState<
+    ReadonlyMap<string, TodoUnlinkedStart>
+  >(() => new Map());
   // Like the Inbox, what finished and waits for a look spans the window, so
   // moving between modes keeps the page; its list follows the active mode's
   // To review count.
@@ -1183,22 +1228,20 @@ function LaunchedShell(
     setSidebarListRequest((current) => ({ view, sequence: (current?.sequence ?? 0) + 1 }));
   }, []);
   // Deep-link target from a content search hit; cleared when Search opens again.
-  const [revealChatTurn, setRevealChatTurn] = useState<
-    { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
-  >(undefined);
+  const [revealTurn, setRevealTurn] = useState<RevealedThreadTurn | undefined>(undefined);
   // A search hit is a one-time jump: once the transcript has shown it, the
   // target is dropped, so a list that mounts again (a jumped-to run joining
   // the newest messages, or Jump to latest followed by Load earlier) does not
   // jump the reader back to it.
-  const spendRevealChatTurn = useCallback(() => setRevealChatTurn(undefined), []);
+  const spendRevealTurn = useCallback(() => setRevealTurn(undefined), []);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
-    setRevealChatTurn(undefined);
+    setRevealTurn(undefined);
     setSearchOpen(true);
   }, []);
   const searchEveryThread = useCallback((query: string) => {
     setSearchQuery(query);
-    setRevealChatTurn(undefined);
+    setRevealTurn(undefined);
     setSearchOpen(true);
   }, []);
   const closeThreadSearch = useCallback(() => {
@@ -1476,18 +1519,6 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
       : activeChatThreadTabId(controller.workspace.layouts.chat, activePaneId);
-  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
-  // coming back opens it on its newest messages instead of jumping to the hit
-  // again after they had already gone back to the newest ones.
-  const previousActiveChatThreadId = useRef(activeChatThreadId);
-  useEffect(() => {
-    const previous = previousActiveChatThreadId.current;
-    previousActiveChatThreadId.current = activeChatThreadId;
-    if (previous === undefined || String(previous) === String(activeChatThreadId ?? "")) return;
-    setRevealChatTurn((current) =>
-      current !== undefined && String(current.threadId) === String(previous) ? undefined : current,
-    );
-  }, [activeChatThreadId]);
   const activeCodeThreadId =
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "code"
       ? undefined
@@ -1496,6 +1527,30 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "work"
       ? undefined
       : activeWorkThreadTabId(controller.workspace.layouts.work, activePaneId);
+  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
+  // coming back opens it on its newest messages instead of jumping to the hit
+  // again after they had already gone back to the newest ones.
+  const previousActiveThreadIds = useRef({
+    chat: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+    work: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+    code: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+  });
+  useEffect(() => {
+    const previous = previousActiveThreadIds.current;
+    const now = {
+      chat: activeChatThreadId === undefined ? undefined : String(activeChatThreadId),
+      work: activeWorkThreadId === undefined ? undefined : String(activeWorkThreadId),
+      code: activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId),
+    };
+    previousActiveThreadIds.current = now;
+    setRevealTurn((current) => {
+      if (current === undefined) return current;
+      const left = previous[current.mode];
+      return left !== undefined && left === String(current.threadId) && left !== now[current.mode]
+        ? undefined
+        : current;
+    });
+  }, [activeChatThreadId, activeCodeThreadId, activeWorkThreadId]);
   const activeDraftKey =
     controller.workspace === undefined || activePaneId === undefined
       ? undefined
@@ -1688,7 +1743,12 @@ function LaunchedShell(
         navigatorAssistantClient: props.navigatorAssistantClient,
         planClient: props.planClient,
         shipClient: props.shipClient,
+        todoClient: props.todoClient,
+        todoListHostClient: props.todoListHostClient,
         workThreadClient: props.workThreadClient,
+        ...(props.threadSearchClient === undefined
+          ? {}
+          : { threadSearchClient: props.threadSearchClient }),
         workTurnClient: props.workTurnClient,
       }),
     [
@@ -1712,6 +1772,9 @@ function LaunchedShell(
       props.planClient,
       props.projectWindowCapability,
       props.shipClient,
+      props.threadSearchClient,
+      props.todoClient,
+      props.todoListHostClient,
       props.workThreadClient,
       props.workTurnClient,
     ],
@@ -1733,6 +1796,7 @@ function LaunchedShell(
     githubTransport,
     hostClient,
     hostResourceClient,
+    threadSearchClient,
     pendingRequestClient,
     projectTerminalClient,
     projectBrowserClient,
@@ -1809,19 +1873,17 @@ function LaunchedShell(
     query: searchQuery,
     enabled: searchOpen && activeMode === "chat",
   });
-  // Message text is searched in the mode the overlay searches, on that mode's
-  // host route, which applies the same listing authority as its sidebar.
-  const searchActiveModeTranscript = useCallback(
+  // Search reads every mode at once (or the one the overlay's filter names)
+  // through the host's search, which searches only the threads each mode
+  // lists for this window.
+  const [searchScope, setSearchScope] = useState<ThreadSearchScope>("all");
+  const searchAcrossModes = useCallback(
     async (query: string) =>
-      activeMode === "chat"
-        ? chatTranscriptAnswer(await chatClient.searchTranscript(query))
-        : activeMode === "work"
-          ? workTranscriptAnswer(await workThreadClient.searchTranscript(query))
-          : codeTranscriptAnswer(await codeClient.searchTranscript(query)),
-    [activeMode, chatClient, codeClient, workThreadClient],
+      threadSearchAnswer(await threadSearchClient.search(query, searchScope)),
+    [searchScope, threadSearchClient],
   );
   const transcriptSearch = useTranscriptSearch({
-    search: searchActiveModeTranscript,
+    search: searchAcrossModes,
     query: searchQuery,
     enabled: searchOpen,
   });
@@ -2695,7 +2757,117 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
-  const todoList = useTodoList(launchedClients.todoClient);
+  // Where the list lives: this host by default, or another computer the
+  // person chose in Settings › To-dos, reached through this window's own
+  // pairing with it. No to-do is sent anywhere else, and nothing is queued
+  // for a computer that cannot be reached.
+  const todoListHost = useTodoListHost(launchedClients.todoListHostClient, machineChanges.todos);
+  const todoListChoice =
+    todoListHost.read.status === "ready" ? todoListHost.read.view.choice : undefined;
+  const todoListChoiceKey =
+    todoListChoice === undefined
+      ? todoListHost.read.status
+      : todoListChoice.kind === "this-host"
+        ? "this-host"
+        : `other-host:${String(todoListChoice.hostId)}`;
+  const todoListOtherHostName =
+    todoListChoice?.kind === "other-host" ? todoListChoice.name : undefined;
+  const todoListSource = useMemo((): {
+    readonly client: TodoClient | undefined;
+    readonly remote: boolean;
+    readonly unreachable?: string;
+  } => {
+    if (todoListChoiceKey === "this-host") {
+      return { client: launchedClients.todoClient, remote: false };
+    }
+    // Not knowing where the list lives is not a reason to use this host's:
+    // the person may have chosen another computer, and a to-do added here
+    // would land in a list they are not shown.
+    if (todoListChoiceKey === "failed") {
+      return {
+        client: undefined,
+        remote: false,
+        unreachable: "Where the to-do list is kept could not be read. Nothing can be changed yet.",
+      };
+    }
+    if (!todoListChoiceKey.startsWith("other-host:")) return { client: undefined, remote: false };
+    const hostId = todoListChoiceKey.slice("other-host:".length);
+    const name = todoListOtherHostName ?? "The computer that keeps the list";
+    const slot = hostFederationTransports?.get(hostId);
+    if (
+      slot === undefined ||
+      slot.kind !== "remote" ||
+      slot.bridge === undefined ||
+      slot.state.kind !== "ready"
+    ) {
+      return {
+        client: undefined,
+        remote: true,
+        unreachable:
+          slot === undefined
+            ? `${name} keeps the list, and this window is not paired with it.`
+            : `${name} cannot be reached, so nothing can be changed.`,
+      };
+    }
+    return {
+      client: createTodoClient({
+        // The remote session owns the destination; the base URL only shapes
+        // the path, and no window capability leaves this computer.
+        baseUrl: "http://127.0.0.1",
+        fetch: createRemoteProductFetch({ bridge: slot.bridge }),
+        windowCapability: "",
+      }),
+      remote: true,
+    };
+    // The transport slot changes in place; the revision says when to look again.
+  }, [
+    todoListChoiceKey,
+    todoListOtherHostName,
+    launchedClients.todoClient,
+    hostFederationTransports,
+    federationRevision,
+  ]);
+  const todoList = useTodoList(
+    todoListSource.client,
+    // Another computer's changes do not reach this host's feed; its list is
+    // read again on the slow timer and after each change sent from here.
+    todoListSource.remote ? undefined : machineChanges.todos,
+    {
+      key: todoListChoiceKey,
+      ...(todoListSource.unreachable === undefined
+        ? {}
+        : { unreachable: todoListSource.unreachable }),
+    },
+  );
+  // This host's own id names its Projects and threads in a to-do, wherever
+  // the list lives.
+  const todoThisHostId =
+    todoListHost.read.status === "ready"
+      ? todoListHost.read.view.thisHostId
+      : todoList.read.status !== "loading" && !todoListSource.remote
+        ? todoList.read.view?.hostId
+        : undefined;
+  // A paired computer can drop off while its transport still reads as ready:
+  // a failed read of a remote list is read-only too, until a read succeeds.
+  const todoListReadOnly = todoListIsReadOnly(todoListSource, todoList.read.status);
+  const todoListHostSettings = useMemo(
+    () => ({
+      read: todoListHost.read,
+      choose: todoListHost.choose,
+      computers: (hostFederationTransports?.list() ?? []).flatMap((slot) => {
+        if (slot.kind !== "remote") return [];
+        try {
+          return [{ hostId: decodeStableHostId(String(slot.hostId)), name: slot.displayName }];
+        } catch {
+          return [];
+        }
+      }),
+    }),
+    [todoListHost.read, todoListHost.choose, hostFederationTransports, federationRevision],
+  );
+  // Read when a link is sent, not when its create started.
+  const todoThisHostIdRef = useRef<TodoListView["hostId"]>(undefined);
+  todoThisHostIdRef.current = todoThisHostId;
   const todosCount =
     todoList.read.status === "loading" || todoList.read.view === undefined
       ? 0
@@ -2710,10 +2882,32 @@ function LaunchedShell(
   const [todoQuickAddOpen, setTodoQuickAddOpen] = useState(false);
   const openTodoQuickAdd = () => setTodoQuickAddOpen(true);
   useNewTodoShortcut(openTodoQuickAdd);
+  const todoThreadRows = useMemo(
+    () =>
+      todoThreadStates([
+        { mode: "chat", rows: chatController.navigation },
+        { mode: "work", rows: workNavigation.navigation },
+        { mode: "code", rows: codeController.navigation },
+      ]),
+    [chatController.navigation, workNavigation.navigation, codeController.navigation],
+  );
   const todosPage: TodosPageProps = {
     list: todoList,
+    listKey: todoListChoiceKey,
+    ...(todoThisHostId === undefined ? {} : { thisHostId: todoThisHostId }),
+    readOnly: todoListReadOnly,
     projects: todoProjects,
     onClose: () => setTodosOpen(false),
+    start: {
+      threadStates: todoThreadRows,
+      onStart: (todo, target) => void startTodo(todo, target),
+      onOpenThread: (link, title) => void openTodoThread(link, title),
+      unlinked: unlinkedTodoStarts,
+      onLink: (todoId) => {
+        const started = unlinkedTodoStarts.get(todoId);
+        if (started !== undefined) void recordTodoLink(todoId, started);
+      },
+    },
   };
   const inboxAttentionItems = useMemo(
     () =>
@@ -3557,6 +3751,10 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The Project controller makes a new setter each render; the thread's trust
+  // prompt reads the latest through this ref so the services stay stable.
+  const setProjectNativeProvidersRef = useRef(projectController.setNativeProviders);
+  setProjectNativeProvidersRef.current = projectController.setNativeProviders;
   const threadNativeSetupServices = useMemo(
     () =>
       providerController.threadNativeSetup === undefined
@@ -3564,8 +3762,17 @@ function LaunchedShell(
         : {
             instances: providerController.instances,
             ...providerController.threadNativeSetup,
+            projects: projectController.projects,
+            setProjectNativeProviders: (
+              projectId: ProjectId,
+              providers: Parameters<typeof projectController.setNativeProviders>[1],
+            ) => setProjectNativeProvidersRef.current(projectId, providers),
           },
-    [providerController.instances, providerController.threadNativeSetup],
+    [
+      providerController.instances,
+      providerController.threadNativeSetup,
+      projectController.projects,
+    ],
   );
   // Built once per client and provider list: a new element on every render
   // re-rendered the whole memoized sidebar for each streamed event.
@@ -3978,6 +4185,10 @@ function LaunchedShell(
     ...codeProviderChoices.map(
       (choice) => `${String(choice.instanceId)}:${String(choice.modelId)}`,
     ),
+    "harness",
+    ...[...codeProviderGroups, ...workProviderGroups]
+      .filter((group) => group.runtime === "octant-harness")
+      .map((group) => String(group.instance.id)),
   ].join("\0");
   const automationCatalogCodeBootstrapKey =
     codeController.bootstrap === undefined
@@ -4019,6 +4230,16 @@ function LaunchedShell(
         ...(codeController.bootstrap === undefined
           ? {}
           : { codeBootstrap: codeController.bootstrap }),
+        // The host lists its server catalog only to its own person, so a
+        // restricted device's lists are empty and its editor offers none.
+        serverProjects: {
+          code: serverCodeProjects.projects,
+          work: serverCodeProjects.workProjects,
+        },
+        serverProviderChoicesByMode: automationServerProviderChoices(
+          [...codeProviderGroups, ...workProviderGroups],
+          { work: workProviderChoices, code: codeProviderChoices },
+        ),
       }),
     // Content keys keep the memo referentially stable across renders that only
     // allocate new Project/profile/provider array wrappers with identical facts.
@@ -4027,6 +4248,8 @@ function LaunchedShell(
       automationCatalogProfileKey,
       automationCatalogProjectKey,
       automationCatalogProviderKey,
+      serverCodeProjects.projects,
+      serverCodeProjects.workProjects,
       localHost?.displayName,
       props.launch.windowId,
     ],
@@ -4926,6 +5149,8 @@ function LaunchedShell(
             title: thread.title,
             projectId: String(thread.projectId),
             providerInstanceId: String(thread.providerInstanceId),
+            ...(thread.modelId === undefined ? {} : { modelId: thread.modelId }),
+            ...(thread.createdAt === undefined ? {} : { createdAt: thread.createdAt }),
             // The lifecycle used to ride along as a badge on every row, which
             // said "active" beside almost every thread and told the reader
             // nothing. The status dot carries it instead.
@@ -4950,6 +5175,9 @@ function LaunchedShell(
             ...(thread.coordinator === true ? { coordinator: true } : {}),
             ...(thread.planner === true ? { planner: true } : {}),
             ...workerLineage(thread.coordinatorThreadId),
+            ...(thread.coordinatorChoice === undefined
+              ? {}
+              : { coordinatorChoice: thread.coordinatorChoice }),
             ...(thread.messageWake === true ? { messageWake: true } : {}),
             ...(thread.coordinatorWakeOff === true ? { coordinatorWakeOff: true } : {}),
             ...(thread.restartContinuationOff === true ? { restartContinuationOff: true } : {}),
@@ -4972,9 +5200,16 @@ function LaunchedShell(
           awaitingInput: thread.activity === "attention",
         }),
       }));
+    // Workers the person has not asked to see in the sidebar stay out of the
+    // list but still count on their coordinator's row. Everything else that
+    // reads Code threads (Needs you, search, the Agents dock) keeps the full list.
+    const codeSidebarThreads = sidebarThreadsWithWorkers(
+      codeProjectThreads,
+      codeController.bootstrap?.settings,
+    );
     const sidebarThreadGroups = sidebarThreadGroupsForMode({
       activeMode,
-      codeThreads: codeProjectThreads,
+      codeThreads: codeSidebarThreads,
       workThreads: workProjectThreads,
     });
 
@@ -5050,6 +5285,7 @@ function LaunchedShell(
     }
     return {
       codeProjectThreads,
+      codeSidebarThreads,
       liveThreadTitles,
       markedChatNavigation,
       markedThreadGroups,
@@ -5062,6 +5298,7 @@ function LaunchedShell(
   }, [
     activeMode,
     chatController.navigation,
+    codeController.bootstrap?.settings,
     codeController.navigation,
     codeController.status,
     codeProviderRequestsByThreadId,
@@ -5540,7 +5777,7 @@ function LaunchedShell(
       setChatThreadRestartContinuation: chatController.setThreadRestartContinuation,
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
-      spendRevealChatTurn,
+      spendRevealTurn,
       splitPane: controller.splitPane,
       startNewThreadDraft,
       toggleBottomPanel,
@@ -5752,6 +5989,36 @@ function LaunchedShell(
         );
   const historyPaneId = historyPane?.paneId;
   const historyTabId = historyPane?.surface.id;
+  // A to-do's source belongs to the one draft its Start opened: the first
+  // draft in front for the same mode and Project. That may be a draft that was
+  // already open, which Start reuses with the same pane and surface, so the
+  // check also runs when the source is set. Leaving that draft for anything
+  // else drops the source, so a later send elsewhere is never linked.
+  const frontSurface = historyPane?.surface;
+  const frontDraft =
+    frontSurface?.kind === "draft-thread"
+      ? `${String(historyPane?.paneId ?? "")}:${String(frontSurface.id)}`
+      : undefined;
+  const frontDraftProjectId =
+    frontSurface?.kind === "draft-thread" && frontSurface.projectId !== undefined
+      ? String(frontSurface.projectId)
+      : undefined;
+  const frontPlace = `${activeMode}:${String(historyPaneId ?? "")}:${String(historyTabId ?? "")}`;
+  useEffect(() => {
+    const start = todoStartRef.current;
+    if (start === undefined) return;
+    if (start.draft === undefined) {
+      if (
+        frontDraft !== undefined &&
+        activeMode === start.mode &&
+        frontDraftProjectId === start.projectId
+      ) {
+        setTodoStart({ ...start, draft: frontDraft });
+      }
+      return;
+    }
+    if (frontDraft !== start.draft || activeMode !== start.mode) setTodoStart(undefined);
+  }, [frontPlace, todoStart]);
   // Review and the archive are reader pages too, opened from elsewhere than the
   // sidebar; without their own place, Back skipped straight past them.
   const historyPage: WindowPage | undefined = reviewOpen
@@ -5957,6 +6224,14 @@ function LaunchedShell(
             mode: "code" as const,
             threadId: String(thread.id),
             title: thread.title,
+            ...(thread.coordinatorThreadId === undefined
+              ? {}
+              : {
+                  workerOf:
+                    codeController.bootstrap?.threads.find(
+                      (candidate) => String(candidate.id) === String(thread.coordinatorThreadId),
+                    )?.title ?? "its coordinator",
+                }),
             ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
             // A Code thread also reports run states (`interrupted`, `waiting`).
             // Search only distinguishes live from archived, so a running thread
@@ -6567,6 +6842,95 @@ function LaunchedShell(
     setTodosOpen(true);
   }
 
+  /**
+   * Start: the ordinary new-thread draft for the chosen Project (its type is
+   * the mode) or Chat, with the to-do's title and notes as the prompt. Nothing
+   * starts until the person sends; the host that owns the Project decides.
+   */
+  async function startTodo(todo: Todo, target: TodoStartTarget): Promise<void> {
+    const project =
+      target.kind === "chat"
+        ? undefined
+        : projectController.allProjects.find(
+            (candidate) => String(candidate.id) === target.projectId,
+          );
+    if (target.kind === "project" && project === undefined) return;
+    const mode: OctantMode = project?.type ?? "chat";
+    closeWorkspaceReaders();
+    setDraftError(undefined);
+    setDraftPendingMessage(undefined);
+    resetNewTaskDraft(mode);
+    setPendingDraftPrompt(todo.notes === "" ? todo.title : `${todo.title}\n\n${todo.notes}`);
+    setTodoStart({
+      todoId: String(todo.id),
+      title: todo.title,
+      mode,
+      ...(project === undefined ? {} : { projectId: String(project.id) }),
+    });
+    // A Chat start files the thread in no Project, so the draft must not keep
+    // the Project the last Chat draft chose.
+    if (project === undefined) setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
+    await controller.openDraftThread(mode, project?.id);
+  }
+
+  /**
+   * Taken when a draft is sent: the to-do source of the draft in front, if
+   * that draft is the one its Start opened. Read before the create awaits, so
+   * a Start pressed while the create is in flight cannot take this thread.
+   */
+  function todoStartOfSentDraft(mode: string): TodoStartInProgress | undefined {
+    const start = todoStartRef.current;
+    if (start === undefined || start.mode !== mode || start.draft === undefined) return undefined;
+    return start.draft === frontDraft ? start : undefined;
+  }
+
+  /** Called by each create path once the host answered with its thread. */
+  function linkStartedTodo(
+    start: TodoStartInProgress | undefined,
+    mode: OctantMode,
+    threadId: string,
+  ): void {
+    if (start === undefined || start.mode !== mode) return;
+    if (todoStartRef.current === start) setTodoStart(undefined);
+    void recordTodoLink(start.todoId, { threadId, mode });
+  }
+
+  async function recordTodoLink(todoId: string, started: TodoUnlinkedStart): Promise<void> {
+    // The list as it is now, not as it was when the create started.
+    // A thread is linked by the host that owns it: this one.
+    const hostId = todoThisHostIdRef.current;
+    let saved = false;
+    if (hostId !== undefined) {
+      try {
+        const outcome = await todoList.change(
+          decodeTodoCommand({
+            kind: "link-todo-thread",
+            todoId,
+            thread: { hostId, threadId: started.threadId, mode: started.mode },
+          }),
+        );
+        saved = outcome.status === "saved";
+      } catch {
+        saved = false;
+      }
+    }
+    setUnlinkedTodoStarts((current) => {
+      const next = new Map(current);
+      if (saved) next.delete(todoId);
+      else next.set(todoId, started);
+      return next;
+    });
+  }
+
+  async function openTodoThread(link: TodoThreadLink, title: string): Promise<void> {
+    closeWorkspaceReaders();
+    const threadId = String(link.threadId);
+    if (link.mode === "chat") await controller.openChatThread(decodeChatThreadId(threadId), title);
+    else if (link.mode === "work")
+      await controller.openWorkThread(decodeWorkThreadId(threadId), title);
+    else await controller.openCodeThread(decodeCodeThreadId(threadId), title);
+  }
+
   // The To review tile, the start screen's review card, and the palette all
   // land on the one page that lists the threads the tile counted.
   function openReview() {
@@ -6770,6 +7134,7 @@ function LaunchedShell(
     draftProjectId?: ProjectId,
     plannerReview?: PlannerProposalReview,
   ): Promise<boolean> {
+    const sentFromTodo = todoStartOfSentDraft("code");
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -6928,6 +7293,7 @@ function LaunchedShell(
         );
         return false;
       }
+      linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
       // The branch Start a fix handed in now belongs to this thread; the next
       // draft must not open on it.
       setPendingDraftBranch(undefined);
@@ -7078,6 +7444,7 @@ function LaunchedShell(
     terminalSession?: import("@octant/contracts").TerminalSessionImportRequest,
     workingFolder?: import("@octant/contracts").ThreadWorkingFolderChoice,
   ): Promise<boolean | void> {
+    const sentFromTodo = todoStartOfSentDraft(mode);
     const paneToReset =
       initiatingPaneId ??
       (mode === "chat" || mode === "work" || mode === "code"
@@ -7112,6 +7479,7 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
+        linkStartedTodo(sentFromTodo, "chat", String(result.thread.id));
         // Clear the pane that submitted this create. Welcome panes cannot
         // become active, and another Chat pane can be current by the time
         // create finishes, so the caller passes the submitting pane.
@@ -7319,6 +7687,7 @@ function LaunchedShell(
           setDraftError("The Code thread could not be created.");
           return;
         }
+        linkStartedTodo(sentFromTodo, "code", String(created.thread.id));
         firstPromptAnnouncedFor = created.thread.id;
         codeThreadControllers.announceFirstPrompt(created.thread.id, prompt);
         await controller.openCodeThread(
@@ -7410,6 +7779,7 @@ function LaunchedShell(
           setDraftError("The task could not be created.");
           return false;
         }
+        linkStartedTodo(sentFromTodo, "work", String(created.thread.id));
         await controller.openWorkThread(
           created.thread.id,
           created.thread.title,
@@ -8032,6 +8402,9 @@ function LaunchedShell(
                       threadBoardAvailable={threadBoardAvailable}
                       codeBoardProjects={codeBoardProjects}
                       codeNavigationRows={codeController.navigation}
+                      {...(codeController.bootstrap?.settings === undefined
+                        ? {}
+                        : { codeWorkerListingSettings: codeController.bootstrap.settings })}
                       codePullRequestsOpen={codePullRequestsOpen}
                       codeProviderGroups={codeProviderGroups}
                       codeThreads={codeController.bootstrap?.threads}
@@ -8149,6 +8522,14 @@ function LaunchedShell(
                         : { pendingDraftCoordinator })}
                       pendingDraftCoordinatorChoices={pendingDraftCoordinatorChoices}
                       {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
+                      {...(todoStart?.draft === undefined || todoStart.draft !== frontDraft
+                        ? {}
+                        : {
+                            draftTodoSource: {
+                              title: todoStart.title,
+                              onRemove: () => setTodoStart(undefined),
+                            },
+                          })}
                       {...(pendingIssue === undefined ? {} : { pendingIssue })}
                       presentedLayout={controller.presentedLayout}
                       activeProject={projectController.activeProject}
@@ -8160,7 +8541,7 @@ function LaunchedShell(
                       workspaceVersion={controller.workspaceVersion}
                       providerController={providerController}
                       providerReady={providerReady}
-                      {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                      {...(revealTurn === undefined ? {} : { revealTurn })}
                       serverUrl={props.launch.serverUrl}
                       settings={controller.settings}
                       threadStatsSummary={threadStatsSummary}
@@ -8308,6 +8689,8 @@ function LaunchedShell(
           searchContentHits={transcriptSearch.hits}
           searchContentListing={threadSearchContentListing}
           searchContentTruncated={transcriptSearch.truncated}
+          searchScope={searchScope}
+          onSearchScopeChange={setSearchScope}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
           onNewSearchThread={() => {
@@ -8330,34 +8713,46 @@ function LaunchedShell(
             // server-authoritative workspace policy rejects.
             const hitProjectId =
               hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
+            // A Canvas hit opens the Canvas, in its thread's mode and Project
+            // (none for a Chat Canvas owned by a thread outside a Project),
+            // through the same open every Canvas card uses.
+            if (hit.field === "canvas" && hit.canvasId !== undefined) {
+              setRevealTurn(undefined);
+              void controller.openCanvas({
+                mode: hit.mode,
+                title: hit.canvasTitle ?? hit.title,
+                canvasId: decodeCanvasId(hit.canvasId),
+                projectId: hitProjectId ?? null,
+              });
+              return;
+            }
             if (hit.mode === "chat") {
               const threadId = decodeChatThreadId(hit.threadId);
-              if (hit.turnId === undefined) {
-                setRevealChatTurn(undefined);
-              } else {
-                setRevealChatTurn({
-                  threadId,
-                  turnId: decodeChatTurnId(hit.turnId),
-                });
-              }
+              setRevealTurn(
+                hit.turnId === undefined
+                  ? undefined
+                  : { mode: "chat", threadId, turnId: decodeChatTurnId(hit.turnId) },
+              );
               void controller.openChatThread(threadId, hit.title, hitProjectId);
               return;
             }
             if (hit.mode === "work") {
-              void controller.openWorkThread(
-                decodeWorkThreadId(hit.threadId),
-                hit.title,
-                undefined,
-                hitProjectId,
+              const threadId = decodeWorkThreadId(hit.threadId);
+              setRevealTurn(
+                hit.turnId === undefined
+                  ? undefined
+                  : { mode: "work", threadId, turnId: decodeWorkTurnId(hit.turnId) },
               );
+              void controller.openWorkThread(threadId, hit.title, undefined, hitProjectId);
               return;
             }
-            void controller.openCodeThread(
-              decodeCodeThreadId(hit.threadId),
-              hit.title,
-              undefined,
-              hitProjectId,
+            const threadId = decodeCodeThreadId(hit.threadId);
+            setRevealTurn(
+              hit.turnId === undefined
+                ? undefined
+                : { mode: "code", threadId, operationId: decodeCodeOperationId(hit.turnId) },
             );
+            void controller.openCodeThread(threadId, hit.title, undefined, hitProjectId);
           }}
           zenActive={zen.active}
           {...(activeCodeThreadView === undefined ? {} : { activeCodeThreadView })}
@@ -8574,201 +8969,210 @@ function LaunchedShell(
                   instances={providerController.snapshot?.instances ?? NO_PROVIDER_INSTANCES}
                   settings={controller.settings?.voice ?? NO_VOICE_SETTINGS}
                 >
-                  <OctantCommandProvider commands={octantCommands}>
-                    <OctantDialogPresence>
-                      {todoQuickAddOpen ? (
-                        <TodoQuickAddDialog
-                          list={todoList}
-                          onClose={() => setTodoQuickAddOpen(false)}
-                          open
-                          projects={todoProjects}
-                        />
-                      ) : null}
-                      {projectActionRun === undefined ? null : (
-                        <ProjectActionRunDialog
-                          key={JSON.stringify(projectActionRun.target)}
-                          client={projectTerminalClient}
-                          target={projectActionRun.target}
-                          storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
-                          open={projectActionRun.open}
-                          onClose={() =>
-                            setProjectActionRun((current) =>
-                              current === undefined ? undefined : { ...current, open: false },
+                  <TodoListHostSettingsContext.Provider value={todoListHostSettings}>
+                    <OctantCommandProvider commands={octantCommands}>
+                      <OctantDialogPresence>
+                        {todoQuickAddOpen ? (
+                          <TodoQuickAddDialog
+                            list={todoList}
+                            {...(todoThisHostId === undefined
+                              ? {}
+                              : { thisHostId: todoThisHostId })}
+                            onClose={() => setTodoQuickAddOpen(false)}
+                            open
+                            projects={todoProjects}
+                          />
+                        ) : null}
+                        {projectActionRun === undefined ? null : (
+                          <ProjectActionRunDialog
+                            key={JSON.stringify(projectActionRun.target)}
+                            client={projectTerminalClient}
+                            target={projectActionRun.target}
+                            storageKey={`octant.action-run:${props.launch.serverUrl}:${props.launch.windowId}:${JSON.stringify(projectActionRun.target)}`}
+                            open={projectActionRun.open}
+                            onClose={() =>
+                              setProjectActionRun((current) =>
+                                current === undefined ? undefined : { ...current, open: false },
+                              )
+                            }
+                            {...(zen.enabled &&
+                            !serverCodeProjects.workProjects.some(
+                              (project) => project.projectId === projectActionRun.target.projectId,
                             )
-                          }
-                          {...(zen.enabled &&
-                          !serverCodeProjects.workProjects.some(
-                            (project) => project.projectId === projectActionRun.target.projectId,
-                          )
+                              ? {
+                                  onOpenTerminal: (
+                                    terminalId: ReturnType<typeof decodeCodeTerminalId>,
+                                  ) => {
+                                    void (async () => {
+                                      if (!zen.active) await zen.enterZen();
+                                      await zen.pinProjectTerminal({
+                                        projectId: projectActionRun.target.projectId,
+                                        terminalId,
+                                      });
+                                    })();
+                                  },
+                                }
+                              : {})}
+                          />
+                        )}
+                      </OctantDialogPresence>
+
+                      <OctantDialogPresence>
+                        {preparationTarget === undefined ? null : (
+                          <WorktreePreparationDialog
+                            key={JSON.stringify(preparationTarget)}
+                            client={projectTerminalClient}
+                            runs={agentRunClient}
+                            target={preparationTarget}
+                            onClose={() => setPreparationTarget(undefined)}
+                          />
+                        )}
+                      </OctantDialogPresence>
+                      {actionsProject === undefined ? null : (
+                        <ProjectActionButtons
+                          actions={activeProjectActions}
+                          {...(activeMode === "code" &&
+                          activeCodeThreadView !== undefined &&
+                          activeCodeThreadView.checkout.kind !== "remote-root" &&
+                          String(activeCodeThreadView.thread.projectId) ===
+                            String(actionsProject.id)
                             ? {
-                                onOpenTerminal: (
-                                  terminalId: ReturnType<typeof decodeCodeTerminalId>,
-                                ) => {
-                                  void (async () => {
-                                    if (!zen.active) await zen.enterZen();
-                                    await zen.pinProjectTerminal({
-                                      projectId: projectActionRun.target.projectId,
-                                      terminalId,
-                                    });
-                                  })();
+                                onSetup: () => {
+                                  const view = activeCodeThreadView;
+                                  setPreparationTarget({
+                                    projectId: actionsProject.id,
+                                    thread: {
+                                      threadId: view.thread.id,
+                                      checkoutId: view.checkout.id,
+                                      ...(view.checkout.head.kind === "none"
+                                        ? {}
+                                        : { head: view.checkout.head.oid }),
+                                    },
+                                  });
                                 },
                               }
                             : {})}
+                          {...(activeMode === "code" &&
+                          activeCodeThreadView !== undefined &&
+                          String(activeCodeThreadView.thread.projectId) ===
+                            String(actionsProject.id)
+                            ? { defaultFolderLabel: "Active checkout" }
+                            : {})}
+                          {...(actionsProject.type === "code"
+                            ? {
+                                mainFolder: actionsProject.binding.canonicalRoot,
+                                extraFolders: (actionsProject.extraFolders ?? []).map(
+                                  (folder) => folder.canonicalRoot,
+                                ),
+                              }
+                            : {})}
+                          onRun={(action, folder) =>
+                            void runProjectAction(actionsProject.id, action, folder)
+                          }
                         />
                       )}
-                    </OctantDialogPresence>
-
-                    <OctantDialogPresence>
-                      {preparationTarget === undefined ? null : (
-                        <WorktreePreparationDialog
-                          key={JSON.stringify(preparationTarget)}
-                          client={projectTerminalClient}
-                          runs={agentRunClient}
-                          target={preparationTarget}
-                          onClose={() => setPreparationTarget(undefined)}
+                      {serverActionsProject === undefined ? null : (
+                        <ProjectActionButtons
+                          actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
+                          {...(serverActionsProject.folder === undefined
+                            ? {}
+                            : { mainFolder: serverActionsProject.folder })}
+                          defaultFolderLabel={
+                            activeMode === "work" ? "Task folder" : "Active server checkout"
+                          }
+                          onRun={(action, folder) =>
+                            void runProjectAction(serverActionsProject.projectId, action, folder)
+                          }
                         />
                       )}
-                    </OctantDialogPresence>
-                    {actionsProject === undefined ? null : (
-                      <ProjectActionButtons
-                        actions={activeProjectActions}
-                        {...(activeMode === "code" &&
-                        activeCodeThreadView !== undefined &&
-                        activeCodeThreadView.checkout.kind !== "remote-root" &&
-                        String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                          ? {
-                              onSetup: () => {
-                                const view = activeCodeThreadView;
-                                setPreparationTarget({
-                                  projectId: actionsProject.id,
-                                  thread: {
-                                    threadId: view.thread.id,
-                                    checkoutId: view.checkout.id,
-                                    ...(view.checkout.head.kind === "none"
-                                      ? {}
-                                      : { head: view.checkout.head.oid }),
-                                  },
-                                });
-                              },
-                            }
-                          : {})}
-                        {...(activeMode === "code" &&
-                        activeCodeThreadView !== undefined &&
-                        String(activeCodeThreadView.thread.projectId) === String(actionsProject.id)
-                          ? { defaultFolderLabel: "Active checkout" }
-                          : {})}
-                        {...(actionsProject.type === "code"
-                          ? {
-                              mainFolder: actionsProject.binding.canonicalRoot,
-                              extraFolders: (actionsProject.extraFolders ?? []).map(
-                                (folder) => folder.canonicalRoot,
-                              ),
-                            }
-                          : {})}
-                        onRun={(action, folder) =>
-                          void runProjectAction(actionsProject.id, action, folder)
-                        }
-                      />
-                    )}
-                    {serverActionsProject === undefined ? null : (
-                      <ProjectActionButtons
-                        actions={serverActionsProject.actions ?? NO_PROJECT_ACTIONS}
-                        {...(serverActionsProject.folder === undefined
-                          ? {}
-                          : { mainFolder: serverActionsProject.folder })}
-                        defaultFolderLabel={
-                          activeMode === "work" ? "Task folder" : "Active server checkout"
-                        }
-                        onRun={(action, folder) =>
-                          void runProjectAction(serverActionsProject.projectId, action, folder)
-                        }
-                      />
-                    )}
-                    <NeedsYouProvider source={needsYouSource}>
-                      {/* Held here rather than with any Code pane: a thread's controller has to
+                      <NeedsYouProvider source={needsYouSource}>
+                        {/* Held here rather than with any Code pane: a thread's controller has to
         outlive the surfaces reading it, so closing a diff tab never tears down
         the turn that thread is running. */}
-                      <CodeThreadControllerSlots
-                        client={codeClient}
-                        navigationBootstrap={codeController.bootstrap}
-                        readCursorStore={codeReadCursorStore}
-                        registry={codeThreadControllers}
-                        threadIds={openCodeThreadIds}
-                      />
-                      <TrackerReferenceProvider ports={trackerReferencePorts}>
-                        <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                          <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
-                            <ProjectIconProvider
-                              serverUrl={props.launch.serverUrl}
-                              windowCapability={props.projectWindowCapability}
-                            >
-                              <StableProjectThreadsProvider value={projectThreadsAccess}>
-                                <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                                  <StreamRepliesContext.Provider
-                                    value={controller.settings?.streamReplies !== false}
-                                  >
-                                    <ReplyDetailSourceContext.Provider value={replyDetailSource}>
-                                      <ReplyDetailContext.Provider
-                                        value={replyDetailSource.reading.defaultLevel}
-                                      >
-                                        {/* The floor for every rendered link: panes that can host a
+                        <CodeThreadControllerSlots
+                          client={codeClient}
+                          navigationBootstrap={codeController.bootstrap}
+                          readCursorStore={codeReadCursorStore}
+                          registry={codeThreadControllers}
+                          threadIds={openCodeThreadIds}
+                        />
+                        <TrackerReferenceProvider ports={trackerReferencePorts}>
+                          <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+                            <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                              <ProjectIconProvider
+                                serverUrl={props.launch.serverUrl}
+                                windowCapability={props.projectWindowCapability}
+                              >
+                                <StableProjectThreadsProvider value={projectThreadsAccess}>
+                                  <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                                    <StreamRepliesContext.Provider
+                                      value={controller.settings?.streamReplies !== false}
+                                    >
+                                      <ReplyDetailSourceContext.Provider value={replyDetailSource}>
+                                        <ReplyDetailContext.Provider
+                                          value={replyDetailSource.reading.defaultLevel}
+                                        >
+                                          {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                                        <MarkdownLinkActionsContext.Provider
-                                          value={rootLinkActions}
-                                        >
-                                          <WorkKindChoiceContext.Provider value={workKindChoice}>
-                                            <ModelToolVerificationContext.Provider
-                                              value={providerController.verifyModelTools}
-                                            >
-                                              <HostFederationStackContext.Provider
-                                                value={federation}
+                                          <MarkdownLinkActionsContext.Provider
+                                            value={rootLinkActions}
+                                          >
+                                            <WorkKindChoiceContext.Provider value={workKindChoice}>
+                                              <ModelToolVerificationContext.Provider
+                                                value={providerController.verifyModelTools}
                                               >
-                                                <PlanUsageProvider
-                                                  barStyle={
-                                                    controller.settings?.usageBars ?? "smooth"
-                                                  }
-                                                  client={launchedClients.providerUsageLimitsClient}
-                                                  instances={providerController.instances}
+                                                <HostFederationStackContext.Provider
+                                                  value={federation}
                                                 >
-                                                  <HostPlatformContext.Provider
-                                                    value={hostPlatform}
+                                                  <PlanUsageProvider
+                                                    barStyle={
+                                                      controller.settings?.usageBars ?? "smooth"
+                                                    }
+                                                    client={
+                                                      launchedClients.providerUsageLimitsClient
+                                                    }
+                                                    instances={providerController.instances}
                                                   >
-                                                    <ServerCodeProjectsContext.Provider
-                                                      value={serverCodeProjects}
+                                                    <HostPlatformContext.Provider
+                                                      value={hostPlatform}
                                                     >
-                                                      <CodeDebugWindowProvider
-                                                        origin={
-                                                          new URL(props.launch.serverUrl).origin
-                                                        }
-                                                        windowId={String(props.launch.windowId)}
+                                                      <ServerCodeProjectsContext.Provider
+                                                        value={serverCodeProjects}
                                                       >
-                                                        <QuestionnaireDraftsProvider
-                                                          serverUrl={props.launch.serverUrl}
-                                                          windowId={props.launch.windowId}
+                                                        <CodeDebugWindowProvider
+                                                          origin={
+                                                            new URL(props.launch.serverUrl).origin
+                                                          }
+                                                          windowId={String(props.launch.windowId)}
                                                         >
-                                                          {shell}
-                                                        </QuestionnaireDraftsProvider>
-                                                      </CodeDebugWindowProvider>
-                                                    </ServerCodeProjectsContext.Provider>
-                                                  </HostPlatformContext.Provider>
-                                                </PlanUsageProvider>
-                                              </HostFederationStackContext.Provider>
-                                            </ModelToolVerificationContext.Provider>
-                                          </WorkKindChoiceContext.Provider>
-                                        </MarkdownLinkActionsContext.Provider>
-                                      </ReplyDetailContext.Provider>
-                                    </ReplyDetailSourceContext.Provider>
-                                  </StreamRepliesContext.Provider>
-                                </NewTaskDraftsContext.Provider>
-                              </StableProjectThreadsProvider>
-                            </ProjectIconProvider>
-                          </SidebarThreadTabsContext.Provider>
-                        </SidebarThreadDragContext.Provider>
-                      </TrackerReferenceProvider>
-                    </NeedsYouProvider>
-                  </OctantCommandProvider>
+                                                          <QuestionnaireDraftsProvider
+                                                            serverUrl={props.launch.serverUrl}
+                                                            windowId={props.launch.windowId}
+                                                          >
+                                                            {shell}
+                                                          </QuestionnaireDraftsProvider>
+                                                        </CodeDebugWindowProvider>
+                                                      </ServerCodeProjectsContext.Provider>
+                                                    </HostPlatformContext.Provider>
+                                                  </PlanUsageProvider>
+                                                </HostFederationStackContext.Provider>
+                                              </ModelToolVerificationContext.Provider>
+                                            </WorkKindChoiceContext.Provider>
+                                          </MarkdownLinkActionsContext.Provider>
+                                        </ReplyDetailContext.Provider>
+                                      </ReplyDetailSourceContext.Provider>
+                                    </StreamRepliesContext.Provider>
+                                  </NewTaskDraftsContext.Provider>
+                                </StableProjectThreadsProvider>
+                              </ProjectIconProvider>
+                            </SidebarThreadTabsContext.Provider>
+                          </SidebarThreadDragContext.Provider>
+                        </TrackerReferenceProvider>
+                      </NeedsYouProvider>
+                    </OctantCommandProvider>
+                  </TodoListHostSettingsContext.Provider>
                 </SpeechCapabilityProvider>
               </ThreadActivityRevisionsContext.Provider>
             </ImageJobChangeRevisionContext.Provider>

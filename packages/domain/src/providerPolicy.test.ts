@@ -2547,31 +2547,31 @@ describe("provider instance policy", () => {
     expect(off.configuration).not.toHaveProperty("artifactDelivery");
   });
 
-  it("turns a provider's own memory on only for a Claude Code or Codex account, apart from running as itself", () => {
+  it("keeps a provider's own memory on by default and stores only the person's off, apart from running as itself", () => {
     for (const account of [claudeProvider(), codexProvider()]) {
-      const on = setProviderOwnMemory(account, { enabled: true, updatedAt });
-      expect(on.ownMemory).toBe(true);
-      expect(on).not.toHaveProperty("nativeSetup");
-      expect(on.version).toBe(account.version + 1);
-      expect(decodeProviderInstance(on)).toEqual(on);
-      expect(setProviderNativeSetup(on, { enabled: true, updatedAt })).toMatchObject({
-        ownMemory: true,
-        nativeSetup: true,
+      const off = setProviderOwnMemory(account, { enabled: false, updatedAt });
+      expect(off.ownMemory).toBe(false);
+      expect(off).not.toHaveProperty("nativeSetup");
+      expect(off.version).toBe(account.version + 1);
+      expect(decodeProviderInstance(off)).toEqual(off);
+      expect(setProviderNativeSetup(off, { enabled: false, updatedAt })).toMatchObject({
+        ownMemory: false,
+        nativeSetup: false,
       });
-      expect(setProviderOwnMemory(on, { enabled: false, updatedAt })).not.toHaveProperty(
+      expect(setProviderOwnMemory(off, { enabled: true, updatedAt })).not.toHaveProperty(
         "ownMemory",
       );
     }
-    const claudeOn = setProviderOwnMemory(claudeProvider(), { enabled: true, updatedAt });
-    if (claudeOn.driverKind !== "claude")
+    const claudeOff = setProviderOwnMemory(claudeProvider(), { enabled: false, updatedAt });
+    if (claudeOff.driverKind !== "claude")
       throw new Error("A Claude account stays a Claude account.");
     expect(
-      changeClaudeConfiguration(claudeOn, {
+      changeClaudeConfiguration(claudeOff, {
         configuration: { ...claudeProvider().configuration, accent: "rose" },
         activeSessionCount: 1,
         updatedAt,
       }),
-    ).toMatchObject({ ownMemory: true });
+    ).toMatchObject({ ownMemory: false });
 
     // OpenCode and Mistral Vibe keep no memory of their own behind a switch.
     for (const account of [provider(), mistralVibeProvider(), piProvider(), httpProvider()]) {
@@ -2581,33 +2581,44 @@ describe("provider instance policy", () => {
     }
   });
 
-  it("lets only a key provider account run as itself, and keeps the switch through an account edit", () => {
-    for (const account of [claudeProvider(), codexProvider(), provider(), mistralVibeProvider()]) {
-      const on = setProviderNativeSetup(account, { enabled: true, updatedAt });
-      expect(on.nativeSetup).toBe(true);
-      expect(on.version).toBe(account.version + 1);
-      expect(decodeProviderInstance(on)).toEqual(on);
-      const off = setProviderNativeSetup(on, { enabled: false, updatedAt });
-      expect(off).not.toHaveProperty("nativeSetup");
+  it("runs a key provider account as itself unless the person turns it off, and keeps that choice through an account edit", () => {
+    for (const account of [
+      claudeProvider(),
+      codexProvider(),
+      provider(),
+      mistralVibeProvider(),
+      kimiCodeProvider(),
+    ]) {
+      const off = setProviderNativeSetup(account, { enabled: false, updatedAt });
+      expect(off.nativeSetup).toBe(false);
+      expect(off.version).toBe(account.version + 1);
+      expect(decodeProviderInstance(off)).toEqual(off);
+      const on = setProviderNativeSetup(off, { enabled: true, updatedAt });
+      expect(on).not.toHaveProperty("nativeSetup");
     }
-    const claudeOn = setProviderNativeSetup(claudeProvider(), { enabled: true, updatedAt });
-    if (claudeOn.driverKind !== "claude")
+    // A record from the earlier default, when on had to be turned on, still decodes.
+    expect(decodeProviderInstance({ ...claudeProvider(), nativeSetup: true })).toMatchObject({
+      nativeSetup: true,
+    });
+    const claudeOff = setProviderNativeSetup(claudeProvider(), { enabled: false, updatedAt });
+    if (claudeOff.driverKind !== "claude")
       throw new Error("A Claude account stays a Claude account.");
-    const recoloured = changeClaudeConfiguration(claudeOn, {
+    const recoloured = changeClaudeConfiguration(claudeOff, {
       configuration: { ...claudeProvider().configuration, accent: "rose" },
       activeSessionCount: 1,
       updatedAt,
     });
-    expect(recoloured.nativeSetup).toBe(true);
+    expect(recoloured.nativeSetup).toBe(false);
 
-    for (const account of [kimiCodeProvider(), piProvider(), ollamaProvider(), httpProvider()]) {
+    for (const account of [piProvider(), ollamaProvider(), httpProvider()]) {
       expect(() => setProviderNativeSetup(account, { enabled: true, updatedAt })).toThrow(
-        "Only a Claude Code, Codex, OpenCode, or Mistral Vibe account runs as itself.",
+        "Only a Claude Code, Codex, OpenCode, or ACP agent account runs as itself.",
       );
     }
-    // The journal refuses the switch on any other ACP agent, so a hand-written
-    // row cannot slip one past the policy.
-    expect(() => decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: true })).toThrow();
+    // Every ACP agent is a key provider, so the journal keeps its switch too.
+    expect(decodeProviderInstance({ ...kimiCodeProvider(), nativeSetup: false })).toMatchObject({
+      nativeSetup: false,
+    });
   });
 
   it("rejects Claude reconfiguration before changing an instance with active sessions", () => {

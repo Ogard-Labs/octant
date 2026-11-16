@@ -117,6 +117,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
     archivedWorktreesClient,
     diskCleanupClient,
     personMemoryClient,
+    octantInstructionsClient,
     localUsageHistoryClient,
     nativeHarnessClient,
     providerUsageLimitsClient,
@@ -304,6 +305,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       archivedWorktreesClient={archivedWorktreesClient}
       diskCleanupClient={diskCleanupClient}
       personMemoryClient={personMemoryClient}
+      octantInstructionsClient={octantInstructionsClient}
       {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(desktopPaneClient === undefined ? {} : { desktopPaneClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}

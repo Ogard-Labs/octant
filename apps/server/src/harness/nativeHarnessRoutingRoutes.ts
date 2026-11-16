@@ -1,8 +1,15 @@
 import {
   decodeNativeHarnessProjectRoutingCommand,
   decodeProjectId,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeUpdateNativeHarnessRoutingSettings,
+  type ProjectId,
+  type ProviderInstanceId,
+  type ProviderModelId,
+  type WindowId,
 } from "@octant/contracts";
+import type { ImageDescriptionAvailability } from "./imageDescription";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -12,13 +19,30 @@ const METHODS = "GET, PUT, DELETE, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const HOST_PATH = "/api/native-harness/routing";
 const PROJECT_PREFIX = "/api/native-harness/routing/projects/";
+const SEES_IMAGES_PATH = "/api/native-harness/routing/sees-images";
 
 export interface NativeHarnessRoutingRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly store: Pick<
     NativeHarnessRoutingStore,
-    "host" | "projectOverride" | "updateHost" | "applyProjectCommand"
+    "host" | "projectOverride" | "projectVersion" | "updateHost" | "applyProjectCommand"
   >;
+  /**
+   * Whether Sees images could describe an image for a thread on this model
+   * in this Project now, so a composer can offer an attachment its model
+   * cannot read. The answer sends nothing.
+   */
+  readonly seesImages?: (input: {
+    readonly projectId?: ProjectId;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  }) => ImageDescriptionAvailability;
+  /**
+   * Whether the asking window may see the Project it names, by its own
+   * persisted workspace, as other Project reads decide. A window that may
+   * not is refused before anything is said about the Project's models.
+   */
+  readonly windowSeesProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
   readonly now?: () => number;
 }
 
@@ -52,7 +76,12 @@ export function createNativeHarnessRoutingRouteHandler(
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== HOST_PATH && !url.pathname.startsWith(PROJECT_PREFIX)) return undefined;
+    if (
+      url.pathname !== HOST_PATH &&
+      url.pathname !== SEES_IMAGES_PATH &&
+      !url.pathname.startsWith(PROJECT_PREFIX)
+    )
+      return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failure("Native harness routing requests must use loopback.", 400, null);
@@ -60,8 +89,13 @@ export function createNativeHarnessRoutingRouteHandler(
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
+    let windowId: WindowId;
     try {
-      authenticateRouteWindowId({ request, store: dependencies.windowAuthorityStore, now: now() });
+      windowId = authenticateRouteWindowId({
+        request,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness routing request is unauthorized.", 401, origin);
@@ -69,6 +103,35 @@ export function createNativeHarnessRoutingRouteHandler(
       return failure("Native harness routing request is invalid.", 400, origin);
     }
 
+    if (url.pathname === SEES_IMAGES_PATH) {
+      if (request.method !== "GET") return failure("Method not allowed.", 405, origin);
+      if (dependencies.seesImages === undefined) {
+        return failure("Sees images is unavailable on this host.", 404, origin);
+      }
+      let projectId: ProjectId | undefined;
+      try {
+        const project = url.searchParams.get("projectId");
+        projectId = project === null ? undefined : decodeProjectId(project);
+      } catch {
+        return failure("Sees images request is invalid.", 400, origin);
+      }
+      if (
+        projectId !== undefined &&
+        dependencies.windowSeesProject?.(windowId, projectId) !== true
+      ) {
+        return failure("This window cannot see that Project.", 403, origin);
+      }
+      try {
+        const answer = dependencies.seesImages({
+          ...(projectId === undefined ? {} : { projectId }),
+          providerInstanceId: decodeProviderInstanceId(url.searchParams.get("providerInstanceId")),
+          modelId: decodeProviderModelId(url.searchParams.get("modelId")),
+        });
+        return json(answer, 200, origin);
+      } catch {
+        return failure("Sees images request is invalid.", 400, origin);
+      }
+    }
     if (url.pathname === HOST_PATH) {
       if (request.method === "GET") {
         return json({ settings: dependencies.store.host() }, 200, origin);
@@ -100,7 +163,11 @@ export function createNativeHarnessRoutingRouteHandler(
     }
     if (request.method === "GET") {
       const override = dependencies.store.projectOverride(projectId);
-      return json({ override: override ?? null }, 200, origin);
+      return json(
+        { override: override ?? null, version: dependencies.store.projectVersion(projectId) },
+        200,
+        origin,
+      );
     }
     if (request.method === "PUT" || request.method === "DELETE") {
       let body: unknown = {};

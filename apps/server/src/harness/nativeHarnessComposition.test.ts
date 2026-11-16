@@ -30,7 +30,10 @@ import { createNativeHarnessShell } from "./nativeHarnessShell";
 import type { NativeHarnessShellPort } from "./nativeHarnessTools";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
-import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
+import { harnessWebSearch } from "./nativeHarnessWebSearch";
+import { searchWebSearchBackends } from "../webSearch/webSearchBackends";
+import { webSearchSettingsFromChatAddress } from "@octant/domain";
+import { MIGRATED_SEARXNG_ENTRY_ID } from "../webSearch/webSearchSettingsService";
 
 const authority = {
   hostId: "00000000-0000-4000-8000-0000000000aa",
@@ -147,8 +150,158 @@ describe("native harness composition", () => {
     },
   );
 
+  it("grants the provider's own search to every lead in Chat, Work, and Code, on this host or a server, and never to a child", () => {
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: () => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: "full-access",
+            approvalSatisfied: true,
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      hostId: authority.hostId,
+      readThreadTaint: () => false,
+      readWorkExecutionPolicy: () => "full-access",
+      readCodeExecutionPolicy: () => "full-access",
+      providerWebSearchFacts: () => ({ origin: "anthropic-api", webSearchReady: false }),
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-11-15T00:00:00.000Z",
+    });
+    const workThread = { ...thread, access: "full-access" } as unknown as WorkThread;
+    const chatThread = {
+      ...thread,
+      researchEnabled: true,
+      researchRouting: "automatic",
+    } as unknown as ChatThread;
+    const serverPorts = {
+      filesystem: (() => ({ root: "/srv/app" })) as never,
+      shell: { run: async () => ({ status: "unavailable" }) } as never,
+      server: () => undefined,
+    };
+    const atFullAccess = { withdrawAfterFirstStep: false };
+    const offers = {
+      chat: composition
+        .forChat({ thread: chatThread, windowId: "w" })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+      work: composition
+        .forWork({ thread: workThread, projectRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+      code: composition
+        .forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+      serverWork: composition
+        .forServerWork({ thread: workThread, ...serverPorts })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+      serverCode: composition
+        .forServerCode({ thread, windowId: "w", ...serverPorts })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+      child: composition
+        .forAgentRun({
+          run: {
+            id: thread.id,
+            parentThreadId: "parent",
+            routingReceipt: { mode: "chat", selectedProviderInstanceId: thread.providerInstanceId },
+            workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+          } as never,
+          authority: {
+            filesystem: false,
+            shell: false,
+            git: false,
+            network: true,
+            tools: true,
+            subagents: false,
+            executionPolicy: "full-access",
+            permissionPersistence: "current-session",
+          },
+          projectRoot: "/unused",
+        })
+        ?.providerWebSearch?.(decodeProviderSessionId("00000000-0000-4000-8000-000000000077")),
+    };
+    expect(offers).toEqual({
+      // Chat is decided below Full access: it has no execution policy of its own.
+      chat: { withdrawAfterFirstStep: true },
+      work: atFullAccess,
+      code: atFullAccess,
+      serverWork: atFullAccess,
+      serverCode: atFullAccess,
+      child: undefined,
+    });
+  });
+
+  it("decides the provider's own search when the turn is sent, keeping it at Full access on a thread marked after composing", () => {
+    const tainted = new Set<string>();
+    let codePolicy: ProviderExecutionPolicy = "full-access";
+    let tracked: ((providerInstanceId: typeof thread.providerInstanceId) => unknown) | undefined;
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: () => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: codePolicy,
+            approvalSatisfied: codePolicy === "full-access",
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      hostId: authority.hostId,
+      readThreadTaint: (threadId) => tainted.has(threadId),
+      readCodeExecutionPolicy: () => codePolicy,
+      // The lead's instance runs its own search; any other instance does not.
+      providerWebSearchFacts: (providerInstanceId) => ({
+        origin:
+          String(providerInstanceId) === String(thread.providerInstanceId)
+            ? "anthropic-api"
+            : undefined,
+        webSearchReady: false,
+      }),
+      providerSearchGrants: {
+        track: (_sessionId, decide) => {
+          tracked = decide;
+        },
+      },
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => "2026-11-15T00:00:00.000Z",
+    });
+    const code = composition.forCode({ thread, checkoutRoot: "/nonexistent", windowId: "w" });
+    // Marked after its tools were composed, as preparing its context can.
+    tainted.add(String(thread.id));
+    const atFullAccess = code?.providerWebSearch?.(
+      decodeProviderSessionId("00000000-0000-4000-8000-000000000077"),
+    );
+    codePolicy = "approval-gated";
+    const belowFullAccess = code?.providerWebSearch?.(
+      decodeProviderSessionId("00000000-0000-4000-8000-000000000077"),
+    );
+    expect({ atFullAccess, belowFullAccess }).toEqual({
+      atFullAccess: { withdrawAfterFirstStep: false },
+      belowFullAccess: undefined,
+    });
+    // Sending tracked the session, so its loop asks again per endpoint.
+    codePolicy = "full-access";
+    expect(tracked?.(thread.providerInstanceId)).toEqual({ withdrawAfterFirstStep: false });
+    expect(tracked?.(decodeProviderInstanceId("00000000-0000-4000-8000-0000000000ff"))).toBe(
+      undefined,
+    );
+  });
+
   it("offers web search on the next turn after SearXNG is set and follows a changed endpoint", async () => {
     let searxngBaseUrl: string | undefined;
+    const asked: Array<{ readonly threadId?: string; readonly toolCallId?: string }> = [];
     const fetch = vi.fn(
       async (_input: RequestInfo | URL) =>
         new Response(
@@ -174,7 +327,20 @@ describe("native harness composition", () => {
         }),
       },
       isHarnessProvider: () => true,
-      resolveWebSearch: () => searxngHarnessWebSearch({ readBaseUrl: () => searxngBaseUrl, fetch }),
+      resolveWebSearch: () =>
+        harnessWebSearch({
+          readEligible: () =>
+            webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID).backends,
+          search: (input) => {
+            asked.push(input);
+            return searchWebSearchBackends({
+              backends: webSearchSettingsFromChatAddress(searxngBaseUrl, MIGRATED_SEARXNG_ENTRY_ID)
+                .backends,
+              search: input,
+              fetch,
+            });
+          },
+        }),
       hostId: authority.hostId,
       readThreadTaint: () => false,
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
@@ -187,6 +353,7 @@ describe("native harness composition", () => {
       nextTurn()?.execute({
         name: "web-search",
         inputJson: JSON.stringify({ query: "octant" }),
+        toolCallId: "toolu_search_1",
       });
 
     const unset = nextTurn()?.definitions.map((definition) => definition.name);
@@ -198,6 +365,8 @@ describe("native harness composition", () => {
       result: { query: "octant", results: [{ url: "https://example.com/octant" }] },
     });
     expect(String(fetch.mock.calls.at(-1)?.[0])).toMatch(/^https:\/\/search\.example\.test\//);
+    // Where the query went is journaled with the thread's own tool call.
+    expect(asked.at(-1)).toMatchObject({ threadId: thread.id, toolCallId: "toolu_search_1" });
 
     searxngBaseUrl = "https://other.example.test";
     await search();

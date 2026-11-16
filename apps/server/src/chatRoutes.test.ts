@@ -7,7 +7,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import { MachineChangeFeed } from "./machineChangeFeed";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
-import { createChatRouteHandler } from "./chatRoutes";
+import { createChatRouteHandler, imagesCurrentFor } from "./chatRoutes";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { ChatServiceError } from "./chat/chatService";
@@ -198,7 +198,7 @@ describe("Chat routes", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("lets a device the host's own person paired change Continue after restart or move a thread to another account, as that device, and refuses any other device", async () => {
+  it("lets a device the host's own person paired change Continue after restart, move a thread to another account or set its usage-limit hand-off, as that device, and refuses any other device", async () => {
     const execute = vi.fn(async () => ({ kind: "thread-updated", thread: threadFixture }));
     const route = routeFixture({ execute });
     const remoteDeviceId = "73000000-0000-4000-8000-000000000050";
@@ -219,6 +219,12 @@ describe("Chat routes", () => {
       },
       {
         kind: "move-chat-thread-account",
+        threadId: threadFixture.id,
+        expectedVersion: 1,
+        providerInstanceId: "73000000-0000-4000-8000-000000000052",
+      },
+      {
+        kind: "set-chat-thread-usage-limit-handoff",
         threadId: threadFixture.id,
         expectedVersion: 1,
         providerInstanceId: "73000000-0000-4000-8000-000000000052",
@@ -263,7 +269,7 @@ describe("Chat routes", () => {
         }),
       );
     }
-    expect(execute).toHaveBeenCalledTimes(3);
+    expect(execute).toHaveBeenCalledTimes(4);
   });
 
   it("rejects unsupported attachment media types", async () => {
@@ -701,3 +707,18 @@ function routeFixture(
     ...dependencies,
   });
 }
+
+describe("a Chat send's image check", () => {
+  it("holds while a local window's authority stands and fails once it is revoked", () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const check = imagesCurrentFor(
+      request("/api/chat/commands", { method: "POST" }),
+      store,
+      () => 1,
+    );
+    expect(check.imagesCurrent?.()).toBe(true);
+    store.revoke(windowId);
+    expect(check.imagesCurrent?.()).toBe(false);
+  });
+});

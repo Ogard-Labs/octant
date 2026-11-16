@@ -33,6 +33,7 @@ function workRow(hostId: string, thread: WorkThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    projectId: String(thread.projectId),
   };
 }
 
@@ -282,6 +283,11 @@ export async function createMobileWorkFromPrompt(input: {
   readonly modelId: string;
   readonly bindingRevisionId: string;
   readonly workingDirectory?: string;
+  /**
+   * Told as soon as the host has made the thread, before its first turn: a
+   * turn that then fails to start still leaves a thread the caller can name.
+   */
+  readonly onCreated?: (row: MobileInboxRow) => void;
 }): Promise<MobileInboxRow> {
   const trimmed = input.prompt.trim();
   if (trimmed.length === 0) {
@@ -297,6 +303,7 @@ export async function createMobileWorkFromPrompt(input: {
     ...(input.workingDirectory === undefined ? {} : { workingDirectory: input.workingDirectory }),
   });
   const row = workRow(input.transport.hostId, thread);
+  input.onCreated?.(row);
   try {
     await sendMobileWorkTurn({
       transport: input.transport,

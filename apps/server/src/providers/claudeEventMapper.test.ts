@@ -14,12 +14,20 @@ import type { ClaudeOpenQueryInput } from "./claudeAgentSdkPort";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  claudeStoredTaskListEvents,
   mapClaudeMessage,
   mapClaudeToolRequest,
   type ClaudeEventContext,
   type ClaudeMappedMessage,
 } from "./claudeEventMapper";
-import type { ClaudeDecodedMessage, ClaudeToolRequest, ClaudeUsage } from "./claudeAgentSdkPort";
+import { ClaudeTaskList } from "./claudeTaskList";
+import type {
+  ClaudeDecodedMessage,
+  ClaudeJsonValue,
+  ClaudeToolRequest,
+  ClaudeUsage,
+  ClaudeWorkflowAgent,
+} from "./claudeAgentSdkPort";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000091");
 const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000092");
@@ -55,6 +63,8 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     requestIds: new Map(),
     taskIds: new Map(),
     todoTaskIds: new Map(),
+    subagentTaskIds: new Map(),
+    taskList: new ClaudeTaskList(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
     makeTaskId: () => `task-${++task}`,
@@ -709,6 +719,33 @@ describe("mapClaudeMessage", () => {
     expect(whole.some((next) => next.kind === "tool-start")).toBe(false);
   });
 
+  it("records only the notebook's path for a NotebookEdit, never the cell it writes", () => {
+    const ctx = context();
+    const recorded = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-notebook",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-notebook-1",
+            toolName: "NotebookEdit",
+            input: {
+              notebook_path: "/repo/analysis.ipynb",
+              cell_id: "cell-1",
+              new_source: "notebook-cell-must-not-cross",
+            },
+          },
+        ],
+        usage,
+      }),
+    ).filter((next) => next.kind === "tool-call-content");
+    expect(recorded).toMatchObject([
+      { part: "input", text: '{"notebook_path":"/repo/analysis.ipynb"}' },
+    ]);
+  });
+
   it("leaves a tool Octant runs itself to the host's own record", () => {
     const ctx = context();
     const started = eventValues(
@@ -792,6 +829,78 @@ describe("mapClaudeMessage", () => {
     ]);
   });
 
+  it("names the model Claude's own subagent call asked for, and leaves it unknown otherwise", () => {
+    const start = (input: Readonly<Record<string, string>>) =>
+      eventValues(
+        mapped(context(), {
+          kind: "stream-event",
+          sessionId: claudeSessionId,
+          event: {
+            kind: "content-start",
+            index: 0,
+            content: { kind: "tool-use", toolUseId: "sdk-agent", toolName: "Agent", input },
+          },
+        }),
+      ).find((value) => value.kind === "child-agent-activity");
+    expect(start({ description: "Review", model: "haiku" })).toMatchObject({ modelId: "haiku" });
+    expect(start({ description: "Review" })).not.toHaveProperty("modelId");
+  });
+
+  it("carries a subagent's closing report and total tokens when Claude reports its task finished", () => {
+    const finish = (notification: {
+      readonly summary: string;
+      readonly usage?: { totalTokens: number; toolUses: number; durationMs: number };
+    }) => {
+      const ctx = context();
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: {
+            kind: "tool-use",
+            toolUseId: "sdk-agent",
+            toolName: "Agent",
+            input: { description: "Review" },
+          },
+        },
+      });
+      mapped(ctx, {
+        kind: "task",
+        sessionId: claudeSessionId,
+        subtype: "task_started",
+        taskId: "sdk-task",
+        toolUseId: "sdk-agent",
+        description: "Review",
+      });
+      return eventValues(
+        mapped(ctx, {
+          kind: "task",
+          sessionId: claudeSessionId,
+          subtype: "task_notification",
+          taskId: "sdk-task",
+          status: "completed",
+          ...notification,
+        }),
+      ).find((value) => value.kind === "child-agent-activity");
+    };
+    expect(
+      finish({
+        summary: "Found two issues.",
+        usage: { totalTokens: 420, toolUses: 3, durationMs: 9 },
+      }),
+    ).toMatchObject({
+      status: "completed",
+      finalSummary: "Found two issues.",
+      usage: { totalTokens: 420 },
+    });
+    const withoutUsage = finish({ summary: "   " });
+    expect(withoutUsage).toMatchObject({ status: "completed" });
+    expect(withoutUsage).not.toHaveProperty("usage");
+    expect(withoutUsage).not.toHaveProperty("finalSummary");
+  });
+
   it("shows Claude's own subagent as a child run and marks the thread when the subagent reads the web", () => {
     const ctx = context();
     const started = mapped(ctx, {
@@ -861,6 +970,177 @@ describe("mapClaudeMessage", () => {
         toolUses: [],
       }),
     ).toMatchObject([{ kind: "failure" }]);
+  });
+
+  it("shows a workflow as a child run under its Workflow call and each agent it starts as a child of the workflow", () => {
+    const ctx = context();
+    const started = mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-workflow",
+          toolName: "Workflow",
+          input: { script: "private script" },
+        },
+      },
+    });
+    expect(eventValues(started)).toMatchObject([{ kind: "tool-start", toolName: "Workflow" }]);
+    const call = eventValues(started)[0];
+    if (call?.kind !== "tool-start") throw new Error("Expected the Workflow call");
+    // The call returns at once; the workflow runs on as a background task.
+    mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [{ toolUseId: "sdk-workflow", isError: false }],
+    });
+
+    const opened = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_started",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      background: true,
+      workflow: { name: "review" },
+      description: "Review the change",
+    });
+    expect(eventValues(opened)).toMatchObject([
+      { kind: "task-progress", status: "in-progress" },
+      {
+        kind: "child-agent-activity",
+        childAgentId: call.toolCallId,
+        task: "review",
+        status: "starting",
+      },
+    ]);
+
+    const progress = (agents: ClaudeWorkflowAgent[]) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "task",
+          sessionId: claudeSessionId,
+          subtype: "task_progress",
+          taskId: "sdk-workflow-task",
+          toolUseId: "sdk-workflow",
+          description: "Review the change",
+          usage: { totalTokens: 10, toolUses: 1, durationMs: 5 },
+          workflow: { agents },
+        }),
+      ).filter((next) => next.kind === "child-agent-activity");
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "progress", lastToolName: "Read" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([
+      {
+        childAgentId: `${call.toolCallId}:agent-0`,
+        parentChildAgentId: call.toolCallId,
+        task: "read the diff",
+        status: "running",
+        summary: "The workflow agent is using Read.",
+      },
+      { childAgentId: `${call.toolCallId}:agent-1`, status: "running" },
+    ]);
+    // The runtime restates the whole list; only an agent that moved is shown again.
+    expect(
+      progress([
+        { index: 0, label: "read the diff", state: "done" },
+        { index: 1, label: "check the tests", state: "start" },
+      ]),
+    ).toMatchObject([{ childAgentId: `${call.toolCallId}:agent-0`, status: "completed" }]);
+
+    const ended = mapped(ctx, {
+      kind: "task",
+      sessionId: claudeSessionId,
+      subtype: "task_notification",
+      taskId: "sdk-workflow-task",
+      toolUseId: "sdk-workflow",
+      status: "completed",
+      summary: "Dynamic workflow completed",
+    });
+    expect(eventValues(ended)).toMatchObject([
+      { kind: "task-progress", status: "completed" },
+      { kind: "child-agent-activity", childAgentId: call.toolCallId, status: "completed" },
+    ]);
+    expect(JSON.stringify([started, opened, ended])).not.toContain("private script");
+
+    // A workflow task that names no Workflow call of this session is not one Octant opened.
+    expect(
+      mapped(context(), {
+        kind: "task",
+        sessionId: claudeSessionId,
+        subtype: "task_started",
+        taskId: "sdk-other",
+        toolUseId: "sdk-unknown",
+        background: true,
+        workflow: {},
+        description: "Unknown",
+      }),
+    ).toMatchObject([{ kind: "failure" }]);
+  });
+
+  it("shows a wake-up call Octant answered in place of the runtime as done, not failed", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "stream-event",
+      sessionId: claudeSessionId,
+      event: {
+        kind: "content-start",
+        index: 0,
+        content: {
+          kind: "tool-use",
+          toolUseId: "sdk-wake",
+          toolName: "ScheduleWakeup",
+          input: { delaySeconds: 300, prompt: "Check it." },
+        },
+      },
+    });
+    const call = ctx.toolStates.get("sdk-wake");
+    if (call === undefined) throw new Error("Expected the call's state");
+    call.answeredByOctant = true;
+    const answered = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-wake", isError: true }],
+      }),
+    );
+    expect(answered.map((next) => next.kind)).not.toContain("tool-failure");
+    expect(answered).toContainEqual(
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "Octant answered from this thread's wake-ups.",
+      }),
+    );
+  });
+
+  it("marks the answer of each claude.ai service tool as outside content", () => {
+    for (const [toolName, input] of [
+      ["Projects", { method: "project_read", path: "notes.md" }],
+      ["ClaudeDesign", { operation: "list", arguments: {} }],
+      ["RemoteTrigger", { action: "get", trigger_id: "trig_1" }],
+      ["PushNotification", { message: "Done", status: "proactive" }],
+    ] as const) {
+      const started = mapped(context(), {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input },
+        },
+      });
+      expect(eventValues(started)[1]).toMatchObject({
+        kind: "outside-content-read",
+        source: "hosted-tool",
+        toolName,
+      });
+    }
   });
 
   it("treats claude.ai's answer to an artifact publish as outside content and carries the page it names", () => {
@@ -1008,6 +1288,41 @@ describe("mapClaudeMessage", () => {
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
+  it("shows a plan Claude hands over in Plan as marked reply text, not as a tool row", () => {
+    const ctx = context();
+    const handedOver = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-plan",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-plan-1",
+            toolName: "ExitPlanMode",
+            input: { plan: "1. Add the route.\n2. Test it." },
+          },
+        ],
+        usage,
+      }),
+    );
+    const refused = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-plan-1", isError: true }],
+      }),
+    );
+
+    const text = handedOver.flatMap((event) => (event.kind === "text-delta" ? [event.text] : []));
+    expect(text.join("")).toBe("**Proposed plan**\n\n1. Add the route.\n2. Test it.\n");
+    expect(
+      [...handedOver, ...refused].some(
+        (event) => event.kind === "tool-start" || event.kind === "tool-failure",
+      ),
+    ).toBe(false);
+  });
+
   it("keeps the task panel in Claude's latest order when an item is renamed or inserted", () => {
     const ctx = context();
     const write = (toolUseId: string, items: ReadonlyArray<string>) =>
@@ -1088,6 +1403,265 @@ describe("mapClaudeMessage", () => {
     expect(write("sdk-todo-c", ["Test it", "Read the spec"])).toEqual(["Test it", "Read the spec"]);
     // An empty list clears the panel.
     expect(write("sdk-todo-d", [])).toEqual([]);
+  });
+
+  describe("Claude's task tools", () => {
+    const decodingInput: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "approval-gated",
+      tools: ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"],
+      canUseTool: async () => ({ behavior: "allow" }),
+      preToolUse: async () => ({ behavior: "allow" }),
+    };
+    // One call as the runtime sends it: the tool use, then the user message
+    // that settles it with the model's text and the structured result.
+    const call = (
+      ctx: ClaudeEventContext,
+      toolUseId: string,
+      toolName: string,
+      input: { readonly [key: string]: ClaudeJsonValue },
+      toolUseResult: unknown,
+      isError = false,
+    ) => {
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: `message-${toolUseId}`,
+        content: [{ kind: "tool-use", toolUseId, toolName, input }],
+        usage,
+      });
+      const decoded = decodeMessage(
+        {
+          type: "user",
+          session_id: claudeSessionId,
+          parent_tool_use_id: null,
+          message: {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: toolUseId,
+                content: "Task text the model reads",
+                ...(isError ? { is_error: true } : {}),
+              },
+            ],
+          },
+          ...(toolUseResult === undefined ? {} : { tool_use_result: toolUseResult }),
+        },
+        decodingInput,
+        { kind: "active", sessionId: claudeSessionId },
+      );
+      const results = mapped(ctx, decoded);
+      expect(results.some((result) => result.kind === "failure")).toBe(false);
+      return eventValues(results);
+    };
+    const panel = (events: ReturnType<typeof eventValues>) =>
+      events.map((event) =>
+        event.kind === "task-progress"
+          ? `${event.taskId} ${event.status} ${event.summary}`
+          : event.kind === "task-list"
+            ? `list ${event.taskIds.join(",")}`
+            : event.kind,
+      );
+
+    it("restates the whole task list after each create, update, and list", () => {
+      const ctx = context();
+
+      expect(
+        panel(
+          call(
+            ctx,
+            "create-1",
+            "TaskCreate",
+            { subject: "Read the spec", description: "d" },
+            {
+              task: { id: "1", subject: "Read the spec" },
+            },
+          ),
+        ),
+      ).toEqual(["task-1 pending Read the spec", "list task-1"]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "create-2",
+            "TaskCreate",
+            { subject: "Write the test", description: "d" },
+            {
+              task: { id: "2", subject: "Write the test" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 pending Read the spec",
+        "task-2 pending Write the test",
+        "list task-1,task-2",
+      ]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-1",
+            "TaskUpdate",
+            { taskId: "1", status: "in_progress", subject: "Read it" },
+            {
+              success: true,
+              taskId: "1",
+              updatedFields: ["subject", "status"],
+              statusChange: { from: "pending", to: "in_progress" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 in-progress Read it",
+        "task-2 pending Write the test",
+        "list task-1,task-2",
+      ]);
+      // The runtime's own list is the whole truth: a task it no longer holds
+      // leaves the panel and one Octant never saw joins it.
+      expect(
+        panel(
+          call(
+            ctx,
+            "list-1",
+            "TaskList",
+            {},
+            {
+              tasks: [
+                { id: "1", subject: "Read it", status: "completed", blockedBy: [] },
+                { id: "3", subject: "Ship it", status: "pending", blockedBy: ["1"] },
+              ],
+            },
+          ),
+        ),
+      ).toEqual(["task-1 completed Read it", "task-3 pending Ship it", "list task-1,task-3"]);
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-3",
+            "TaskUpdate",
+            { taskId: "3", status: "deleted" },
+            {
+              success: true,
+              taskId: "3",
+              updatedFields: ["deleted"],
+              statusChange: { from: "pending", to: "deleted" },
+            },
+          ),
+        ),
+      ).toEqual(["task-1 completed Read it", "list task-1"]);
+    });
+
+    it("never adds a task whose id did not come back in the call's result", () => {
+      const ctx = context();
+
+      // A refused create, and one whose structured result is missing, name no id.
+      expect(
+        call(
+          ctx,
+          "create-refused",
+          "TaskCreate",
+          { subject: "Read", description: "d" },
+          undefined,
+          true,
+        ),
+      ).toEqual([]);
+      expect(
+        call(ctx, "create-bare", "TaskCreate", { subject: "Read", description: "d" }, undefined),
+      ).toEqual([]);
+      // An update Claude refused, or to a task this session never saw, changes nothing.
+      expect(
+        call(
+          ctx,
+          "update-missing",
+          "TaskUpdate",
+          { taskId: "9", status: "completed" },
+          {
+            success: false,
+            taskId: "9",
+            updatedFields: [],
+            error: "Task not found",
+          },
+        ),
+      ).toEqual([]);
+      expect(
+        call(
+          ctx,
+          "update-unseen",
+          "TaskUpdate",
+          { taskId: "9", status: "completed" },
+          {
+            success: true,
+            taskId: "9",
+            updatedFields: ["status"],
+            statusChange: { from: "pending", to: "completed" },
+          },
+        ),
+      ).toEqual([]);
+    });
+
+    it("opens a resumed session's first turn with the whole stored list, once", () => {
+      const ctx = context();
+      ctx.taskList.seed([
+        { id: "1", subject: "Read the spec", status: "completed" },
+        { id: "2", subject: "Write the test", status: "in_progress" },
+      ]);
+
+      expect(panel(eventValues(claudeStoredTaskListEvents(ctx)))).toEqual([
+        "task-1 completed Read the spec",
+        "task-2 in-progress Write the test",
+        "list task-1,task-2",
+      ]);
+      expect(claudeStoredTaskListEvents(ctx)).toEqual([]);
+      // The next call builds on the stored list rather than starting over.
+      expect(
+        panel(
+          call(
+            ctx,
+            "update-2",
+            "TaskUpdate",
+            { taskId: "2", status: "completed" },
+            {
+              success: true,
+              taskId: "2",
+              updatedFields: ["status"],
+              statusChange: { from: "in_progress", to: "completed" },
+            },
+          ),
+        ),
+      ).toEqual([
+        "task-1 completed Read the spec",
+        "task-2 completed Write the test",
+        "list task-1,task-2",
+      ]);
+    });
+
+    it("still shows a checklist Claude writes with TodoWrite in a session that holds the task tools", () => {
+      const ctx = context();
+      ctx.taskList.seed([{ id: "1", subject: "Stored task", status: "pending" }]);
+      const events = eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: "message-todo",
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId: "todo-1",
+              toolName: "TodoWrite",
+              input: { todos: [{ content: "Read", status: "pending", activeForm: "Reading" }] },
+            },
+          ],
+          usage,
+        }),
+      ).filter((event) => event.kind !== "usage");
+
+      expect(panel(events)).toEqual(["task-1 pending Read", "list task-1"]);
+    });
   });
 
   it("ignores raw provider tool summaries regardless of Unicode length", () => {
@@ -1480,36 +2054,115 @@ describe("mapClaudeMessage", () => {
     },
   );
 
-  it("fails closed without exposing an outside-root file path", () => {
-    const outsidePath = "/private/outside-root-secret.ts";
-    const results = mapped(context(), {
+  it("journals a write outside the checkout as a tool step with no file change, leaving its authority to the gate", () => {
+    // Below Full access the gate asks before such a write; the mapper only
+    // records what ran, at every level.
+    const ctx = context();
+    const started = mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
-      messageId: "sdk-message-private",
+      messageId: "sdk-message-outside",
       content: [
         {
           kind: "tool-use",
-          toolUseId: "sdk-write-private",
+          toolUseId: "sdk-write-outside",
           toolName: "Write",
-          input: { file_path: outsidePath, content: "private content" },
+          input: { file_path: "/elsewhere/notes.md", content: "notes" },
         },
       ],
       usage,
     });
-
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
+    expect(started.some((next) => next.kind === "failure")).toBe(false);
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-outside", isError: false }],
+      }),
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
     ]);
-    expect(JSON.stringify(results)).not.toContain(outsidePath);
   });
 
-  it("fails closed when Project authority denies a lexically confined file path", () => {
+  it("marks a streamed command unsandboxed once its whole input arrives, under its one start", () => {
+    const ctx = context();
+    const streamed = eventValues(
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index: 0,
+          content: { kind: "tool-use", toolUseId: "sdk-bash-1", toolName: "Bash", input: {} },
+        },
+      }),
+    );
+    const whole = eventValues(
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: "message-bash",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "sdk-bash-1",
+            toolName: "Bash",
+            input: { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+          },
+        ],
+        usage,
+      }),
+    );
+    const events = [...streamed, ...whole];
+    expect(events.filter((next) => next.kind === "tool-start")).toHaveLength(1);
+    expect(events.filter((next) => next.kind === "tool-progress")).toEqual([
+      expect.objectContaining({
+        message: expect.stringMatching(/^Unsandboxed: this command runs outside/),
+      }),
+    ]);
+  });
+
+  it("journals a worktree switch with a notice that the thread's views stay on its checkout, and marks in-process code and an escaped command unsandboxed", () => {
+    for (const [toolName, input, notice] of [
+      [
+        "EnterWorktree",
+        { name: "feature" },
+        /worktree \(feature\)\. The thread's file views and diffs stay on its original checkout/,
+      ],
+      ["ExitWorktree", { action: "keep" }, /back to the thread's checkout/],
+      ["REPL", { code: "1 + 1" }, /^Unsandboxed: runs code in Claude's own process/],
+      [
+        "Bash",
+        { command: "ls ~/Documents", dangerouslyDisableSandbox: true },
+        /^Unsandboxed: this command runs outside Claude's command sandbox/,
+      ],
+    ] as const) {
+      const started = eventValues(
+        mapped(context(), {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `sdk-message-${toolName}`,
+          content: [{ kind: "tool-use", toolUseId: `sdk-${toolName}`, toolName, input }],
+          usage,
+        }),
+      );
+      expect(started).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "tool-start", toolName }),
+          expect.objectContaining({
+            kind: "tool-progress",
+            message: expect.stringMatching(notice),
+          }),
+        ]),
+      );
+    }
+  });
+
+  it("reports no file change for a lexically confined path Project authority denies", () => {
     const checkedPaths: string[] = [];
     const ctx = context({
       isProjectConfinedPath: (absolutePath) => {
@@ -1517,10 +2170,9 @@ describe("mapClaudeMessage", () => {
         return false;
       },
     });
-    const sequenceBefore = ctx.sequence;
     const deniedPath = "src/symlink/private.ts";
 
-    const results = mapped(ctx, {
+    mapped(ctx, {
       kind: "assistant",
       sessionId: claudeSessionId,
       messageId: "sdk-message-private",
@@ -1534,20 +2186,24 @@ describe("mapClaudeMessage", () => {
       ],
       usage,
     });
+    const completed = eventValues(
+      mapped(ctx, {
+        kind: "tool-results",
+        sessionId: claudeSessionId,
+        results: [{ toolUseId: "sdk-write-private", isError: false }],
+      }),
+    );
 
-    expect(results).toEqual([
-      {
-        kind: "failure",
-        failure: {
-          category: "protocol",
-          message: "Claude returned invalid file-change metadata.",
-        },
-      },
-    ]);
     expect(checkedPaths).toEqual(["/repo/src/symlink/private.ts"]);
-    expect(ctx.sequence).toBe(sequenceBefore);
-    expect(ctx.toolStates).toHaveLength(0);
-    expect(JSON.stringify(results)).not.toContain(deniedPath);
+    expect(completed.some((next) => next.kind === "file-change" || next.kind === "diff")).toBe(
+      false,
+    );
+    expect(completed).toEqual([
+      expect.objectContaining({
+        kind: "tool-success",
+        summary: "File write completed outside the checkout.",
+      }),
+    ]);
   });
 
   it("fails closed on contradictory tool correlation without emitting partial events", () => {
@@ -2318,6 +2974,34 @@ describe("mapClaudeMessage", () => {
     expect(finishedEvent?.kind === "event" ? finishedEvent.event : undefined).not.toHaveProperty(
       "stopReason",
     );
+  });
+
+  it("names the turn's last assistant message as the point a fork or rewind cuts the session at", () => {
+    const ctx = context();
+    for (const uuid of ["transcript-message-1", "transcript-message-2"]) {
+      mapped(ctx, {
+        kind: "assistant",
+        sessionId: claudeSessionId,
+        messageId: `message-${uuid}`,
+        uuid,
+        content: [{ kind: "text", text: "Done." }],
+        usage,
+      });
+    }
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.01,
+      permissionDenials: [],
+    });
+    expect(completed.at(-1)).toMatchObject({
+      kind: "event",
+      event: { kind: "completed", nativeAnchor: "transcript-message-2" },
+    });
   });
 
   it("reports how much of the window the last request filled, and where the runtime compacts", () => {

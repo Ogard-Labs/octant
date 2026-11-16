@@ -24,6 +24,7 @@ import {
   type CodePlannerView,
   type CodePlannerWorkProposal,
   type CodeThreadId,
+  type CoordinatorWorkerChoice,
   type EventActor,
   type ProjectId,
   type WindowId,
@@ -100,6 +101,24 @@ export interface CodePlannerServiceOptions {
   >;
   /** Whether a thread is marked as having taken in outside content, as its mark reads now. */
   readonly isMarkedWithOutsideContent: (threadId: string) => boolean;
+  /**
+   * **Use Builder instead**: the coordinator's model choice run again in the
+   * Builder role. Absent where coordinators are not wired, which refuses it.
+   */
+  readonly rechooseAsBuilder?: (
+    coordinatorThreadId: string,
+    filters: { readonly needsImages?: boolean; readonly reviewedProviderKind?: string },
+  ) =>
+    | {
+        readonly status: "chosen";
+        readonly resolved: {
+          readonly providerInstanceId: string;
+          readonly modelId: string;
+          readonly choice?: CoordinatorWorkerChoice;
+          readonly modelName?: string;
+        };
+      }
+    | { readonly status: "refused"; readonly message: string };
 }
 
 export class CodePlannerServiceError extends Error {
@@ -126,6 +145,7 @@ export class CodePlannerService {
   readonly #createThread: CodePlannerServiceOptions["createThread"];
   readonly #canAccessProject: CodePlannerServiceOptions["canAccessProject"];
   readonly #isMarkedWithOutsideContent: CodePlannerServiceOptions["isMarkedWithOutsideContent"];
+  readonly #rechooseAsBuilder: CodePlannerServiceOptions["rechooseAsBuilder"];
   readonly #creating = new Set<string>();
 
   constructor(options: CodePlannerServiceOptions) {
@@ -135,6 +155,7 @@ export class CodePlannerService {
     this.#createThread = options.createThread;
     this.#canAccessProject = options.canAccessProject;
     this.#isMarkedWithOutsideContent = options.isMarkedWithOutsideContent;
+    this.#rechooseAsBuilder = options.rechooseAsBuilder;
   }
 
   readView(authenticatedWindowId: WindowId, projectIdInput: unknown): CodePlannerView {
@@ -345,6 +366,10 @@ export class CodePlannerService {
       readonly providerInstanceId?: string;
       readonly modelId?: string;
       readonly executionPolicy: string;
+      readonly choice?: CoordinatorWorkerChoice;
+      readonly modelName?: string;
+      readonly needsImages?: true;
+      readonly reviewedProviderKind?: string;
     },
   ):
     | { readonly status: "proposed"; readonly proposal: CodePlannerWorkProposal }
@@ -423,6 +448,9 @@ export class CodePlannerService {
       this.#assertWindowAccess(authenticatedWindowId, projected.proposal.projectId);
     }
     const key = String(command.proposalId);
+    if (command.kind === "use-builder-for-planner-work-proposal") {
+      return this.#useBuilderInstead(projected, command.expectedVersion, actor);
+    }
     if (this.#creating.has(key))
       return {
         status: "refused",
@@ -511,7 +539,10 @@ export class CodePlannerService {
         admittedAt: decodeTimestamp(this.#clock()),
       },
     };
-    const executionContext = this.#inheritedMarkFor(decision.proposal);
+    const executionContext = {
+      ...this.#inheritedMarkFor(decision.proposal),
+      ...this.#choiceFor(decision.proposal, command.creation),
+    };
     this.#creating.add(key);
     let admittedVersion: number | undefined;
     try {
@@ -585,6 +616,131 @@ export class CodePlannerService {
     } finally {
       this.#creating.delete(key);
     }
+  }
+
+  /**
+   * Runs the proposal's model choice again in the Builder role and keeps it
+   * pending on that model, under the proposal's version, so a person who
+   * finds the asked role too expensive can approve the ordinary one.
+   */
+  #useBuilderInstead(
+    projected: ReturnType<typeof readCodePlannerProposal>,
+    expectedVersion: number,
+    actor: EventActor | undefined,
+  ): CodePlannerProposalOutcome {
+    if (projected === undefined) {
+      return { status: "refused", reason: "proposal-not-found", message: "Proposal not found." };
+    }
+    const proposal = projected.proposal;
+    if (proposal.status !== "pending") {
+      return {
+        status: "refused",
+        reason: "proposal-not-pending",
+        message: "This proposal was already decided.",
+      };
+    }
+    if (projected.proposalVersion !== expectedVersion) {
+      return {
+        status: "refused",
+        reason: "proposal-changed",
+        message: "The proposal changed; reload and retry.",
+      };
+    }
+    if (
+      proposal.creationAttempt?.status === "creating" ||
+      this.#creating.has(String(proposal.id))
+    ) {
+      return {
+        status: "refused",
+        reason: "proposal-changed",
+        message: "This proposal is already creating its task.",
+      };
+    }
+    if (
+      proposal.fromCoordinator !== true ||
+      proposal.workerOptions?.choice === undefined ||
+      this.#rechooseAsBuilder === undefined
+    ) {
+      return {
+        status: "refused",
+        reason: "builder-unavailable",
+        message: "This proposal's model was not chosen from the roles.",
+      };
+    }
+    const kept = proposal.workerOptions;
+    const rechosen = this.#rechooseAsBuilder(String(proposal.plannerThreadId), {
+      ...(kept.needsImages === true ? { needsImages: true } : {}),
+      ...(kept.reviewedProviderKind === undefined
+        ? {}
+        : { reviewedProviderKind: kept.reviewedProviderKind }),
+    });
+    if (rechosen.status === "refused") {
+      return { status: "refused", reason: "builder-unavailable", message: rechosen.message };
+    }
+    let next: CodePlannerWorkProposal;
+    try {
+      next = decodeCodePlannerWorkProposal({
+        ...proposal,
+        workerOptions: {
+          executionPolicy: kept.executionPolicy,
+          ...(kept.needsImages === true ? { needsImages: true } : {}),
+          ...(kept.reviewedProviderKind === undefined
+            ? {}
+            : { reviewedProviderKind: kept.reviewedProviderKind }),
+          providerInstanceId: rechosen.resolved.providerInstanceId,
+          modelId: rechosen.resolved.modelId,
+          ...(rechosen.resolved.choice === undefined ? {} : { choice: rechosen.resolved.choice }),
+          ...(rechosen.resolved.modelName === undefined
+            ? {}
+            : { modelName: rechosen.resolved.modelName }),
+        },
+      });
+    } catch {
+      return {
+        status: "refused",
+        reason: "builder-unavailable",
+        message: "The Builder model could not be recorded.",
+      };
+    }
+    try {
+      this.#appendProposal(next, expectedVersion, actor);
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) {
+        return {
+          status: "refused",
+          reason: "proposal-changed",
+          message: "The proposal changed; reload and retry.",
+        };
+      }
+      throw this.#unavailable();
+    }
+    return { status: "rechosen", proposal: this.#requireProposal(next.id) };
+  }
+
+  /**
+   * The model choice a confirmed coordinator proposal journals on its worker:
+   * the host's own when the person approved the proposed model, else the
+   * person's pick in the same role.
+   */
+  #choiceFor(
+    proposal: CodePlannerWorkProposal,
+    creation: CodePlannerThreadCreation,
+  ): Pick<CodeServiceExecutionContext, "coordinatorChoice"> {
+    const options = proposal.workerOptions;
+    if (proposal.fromCoordinator !== true || options?.choice === undefined) return {};
+    const created =
+      creation.kind === "create-managed-code-thread"
+        ? { providerInstanceId: creation.providerInstanceId, modelId: creation.modelId }
+        : {
+            providerInstanceId: creation.thread.providerInstanceId,
+            modelId: creation.thread.modelId,
+          };
+    const same =
+      String(created.providerInstanceId) === String(options.providerInstanceId) &&
+      String(created.modelId) === String(options.modelId);
+    return {
+      coordinatorChoice: same ? options.choice : { role: options.choice.role, rank: "person" },
+    };
   }
 
   /** A stored task is recovery evidence, never permission to send a first turn. */

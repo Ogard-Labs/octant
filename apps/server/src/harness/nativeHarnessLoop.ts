@@ -3,6 +3,8 @@ import {
   decodeProviderFailure,
   decodeProviderSessionId,
   NativeHarnessTodoWriteArguments,
+  OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS,
+  WEB_SEARCH_TOOL_DEFINITION,
   type CorrelationId,
   type NativeHarnessTranscriptToolCall,
   type NativeHarnessTranscriptToolResult,
@@ -43,6 +45,7 @@ import type {
   NativeHarnessLeadFallbackOutcome,
   NativeHarnessLeadTarget,
   NativeHarnessMessage,
+  NativeHarnessProviderSearchDecisions,
   NativeHarnessRequest,
   NativeHarnessResponse,
   NativeHarnessStreamEvent,
@@ -52,6 +55,9 @@ import type {
 } from "./nativeHarnessTransport";
 import { addNativeHarnessUsage } from "./nativeHarnessTransport";
 import { toolEffectClass } from "../toolEffects/toolEffectClass";
+
+/** The provider's own search as its runtime events name it; a plain name the outside-content record keeps. */
+const PROVIDER_WEB_SEARCH_TOOL_NAME = "web_search";
 
 const OMITTED_RESULT_JSON = JSON.stringify({
   omitted: true,
@@ -157,6 +163,21 @@ export interface NativeHarnessConnectionOptions {
    */
   readonly leadFallback?: NativeHarnessLeadFallback;
   /**
+   * Whether a model the lead falls back to runs the provider's own search,
+   * as its endpoint's origin says. The compatible endpoints send their own
+   * search only on their own origin, so a fallback without one is offered
+   * Octant's `web-search` instead. Absent, only the lead's own instance is
+   * taken to run it.
+   */
+  readonly ownSearchOn?: (target: NativeHarnessLeadTarget) => boolean;
+  /**
+   * The running turn's provider-search grant as the host decides it now,
+   * asked before each request: a level lowered or a thread marked mid-turn
+   * withdraws the provider's own search for the rest of the turn. Absent, the
+   * grant the turn was sent with stands.
+   */
+  readonly providerSearch?: NativeHarnessProviderSearchDecisions;
+  /**
    * The model's window as the request-fitting rules settle on it, read when a
    * request is sent; undefined when nothing names one. It gives the lead its
    * window fill when no compaction point carries a window.
@@ -196,6 +217,23 @@ function resultsMessage(pending: PendingStep): NativeHarnessMessage {
   };
 }
 
+/**
+ * One built-in search as its reports have described it so far. Its research
+ * and citations are journaled once, when the request that ran it settles:
+ * `persistCitation` keeps every citation event as a new row, so a page first
+ * cited by a later report, or first reported without a title, could not be
+ * corrected after an earlier emission.
+ */
+interface ProviderSearchRecord {
+  readonly toolCallId: string;
+  query: string | undefined;
+  /** The lines the Watcher has already read. */
+  readonly watched: Set<string>;
+  /** Each page by its address, with the first title any report gave it. */
+  readonly sources: Map<string, string | undefined>;
+  journaled: boolean;
+}
+
 interface SessionState {
   readonly sessionId: ProviderSessionId;
   /** The journal aggregate this session appends to; a resumed session keeps its original one. */
@@ -217,6 +255,23 @@ interface SessionState {
   acceptingSteering: boolean;
   system: string | undefined;
   tools: ReadonlyArray<ProviderToolDefinition>;
+  /** The provider's own web search the host let this turn offer, if any. */
+  providerWebSearch: ProviderTurnInput["providerWebSearch"];
+  /**
+   * The provider's own search is left out of the rest of the turn: below Full
+   * access, once the turn searched or answered a tool call, the conversation
+   * may hold outside content a built-in query could carry out unseen; and
+   * once the host's grant for the turn no longer offers it.
+   */
+  providerWebSearchWithdrawn: boolean;
+  /** Whether this turn has searched or answered a tool call yet. */
+  searchedOrAnswered: boolean;
+  /**
+   * Each built-in search the turn's requests reported, by its id. The
+   * endpoint reports a search as soon as its results arrive and again with
+   * what the reply cited, so a later report adds only what is new.
+   */
+  readonly providerSearches: Map<string, ProviderSearchRecord>;
   pending: PendingStep | undefined;
   /** Every call answered in this turn, so a retried answer after its step moved on is ignored. */
   readonly answered: Set<string>;
@@ -239,6 +294,8 @@ interface SessionState {
     | {
         readonly target: NativeHarnessLeadTarget;
         readonly endpoint: NativeHarnessTransportSession;
+        /** Whether the fallback's endpoint runs the provider's own search. */
+        readonly ownSearch: boolean;
       }
     | undefined;
   /** Models this turn already ran on and gave up on. */
@@ -319,6 +376,96 @@ export function createNativeHarnessConnection(
         correlationId: state.correlationId,
         occurredAt: options.clock() as UtcTimestamp,
       } as ProviderRuntimeEvent);
+    /**
+     * A built-in search the provider ran: the thread is marked as having read
+     * outside content before the model's next step, whatever the Watcher
+     * finds. The Watcher reads the titles, addresses, and cited text only:
+     * the provider never returns page text Octant can read. The search is
+     * journaled as research by `journalProviderSearches` once its request
+     * settles, since a later report can still add pages and titles.
+     */
+    const reportProviderWebSearch = (
+      state: SessionState,
+      search: Extract<NativeHarnessStreamEvent, { readonly kind: "provider-web-search" }>,
+    ) => {
+      state.searchedOrAnswered = true;
+      const query = search.query?.trim().slice(0, 1_024);
+      const reported = query === undefined || query.length === 0 ? undefined : query;
+      const known = state.providerSearches.get(search.searchId);
+      const record: ProviderSearchRecord = known ?? {
+        toolCallId: `provider-web-search-${search.searchId}`.slice(0, 120),
+        query: reported,
+        watched: new Set(),
+        sources: new Map(),
+        journaled: false,
+      };
+      if (known === undefined) {
+        state.providerSearches.set(search.searchId, record);
+        emit(state, {
+          kind: "outside-content-read",
+          toolCallId: record.toolCallId,
+          toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+          source: "web-search",
+          ...(reported === undefined ? {} : { target: reported }),
+        });
+      }
+      record.query ??= reported;
+      for (const source of search.sources) {
+        if (record.sources.get(source.url) === undefined) {
+          record.sources.set(source.url, source.title);
+        }
+      }
+      const added = [
+        ...search.sources.map((source) =>
+          source.title === undefined ? source.url : `${source.title} ${source.url}`,
+        ),
+        ...search.citedText,
+      ].filter((line) => !record.watched.has(line));
+      for (const line of added) record.watched.add(line);
+      const text = added.join("\n").slice(0, OUTSIDE_CONTENT_RESULT_MAX_CHARACTERS);
+      if (text.trim().length > 0) {
+        emit(state, {
+          kind: "outside-content-result",
+          toolCallId: record.toolCallId,
+          toolName: PROVIDER_WEB_SEARCH_TOOL_NAME,
+          source: "web-search",
+          text,
+        });
+      }
+    };
+    /**
+     * Journals each search a request reported as research with the provider
+     * as its backend, one citation per page under its best title, once the
+     * request settles, before its tool calls, completion, or failure: a
+     * search the request ran before it failed or was cancelled is still kept.
+     * The endpoint reports a search only within the request that ran it, so
+     * a report after that adds to what the Watcher reads, not to citations.
+     */
+    const journalProviderSearches = (state: SessionState) => {
+      for (const record of state.providerSearches.values()) {
+        if (record.journaled) continue;
+        record.journaled = true;
+        emit(state, {
+          kind: "research-started",
+          researchId: record.toolCallId,
+          query: record.query ?? "(query not reported)",
+          backend: "provider-native",
+        });
+        for (const [index, [url, title]] of [...record.sources].entries()) {
+          emit(state, {
+            kind: "citation",
+            citationId: `${record.toolCallId.slice(0, 116)}-${index}`,
+            sourceTitle: (title ?? url).slice(0, 512),
+            sourceUrl: url.slice(0, 2_048),
+          });
+        }
+        emit(state, {
+          kind: "research-completed",
+          researchId: record.toolCallId,
+          sourceCount: record.sources.size,
+        });
+      }
+    };
     const cursorFor = (state: SessionState): ProviderResumeCursor => ({
       driverKind: options.driverKind,
       value: String(state.transcriptId),
@@ -332,6 +479,7 @@ export function createNativeHarnessConnection(
       for (const note of state.steering.splice(0)) note.resolve("unsupported");
       state.fallback?.endpoint.release();
       state.fallback = undefined;
+      options.providerSearch?.release(state.sessionId);
       state.turn = undefined;
       state.messages.length = 0;
       state.pending = undefined;
@@ -393,6 +541,10 @@ export function createNativeHarnessConnection(
       acceptingSteering: false,
       system: undefined,
       tools: input.tools ?? [],
+      providerWebSearch: undefined,
+      providerWebSearchWithdrawn: false,
+      searchedOrAnswered: false,
+      providerSearches: new Map(),
       pending: undefined,
       answered: new Set(),
       todoTaskIds: new Map(),
@@ -479,8 +631,14 @@ export function createNativeHarnessConnection(
       state.steps += 1;
       state.requestEstimateUsd = undefined;
       const step = sendOnLead(state, request, controller.signal)
-        .then((response) => settleResponse(state, response))
+        // Journaled in both settlements rather than in a `finally`, which
+        // would delay the step's tool requests by a tick.
+        .then((response) => {
+          journalProviderSearches(state);
+          return settleResponse(state, response);
+        })
         .catch((error: unknown) => {
+          journalProviderSearches(state);
           if (state.latestReportedUsage !== undefined) {
             // Replace the partial request reports so an unfinished retry cannot
             // leave a whole-turn estimate, without adding the known tokens twice.
@@ -552,6 +710,10 @@ export function createNativeHarnessConnection(
         // A request's own usage says when that request was sent, which is what
         // lets its timing leave out the tool time between requests.
         onEvent: (event: NativeHarnessStreamEvent) => {
+          if (event.kind === "provider-web-search") {
+            reportProviderWebSearch(state, event);
+            return;
+          }
           if (event.kind === "retrying") state.pricingBoundariesKnown = false;
           if (event.kind === "usage") {
             state.contextTokens = requestContextTokens(event);
@@ -657,9 +819,18 @@ export function createNativeHarnessConnection(
             outcome.endpoint.release();
             throw error;
           }
+          // The search offer follows the endpoint the request now goes to:
+          // the provider's own where that endpoint runs one, `web-search`
+          // otherwise, so a fallback is never left with neither.
+          const ownSearch = runsOwnSearch(outcome.target);
+          const { tools: _tools, providerWebSearch: _offered, ...unsearched } = current;
           const moved = fitRequest(
             outcome.endpoint,
-            { ...current, modelId: outcome.target.modelId },
+            {
+              ...unsearched,
+              modelId: outcome.target.modelId,
+              ...searchOffer(state, { target: outcome.target, ownSearch }),
+            },
             { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
@@ -671,7 +842,7 @@ export function createNativeHarnessConnection(
           }
           state.fallback?.endpoint.release();
           state.pricingBoundariesKnown = false;
-          state.fallback = { target: outcome.target, endpoint: outcome.endpoint };
+          state.fallback = { target: outcome.target, endpoint: outcome.endpoint, ownSearch };
           current = moved;
         }
       }
@@ -688,6 +859,10 @@ export function createNativeHarnessConnection(
       if (pending === undefined) return;
       state.messages.push(resultsMessage(pending));
       state.pending = undefined;
+      // A tool's result may be outside content the host is only now
+      // recording; below Full access the provider's own search, whose query
+      // Octant never sees first, is not offered on what follows it.
+      state.searchedOrAnswered = true;
       const request = takeSteeringRequest(state) ?? requestFor(state, [...state.messages]);
       if (request === undefined) {
         emit(state, {
@@ -1211,6 +1386,80 @@ export function createNativeHarnessConnection(
       return noted === request || state.endpoint.fits(noted) ? noted : request;
     };
 
+    /** Whether a model the lead falls back to runs the provider's own search. */
+    const runsOwnSearch = (target: NativeHarnessLeadTarget): boolean =>
+      String(target.providerInstanceId) === String(options.instanceId) ||
+      options.ownSearchOn?.(target) === true;
+
+    /**
+     * The provider's own search a request may offer, if any. The host's grant
+     * is asked again before each request, for the endpoint the request goes
+     * to: a level lowered or a thread marked mid-turn withdraws it for the
+     * rest of the turn, and a fallback endpoint is judged by its own origin
+     * under the thread's same routing, taint, and level, so a fallback that
+     * runs its own search is offered it even when the lead's endpoint was not.
+     * On the lead's endpoint a grant asked again never offers what the turn
+     * was not sent with. Either grant ends the offer at the turn's first
+     * search or tool answer when it says so. Without the host's answer the
+     * grant the turn was sent with stands, on the lead and on a fallback that
+     * runs its own search.
+     */
+    const offeredProviderSearch = (
+      state: SessionState,
+      endpoint:
+        | { readonly target: NativeHarnessLeadTarget; readonly ownSearch: boolean }
+        | undefined,
+    ): boolean => {
+      if (state.providerWebSearchWithdrawn) return false;
+      const sent = state.providerWebSearch;
+      const asked = options.providerSearch?.now(
+        state.sessionId,
+        endpoint?.target.providerInstanceId ?? options.instanceId,
+      );
+      const now =
+        asked === undefined || asked.status === "untracked"
+          ? endpoint === undefined || endpoint.ownSearch
+            ? sent
+            : undefined
+          : endpoint === undefined && sent === undefined
+            ? undefined
+            : asked.grant;
+      if (now === undefined) {
+        // Withdrawn once it was offered: a revocation is not undone later in
+        // the turn. A turn never offered it has nothing to withdraw, so a
+        // fallback that runs its own search can still be offered it.
+        if (sent !== undefined) state.providerWebSearchWithdrawn = true;
+        return false;
+      }
+      if (
+        (sent?.withdrawAfterFirstStep === true || now.withdrawAfterFirstStep) &&
+        state.searchedOrAnswered
+      ) {
+        state.providerWebSearchWithdrawn = true;
+        return false;
+      }
+      return true;
+    };
+
+    /**
+     * A request offers one search: the provider's own while it is offered
+     * (`offeredProviderSearch`), Octant's `web-search` otherwise, never both.
+     */
+    const searchOffer = (
+      state: SessionState,
+      endpoint:
+        | { readonly target: NativeHarnessLeadTarget; readonly ownSearch: boolean }
+        | undefined,
+    ): Pick<NativeHarnessRequest, "tools" | "providerWebSearch"> =>
+      offeredProviderSearch(state, endpoint)
+        ? {
+            tools: sortToolDefinitionsByName(
+              state.tools.filter((tool) => tool.name !== WEB_SEARCH_TOOL_DEFINITION.name),
+            ),
+            providerWebSearch: true,
+          }
+        : { tools: sortToolDefinitionsByName(state.tools) };
+
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(
         state.endpoint,
@@ -1219,7 +1468,7 @@ export function createNativeHarnessConnection(
           modelId: state.modelId,
           system: state.system,
           history,
-          tools: sortToolDefinitionsByName(state.tools),
+          ...searchOffer(state, state.fallback),
         },
         { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
@@ -1342,6 +1591,13 @@ export function createNativeHarnessConnection(
             const { system, rest } = splitInstructions(input.context);
             state.system = composeSystem(system, input.tools);
             state.tools = input.tools;
+            state.providerWebSearch = input.providerWebSearch;
+            state.providerWebSearchWithdrawn = false;
+            state.searchedOrAnswered = false;
+            // Each turn starts on the lead's own model again, so its first
+            // request is built for the lead's search, not the last fallback's.
+            state.fallback?.endpoint.release();
+            state.fallback = undefined;
             const user: NativeHarnessMessage = {
               role: "user",
               text: renderProviderTurnPrompt({ prompt: input.prompt, context: rest }),
@@ -1363,9 +1619,6 @@ export function createNativeHarnessConnection(
             state.messages.splice(0, state.messages.length, ...earlier, live);
             state.pending = undefined;
             state.answered.clear();
-            // Each turn starts on the lead's own model again.
-            state.fallback?.endpoint.release();
-            state.fallback = undefined;
             state.attempted = [];
             state.turn = input;
             state.turnMessage = user;
@@ -1517,14 +1770,29 @@ function inSystemPrompt(block: ProviderContextBlock): boolean {
   return block.kind === "instructions" || block.kind === "skill-instructions";
 }
 
+/**
+ * The instructions the person wrote for Octant. They join the system prompt
+ * after Octant's own instructions, so the harness, whose endpoint models bring
+ * no prompt of their own, reads them as standing rules rather than a message.
+ */
+function personWrittenInstructions(block: ProviderContextBlock): boolean {
+  return (
+    block.kind === "person-instructions" ||
+    block.kind === "project-instructions" ||
+    block.kind === "orchestration-instructions"
+  );
+}
+
 function splitInstructions(context: ReadonlyArray<ProviderContextBlock> | undefined): {
   readonly system: ReadonlyArray<string>;
   readonly rest: ReadonlyArray<ProviderContextBlock>;
 } {
   const blocks = context ?? [];
   return {
-    system: blocks.filter(inSystemPrompt).map((block) => block.text),
-    rest: blocks.filter((block) => !inSystemPrompt(block)),
+    system: [...blocks.filter(inSystemPrompt), ...blocks.filter(personWrittenInstructions)].map(
+      (block) => block.text,
+    ),
+    rest: blocks.filter((block) => !inSystemPrompt(block) && !personWrittenInstructions(block)),
   };
 }
 

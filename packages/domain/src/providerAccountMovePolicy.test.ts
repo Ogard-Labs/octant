@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { decodeEventActor } from "@octant/contracts/events";
 import { decodeProviderInstanceId } from "@octant/contracts/providers";
-import { decideProviderAccountMove } from "./providerAccountMovePolicy";
+import {
+  decideProviderAccountMove,
+  decideUsageLimitHandoff,
+  decideUsageLimitHandoffSetting,
+} from "./providerAccountMovePolicy";
 
 const work = {
   id: decodeProviderInstanceId("84000000-0000-4000-8000-0000000000b1"),
@@ -88,5 +92,85 @@ describe("moving a thread to another provider account", () => {
     });
     expect(refusal({ to: { ...work, enabled: true } })).toMatchObject({ reason: "same-account" });
     expect(refusal({ to: undefined })).toMatchObject({ reason: "account-missing" });
+  });
+});
+
+describe("handing a thread off when its account hits its usage limit", () => {
+  const from = { ...work, displayName: "Work" };
+  const to = { ...personal, displayName: "Personal" };
+  const limited = {
+    targetProviderInstanceId: String(personal.id),
+    lastStopId: undefined,
+    limitStopId: "turn-1",
+    modelPoolOn: false,
+    from,
+    to,
+  };
+
+  it("hands off once to the named account on a usage-limit stop", () => {
+    expect(decideUsageLimitHandoff(limited)).toEqual({ kind: "hands-off" });
+    expect(decideUsageLimitHandoff({ ...limited, lastStopId: "turn-1" })).toEqual({
+      kind: "stays",
+    });
+  });
+
+  it("does nothing without the opt-in or without a usage-limit stop", () => {
+    expect(decideUsageLimitHandoff({ ...limited, targetProviderInstanceId: undefined })).toEqual({
+      kind: "stays",
+    });
+    expect(decideUsageLimitHandoff({ ...limited, limitStopId: undefined })).toEqual({
+      kind: "stays",
+    });
+  });
+
+  it("stops and says why when the named account cannot take the thread or hit its limit too", () => {
+    expect(decideUsageLimitHandoff({ ...limited, to: { ...to, enabled: false } })).toMatchObject({
+      kind: "stopped",
+      message: "Personal is turned off.",
+    });
+    expect(decideUsageLimitHandoff({ ...limited, to: undefined })).toMatchObject({
+      kind: "stopped",
+    });
+    expect(
+      decideUsageLimitHandoff({ ...limited, from: { ...to, driverKind: "claude" as const } }),
+    ).toMatchObject({ kind: "stopped", message: expect.stringContaining("usage limit too") });
+  });
+
+  it("refuses the opt-in on a pooled thread and from anyone but the person", () => {
+    expect(
+      decideUsageLimitHandoffSetting({
+        actor: person,
+        modelPoolOn: true,
+        from: work,
+        to: personal,
+      }),
+    ).toMatchObject({ kind: "refused", reason: "model-pool" });
+    expect(
+      decideUsageLimitHandoffSetting({
+        actor: undefined,
+        modelPoolOn: false,
+        from: work,
+        to: personal,
+      }),
+    ).toMatchObject({ kind: "refused", reason: "unattended" });
+    expect(
+      decideUsageLimitHandoffSetting({
+        actor: person,
+        modelPoolOn: false,
+        from: work,
+        to: personal,
+      }),
+    ).toEqual({ kind: "moves" });
+    expect(
+      decideUsageLimitHandoffSetting({ actor: person, modelPoolOn: true, from: work, to: "off" }),
+    ).toEqual({ kind: "moves" });
+    expect(
+      decideUsageLimitHandoffSetting({
+        actor: undefined,
+        modelPoolOn: false,
+        from: work,
+        to: "off",
+      }),
+    ).toMatchObject({ kind: "refused", reason: "unattended" });
   });
 });

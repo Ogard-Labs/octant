@@ -12,6 +12,7 @@ import {
   decodeCodeFileReference,
   decodeCodeRepositoryId,
   decodeCodeRuntimeWork,
+  decodeProviderInstance,
   decodeUsageResumeRecord,
   decodeCodeThread,
   decodeCodeThreadId,
@@ -1044,6 +1045,36 @@ describe("CodeService commands", () => {
     });
   });
 
+  it("keeps the Windows terminal shell a person chose across later default changes, and stores nothing for Windows PowerShell", async () => {
+    const fixture = serviceFixture();
+    const defaults = {
+      kind: "update-code-settings",
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+    } as const;
+    const chosen = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 0,
+      windowsTerminalShell: "pwsh",
+    });
+    expect(chosen).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, { ...defaults, expectedVersion: 1 });
+    expect(later).toMatchObject({ settings: { windowsTerminalShell: "pwsh" } });
+    if (later.kind !== "settings-updated") throw new Error("settings were not updated");
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: later.settings } as never);
+
+    const back = await fixture.service.execute(ids.window, {
+      ...defaults,
+      expectedVersion: 2,
+      windowsTerminalShell: "powershell",
+    });
+    if (back.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(back.settings.windowsTerminalShell).toBeUndefined();
+  });
+
   it("keeps Android snapshot boot off until a person turns it on, then across later default changes", async () => {
     const fixture = serviceFixture();
     const defaults = {
@@ -1126,6 +1157,35 @@ describe("CodeService commands", () => {
     expect(cleared).not.toHaveProperty("settings.shieldModel");
   });
 
+  it("keeps where coordinators' workers are listed, per Project, across later settings changes", async () => {
+    const fixture = serviceFixture();
+    const project = "00000000-0000-4000-8000-0000000000b1";
+    const chosen = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      coordinatorWorkerListing: { sidebar: true, board: false },
+      coordinatorWorkerListingByProject: { [project]: { sidebar: false, board: true } } as never,
+    });
+    if (chosen.kind !== "settings-updated") throw new Error("settings were not updated");
+    expect(chosen.settings.coordinatorWorkerListing).toEqual({ sidebar: true, board: false });
+    fixture.persistence.readCodeSettings.mockReturnValue({ settings: chosen.settings } as never);
+
+    const later = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "plan",
+      defaultPermissionPersistence: "current-session",
+    });
+    expect(later).toMatchObject({
+      settings: {
+        coordinatorWorkerListing: { sidebar: true, board: false },
+        coordinatorWorkerListingByProject: { [project]: { sidebar: false, board: true } },
+      },
+    });
+  });
+
   it("keeps the Git requirement a window asks for when it still sends the old default-folder switch", async () => {
     const fixture = serviceFixture();
 
@@ -1143,6 +1203,25 @@ describe("CodeService commands", () => {
       settings: { requireGitRepository: true },
     });
     expect(updated).not.toHaveProperty("settings.allowDefaultFolderThreads");
+  });
+
+  it("refuses a new thread that carries a host move's continued-on-fallback reason", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    const spoofed = thread({
+      executionPolicy: "approval-gated",
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider,
+        previousModelId: "model-a",
+        nextProviderInstanceId: ids.provider,
+        nextModelId: "model-b",
+        changedAt: "2026-11-15T12:00:00.000Z",
+        continuedOnFallback: "Words a client wrote",
+      } as never,
+    });
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: spoofed }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("journals an authorized new thread at expected aggregate version zero", async () => {
@@ -1228,6 +1307,107 @@ describe("CodeService commands", () => {
       expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
     },
   );
+
+  it("reads a worker's later model change as a person's pick unless the host's restart names its own", async () => {
+    const worker = () =>
+      thread({
+        coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+        coordinatorChoice: { role: "default", rank: "main" },
+      });
+    const byPerson = serviceFixture({ threads: [worker()] });
+    const changed = await byPerson.service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(changed).toMatchObject({
+      thread: { coordinatorChoice: { role: "default", rank: "person" } },
+    });
+    const byHost = serviceFixture({ threads: [worker()] });
+    const restarted = await byHost.service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason: "first request on model-a failed before any work",
+        },
+      },
+    );
+    expect(restarted).toMatchObject({
+      thread: { coordinatorChoice: { rank: { fallback: 1 } } },
+    });
+  });
+
+  it("records the host's continued-on-fallback reason on the hand-off, and only the host's", async () => {
+    const worker = () =>
+      thread({
+        coordinatorThreadId: decodeCodeThreadId("20000000-0000-4000-8000-0000000000ff"),
+        coordinatorChoice: { role: "default", rank: "main" },
+      });
+    const reason = "model-a (Work) at usage limit; continued on model-b (Work)";
+    const continued = await serviceFixture({ threads: [worker()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: {
+          role: "default",
+          rank: { fallback: 1 },
+          reason,
+          move: "continued-on-fallback",
+        },
+      },
+    );
+    expect(continued).toMatchObject({
+      thread: { providerHandoff: { nextModelId: "model-b", continuedOnFallback: reason } },
+    });
+    // A person's own move carries no reason, and neither does a thread a person started.
+    const byPerson = await serviceFixture({ threads: [worker()] }).service.execute(ids.window, {
+      kind: "change-code-thread-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    expect(
+      byPerson.kind === "thread-updated" && byPerson.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
+    const personThread = await serviceFixture({ threads: [thread()] }).service.execute(
+      ids.window,
+      {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      },
+      undefined,
+      {
+        coordinatorChoice: { role: "default", rank: "main", reason, move: "continued-on-fallback" },
+      },
+    );
+    expect(
+      personThread.kind === "thread-updated" &&
+        personThread.thread.providerHandoff?.continuedOnFallback,
+    ).toBeUndefined();
+  });
 
   it("returns to provider defaults when a reasoning choice is cleared or the model changes", async () => {
     const fixture = serviceFixture({
@@ -2075,6 +2255,46 @@ describe("CodeService commands", () => {
       });
     });
 
+    it("records where an agent's approved plan returns a thread, and never Full access", async () => {
+      const fixture = serviceFixture({
+        threads: [thread({ executionPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      await expect(
+        fixture.service.execute(ids.window, {
+          kind: "change-code-thread-access",
+          threadId: ids.thread,
+          expectedVersion: 1 as never,
+          executionPolicy: "plan",
+          permissionPersistence: "current-session",
+          planReturnPolicy: "full-access",
+        }),
+      ).rejects.toMatchObject({ failure: { category: "invalid" } });
+      const planned = await fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        planReturnPolicy: "auto-accept-edits",
+      });
+      expect(planned).toMatchObject({
+        thread: { executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" },
+      });
+      const inPlan = serviceFixture({
+        threads: [thread({ executionPolicy: "plan", planReturnPolicy: "auto-accept-edits" })],
+        approve: false,
+      });
+      const back = await inPlan.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1 as never,
+        executionPolicy: "auto-accept-edits",
+        permissionPersistence: "current-session",
+      });
+      expect("thread" in back ? back.thread : undefined).not.toHaveProperty("planReturnPolicy");
+    });
+
     it("keeps a Code thread's sandbox at Full access, takes a new choice with the mode, and drops it below Full access", async () => {
       const raised = serviceFixture({
         threads: [thread({ executionPolicy: "full-access" })],
@@ -2697,6 +2917,7 @@ describe("CodeService commands", () => {
       { messageWake: true as const },
       { coordinatorBounds: { rounds: 50 } },
       { coordinatorWorkerLevel: "full-access" as const },
+      { coordinatorChoice: { role: "deep" as const, rank: "main" as const } },
     ]) {
       await expect(
         fixture.service.execute(ids.window, {
@@ -5499,6 +5720,8 @@ describe("CodeService.listTests", () => {
   });
 });
 
+type ProviderInstanceReader = NonNullable<CodePersistencePort["readProviderInstance"]>;
+
 function serviceFixture(
   options: {
     readonly workingFolderAllowed?: boolean;
@@ -5542,6 +5765,9 @@ function serviceFixture(
   const persistence = {
     readCodeSettings: vi.fn(() => undefined),
     readProject: vi.fn(() => options.project),
+    readProviderInstance: vi.fn(
+      (_instanceId: string) => undefined as ReturnType<ProviderInstanceReader>,
+    ),
     readAgentProfileBinding: vi.fn((profileId: string) => {
       const found = (options.profiles ?? []).find(
         (candidate) => String(candidate.id) === String(profileId),
@@ -6313,5 +6539,216 @@ describe("scheduling a Code thread's usage-limit resume", () => {
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+});
+
+describe("moving a Code thread to another account", () => {
+  const personal = "00000000-0000-4000-8000-0000000010e1";
+  const operationId = testUuid(3200);
+  const account = (id: string, displayName: string, enabled = true) =>
+    decodeProviderInstance({
+      id,
+      displayName,
+      driverKind: "openai-compatible",
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://example.invalid/v1/",
+        authentication: "bearer",
+        protocol: "responses",
+        manualModelIds: ["model-a"],
+      },
+      enabled,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  const withAccounts = (
+    fixture: ReturnType<typeof serviceFixture>,
+    options: { readonly personalEnabled?: boolean } = {},
+  ) => {
+    fixture.persistence.readProviderInstance.mockImplementation((id: string) =>
+      String(id) === personal
+        ? account(personal, "Personal", options.personalEnabled ?? true)
+        : String(id) === String(ids.provider)
+          ? account(ids.provider, "Work")
+          : undefined,
+    );
+    return fixture;
+  };
+  const limitedTurn = (fixture: ReturnType<typeof serviceFixture>) => {
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue([
+      {
+        work: decodeCodeRuntimeWork({
+          id: operationId,
+          threadId: ids.thread,
+          kind: "provider-turn",
+          state: "waiting",
+          updatedAt: now,
+        }),
+        firstSequence: 1,
+      },
+    ]);
+    fixture.persistence.journal.replayAggregate.mockReturnValue([
+      {
+        ...eventEnvelope(1, "code.operation-event-recorded@1", {
+          threadId: ids.thread,
+          operationId,
+          cursor: 1,
+          occurredAt: now,
+          event: {
+            kind: "operation-result",
+            result: {
+              kind: "provider-turn-state",
+              operationId,
+              state: "waiting",
+              failure: {
+                category: "waiting",
+                message: "The provider's usage window is spent.",
+                usageLimit: { kind: "exhausted" },
+              },
+            },
+          },
+        }),
+        aggregateType: "code-operation" as never,
+        aggregateId: operationId as never,
+      },
+    ]);
+    return fixture;
+  };
+  const appendedThreads = (fixture: ReturnType<typeof serviceFixture>) =>
+    fixture.persistence.journal.append.mock.calls.flatMap((call: ReadonlyArray<unknown>) =>
+      (call[0] as { readonly events: ReadonlyArray<{ readonly payload: unknown }> }).events.map(
+        (event) => (event.payload as { readonly thread?: ReturnType<typeof thread> }).thread,
+      ),
+    );
+  const move = {
+    kind: "move-code-thread-account",
+    threadId: ids.thread,
+    expectedVersion: 1,
+    providerInstanceId: personal,
+  } as const;
+
+  it("moves on the person's request, keeping the model, and records the provider handoff", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
+
+    const result = await fixture.service.execute(ids.window, move);
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        providerInstanceId: personal,
+        modelId: "model-a",
+        providerHandoff: {
+          previousProviderInstanceId: ids.provider,
+          nextProviderInstanceId: personal,
+        },
+      },
+    });
+  });
+
+  it("releases a turn parked on the old account's usage limit when the person moves the thread", async () => {
+    const fixture = limitedTurn(withAccounts(serviceFixture({ threads: [thread()] })));
+
+    const result = await fixture.service.execute(ids.window, move);
+
+    expect(result).toMatchObject({
+      thread: { providerHandoff: { releasedStopId: operationId } },
+    });
+  });
+
+  it("refuses a move from an agent, from a routine, and while a turn runs", async () => {
+    const fixture = withAccounts(serviceFixture({ threads: [thread()] }));
+    const agent = {
+      kind: "agent",
+      actorId: ids.window,
+      providerInstanceId: ids.provider,
+      threadId: String(ids.thread),
+    };
+    await expect(
+      fixture.service.execute(ids.window, move, undefined, { actor: agent as never }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    await expect(fixture.service.execute(ROUTINE_HOST_SCOPE_ID, move)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockReturnValue([
+      {
+        work: decodeCodeRuntimeWork({
+          id: operationId,
+          threadId: ids.thread,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 1,
+      },
+    ]);
+    await expect(fixture.service.execute(ids.window, move)).rejects.toMatchObject({
+      failure: { message: "Wait for the running answer to finish before moving this thread." },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("hands off once to the account the person named when the account hits its usage limit", async () => {
+    const opted = thread({ usageLimitHandoff: { providerInstanceId: personal as never } });
+    const fixture = limitedTurn(withAccounts(serviceFixture({ threads: [opted] })));
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    const written = appendedThreads(fixture);
+    expect(written[0]).toMatchObject({
+      providerInstanceId: personal,
+      providerHandoff: {
+        previousProviderInstanceId: ids.provider,
+        nextProviderInstanceId: personal,
+        // The parked turn no longer holds the thread; its limit stays in history.
+        releasedStopId: operationId,
+      },
+    });
+    expect(written[1]).toMatchObject({
+      usageLimitHandoff: {
+        last: {
+          kind: "handed-off",
+          stopId: operationId,
+          fromProviderInstanceId: ids.provider,
+          toProviderInstanceId: personal,
+        },
+      },
+    });
+
+    // The recorded stop is not handed off a second time.
+    const handled = thread({
+      usageLimitHandoff: {
+        providerInstanceId: personal as never,
+        last: written[1]?.usageLimitHandoff?.last as never,
+      },
+    });
+    const again = limitedTurn(withAccounts(serviceFixture({ threads: [handled] })));
+    await again.service.handOffAfterUsageLimit(ids.thread);
+    expect(again.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("does not move a thread on a usage limit without the person's opt-in", async () => {
+    const fixture = limitedTurn(withAccounts(serviceFixture({ threads: [thread()] })));
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("stops and says why when the named account is turned off", async () => {
+    const opted = thread({ usageLimitHandoff: { providerInstanceId: personal as never } });
+    const fixture = limitedTurn(
+      withAccounts(serviceFixture({ threads: [opted] }), { personalEnabled: false }),
+    );
+
+    await fixture.service.handOffAfterUsageLimit(ids.thread);
+
+    const written = appendedThreads(fixture);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      providerInstanceId: ids.provider,
+      usageLimitHandoff: { last: { kind: "stopped", detail: "Personal is turned off." } },
+    });
   });
 });

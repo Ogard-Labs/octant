@@ -19,7 +19,9 @@ import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/dr
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
-import { WorkTurnRuntime } from "./workTurnRuntime";
+import { OutlivingSessions } from "../providers/outlivingSessions";
+import { heldTurnContext } from "../providers/heldTurnContext";
+import { WorkTurnRuntime, workSessionKey } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
@@ -313,14 +315,15 @@ describe("WorkTurnRuntime", () => {
         sessionId: ids.session,
         ...value,
       });
-    // 100 deltas of 1 KiB, each ending in a two-byte character: past the
-    // 64 KiB bound well before the last one.
-    const chunk = `${"a".repeat(1_022)}é`;
+    // 36 deltas of 1 MiB, each ending in a two-byte character: past the
+    // 32 MiB bound Chat and Code share before the last one, and far past the
+    // 64 KiB a Work reply used to keep.
+    const chunk = `${"a".repeat(1_048_574)}é`;
     const events: ProviderRuntimeEvent[] = [
-      ...Array.from({ length: 100 }, (_, index) =>
+      ...Array.from({ length: 36 }, (_, index) =>
         event(index + 1, { kind: "text-delta", text: chunk }),
       ),
-      event(101, { kind: "completed" }),
+      event(37, { kind: "completed" }),
     ];
     const driver: ProviderDriver = {
       kind: "codex",
@@ -338,7 +341,9 @@ describe("WorkTurnRuntime", () => {
           answerTool: () => Effect.void,
         } as never),
     };
-    const deltas: string[] = [];
+    const marker = "\n[Output truncated by Octant.]";
+    const truncatedReplies = new Set<string>();
+    let longestUntruncated = 0;
 
     const outcome = await new WorkTurnRuntime().run({
       command: decodeStartWorkThreadTurnCommand({
@@ -361,20 +366,22 @@ describe("WorkTurnRuntime", () => {
       projectRoot: "/tmp/work-project",
       driver,
       signal: new AbortController().signal,
-      onDelta: (response) => deltas.push(response),
+      onDelta: (response) => {
+        if (response.endsWith(marker)) truncatedReplies.add(response);
+        else longestUntruncated = Math.max(longestUntruncated, response.length);
+      },
     });
 
     if (outcome.kind !== "completed") throw new Error(`Expected completed, got ${outcome.kind}.`);
-    const marker = "\n[Output truncated by Octant.]";
+    const bound = 32 * 1024 * 1024;
+    expect(longestUntruncated).toBeGreaterThan(64 * 1024);
     expect(outcome.response.endsWith(marker)).toBe(true);
     expect(outcome.response.indexOf(marker)).toBe(outcome.response.length - marker.length);
-    expect(Buffer.byteLength(outcome.response, "utf8")).toBeLessThanOrEqual(64 * 1024);
-    expect(Buffer.byteLength(outcome.response, "utf8")).toBeGreaterThan(64 * 1024 - 64);
-    expect(outcome.response).not.toContain("\uFFFD");
+    expect(Buffer.byteLength(outcome.response, "utf8")).toBeLessThanOrEqual(bound);
+    expect(Buffer.byteLength(outcome.response, "utf8")).toBeGreaterThan(bound - 64);
+    expect(outcome.response.slice(-1_000)).not.toContain("\uFFFD");
     // Once truncated the reply holds still: later deltas neither grow nor shave it.
-    expect(new Set(deltas.filter((response) => response.endsWith(marker)))).toEqual(
-      new Set([outcome.response]),
-    );
+    expect(truncatedReplies).toEqual(new Set([outcome.response]));
   });
 
   it("parks a provider-declared usage limit as a rate-limited outcome with its reset", async () => {
@@ -2171,6 +2178,154 @@ describe("WorkTurnRuntime", () => {
     expect(acquire).not.toHaveBeenCalled();
   });
 
+  describe("a session the host keeps past its turn", () => {
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Start the preview server",
+      authority: {
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "model",
+      },
+    });
+    const completed = (sequence: number): ProviderRuntimeEvent =>
+      decodeProviderRuntimeEvent({
+        kind: "completed",
+        instanceId: ids.provider,
+        sequence,
+        correlationId: ids.project,
+        occurredAt: "2026-11-15T12:00:00.000Z",
+        sessionId: ids.session,
+      });
+    // A runtime whose session still runs a background task after its turn.
+    const runtimeWithTask = () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const work = {
+        tasks: [{ taskId: "task-1", description: "npm run dev" }],
+        turnRunning: false,
+        runtimeTurnWaiting: false,
+        ended: false,
+      };
+      const calls = {
+        acquire: vi.fn(),
+        start: vi.fn(),
+        send: vi.fn(),
+        attach: vi.fn(),
+        stop: vi.fn(),
+        outlivesTurn: [] as Array<boolean | undefined>,
+      };
+      const connection: ProviderConnection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: (input) =>
+          Effect.sync(() => {
+            calls.start(input);
+            calls.outlivesTurn.push(input.outlivesTurn);
+            return { sessionId: input.sessionId };
+          }),
+        resume: () => Effect.die("unused"),
+        send: () =>
+          Effect.sync(() => calls.send()).pipe(Effect.zipRight(Queue.offer(queue, completed(1)))),
+        attachRuntimeTurn: () =>
+          Effect.sync(() => calls.attach()).pipe(Effect.zipRight(Queue.offer(queue, completed(2)))),
+        backgroundWork: () => ({ current: () => work, watch: () => () => undefined }),
+        interrupt: () => Effect.void,
+        stop: () => Effect.sync(() => calls.stop()),
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const driver: ProviderDriver = {
+        kind: "claude",
+        probe: () => Effect.die("unused"),
+        acquire: (input) =>
+          Effect.sync(() => {
+            calls.acquire(input);
+            return connection;
+          }),
+      };
+      return { calls, driver };
+    };
+
+    it("keeps the thread's session and its background task running after the turn completes", async () => {
+      const keeper = new OutlivingSessions({
+        idleLimitMs: () => null,
+        startRuntimeTurn: async () => ({ status: "busy" }),
+      });
+      const { calls, driver } = runtimeWithTask();
+      const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
+      try {
+        const first = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          signal: new AbortController().signal,
+        });
+        expect(first).toMatchObject({ kind: "completed" });
+        expect(calls.outlivesTurn).toEqual([true]);
+        expect(calls.stop).not.toHaveBeenCalled();
+        expect(keeper.liveTasks(workSessionKey(ids.thread))?.tasks).toEqual([
+          { taskId: "task-1", description: "npm run dev" },
+        ]);
+
+        const second = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          signal: new AbortController().signal,
+        });
+        expect(second).toMatchObject({ kind: "completed" });
+        // The next turn takes up the same session rather than starting one.
+        expect(calls.acquire).toHaveBeenCalledOnce();
+        expect(calls.start).toHaveBeenCalledOnce();
+      } finally {
+        await keeper.close();
+      }
+      expect(calls.stop).toHaveBeenCalledOnce();
+    });
+
+    it("opens a turn the runtime started by itself by attaching to it, never sending the recorded prompt", async () => {
+      const keeper = new OutlivingSessions({
+        idleLimitMs: () => null,
+        startRuntimeTurn: async () => ({ status: "busy" }),
+      });
+      const { calls, driver } = runtimeWithTask();
+      const runtime = new WorkTurnRuntime({ timeoutMs: 5000, outlivingSessions: keeper });
+      const promptSent = vi.fn();
+      const forTurn = vi.spyOn(heldTurnContext, "forTurn");
+      try {
+        const outcome = await runtime.run({
+          command,
+          providerSessionId: ids.session as never,
+          projectRoot: "/tmp/work-project",
+          driver,
+          runtimeTurn: true,
+          onPromptSent: promptSent,
+          signal: new AbortController().signal,
+        });
+        expect(outcome).toMatchObject({ kind: "completed" });
+        expect(calls.attach).toHaveBeenCalledOnce();
+        expect(calls.send).not.toHaveBeenCalled();
+        // The runtime's own turn spends tokens like any other.
+        expect(promptSent).toHaveBeenCalledOnce();
+        // It sends no context, so the held-context record is neither read
+        // for it nor told it carried anything.
+        expect(forTurn).not.toHaveBeenCalled();
+      } finally {
+        forTurn.mockRestore();
+        await keeper.close();
+      }
+    });
+  });
+
   describe("how a turn ran", () => {
     const base = Date.parse("2026-10-06T12:00:00.000Z");
     const at = (seconds: number) => decodeTimestamp(new Date(base + seconds * 1000).toISOString());
@@ -2286,6 +2441,7 @@ describe("WorkTurnRuntime", () => {
       const tracker = {
         begin: (startedAt: string) => calls.push(`begin ${startedAt}`),
         observe: (observed: { readonly kind: string }) => calls.push(observed.kind),
+        connect: () => calls.push("connect"),
         end: () => calls.push("end"),
       };
 
@@ -2303,7 +2459,14 @@ describe("WorkTurnRuntime", () => {
         liveTurn: tracker,
       });
 
-      expect(calls).toEqual([`begin ${at(0)}`, "tool-start", "text-delta", "completed", "end"]);
+      expect(calls).toEqual([
+        `begin ${at(0)}`,
+        "connect",
+        "tool-start",
+        "text-delta",
+        "completed",
+        "end",
+      ]);
     });
 
     it("hands each command a runtime starts to the forge-change record, with the thread's level", async () => {
@@ -2348,6 +2511,7 @@ describe("WorkTurnRuntime", () => {
         liveTurn: {
           begin: () => calls.push("begin"),
           observe: () => calls.push("observe"),
+          connect: () => undefined,
           end: () => calls.push("end"),
         },
       });

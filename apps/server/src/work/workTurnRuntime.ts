@@ -1,9 +1,5 @@
 import { beginSandboxTurn } from "../process/sandboxRuntimePolicy";
-import {
-  DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
-  MAX_PROVIDER_ATTACHMENTS,
-  MAX_TURN_RUNTIME_EVENTS,
-} from "@octant/contracts";
+import { DEFAULT_THREAD_TOOL_STEPS_PER_TURN, MAX_PROVIDER_ATTACHMENTS } from "@octant/contracts";
 import type {
   ProviderChildActivityEvent,
   ShieldWatcherLabel,
@@ -13,6 +9,7 @@ import {
   observeTurnMetrics,
   FULL_ACCESS_SANDBOX_UNSUPPORTED,
   isNativeHarnessDriverKind,
+  projectExtraFolderRoots,
   markThreadToolStepOutsideContent,
   markThreadToolStepRoutine,
   outsideContentRecordedOnly,
@@ -23,6 +20,7 @@ import {
   startTurnMetrics,
   workThreadAccessOf,
   type ThreadToolSteps,
+  turnRuntimeEventBudget,
 } from "@octant/domain";
 import type { RuntimeForgeChangeObserver } from "../shield/runtimeForgeChanges";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -42,6 +40,9 @@ import {
   DEFAULT_WORK_ACCESS,
   type WorkAccess,
   type WorkTurnFailure,
+  type Project,
+  type WorkThread,
+  type WorkThreadId,
   type WorkTurnRequestId,
   type WorkTurnState,
   MAX_THREAD_TASKS_PER_TURN,
@@ -50,13 +51,19 @@ import {
   type ThreadTaskProgress,
   type ThreadTaskProgressList,
 } from "@octant/contracts";
-import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderSessionHandle,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { providerWebSearchAtSend, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { recordedToolSet, type TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { heldTurnContext } from "../providers/heldTurnContext";
+import type { OutlivingSessions } from "../providers/outlivingSessions";
+import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
 import {
@@ -66,6 +73,7 @@ import {
 } from "../context/runtimeOutsideContentMark";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
+  AnsweredRequests,
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   DEFAULT_PROVIDER_TOOL_CALL_PAUSE_LIMIT_MS,
@@ -77,7 +85,6 @@ import {
 } from "../providers/turnBudget";
 
 // Discrete events only; streaming deltas are exempt (see turnBudget.ts).
-const MAX_EVENTS = MAX_TURN_RUNTIME_EVENTS;
 // How long a finished turn waits for its provider session to interrupt or stop.
 const CLEANUP_TIMEOUT_MS = 1_000;
 const RESPONSE_TRUNCATION_MARKER = "\n[Output truncated by Octant.]";
@@ -124,6 +131,21 @@ export interface WorkTurnRuntimePort {
     readonly nativeArtifacts?: boolean;
     /** What the session may load of the provider's own setup; absent keeps it all off. */
     readonly nativeSetup?: ProviderNativeSetup;
+    /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
+    readonly wakeups?: ProviderWakeupSchedule;
+    /**
+     * The runtime started this turn by itself in the thread's kept session (a
+     * background task ended or a watch reported). The turn attaches to what
+     * the runtime already runs instead of sending the prompt, which only
+     * records why the turn exists.
+     */
+    readonly runtimeTurn?: true;
+    /**
+     * The thread's terms when the turn was admitted (see
+     * {@link workSessionTerms}); a kept session is stopped once the thread's
+     * terms differ.
+     */
+    readonly sessionTerms?: string;
     readonly appManagedTools?: AppManagedToolSet;
     /**
      * The turn's record of tool calls about to take effect: each call the host
@@ -216,6 +238,57 @@ export interface WorkTurnRuntimeOptions {
   readonly providerToolCallPauseLimitMs?: () => number | null;
   /** A fixed stalled-turn limit, for a caller with no host setting to read. */
   readonly timeoutMs?: number;
+  /**
+   * Keeps a thread's provider session past its turn while the runtime runs
+   * background work, as a Code session is kept. Absent, every session stops
+   * when its turn ends.
+   */
+  readonly outlivingSessions?: Pick<OutlivingSessions, "acquire">;
+}
+
+/** The key a Work thread's kept provider session is held under. */
+export function workSessionKey(threadId: WorkThreadId): string {
+  return `work:${String(threadId)}`;
+}
+
+/**
+ * The terms a Work thread's session is started on: its level, its provider
+ * and model, and the folder authority its Project grants it (the Project's
+ * current binding and root, the thread's approved working folder, and the
+ * extra folders). A kept session started on other terms is stopped, so it
+ * never goes on acting as the thread no longer is or reaching a folder the
+ * Project no longer grants. Undefined when the thread can run no turn: it is
+ * archived or Done, or its Project is gone, archived or no longer grants its
+ * working folder.
+ */
+export function workSessionTerms(
+  thread: WorkThread,
+  project: Project | undefined,
+): string | undefined {
+  if (thread.lifecycle !== "active" || thread.completionConfirmed === true) return undefined;
+  if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
+  return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+    [...projectExtraFolderRoots(project)].sort(),
+    thread.access,
+    thread.fullAccessSandbox === true,
+    String(thread.providerInstanceId),
+    String(thread.modelId),
+    thread.modelOptionValues ?? null,
+    String(thread.projectId),
+    thread.bindingRevisionId === undefined ? null : String(thread.bindingRevisionId),
+    thread.workingFolderId === undefined ? null : String(thread.workingFolderId),
+    thread.workingDirectory ?? null,
+  ]);
 }
 
 /**
@@ -245,8 +318,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   }
   /** Each running turn's review rows, by thread: one Work thread runs one turn at a time. */
   readonly #shieldReviews = new Map<string, (review: WorkShieldReview) => void>();
+  /** Each running turn's stop, by thread, read by a kept session's request reviews. */
+  readonly #turnSignals = new Map<string, AbortSignal>();
+  readonly #outlivingSessions: Pick<OutlivingSessions, "acquire"> | undefined;
 
   constructor(options: WorkTurnRuntimeOptions = {}) {
+    this.#outlivingSessions = options.outlivingSessions;
     const fixedLimitMs = options.timeoutMs ?? DEFAULT_STALLED_TURN_LIMIT_MS;
     this.#stalledTurnLimitMs = options.stalledTurnLimitMs ?? (() => fixedLimitMs);
     this.#providerToolCallPauseLimitMs =
@@ -349,6 +426,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
   ): Effect.Effect<WorkTurnRuntimeOutcome, ProviderFailure, Scope.Scope> {
     const cleanupTimeoutMs = this.#cleanupTimeoutMs;
     const shieldReviews = this.#shieldReviews;
+    const turnSignals = this.#turnSignals;
+    const keeper = this.#outlivingSessions;
     const forceStops = this.#forceStops;
     return Effect.gen(function* () {
       yield* Effect.addFinalizer(() =>
@@ -372,6 +451,8 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         input.toolStepLimit === "off"
           ? undefined
           : (input.toolStepLimit ?? DEFAULT_THREAD_TOOL_STEPS_PER_TURN);
+      // The event budget follows the same limit: off, no turn is stopped.
+      const maxEvents = turnRuntimeEventBudget(stepLimit) ?? Number.POSITIVE_INFINITY;
       // An Octant Harness turn's runtime announces no tool call of its own:
       // every tool it has is one Octant runs for it, so the request is the
       // only sign of the call and the host gives it its row.
@@ -389,9 +470,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       };
       const threadKey = String(input.command.threadId);
       shieldReviews.set(threadKey, showShieldReview);
+      turnSignals.set(threadKey, input.signal);
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           if (shieldReviews.get(threadKey) === showShieldReview) shieldReviews.delete(threadKey);
+          if (turnSignals.get(threadKey) === input.signal) turnSignals.delete(threadKey);
         }),
       );
       // A thread that asked for the sandbox at Full access never runs open on a
@@ -429,7 +512,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }),
       );
       const sandboxPolicy = sandboxTurn.selection;
-      const connection = yield* input.driver.acquire({
+      const acquire = input.driver.acquire({
         ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -439,9 +522,39 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           projectId: input.command.authority.projectId,
           threadId: input.command.threadId,
           sessionId: input.providerSessionId,
-          signal: input.signal,
-          onApprovalReviewed: showShieldReview,
+          get signal() {
+            return turnSignals.get(threadKey);
+          },
+          onApprovalReviewed: (review) => shieldReviews.get(threadKey)?.(review),
         },
+      });
+      // A kept connection is one session's: another session, folder or
+      // provider opens a new one and stops the kept one first.
+      const connection = yield* keeper === undefined
+        ? acquire
+        : keeper.acquire(
+            workSessionKey(input.command.threadId),
+            JSON.stringify([
+              String(input.command.authority.providerInstanceId),
+              input.projectRoot,
+              input.extraFolders ?? [],
+              sandboxPolicy?.context.sessionId ?? null,
+              String(input.providerSessionId),
+            ]),
+            acquire,
+            input.sessionTerms,
+          );
+      if (input.runtimeTurn === true && connection.attachRuntimeTurn === undefined) {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "unsupported",
+          message: "This provider cannot open a turn it started itself.",
+        });
+      }
+      input.liveTurn?.connect({
+        connection,
+        sessionId: input.providerSessionId,
+        providerInstanceId: input.command.authority.providerInstanceId,
+        takesSteeredResults: true,
       });
       yield* Effect.addFinalizer(() =>
         Effect.gen(function* () {
@@ -467,6 +580,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         tools: input.appManagedTools?.definitions ?? [],
         ...(input.nativeArtifacts === true ? { nativeArtifacts: true } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
+        ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
       };
       const handle = yield* input.resumeCursor === undefined
         ? connection.start({ ...options, modelId: input.command.authority.modelId })
@@ -521,7 +635,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         pendingRequestCleanups.delete(key);
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
-      const answeredToolRequestIds = new Set<string>();
+      const answeredToolRequests = new AnsweredRequests();
       const compactions = new TurnCompactions();
       const events = yield* subscribeThenSend({
         connection,
@@ -529,7 +643,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.map(makeTurnTextParagraphs()),
-            Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
+            Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > maxEvents),
             Stream.tap(() => shareEventLoop),
             Stream.tap((event) => idle.observe(event)),
             // Liveness only restarts the idle clock above; nothing else sees it.
@@ -596,7 +710,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                       "full-access",
                   });
                 }
-                if (handledEvents > MAX_EVENTS) return;
+                if (handledEvents > maxEvents) return;
                 input.toolCallRecords?.observe(event);
                 // Kept in the record above; never a step or a turn event.
                 if (event.kind === "tool-call-content") return;
@@ -647,8 +761,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   input.onToolSteps?.(nextToolSteps);
                 }
                 if (event.kind === "tool-request") {
-                  if (answeredToolRequestIds.has(event.requestId)) return;
-                  answeredToolRequestIds.add(event.requestId);
+                  if (!answeredToolRequests.answer(event.requestId)) return;
                   const toolSet = recordedToolSet(
                     input.toolEffects,
                     input.appManagedTools,
@@ -778,6 +891,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               category: "unauthorized" as const,
               message: "Work turn admission is no longer current.",
             });
+          const attach = connection.attachRuntimeTurn;
+          if (input.runtimeTurn === true && attach !== undefined) {
+            // The runtime is already running this turn; its held events go
+            // out on the subscription above, and nothing is sent.
+            meter.sent();
+            return attach(input.providerSessionId).pipe(
+              Effect.tap(() => Effect.sync(() => input.onPromptSent?.())),
+            );
+          }
           let feedback: ReturnType<NonNullable<typeof input.takeProductFeedback>> | undefined;
           try {
             feedback = input.takeProductFeedback?.(
@@ -825,6 +947,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   : context,
               attachments: [...(input.attachments ?? []), ...(feedback?.attachments ?? [])],
               tools: [...(input.appManagedTools?.definitions ?? [])],
+              ...providerWebSearchAtSend(input.appManagedTools, input.providerSessionId),
             })
             .pipe(Effect.tap(() => Effect.sync(() => input.onPromptSent?.())));
         }),
@@ -834,7 +957,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         releaseRequestHold(requestId);
       }
 
-      if (handledEvents > MAX_EVENTS) {
+      if (handledEvents > maxEvents) {
         return {
           kind: "waiting",
           failure: {

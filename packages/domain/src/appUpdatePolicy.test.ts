@@ -238,11 +238,18 @@ describe("resolveUpdateOffer", () => {
   it("refuses a release for another platform or architecture", () => {
     expect(
       resolveUpdateOffer({
-        document: feed({ release: { platform: "win32" } }),
+        document: feed({ release: { platform: "freebsd" } }),
         app,
         verifySignature: accept,
       }),
     ).toEqual({ kind: "refuse", refusal: "malformed" });
+    expect(
+      resolveUpdateOffer({
+        document: feed({ release: { platform: "win32", arch: "x64" } }),
+        app,
+        verifySignature: accept,
+      }),
+    ).toEqual({ kind: "refuse", refusal: "wrong-platform" });
     expect(
       resolveUpdateOffer({
         document: feed(),

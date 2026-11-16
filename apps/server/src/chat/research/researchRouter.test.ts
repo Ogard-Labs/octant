@@ -6,7 +6,7 @@ function input(overrides: Partial<ResearchBackendInput> = {}): ResearchBackendIn
   return {
     researchEnabled: true,
     routing: "automatic",
-    searxngConfigured: true,
+    webSearchReady: true,
     appManagedTools: "supported",
     nativeResearch: "supported",
     ...overrides,
@@ -16,7 +16,7 @@ function input(overrides: Partial<ResearchBackendInput> = {}): ResearchBackendIn
 describe("ResearchRouter.resolve", () => {
   it("returns disabled and unavailable domain decisions unchanged", () => {
     const router = new ResearchRouter({
-      searxngClient: { search: vi.fn() },
+      webSearch: { search: vi.fn() },
       providerNativeExecute: vi.fn(),
     });
 
@@ -26,10 +26,10 @@ describe("ResearchRouter.resolve", () => {
       router.resolve(
         input({
           routing: "searxng",
-          searxngConfigured: false,
+          webSearchReady: false,
         }),
       ),
-    ).toEqual({ kind: "unavailable", reason: "searxng-not-configured" });
+    ).toEqual({ kind: "unavailable", reason: "no-eligible-web-search-backend" });
   });
 
   it("returns a SearXNG executor and attribution for selected SearXNG routing", () => {
@@ -39,7 +39,7 @@ describe("ResearchRouter.resolve", () => {
       results: [],
     }));
     const router = new ResearchRouter({
-      searxngClient: { search: searxngSearch },
+      webSearch: { search: searxngSearch },
       providerNativeExecute: vi.fn(),
     });
 
@@ -47,7 +47,7 @@ describe("ResearchRouter.resolve", () => {
     expect(resolved).toMatchObject({
       kind: "ready",
       backend: "searxng",
-      attribution: "SearXNG",
+      attribution: "Octant web search",
     });
     if (resolved.kind !== "ready" || resolved.backend !== "searxng") {
       throw new Error("expected ready SearXNG decision");
@@ -64,7 +64,7 @@ describe("ResearchRouter.resolve", () => {
 
   it("returns provider-native readiness without requiring an app executor", () => {
     const router = new ResearchRouter({
-      searxngClient: { search: vi.fn() },
+      webSearch: { search: vi.fn() },
     });
 
     const resolved = router.resolve(input({ routing: "provider-native" }));
@@ -80,7 +80,7 @@ describe("ResearchRouter.resolve", () => {
 
   it("uses advertised native capability as the provider-native execution gate", () => {
     const router = new ResearchRouter({
-      searxngClient: { search: vi.fn() },
+      webSearch: { search: vi.fn() },
     });
 
     expect(router.resolve(input({ routing: "provider-native" }))).toEqual({
@@ -92,7 +92,7 @@ describe("ResearchRouter.resolve", () => {
 
   it("never silently falls back when an explicit backend is unavailable", () => {
     const router = new ResearchRouter({
-      searxngClient: { search: vi.fn() },
+      webSearch: { search: vi.fn() },
       providerNativeExecute: vi.fn(),
     });
 
@@ -110,7 +110,7 @@ describe("ResearchRouter.resolve", () => {
       router.resolve(
         input({
           routing: "provider-native",
-          searxngConfigured: true,
+          webSearchReady: true,
           appManagedTools: "supported",
           nativeResearch: "unavailable",
         }),
@@ -118,13 +118,18 @@ describe("ResearchRouter.resolve", () => {
     ).toEqual({ kind: "unavailable", reason: "native-research-unsupported" });
   });
 
-  it("automatic routing prefers SearXNG without exposing a forced native fallback path", () => {
+  it("automatic routing prefers the provider's own search and falls back to Octant web search", () => {
     const searxngSearch = vi.fn();
     const router = new ResearchRouter({
-      searxngClient: { search: searxngSearch },
+      webSearch: { search: searxngSearch },
     });
 
-    const resolved = router.resolve(input({ routing: "automatic" }));
-    expect(resolved).toMatchObject({ kind: "ready", backend: "searxng" });
+    expect(router.resolve(input({ routing: "automatic" }))).toMatchObject({
+      kind: "ready",
+      backend: "provider-native",
+    });
+    expect(
+      router.resolve(input({ routing: "automatic", nativeResearch: "unsupported" })),
+    ).toMatchObject({ kind: "ready", backend: "searxng" });
   });
 });

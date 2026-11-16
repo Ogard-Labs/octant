@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
-import { coordinatorWorkersOf } from "./coordinatorWorkers";
+import { coordinatorChoiceNote, coordinatorWorkersOf } from "./coordinatorWorkers";
 
 const coordinator: ChatThreadNavigationItem = {
   threadId: "coordinator",
@@ -57,5 +57,61 @@ describe("coordinatorWorkersOf", () => {
 
   it("names none for a coordinator that has started no workers", () => {
     expect(coordinatorWorkersOf([coordinator], "coordinator")).toBeUndefined();
+  });
+
+  it("shows each worker's model and why it is not the main pick", () => {
+    const workers = coordinatorWorkersOf(
+      [
+        coordinator,
+        worker("main", {
+          providerInstanceId: "p1",
+          modelId: "sonnet",
+          coordinatorChoice: { role: "default", rank: "main" },
+        }),
+        worker("fallback", {
+          providerInstanceId: "p1",
+          modelId: "astra",
+          coordinatorChoice: {
+            role: "default",
+            rank: { fallback: 1 },
+            reason: "main Sonnet 5.5 at usage limit until 14:00 UTC",
+          },
+        }),
+        worker("chosen", {
+          providerInstanceId: "p1",
+          modelId: "opus",
+          coordinatorChoice: { role: "deep", rank: "main", why: "touches three packages" },
+        }),
+      ],
+      "coordinator",
+      (model) => `${model.modelId} name`,
+    );
+    expect(workers?.map((entry) => [entry.model, entry.choiceNote])).toEqual([
+      ["sonnet name", undefined],
+      ["astra name", "fallback: main Sonnet 5.5 at usage limit until 14:00 UTC"],
+      ["opus name", "chosen: touches three packages"],
+    ]);
+  });
+
+  it("says when the worker borrowed a lower tier or a person picked its model", () => {
+    expect(
+      coordinatorChoiceNote({
+        role: "deep",
+        rank: { borrowed: "default", lowerTier: true },
+        reason: "lower tier: all Hard problems models unavailable",
+      }),
+    ).toBe("fallback: lower tier: all Hard problems models unavailable");
+    // A running worker the host moved on to its role's next model.
+    expect(
+      coordinatorChoiceNote({
+        role: "default",
+        rank: { fallback: 1 },
+        reason: "Opus 5.5 (Work) at usage limit; continued on Astra (Personal)",
+        why: "needs the larger context",
+        move: "continued-on-fallback",
+      }),
+    ).toBe("fallback: Opus 5.5 (Work) at usage limit; continued on Astra (Personal)");
+    expect(coordinatorChoiceNote({ role: "deep", rank: "person" })).toBe("chosen by you");
+    expect(coordinatorChoiceNote(undefined)).toBeUndefined();
   });
 });

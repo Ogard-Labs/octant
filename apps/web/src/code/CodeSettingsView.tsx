@@ -1,4 +1,4 @@
-import type { CodeDiffLayout, CodeSettings } from "@octant/contracts/code";
+import type { CodeDiffLayout, CodeSettings, WindowsTerminalShell } from "@octant/contracts/code";
 import type { AutoReviewer, ShieldModelChoice } from "@octant/contracts/shield";
 import { Schema } from "effect";
 import {
@@ -7,12 +7,16 @@ import {
   CoordinatorOpenWorkerLimit,
   type CoordinatorStartingByProject,
   type CoordinatorStartingChoice,
+  type CoordinatorWorkerListing,
+  type CoordinatorWorkerListingByProject,
   type PermissionMode,
   type SettingsSettingId,
 } from "@octant/contracts";
 import { permissionModeOf, threadAccessOf } from "@octant/domain/guardrail-policy";
 import { useRef, useState } from "react";
+import { useHostPlatform } from "../platform";
 import { SettingRow, SettingsSection } from "../settings/primitives";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantFieldError } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
@@ -21,6 +25,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { useFullAccessWarning } from "./FullAccessWarning";
 import { PERMISSION_MODE_OPTIONS } from "./PermissionModePicker";
+import { WORKERS_UNLISTED } from "./coordinatorWorkerListing";
 
 export interface CodeSettingsUpdate {
   readonly defaultExecutionPolicy: CodeSettings["defaultExecutionPolicy"];
@@ -41,10 +46,16 @@ export interface CodeSettingsUpdate {
   readonly coordinatorStarting?: CoordinatorStartingChoice;
   /** Absent keeps the stored overrides; a present map replaces them. */
   readonly coordinatorStartingByProject?: CoordinatorStartingByProject;
+  /** Absent keeps the stored choice. */
+  readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
+  /** Absent keeps the stored overrides; a present map replaces them. */
+  readonly coordinatorWorkerListingByProject?: CoordinatorWorkerListingByProject;
   /** Absent keeps the stored limit. */
   readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
   /** Absent keeps the stored choice. */
   readonly restartContinuation?: boolean;
+  /** Absent keeps the stored choice. */
+  readonly windowsTerminalShell?: WindowsTerminalShell;
 }
 
 /** Settings › Code › Coordinators › Starting workers (docs/design/coordinator-threads.md). */
@@ -56,7 +67,57 @@ export const COORDINATOR_STARTING_OPTIONS: ReadonlyArray<{
   { id: "propose-for-approval", label: "Propose for approval" },
 ];
 
+/** Settings › Code › Terminal shell, offered on a Windows host only. */
+export const WINDOWS_TERMINAL_SHELL_OPTIONS: ReadonlyArray<{
+  readonly id: WindowsTerminalShell;
+  readonly label: string;
+}> = [
+  { id: "powershell", label: "Windows PowerShell" },
+  { id: "pwsh", label: "PowerShell 7" },
+  { id: "cmd", label: "Command Prompt" },
+];
+
 const isOpenWorkerLimit = Schema.is(CoordinatorOpenWorkerLimit);
+
+function sameWorkerListing(a: CoordinatorWorkerListing, b: CoordinatorWorkerListing): boolean {
+  return a.sidebar === b.sidebar && a.board === b.board;
+}
+
+/**
+ * The two Show workers checkboxes, shared by Settings and a Project's
+ * overview so both say the same words (docs/design/workspace.md#coordinators).
+ */
+export function CoordinatorWorkerListingChecks(props: {
+  readonly label: string;
+  readonly value: CoordinatorWorkerListing;
+  readonly disabled: boolean;
+  readonly onChange: (next: CoordinatorWorkerListing) => void;
+}) {
+  return (
+    <div aria-label={props.label} className="coordinator-worker-listing" role="group">
+      <label className="coordinator-worker-listing__choice">
+        <OctantCheckbox
+          checked={props.value.sidebar}
+          disabled={props.disabled}
+          onChange={(event) =>
+            props.onChange({ ...props.value, sidebar: event.currentTarget.checked })
+          }
+        />
+        <span>In the sidebar</span>
+      </label>
+      <label className="coordinator-worker-listing__choice">
+        <OctantCheckbox
+          checked={props.value.board}
+          disabled={props.disabled}
+          onChange={(event) =>
+            props.onChange({ ...props.value, board: event.currentTarget.checked })
+          }
+        />
+        <span>On the board</span>
+      </label>
+    </div>
+  );
+}
 
 const OPEN_WORKER_LIMIT_OPTIONS = Array.from(
   { length: MAX_COORDINATOR_OPEN_WORKER_LIMIT },
@@ -90,6 +151,7 @@ type CodeSettingsSectionId =
   | "coordinators"
   | "editor"
   | "devices"
+  | "terminal"
   | "external-editor";
 
 /**
@@ -148,15 +210,32 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [coordinatorStarting, setCoordinatorStarting] = useState<CoordinatorStartingChoice>(
     props.settings.coordinatorStarting ?? "start-without-asking",
   );
+  const [workerListing, setWorkerListing] = useState<CoordinatorWorkerListing>(
+    props.settings.coordinatorWorkerListing ?? WORKERS_UNLISTED,
+  );
   const [openWorkerLimit, setOpenWorkerLimit] = useState<number>(
     props.settings.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT,
+  );
+  const hostPlatform = useHostPlatform();
+  const [windowsShell, setWindowsShell] = useState<WindowsTerminalShell>(
+    props.settings.windowsTerminalShell ?? "powershell",
   );
   const [previousSettings, setPreviousSettings] = useState(props.settings);
   if (previousSettings !== props.settings) {
     setPreviousSettings(props.settings);
+    setWindowsShell((current) =>
+      current === (previousSettings.windowsTerminalShell ?? "powershell")
+        ? (props.settings.windowsTerminalShell ?? "powershell")
+        : current,
+    );
     setCoordinatorStarting((current) =>
       current === (previousSettings.coordinatorStarting ?? "start-without-asking")
         ? (props.settings.coordinatorStarting ?? "start-without-asking")
+        : current,
+    );
+    setWorkerListing((current) =>
+      sameWorkerListing(current, previousSettings.coordinatorWorkerListing ?? WORKERS_UNLISTED)
+        ? (props.settings.coordinatorWorkerListing ?? WORKERS_UNLISTED)
         : current,
     );
     setOpenWorkerLimit((current) =>
@@ -232,12 +311,17 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     },
   ) {
     const host = hostSettings.current;
     if (change.coordinatorStarting !== undefined) {
       setCoordinatorStarting(host.coordinatorStarting ?? "start-without-asking");
+    }
+    if (change.coordinatorWorkerListing !== undefined) {
+      setWorkerListing(host.coordinatorWorkerListing ?? WORKERS_UNLISTED);
     }
     if (change.coordinatorOpenWorkerLimit !== undefined) {
       setOpenWorkerLimit(host.coordinatorOpenWorkerLimit ?? DEFAULT_COORDINATOR_OPEN_WORKER_LIMIT);
@@ -266,6 +350,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     if (change.restartContinuation !== undefined) {
       setRestartContinuation(host.restartContinuation !== false);
     }
+    if (change.windowsTerminalShell !== undefined) {
+      setWindowsShell(host.windowsTerminalShell ?? "powershell");
+    }
   }
 
   /**
@@ -283,7 +370,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       readonly autoReviewer?: AutoReviewer;
       readonly fullAccessSandbox?: boolean;
       readonly coordinatorStarting?: CoordinatorStartingChoice;
+      readonly coordinatorWorkerListing?: CoordinatorWorkerListing;
       readonly coordinatorOpenWorkerLimit?: CoordinatorOpenWorkerLimit;
+      readonly windowsTerminalShell?: WindowsTerminalShell;
     },
   ) {
     const draft: CodeSettingsDraft = {
@@ -344,9 +433,15 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ...(change.coordinatorStarting === undefined
           ? {}
           : { coordinatorStarting: change.coordinatorStarting }),
+        ...(change.coordinatorWorkerListing === undefined
+          ? {}
+          : { coordinatorWorkerListing: change.coordinatorWorkerListing }),
         ...(change.coordinatorOpenWorkerLimit === undefined
           ? {}
           : { coordinatorOpenWorkerLimit: change.coordinatorOpenWorkerLimit }),
+        ...(change.windowsTerminalShell === undefined
+          ? {}
+          : { windowsTerminalShell: change.windowsTerminalShell }),
         ...(trimmedExecutable === ""
           ? {}
           : {
@@ -521,6 +616,23 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             />
           </SettingRow>
           <SettingRow
+            description="Workers live inside their coordinator's thread. Choose where else they are listed. Requests from workers always reach Needs you. A Project can choose its own in its overview."
+            focused={props.focusedSetting === "code-coordinator-show-workers"}
+            label="Show workers"
+            scope="mode"
+            settingId="code-coordinator-show-workers"
+          >
+            <CoordinatorWorkerListingChecks
+              disabled={false}
+              label="Show workers"
+              onChange={(next) => {
+                setWorkerListing(next);
+                void commit("coordinators", { coordinatorWorkerListing: next });
+              }}
+              value={workerListing}
+            />
+          </SettingRow>
+          <SettingRow
             description="How many workers one coordinator may have open at once. A worker that is Done, put away, or archived no longer counts."
             focused={props.focusedSetting === "code-coordinator-open-workers"}
             label="Open workers per coordinator"
@@ -585,6 +697,35 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         </div>
         <CodeSettingsFeedbackSlot feedback={feedback} section="devices" />
       </SettingsSection>
+      {hostPlatform === "win32" ? (
+        <SettingsSection title="Terminal">
+          <div className="setgroup">
+            <SettingRow
+              description="The shell a Code or Project terminal opens on this computer. Terminals run only at Full access on Windows."
+              focused={props.focusedSetting === "code-terminal-shell"}
+              label="Terminal shell"
+              scope="mode"
+              settingId="code-terminal-shell"
+            >
+              <OctantSelectField
+                aria-label="Terminal shell"
+                className="settings-view__select window-no-drag"
+                onValueChange={(value) => {
+                  const option = WINDOWS_TERMINAL_SHELL_OPTIONS.find(
+                    (candidate) => candidate.id === value,
+                  );
+                  if (option === undefined || option.id === windowsShell) return;
+                  setWindowsShell(option.id);
+                  void commit("terminal", { windowsTerminalShell: option.id });
+                }}
+                options={WINDOWS_TERMINAL_SHELL_OPTIONS}
+                value={windowsShell}
+              />
+            </SettingRow>
+          </div>
+          <CodeSettingsFeedbackSlot feedback={feedback} section="terminal" />
+        </SettingsSection>
+      ) : null}
       <SettingsSection title="External editor">
         <div className="setgroup">
           <SettingRow

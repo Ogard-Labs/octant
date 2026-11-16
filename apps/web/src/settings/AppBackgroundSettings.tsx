@@ -5,6 +5,7 @@ import type {
   SidebarBackgroundMetadata,
 } from "@octant/contracts/theme";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
+import { ASCII_DEFAULT_CELL, ASCII_MIN_CELL, asciiCell } from "@octant/domain/ascii-print";
 import { Check, Image as ImageIcon, Images, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -114,6 +115,7 @@ const EFFECTS = [
   { id: "none", label: "Off" },
   { id: "pixelate", label: "Pixelate" },
   { id: "dither", label: "Dither" },
+  { id: "ascii", label: "ASCII" },
 ] as const satisfies ReadonlyArray<{ id: AppBackgroundEffect; label: string }>;
 
 /**
@@ -149,13 +151,20 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const effect: AppBackgroundEffect = field && savedEffect === "none" ? "dither" : savedEffect;
   const printed = (picture && effect !== "none") || field;
   const motion = currentMotion(background);
-  const moves = printed || background.kind === "characters" || background.kind === "flowing";
+  // Characters have no wave, so an ASCII print offers no Motion.
+  const ascii = picture && effect === "ascii";
+  const moves =
+    (printed && !ascii) || background.kind === "characters" || background.kind === "flowing";
   // A photo dithered before the effect choice existed prints at 2 px and 4
   // colours. Moving one slider saves an explicit effect, which retires that
   // legacy reading, so the untouched slider's value is saved with it rather
   // than jumping to the decoded default.
   const legacyPrint = background.effect === undefined && effect === "dither";
-  const printCell = legacyPrint ? 2 : background.effectCell;
+  const printCell = legacyPrint
+    ? 2
+    : ascii
+      ? asciiCell(background.effectCell)
+      : background.effectCell;
   const printTones = legacyPrint ? 4 : background.effectTones;
 
   useEffect(() => {
@@ -464,7 +473,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               description={
                 field
                   ? "Plain square pixels, or dithered into a pattern of shades."
-                  : "Show the picture as it is, in square pixels, or dithered with fewer colours."
+                  : "Show the picture as it is, in square pixels, dithered with fewer colours, or as characters."
               }
               label="Effect"
               scope="app"
@@ -474,7 +483,14 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 aria-label="Background effect"
                 onValueChange={(value) => {
                   const next = value[0];
-                  if (next !== undefined) props.onChange({ ...background, effect: next });
+                  if (next === undefined) return;
+                  // A character needs room to read, so ASCII starts at a
+                  // readable cell rather than inheriting a 2 px one.
+                  const effectCell =
+                    next === "ascii" && background.effectCell < ASCII_MIN_CELL
+                      ? ASCII_DEFAULT_CELL
+                      : background.effectCell;
+                  props.onChange({ ...background, effect: next, effectCell });
                 }}
                 value={[effect]}
               >
@@ -488,7 +504,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
           ) : null}
           {printed ? (
             <SettingRow
-              description="How big each square is."
+              description={ascii ? "How big each character is." : "How big each square is."}
               label="Pixel size"
               scope="app"
               settingId="app-background-effect-cell"
@@ -498,7 +514,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 className="settings-view__range"
                 format={(value) => `${String(value)} px`}
                 max={16}
-                min={2}
+                min={ascii ? ASCII_MIN_CELL : 2}
                 onChange={(event) =>
                   props.onChange({
                     ...background,

@@ -870,6 +870,8 @@ describe("browser diagnostics reach the provider-facing result", () => {
       screenshot: {},
       diagnostics: {},
       audit: { kind: "accessibility" },
+      "page-tools": {},
+      "page-tool-call": { name: "search", arguments: { q: "shoes" } },
       stop: {},
       help: {},
     };

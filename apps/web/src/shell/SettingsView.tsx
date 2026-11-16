@@ -103,6 +103,8 @@ import {
 } from "../settings/runtimeCompactionDefaults";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { PersonMemoryClient } from "@octant/client-runtime/person-memory-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
+import { OctantInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import type { ProtectedFilesClient } from "@octant/client-runtime/protected-files-client";
 import type { ArchivedWorktreesClient } from "@octant/client-runtime/archived-worktrees-client";
 import type { DiskCleanupClient } from "@octant/client-runtime/disk-cleanup-client";
@@ -126,6 +128,7 @@ import { SecretStoresClientContext } from "../settings/SecretStoresClientContext
 import { SecretStoresSettingsSection } from "../settings/SecretStoresSettingsSection";
 import { AutomaticModelSettings } from "../settings/AutomaticModelSettings";
 import { PersonMemorySettings } from "../settings/PersonMemorySettings";
+import { TodoListHostSettings } from "../todos/TodoListHostSettings";
 import { ProtectedFilesSettings } from "../settings/ProtectedFilesSettings";
 import { ArchivedWorktreesSettings } from "../settings/ArchivedWorktreesSettings";
 import { HostWorktreesSettings } from "../settings/HostWorktreesSettings";
@@ -162,6 +165,7 @@ import { VoiceSettingsView } from "../settings/VoiceSettingsView";
 import { ImageGenerationSettingsView } from "../settings/ImageGenerationSettingsView";
 import { ModelEndpointSettingsView } from "../settings/ModelEndpointSettingsView";
 import { ComputerUseSettingsView } from "../settings/ComputerUseSettingsView";
+import { WebSearchSettingsView } from "../settings/WebSearchSettingsView";
 import { DesktopLeaseSettings } from "../settings/DesktopLeaseSettings";
 import { DesktopSpendCapSettings } from "../settings/DesktopSpendCapSettings";
 import type { DesktopPaneClient } from "@octant/client-runtime/desktop-pane-client";
@@ -196,8 +200,8 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import {
   NativeHarnessRoutingPanel,
   nativeHarnessSlotsUsing,
-  type NativeHarnessProviderOption,
 } from "../harness/NativeHarnessRoutingPanel";
+import { modelRolePickerGroups, modelRoleProviderOptions } from "../harness/modelRoleOptions";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import {
   DEFAULT_BROWSER_CAPTURES_PER_THREAD,
@@ -205,10 +209,10 @@ import {
   LOCAL_HOST_ID,
   MAX_BROWSER_CAPTURES_PER_THREAD,
   MAX_THREAD_TOOL_STEPS_SETTING,
-  MAX_TURN_RUNTIME_EVENTS,
+  RUNTIME_EVENTS_PER_TOOL_STEP,
+  DEFAULT_RUNTIME_TURNS_PER_TURN,
+  MAX_RUNTIME_TURNS_PER_TURN_SETTING,
 } from "@octant/contracts";
-import { buildModelPickerGroups, isNativeHarnessDriverKind } from "@octant/domain";
-import type { PickerGroup } from "@octant/domain";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
@@ -295,6 +299,8 @@ export interface SettingsViewProps {
   readonly archivedWorktreesClient?: ArchivedWorktreesClient;
   readonly diskCleanupClient?: DiskCleanupClient;
   readonly personMemoryClient?: PersonMemoryClient;
+  /** Your instructions for Octant, under Your identity. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
   readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Computer use › the monthly cap for desktops that bill; absent where the host has no route to it. */
@@ -381,6 +387,8 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
     "Models you add by API key or run locally: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
+  "web-search":
+    "Where Octant's own web search may send a query, the data policy it follows, and the keys it uses.",
   github: "Connection and repository access on the selected host.",
   host: "Octant's background service: its status, startup, and maintenance.",
   permissions:
@@ -414,6 +422,7 @@ const MOVED_SETTINGS: ReadonlyArray<{
     (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
   ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
+  { from: "chat", setting: "chat-searxng-url", to: "web-search" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
   ...[
@@ -1294,6 +1303,22 @@ function ActiveSectionContent({
                     }
                   />
                 </SettingRow>
+                <SettingRow
+                  description="Stops a provider session left running only background work, such as a dev server, after its thread has had no turn for this long; its live tasks stop with it."
+                  focused={focusedSetting === settingId("background-session-idle-limit")}
+                  label="Background work limit"
+                  scope="host"
+                  settingId="background-session-idle-limit"
+                >
+                  <ProviderToolCallPauseLimitSelect
+                    id="background-session-idle-limit"
+                    label="Background work limit"
+                    minutes={props.settings.backgroundSessionIdleLimitMinutes}
+                    onChange={(minutes) =>
+                      props.onSettingsChange({ backgroundSessionIdleLimitMinutes: minutes })
+                    }
+                  />
+                </SettingRow>
               </div>
             </SettingsSection>
           </div>
@@ -1365,11 +1390,11 @@ function ActiveSectionContent({
               <NativeHarnessRoutingPanel
                 client={props.nativeHarnessClient}
                 focused={focusedSetting === settingId("model-roles")}
-                groups={nativeHarnessPickerGroups(props.providerController)}
+                groups={modelRolePickerGroups(props.providerController)}
                 key={rolesRevision}
                 hostId={LOCAL_HOST_ID}
                 onOpenModelEndpoints={openModelEndpoints}
-                providers={nativeHarnessProviderOptions(props.providerController)}
+                providers={modelRoleProviderOptions(props.providerController)}
                 {...(props.providerController === undefined
                   ? {}
                   : { onVerifyTools: props.providerController.verifyModelTools })}
@@ -1755,7 +1780,7 @@ function ActiveSectionContent({
           <SettingsSection title="Tool steps">
             <div className="setgroup">
               <SettingRow
-                description={`How many tool calls a Chat or Work turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row.`}
+                description={`How many tool calls a Chat, Work or Code turn shows, and keeps records for, below Full access. Default ${DEFAULT_THREAD_TOOL_STEPS_PER_TURN}. A turn that calls more still runs; its later calls have no row. A turn stops after ${RUNTIME_EVENTS_PER_TOOL_STEP} runtime events for each step kept.`}
                 focused={focusedSetting === settingId("tool-steps-per-turn")}
                 label="Tool steps kept per turn"
                 scope="host"
@@ -1770,7 +1795,7 @@ function ActiveSectionContent({
                 />
               </SettingRow>
               <SettingRow
-                description={`The same limit for a Work turn that runs at Full access. 0 means no limit: every call is kept, and the spend ceiling is what bounds the turn. A turn still stops after ${MAX_TURN_RUNTIME_EVENTS.toLocaleString("en-US")} runtime events, whatever this is set to.`}
+                description="The same limit for a Work or Code turn that runs at Full access. 0 means no limit: every call is kept, no event count stops the turn, and the spend ceiling is what bounds it."
                 focused={focusedSetting === settingId("tool-steps-per-turn-full-access")}
                 label="Tool steps kept per turn at Full access"
                 scope="host"
@@ -1784,6 +1809,21 @@ function ActiveSectionContent({
                     props.onSettingsChange({ fullAccessToolStepsPerTurn: value })
                   }
                   value={props.settings.fullAccessToolStepsPerTurn}
+                />
+              </SettingRow>
+              <SettingRow
+                description={`How many turns a runtime may start by itself inside one of your turns below Full access, when a background command ends or a watch reports. Default ${DEFAULT_RUNTIME_TURNS_PER_TURN}. Past it your turn completes and its session stops. Full access has no such count, and a message you send meanwhile goes into the turn.`}
+                focused={focusedSetting === settingId("runtime-turns-per-turn")}
+                label="Turns a runtime starts by itself"
+                scope="host"
+                settingId="runtime-turns-per-turn"
+              >
+                <OctantNumberStepper
+                  label="Turns a runtime starts by itself"
+                  max={MAX_RUNTIME_TURNS_PER_TURN_SETTING}
+                  min={1}
+                  onChange={(value) => props.onSettingsChange({ runtimeTurnsPerTurn: value })}
+                  value={props.settings.runtimeTurnsPerTurn}
                 />
               </SettingRow>
             </div>
@@ -1802,6 +1842,12 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+        </div>
+      );
+    case "todos":
+      return (
+        <div className="settings-section-stack" id="settings-todos">
+          <TodoListHostSettings />
         </div>
       );
     case "memory":
@@ -1874,6 +1920,16 @@ function ActiveSectionContent({
             />
           )}
         </div>
+      );
+    case "web-search":
+      return (
+        <WebSearchSettingsView
+          {...(props.hostControlClient === undefined ? {} : { client: props.hostControlClient })}
+          {...(focusedSetting === undefined ? {} : { focusedSetting })}
+          onOpenResearchRoute={() =>
+            onApplyDeepLink({ section: "chat", setting: settingId("chat-research-backend") })
+          }
+        />
       );
     case "skills":
       // Marketplace fetches is this host's own switch, so it stays reachable
@@ -2401,8 +2457,13 @@ function BrowserTransferLimitSelect(props: {
 
 const PROVIDER_TOOL_CALL_PAUSE_LIMIT_CHOICES: ReadonlyArray<number> = [30, 60, 120, 240, 480, 1440];
 
-/** How long one provider tool call may pause the stalled-turn limit, plus Off. */
+/**
+ * How long one provider tool call may pause the stalled-turn limit, plus Off.
+ * The background work limit offers the same lengths under its own name.
+ */
 function ProviderToolCallPauseLimitSelect(props: {
+  readonly id?: string;
+  readonly label?: string;
   readonly minutes: number | null;
   readonly onChange: (minutes: number | null) => void;
 }) {
@@ -2414,8 +2475,8 @@ function ProviderToolCallPauseLimitSelect(props: {
         );
   return (
     <OctantSelectField
-      aria-label="Tool-call pause limit"
-      id="provider-tool-call-pause-limit"
+      aria-label={props.label ?? "Tool-call pause limit"}
+      id={props.id ?? "provider-tool-call-pause-limit"}
       onValueChange={(value) => props.onChange(value === "off" ? null : Number(value))}
       options={[
         ...choices.map((minutes) => ({ id: String(minutes), label: durationChoiceLabel(minutes) })),
@@ -2492,6 +2553,10 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
               profile={props.settings.userProfile}
             />
           </SettingRow>
+          <OctantInstructionsSettings
+            client={props.octantInstructionsClient}
+            focusedSetting={focusedSetting}
+          />
         </div>
       </SettingsSection>
       <SettingsSection title="Available modes">
@@ -2729,7 +2794,7 @@ function SkillsSection({
                               id: String(instance.id),
                               displayName: instance.displayName,
                               driverKind: instance.driverKind,
-                              nativeSetup: instance.nativeSetup === true,
+                              nativeSetup: instance.nativeSetup !== false,
                             },
                           ]
                         : [],
@@ -3668,38 +3733,6 @@ function nativeHarnessRolesUsing(
     const { configuration } = await client.routing();
     return nativeHarnessSlotsUsing(configuration, instanceId);
   };
-}
-
-/** The direct-endpoint providers a slot may name, with the models each reports. */
-function nativeHarnessProviderOptions(
-  controller: SettingsViewProps["providerController"],
-): ReadonlyArray<NativeHarnessProviderOption> {
-  if (controller === undefined) return [];
-  return controller.instances
-    .filter((instance) => instance.enabled && isNativeHarnessDriverKind(instance.driverKind))
-    .map((instance) => ({
-      instanceId: String(instance.id),
-      label: instance.displayName,
-      modelCount: controller.observedByInstance.get(instance.id)?.models.length ?? 0,
-    }));
-}
-
-/**
- * The harness endpoints' models as the compact chooser lists them. Chat's
- * grouping lists every model, Chat-only ones included, because a role may
- * answer without tools and the panel says so beside the choice.
- */
-function nativeHarnessPickerGroups(
-  controller: SettingsViewProps["providerController"],
-): ReadonlyArray<PickerGroup> {
-  if (controller === undefined) return [];
-  return buildModelPickerGroups({
-    instances: controller.instances,
-    observedByInstance: controller.observedByInstance,
-    providerOrder: controller.defaults.providerOrder,
-    hiddenModels: controller.defaults.hiddenModels,
-    mode: "chat",
-  }).filter((group) => group.runtime === "octant-harness");
 }
 
 function privacyThreadsFromSettings(props: SettingsViewProps): ReadonlyArray<PrivacyTarget> {

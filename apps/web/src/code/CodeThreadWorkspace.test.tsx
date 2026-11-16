@@ -714,6 +714,76 @@ describe("CodeThreadWorkspace", () => {
     expect(loadEarlierConversation).toHaveBeenCalledOnce();
   });
 
+  it("loads earlier pages until a search hit's turn is loaded, then brings it into view", async () => {
+    const newest = "33333333-3333-4333-8333-333333333333";
+    const older = "44444444-4444-4444-8444-444444444444";
+    const loadEarlierConversation = vi.fn();
+    const onTurnRevealed = vi.fn();
+    const newestRows = [
+      { id: "newest:user", role: "user" as const, text: "Newest prompt", operationId: newest },
+      {
+        id: "newest:assistant",
+        role: "assistant" as const,
+        text: "Newest reply",
+        operationId: newest,
+      },
+    ];
+    const view = (conversation: typeof newestRows, earlier: "idle" | "none-left") => (
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: conversation as never,
+          conversationHistory: "loaded",
+          earlierConversation: earlier,
+          loadEarlierConversation,
+        })}
+        onTurnRevealed={onTurnRevealed}
+        providerGroups={[providerGroup()]}
+        revealOperationId={older as never}
+        threadId={threadId}
+      />
+    );
+    const { rerender } = render(view(newestRows, "idle"));
+
+    await waitFor(() => expect(loadEarlierConversation).toHaveBeenCalledOnce());
+    expect(onTurnRevealed).not.toHaveBeenCalled();
+
+    rerender(
+      view(
+        [
+          { id: "older:user", role: "user", text: "The prompt that matched", operationId: older },
+          ...newestRows,
+        ],
+        "none-left",
+      ),
+    );
+
+    await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+    expect(screen.getByText("The prompt that matched")).toBeInTheDocument();
+    expect(loadEarlierConversation).toHaveBeenCalledOnce();
+  });
+
+  it("spends a search hit the thread no longer holds without loading anything", async () => {
+    const loadEarlierConversation = vi.fn();
+    const onTurnRevealed = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [{ id: "turn-1:user", role: "user", text: "Only prompt" }],
+          conversationHistory: "loaded",
+          earlierConversation: "none-left",
+          loadEarlierConversation,
+        })}
+        onTurnRevealed={onTurnRevealed}
+        providerGroups={[providerGroup()]}
+        revealOperationId={"55555555-5555-4555-8555-555555555555" as never}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(onTurnRevealed).toHaveBeenCalledOnce());
+    expect(loadEarlierConversation).not.toHaveBeenCalled();
+  });
+
   it("keeps new-thread setup hidden while an existing transcript is loading", () => {
     render(
       <CodeThreadWorkspace
@@ -1060,6 +1130,108 @@ describe("CodeThreadWorkspace", () => {
     // A busy wait offers to queue the follow-up, where a parked one sends it.
     expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
+  });
+
+  it("says where and why the host moved a worker on to its fallback, even with no turn after the move", () => {
+    const base = controller();
+    const reason = "Opus 5.5 (Work) at usage limit; continued on Astra (Personal)";
+    render(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...base,
+            conversation: [
+              {
+                id: "ask",
+                role: "user",
+                text: "Fix the test",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                at: "2026-11-15T12:00:00.000Z",
+              },
+              {
+                id: "stopped",
+                role: "assistant",
+                text: "Looking at it",
+                status: "waiting",
+                operationId: "30000000-0000-4000-8000-0000000000f1",
+                // Its turn settled after the move; the marker still follows it.
+                at: "2026-11-15T12:03:00.000Z",
+              },
+            ],
+            activeView: {
+              ...base.activeView!,
+              thread: {
+                ...base.activeView!.thread,
+                coordinatorThreadId: "20000000-0000-4000-8000-0000000000c1",
+                coordinatorChoice: { role: "default", rank: { fallback: 1 }, reason },
+                providerHandoff: {
+                  previousProviderInstanceId: providerId,
+                  previousModelId: modelId,
+                  nextProviderInstanceId: providerId,
+                  nextModelId: modelId,
+                  changedAt: "2026-11-15T12:02:00.000Z",
+                  continuedOnFallback: reason,
+                },
+              },
+            },
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    const marker = screen.getByLabelText("Continued on the fallback");
+    expect(marker).toHaveTextContent(`Octant moved this thread: ${reason}`);
+    // After the stopped turn's reply, not between its prompt and reply.
+    expect(
+      screen.getByText("Looking at it").compareDocumentPosition(marker) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("sends the next message on the new account once a usage-limit hand-off released the parked turn", async () => {
+    const user = userEvent.setup();
+    const stopId = "30000000-0000-4000-8000-0000000000e1";
+    const base = controller();
+    const parked = {
+      ...base,
+      turnStatus: "waiting" as const,
+      turnError: "The provider's usage window is spent.",
+      turnErrorCategory: "failed",
+      latestProviderTurnOperationId: stopId,
+    };
+    const { rerender } = render(
+      <CodeThreadWorkspace controller={parked as never} threadId={threadId} />,
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "Carry on");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...parked,
+            activeView: {
+              ...base.activeView!,
+              thread: {
+                ...base.activeView!.thread,
+                version: 3,
+                providerHandoff: {
+                  previousProviderInstanceId: providerId,
+                  previousModelId: modelId,
+                  nextProviderInstanceId: providerId,
+                  nextModelId: modelId,
+                  changedAt: "2026-09-30T08:00:03.000Z",
+                  releasedStopId: stopId,
+                },
+              },
+            },
+          } as never
+        }
+        threadId={threadId}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
   });
 
   it("leaves the model picker enabled on a turn parked by a refused resume", () => {
@@ -1818,7 +1990,13 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "does this still hold?");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(resolve).toHaveBeenCalledWith(expect.anything(), [mentionedThreadId]);
+    // The preflight names this composer's own thread, so it judges the reach the send will.
+    expect(resolve).toHaveBeenCalledWith(
+      expect.anything(),
+      [mentionedThreadId],
+      undefined,
+      threadId,
+    );
     // The chip travels as an id. The message the host journals — and the
     // conversation and every later turn read back — is the user's own words,
     // so nothing the mention contributed can be replayed.

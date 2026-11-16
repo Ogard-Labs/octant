@@ -7,7 +7,7 @@ import { SideChatDraftReturnReferences } from "./sideChatReturn";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
-import { AgentRunResultDeliveryMark } from "./agentRun";
+import { AgentResultsSteeredIntoTurn, AgentRunResultDeliveryMark } from "./agentRun";
 import { ContextCompactionSettledRecord } from "./context";
 import {
   ContextHandoffMessages,
@@ -33,6 +33,7 @@ import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMenti
 import { ThreadTaskProgressList } from "./threadTasks";
 import { ThreadToolStep, ThreadToolStepList } from "./threadToolStepList";
 import { ThreadWindowBoundsFields } from "./threadWindow";
+import { DescribedTurnImages } from "./imageDescription";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -45,7 +46,14 @@ const boundedNonEmptyText = (maximumBytes: number) =>
     Schema.filter((value) => encoder.encode(value).byteLength <= maximumBytes),
   );
 
-export const MAX_WORK_TURN_RESPONSE_BYTES = 64 * 1024;
+/**
+ * The most of a Work reply the turn keeps: the 32 MiB streamed-output budget
+ * Chat and Code turns have (maintainer decision, 2026-11-14), so a long Work
+ * answer is no longer cut at 64 KiB. The reply is journaled once, when the
+ * turn settles; a settled turn too heavy for one stream frame is read from
+ * the transcript snapshot instead.
+ */
+export const MAX_WORK_TURN_RESPONSE_BYTES = 32 * 1024 * 1024;
 /**
  * The most one live Work stream frame may weigh. A client refuses a heavier
  * line, so the host sends a view to the transcript snapshot instead of a
@@ -287,6 +295,8 @@ export const WorkTurnState = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   failure: Schema.optional(WorkTurnFailure),
   /** Files that changed in the bound folder while this turn ran. */
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
@@ -306,6 +316,8 @@ export const WorkTurnState = Schema.Struct({
    * result; journaled with the turn's acceptance so replay keeps the mark.
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
+  /** Finished children's results steered into this turn while it ran, in arrival order. */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   capabilities: WorkTurnCapabilityFacts,
   sideChatReturns: Schema.optional(SideChatDraftReturnReferences),
   version: AggregateVersion,
@@ -549,6 +561,8 @@ export const WorkTurnAccepted = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
   ),
+  /** The attached images a Sees images model described, and which model. */
+  describedImages: Schema.optional(DescribedTurnImages),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
   capabilities: WorkTurnCapabilityFacts,
   /**

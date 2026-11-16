@@ -6,6 +6,7 @@ import type {
   ProviderFailure,
 } from "@octant/contracts";
 import { MAX_TOOL_CALL_CONTENT_EVENT_CHARACTERS } from "@octant/contracts";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 
 import type {
   ClaudeAccountState,
@@ -20,8 +21,10 @@ import type {
   ClaudeSessionMetadata,
   ClaudeStreamEvent,
   ClaudeTaskUsage,
+  ClaudeWorkflowAgent,
   ClaudeUsage,
 } from "./claudeAgentSdkPort";
+import { claudeTaskToolOutput } from "./claudeTaskList";
 
 const EFFORT_LEVELS = new Set(["low", "medium", "high", "xhigh", "max"]);
 const API_PROVIDERS = new Set([
@@ -417,11 +420,21 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
   const only = results.length === 1 ? results[0] : undefined;
   const publishedPage =
     only === undefined || only.isError ? undefined : claudePublishedPage(message.tool_use_result);
+  const taskOutput =
+    only === undefined || only.isError ? undefined : claudeTaskToolOutput(message.tool_use_result);
   return {
     kind: "tool-results",
     sessionId: message.session_id,
     results:
-      only === undefined || publishedPage === undefined ? results : [{ ...only, publishedPage }],
+      only === undefined || (publishedPage === undefined && taskOutput === undefined)
+        ? results
+        : [
+            {
+              ...only,
+              ...(publishedPage === undefined ? {} : { publishedPage }),
+              ...(taskOutput === undefined ? {} : { taskOutput }),
+            },
+          ],
   };
 }
 
@@ -751,9 +764,9 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   // Claude Code announces its built-in slash commands and agents here on
   // every install (2.1.258 lists `clear`, `compact`, `Explore`, `Plan`, ...)
   // and the entries are objects, not names. Their presence is not evidence of
-  // injected authority: the query is opened with no setting sources, skills,
-  // agents, plugins, or MCP servers, and the tool set is checked on the
-  // initialized message. Only the shape is validated here; requiring the
+  // injected authority: the query opens with only the setting sources,
+  // skills, plugins, and MCP servers the session's setup allows, and the tool
+  // set is checked on the initialized message. Only the shape is validated here; requiring the
   // lists to be empty rejected every current install as incompatible.
   if (
     initialized === undefined ||
@@ -764,12 +777,15 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   ) {
     throw protocol();
   }
+  const commands = advertisedSlashCommands(initialized.commands);
   return {
     models: decodeModels(initialized.models),
     account: decodeAccount(initialized.account),
     compactAnnounced: initialized.commands.some(
       (command: unknown) => object(command)?.name === "compact",
     ),
+    // Absent when the runtime announced none, as the initialization says.
+    ...(commands.length === 0 ? {} : { commands }),
   };
 }
 
@@ -922,17 +938,26 @@ export function permissionMode(
 // the initialized tool set even when it was requested. A session that loads
 // a trusted Project's code also holds the tools of the MCP servers the person
 // and the Project set up, which Octant cannot name in advance; each call to
-// one still passes Octant's gate.
+// one still passes Octant's gate. A session with the full built-in set holds
+// every built-in tool but the withheld ones, also not named in advance, and
+// each call to one passes the gate too.
 export function claudeOffersTool(
-  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup">,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "nativeSetup" | "withheldTools">,
   toolName: string,
 ): boolean {
   if (input.tools.includes(toolName)) return true;
-  return (
-    input.nativeSetup?.projectCode === true &&
-    toolName.startsWith("mcp__") &&
-    !toolName.startsWith("mcp__octant__")
-  );
+  if (toolName.startsWith("mcp__")) {
+    return claudeStartsOwnServers(input.nativeSetup) && !toolName.startsWith("mcp__octant__");
+  }
+  return input.withheldTools !== undefined && !input.withheldTools.includes(toolName);
+}
+
+/**
+ * Whether the session starts MCP servers other than Octant's: the account's
+ * own with its tool servers on, and a trusted Project's with its code.
+ */
+function claudeStartsOwnServers(setup: ClaudeOpenQueryInput["nativeSetup"]): boolean {
+  return setup?.toolServers === true || setup?.projectCode === true;
 }
 
 /** Whether a server the session reports is one this session may hold. */
@@ -943,7 +968,7 @@ function claudeOffersMcpServer(input: ClaudeOpenQueryInput, server: unknown): bo
     return input.managedToolServer === true && record.status === "connected";
   // The person's and the trusted Project's own servers; one that failed or
   // waits for sign-in simply offers no tools.
-  return input.nativeSetup?.projectCode === true && typeof record.name === "string";
+  return claudeStartsOwnServers(input.nativeSetup) && typeof record.name === "string";
 }
 
 function decodeInitializedMessage(
@@ -1064,6 +1089,48 @@ const TASK_UPDATE_STATUSES = new Set([
   "killed",
   "paused",
 ]);
+
+const MAX_WORKFLOW_PROGRESS_ENTRIES = 512;
+const WORKFLOW_AGENT_STATES = new Set(["start", "progress", "done", "error"]);
+
+/**
+ * The agents a workflow's `task_progress` reports. The runtime sends its
+ * whole progress list each time: one `workflow_agent` entry per agent, kept
+ * up to date in place, beside phase and log entries Octant does not show.
+ * Only an agent's place, label, state, and last tool are read; its prompt
+ * and result previews stay the runtime's.
+ */
+function decodeWorkflowAgents(value: unknown): readonly ClaudeWorkflowAgent[] {
+  if (!Array.isArray(value) || value.length > MAX_WORKFLOW_PROGRESS_ENTRIES) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return value.flatMap((entry): ClaudeWorkflowAgent[] => {
+    const item = object(entry);
+    if (item === undefined || typeof item.type !== "string") {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    if (item.type !== "workflow_agent") return [];
+    if (
+      typeof item.index !== "number" ||
+      !Number.isSafeInteger(item.index) ||
+      item.index < 0 ||
+      typeof item.label !== "string" ||
+      typeof item.state !== "string" ||
+      !WORKFLOW_AGENT_STATES.has(item.state) ||
+      (item.lastToolName !== undefined && typeof item.lastToolName !== "string")
+    ) {
+      throw protocol("Claude returned an unsupported runtime message.");
+    }
+    return [
+      {
+        index: item.index,
+        label: item.label,
+        state: item.state as ClaudeWorkflowAgent["state"],
+        ...(typeof item.lastToolName === "string" ? { lastToolName: item.lastToolName } : {}),
+      },
+    ];
+  });
+}
 
 function decodeTaskUsage(value: unknown): ClaudeTaskUsage {
   const usage = object(value);
@@ -1212,6 +1279,22 @@ function decodeStatus(
   };
 }
 
+/**
+ * The runtime's own word on whether it is running a turn. It sends these only
+ * when `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS` is set; `idle` follows the
+ * last result of a run of turns, so a turn the runtime starts by itself from
+ * a queued notice comes before it.
+ */
+function decodeSessionState(message: Record<string, unknown>): ClaudeDecodedMessage {
+  if (
+    typeof message.session_id !== "string" ||
+    (message.state !== "idle" && message.state !== "running" && message.state !== "requires_action")
+  ) {
+    throw protocol("Claude returned an unsupported runtime message.");
+  }
+  return { kind: "session-state", sessionId: message.session_id, state: message.state };
+}
+
 export type ClaudeDecodePhase =
   | {
       readonly kind: "initializing";
@@ -1288,6 +1371,12 @@ export function decodeMessage(
       return decodeStatus(message, input);
     }
     if (message.type === "rate_limit_event") return decodeRateLimit(message);
+    // The session's state before it initializes says nothing about a turn,
+    // but it does say the runtime reports its state: dropped, a background
+    // task that ended before the first result could end the turn early.
+    if (message.type === "system" && message.subtype === "session_state_changed") {
+      return decodeSessionState(message);
+    }
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (
@@ -1348,6 +1437,9 @@ export function decodeMessage(
       kind: "assistant",
       sessionId: message.session_id,
       messageId: assistant.id,
+      ...(typeof message.uuid === "string" && message.uuid.trim().length > 0
+        ? { uuid: message.uuid }
+        : {}),
       ...(message.error === undefined ? {} : { error: message.error }),
       content: assistant.content.map((content) => decodeAssistantContent(content, input)),
       usage: decodeUsage(assistant.usage, true),
@@ -1459,6 +1551,9 @@ export function decodeMessage(
       ...(postTokens === undefined ? {} : { postTokens }),
     };
   }
+  if (message.type === "system" && message.subtype === "session_state_changed") {
+    return decodeSessionState(message);
+  }
   if (
     message.type === "system" &&
     (message.subtype === "task_started" ||
@@ -1481,20 +1576,50 @@ export function decodeMessage(
     // A session with its own subagents on reports each one's lifecycle as a
     // task: `task_started` names the agent (`task_type: "local_agent"`,
     // `subagent_type`, its prompt) and later frames carry the subagent type.
-    // The prompt is the runtime's and is never kept. Workflows stay refused.
+    // The prompt is the runtime's and is never kept.
     const subagentTask = (value: Record<string, unknown>) =>
       input.nativeSetup?.subagents === true &&
       (value.subagent_type === undefined || typeof value.subagent_type === "string");
+    let background = false;
+    let workflow: { name?: string; agents?: readonly ClaudeWorkflowAgent[] } | undefined;
     if (message.subtype === "task_started") {
       const ownSubagent =
         subagentTask(message) &&
         (message.task_type === undefined || message.task_type === "local_agent") &&
         (message.prompt === undefined || typeof message.prompt === "string") &&
         (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      // A command Claude runs in the background, and a watch its Monitor
+      // tool keeps, are `local_bash` tasks (Claude Code 2.1.211). Each wakes
+      // the model when it finishes or reports, which the driver holds inside
+      // the turn that started it (maintainer decision, 2026-11-14).
+      const command =
+        message.task_type === "local_bash" &&
+        message.subagent_type === undefined &&
+        message.prompt === undefined &&
+        message.workflow_name === undefined &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      // A workflow runs in this process as a `local_workflow` task named by
+      // its script's `meta.name`, and wakes the model when it ends, as a
+      // background command does (maintainer decision, 2026-11-14). Its
+      // `prompt` is the script, which is the runtime's and is never kept. A
+      // run sent to a remote session (`remote_agent`) stays refused.
+      const ownWorkflow =
+        input.nativeSetup?.subagents === true &&
+        message.task_type === "local_workflow" &&
+        message.subagent_type === undefined &&
+        (message.workflow_name === undefined || typeof message.workflow_name === "string") &&
+        (message.prompt === undefined || typeof message.prompt === "string") &&
+        (message.skip_transcript === undefined || typeof message.skip_transcript === "boolean");
+      background = command || ownWorkflow;
+      if (ownWorkflow) {
+        const name = optionalString(message.workflow_name)?.trim().slice(0, 256);
+        workflow = name === undefined || name.length === 0 ? {} : { name };
+      }
       if (
         typeof message.description !== "string" ||
-        message.workflow_name !== undefined ||
+        (message.workflow_name !== undefined && !ownWorkflow) ||
         (!ownSubagent &&
+          !background &&
           (message.subagent_type !== undefined ||
             message.task_type !== undefined ||
             message.prompt !== undefined ||
@@ -1515,15 +1640,21 @@ export function decodeMessage(
       description = message.description;
       summary = optionalString(message.summary);
       usage = decodeTaskUsage(message.usage);
+      if (message.workflow_progress !== undefined) {
+        if (input.nativeSetup?.subagents !== true) {
+          throw protocol("Claude returned an unsupported runtime message.");
+        }
+        workflow = { agents: decodeWorkflowAgents(message.workflow_progress) };
+      }
     } else if (message.subtype === "task_notification") {
       if (
         typeof message.status !== "string" ||
         !TASK_NOTIFICATION_STATUSES.has(message.status) ||
         typeof message.output_file !== "string" ||
         typeof message.summary !== "string" ||
-        (message.skip_transcript !== undefined &&
-          message.skip_transcript !== false &&
-          !(subagentTask(message) && typeof message.skip_transcript === "boolean"))
+        // Only a display hint; a background command's housekeeping notice
+        // carries it as a subagent's does.
+        (message.skip_transcript !== undefined && typeof message.skip_transcript !== "boolean")
       ) {
         throw protocol("Claude returned an unsupported runtime message.");
       }
@@ -1555,6 +1686,8 @@ export function decodeMessage(
       subtype: message.subtype,
       taskId: message.task_id,
       ...(typeof message.tool_use_id === "string" ? { toolUseId: message.tool_use_id } : {}),
+      ...(background ? { background: true } : {}),
+      ...(workflow === undefined ? {} : { workflow }),
       ...(status === undefined ? {} : { status }),
       ...(description === undefined ? {} : { description }),
       ...(summary === undefined ? {} : { summary }),
@@ -1585,6 +1718,20 @@ export function decodeMessage(
     };
   }
   if (isHarmlessInformational(message)) return { kind: "ignored" };
+  // The runtime pushes its whole command list when skills are found mid-
+  // session (SDK 0.3.211 `commands_changed`); it replaces the cached list.
+  if (
+    message.type === "system" &&
+    message.subtype === "commands_changed" &&
+    typeof message.session_id === "string" &&
+    Array.isArray(message.commands)
+  ) {
+    return {
+      kind: "commands-changed",
+      sessionId: message.session_id,
+      commands: advertisedSlashCommands(message.commands),
+    };
+  }
   // A system subtype this decoder does not know says so in a sentence of its
   // own. The subtype itself is runtime-supplied text and stays out of a
   // failure the driver journals; a known subtype with refused fields stays
@@ -1599,9 +1746,16 @@ export function decodeMessage(
   throw protocol("Claude returned an unsupported runtime message.");
 }
 
+/**
+ * The runtime's sessions whose own folder is `expectedRoot`. A session's
+ * title (a name the person gave it, or the runtime's summary of its first
+ * prompt) is kept only with `titles`, for the list a person picks a session
+ * from; a resume lookup never carries it.
+ */
 export function decodeSessions(
   value: unknown,
   expectedRoot: string,
+  options: { readonly titles?: true } = {},
 ): readonly ClaudeSessionMetadata[] {
   if (!Array.isArray(value)) throw protocol();
   return value.flatMap((entry) => {
@@ -1616,12 +1770,23 @@ export function decodeSessions(
       throw protocol();
     }
     if (session.cwd !== expectedRoot) return [];
+    // A title or branch the runtime reports oddly is left out, never a reason
+    // to drop the session.
+    const named = typeof session.customTitle === "string" ? session.customTitle.trim() : "";
+    const summary = typeof session.summary === "string" ? session.summary.trim() : "";
+    const title = options.titles === true ? (named.length > 0 ? named : summary).slice(0, 200) : "";
+    const gitBranch =
+      options.titles === true && typeof session.gitBranch === "string"
+        ? session.gitBranch.slice(0, 256)
+        : undefined;
     return [
       {
         sessionId: session.sessionId,
         projectRoot: session.cwd,
         lastModified: session.lastModified,
         ...(session.createdAt === undefined ? {} : { createdAt: session.createdAt }),
+        ...(title.length === 0 ? {} : { title }),
+        ...(gitBranch === undefined || gitBranch.length === 0 ? {} : { gitBranch }),
       },
     ];
   });

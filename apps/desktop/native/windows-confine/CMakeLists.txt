@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.24)
+project(octant_windows_confine LANGUAGES CXX)
+add_executable(octant-windows-confine main.cpp)
+target_compile_features(octant-windows-confine PRIVATE cxx_std_17)
+target_compile_definitions(octant-windows-confine PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+set_property(TARGET octant-windows-confine PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_compile_options(octant-windows-confine PRIVATE /W4 /WX /EHsc /utf-8)
+target_link_libraries(octant-windows-confine PRIVATE advapi32 userenv)

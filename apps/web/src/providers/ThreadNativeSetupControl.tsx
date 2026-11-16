@@ -1,8 +1,12 @@
 import {
   KEY_PROVIDER_DRIVER_KINDS,
+  type KeyProviderDriverKinds,
+  type ProjectId,
+  type ProjectSummary,
   type ProviderInstanceId,
   type ProviderInstance,
   type ThreadNativeSetupChoice,
+  type ThreadProjectCode,
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
 import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
@@ -26,6 +30,25 @@ export interface ThreadNativeSetupServices {
     providerInstanceId: ProviderInstanceId,
     choice: ThreadNativeSetupChoice,
   ) => Promise<ThreadNativeSetupChoice>;
+  /** Whether a Work or Code thread's Project holds its provider's own Project code, and its trust. */
+  readonly readProjectCode?: (
+    threadId: string,
+    mode: "work" | "code",
+  ) => Promise<ThreadProjectCode>;
+  /** The Projects as this window last read them, for their live trust. */
+  readonly projects?: ReadonlyArray<ProjectSummary>;
+  /**
+   * Sends the Project's whole trusted-provider list, as Project settings does.
+   * Absent where this window holds no Project controller.
+   */
+  readonly setProjectNativeProviders?: (
+    projectId: ProjectId,
+    providers: KeyProviderDriverKinds,
+  ) => Promise<boolean>;
+}
+
+export function useThreadNativeSetupServices(): ThreadNativeSetupServices | undefined {
+  return useContext(ThreadNativeSetupContext);
 }
 
 const ThreadNativeSetupContext = createContext<ThreadNativeSetupServices | undefined>(undefined);
@@ -71,8 +94,9 @@ const DEFAULT_OPTION = OPTIONS[0] ?? {
 
 /**
  * Turns a key provider's own setup on or off for one thread, or leaves it to
- * the account. Shown only where the host allows the change: a window on this
- * host, for a thread whose provider is one of the four key providers. The
+ * the account. Shown for a thread whose provider is one of the four key
+ * providers; the host takes the change only from its own person, at a window
+ * on this host or on a device they paired. The
  * choice takes effect on the thread's next turn.
  */
 export function ThreadNativeSetupControl(props: {

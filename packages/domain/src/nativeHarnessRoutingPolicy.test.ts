@@ -93,6 +93,53 @@ describe("native harness route resolution", () => {
     expect(chosen).toMatchObject({ kind: "primary", slotId: "advisor", candidate: small });
   });
 
+  it("reads no image on the Builder's model when Sees images has no model", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: configured,
+      facts: allReady,
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "unroutable", slotId: "vision", reason: "slot-empty" });
+  });
+
+  it("lets a Project's Sees images list beat Settings and walks past a refused model with its reason", () => {
+    const vision = {
+      slots: [...configured.slots, { id: "vision" as never, candidates: [big] }],
+      jobSlots: [],
+    };
+    const project = {
+      slots: [{ id: "vision" as never, candidates: [small, spare] }],
+      jobSlots: [],
+    };
+    const decision = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: vision,
+      project,
+      facts: (candidate) =>
+        candidate === small ? { ready: true, refusals: ["project-incompatible"] } : { ready: true },
+      now,
+    });
+    expect(decision).toMatchObject({
+      kind: "failure-fallback",
+      slotId: "vision",
+      candidate: spare,
+      rejected: [{ candidate: small, reasons: ["project-incompatible"] }],
+    });
+    const none = resolveNativeHarnessRoute({
+      job: "image-understanding",
+      host: vision,
+      project,
+      facts: () => ({ ready: true, refusals: ["capability-incompatible"] }),
+      now,
+    });
+    expect(none).toMatchObject({ kind: "unroutable", reason: "no-eligible-candidate" });
+    expect(none.rejected.map((entry) => entry.reasons)).toEqual([
+      ["capability-incompatible"],
+      ["capability-incompatible"],
+    ]);
+  });
+
   it("steps to the next ready candidate while the primary cools down, and says why", () => {
     const decision = resolveNativeHarnessRoute({
       job: "lead",
@@ -122,6 +169,18 @@ describe("native harness route resolution", () => {
       now,
     });
     expect(decision).toMatchObject({ kind: "primary", candidate: small });
+  });
+
+  it("uses a Project's model for the role it chose and Settings for every other role", () => {
+    const project: NativeHarnessRoutingConfiguration = {
+      slots: [{ id: "task" as never, candidates: [spare] }],
+      jobSlots: [],
+    };
+    const resolve = (job: "lead" | "researcher") =>
+      resolveNativeHarnessRoute({ job, host: configured, project, facts: allReady, now });
+    // Scout (task) is the Project's own; Builder (default) is still Settings'.
+    expect(resolve("researcher")).toMatchObject({ kind: "primary", candidate: spare });
+    expect(resolve("lead")).toMatchObject({ kind: "primary", candidate: big });
   });
 
   it("refuses with every rejection listed when no candidate is ready", () => {
@@ -154,5 +213,29 @@ describe("native harness route resolution", () => {
       now,
     });
     expect(decision).toMatchObject({ kind: "unroutable", reason: "slot-empty" });
+  });
+
+  it("steps past a model the harness cannot run and records why", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "lead",
+      host: configured,
+      facts: (candidate) => ({ ready: true, harnessRunnable: candidate !== big }),
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "failure-fallback", candidate: spare });
+    expect(decision.rejected).toEqual([{ candidate: big, reasons: ["not-harness-runnable"] }]);
+  });
+
+  it("never runs a role whose every model is outside the harness", () => {
+    const decision = resolveNativeHarnessRoute({
+      job: "lead",
+      host: configured,
+      facts: () => ({ ready: true, harnessRunnable: false }),
+      now,
+    });
+    expect(decision).toMatchObject({ kind: "unroutable", reason: "no-eligible-candidate" });
+    expect(decision.rejected.every((entry) => entry.reasons.includes("not-harness-runnable"))).toBe(
+      true,
+    );
   });
 });

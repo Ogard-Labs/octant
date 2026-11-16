@@ -16,7 +16,6 @@ import {
   type Project,
   type ProviderInstance,
   type ProviderModel,
-  type ProviderObservedState,
 } from "@octant/contracts";
 import {
   AgentRunPolicyRejected,
@@ -56,6 +55,18 @@ export interface AgentsToolTarget {
   readonly reasoningByModel?: Readonly<Record<string, ReadonlyArray<string>>>;
 }
 
+/**
+ * A provider this parent may not target, with why. `capabilities` reports
+ * these beside the targets so the model never guesses at a provider that is
+ * missing from the list, and can tell the person what would make it eligible.
+ */
+export interface AgentsToolUnavailableTarget {
+  readonly providerInstanceId: string;
+  readonly displayName: string;
+  readonly driverKind: string;
+  readonly reason: "not-ready" | "tools-unsupported" | "project-policy";
+}
+
 export interface AgentRunDelegationInput {
   readonly role?: AgentRunRole;
   readonly task: string;
@@ -65,6 +76,8 @@ export interface AgentRunDelegationInput {
   readonly includeParentContext?: boolean;
   readonly contextInputPolicy?: ConversationInputPolicy;
   readonly after?: ReadonlyArray<string>;
+  /** Sibling children with the same label are shown side by side; the host ranks nothing. */
+  readonly compareGroup?: string;
   /** A roster member that runs the child on its own host instead of this one. */
   readonly targetMemberId?: string;
   /** The member's own id for the Project to run in; required with a target member. */
@@ -107,6 +120,8 @@ export interface AgentRunDelegationOptions {
   readonly windowId: string;
   readonly uuid: () => string;
   readonly listTargets: () => ReadonlyArray<AgentsToolTarget>;
+  /** Enabled providers this parent may not target, with why; absent lists none. */
+  readonly listUnavailableTargets?: () => ReadonlyArray<AgentsToolUnavailableTarget>;
   readonly routing?: AgentRunDelegationRouting;
   /**
    * Outside content the thread read gates its helpers: never true at Full
@@ -118,7 +133,7 @@ export interface AgentRunDelegationOptions {
    * reading outside content, and keeps a yes. Absent where the turn has no way
    * to ask its person, or runs in Plan; the delegation is then refused.
    */
-  readonly askMarkedDelegation?: () => Promise<boolean>;
+  readonly askMarkedDelegation?: (signal?: AbortSignal) => Promise<boolean>;
   readonly isPaused?: () => boolean;
   readonly projectId?: string | undefined;
   /** Absent when this host cannot reach other members; a target member is then refused. */
@@ -166,9 +181,12 @@ const TAINTED_DELEGATION_MESSAGE =
  * person does, once: their yes is kept for the thread, so the next call finds
  * the thread no longer gated and asks nobody.
  */
-async function markedDelegationRefused(options: AgentRunDelegationOptions): Promise<boolean> {
+async function markedDelegationRefused(
+  options: AgentRunDelegationOptions,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
   if (options.isTainted?.() !== true) return false;
-  return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation());
+  return options.askMarkedDelegation === undefined || !(await options.askMarkedDelegation(signal));
 }
 
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
@@ -200,6 +218,7 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
         ? ("target-member" as const)
         : ("unavailable" as const),
     targets: options.listTargets(),
+    unavailableTargets: options.listUnavailableTargets?.() ?? [],
   } as const;
 }
 
@@ -207,6 +226,8 @@ export function agentRunDelegationCapabilities(options: AgentRunDelegationOption
 export async function startAgentRunDelegation(
   options: AgentRunDelegationOptions,
   input: AgentRunDelegationInput,
+  /** The tool call's signal, so an ask for this call ends with its turn. */
+  signal?: AbortSignal,
 ): Promise<AgentRunDelegationResult> {
   if (options.admission.settings.current().creationPosture !== "automatic")
     return {
@@ -221,7 +242,7 @@ export async function startAgentRunDelegation(
       reason: "session-paused",
       message: "This run is paused, so no new helper starts until it is resumed.",
     };
-  if (await markedDelegationRefused(options))
+  if (await markedDelegationRefused(options, signal))
     return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (input.targetProjectId !== undefined && input.targetMemberId === undefined)
     return {
@@ -237,6 +258,7 @@ export async function startAgentRunDelegation(
       input.modelId !== undefined ||
       input.reasoning !== undefined ||
       input.after !== undefined ||
+      input.compareGroup !== undefined ||
       input.includeParentContext === true ||
       input.contextInputPolicy !== undefined
     )
@@ -282,6 +304,7 @@ export async function startAgentRunDelegation(
         ? {}
         : { contextInputPolicy: input.contextInputPolicy }),
       ...(input.after === undefined ? {} : { dependsOn: input.after }),
+      ...(input.compareGroup === undefined ? {} : { compareGroup: input.compareGroup }),
     });
   } catch {
     return { status: "refused", reason: "invalid-delegation" };
@@ -473,55 +496,93 @@ export type AgentRunFollowUpResult =
  * revalidated against, so filtering here guards all three. Chat Projects carry
  * no provider policy.
  */
-export function agentRunEligibleTargets(input: {
+export function agentRunEligibleTargets(
+  input: AgentRunTargetAvailabilityInput,
+): ReadonlyArray<AgentsToolTarget> {
+  return agentRunTargetAvailability(input).targets;
+}
+
+export interface AgentRunTargetAvailabilityInput {
   readonly project: Project | undefined;
+  /** The level the child would run at, when known; see `modelCanTakeDelegatedWork`. */
+  readonly level?: Parameters<typeof modelCanTakeDelegatedWork>[3];
   readonly instances: ReadonlyArray<
     Pick<ProviderInstance, "id" | "enabled" | "displayName" | "driverKind">
   >;
   readonly observedState: (
     instanceId: ProviderInstance["id"],
-  ) =>
-    | (Pick<ProviderObservedState, "readiness" | "models"> &
-        Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>)
-    | undefined;
+  ) => Parameters<typeof modelCanTakeDelegatedWork>[1] | undefined;
   readonly isTargetAllowed: (
     project: Exclude<Project, { readonly type: "chat" }>,
     providerInstanceId: ProviderInstance["id"],
     modelId: ProviderModel["id"],
   ) => boolean;
-}): ReadonlyArray<AgentsToolTarget> {
+}
+
+/**
+ * The targets this parent may delegate to, and every enabled provider it may
+ * not, each with the first reason that excludes it. A disabled provider is left
+ * out of both: the person turned it off, so it is not a choice to explain.
+ */
+export function agentRunTargetAvailability(input: AgentRunTargetAvailabilityInput): {
+  readonly targets: ReadonlyArray<AgentsToolTarget>;
+  readonly unavailable: ReadonlyArray<AgentsToolUnavailableTarget>;
+} {
   const { project } = input;
-  return input.instances.flatMap((instance) => {
-    if (!instance.enabled) return [];
+  const targets: Array<AgentsToolTarget> = [];
+  const unavailable: Array<AgentsToolUnavailableTarget> = [];
+  for (const instance of input.instances) {
+    if (!instance.enabled) continue;
+    const named = {
+      providerInstanceId: String(instance.id),
+      displayName: instance.displayName,
+      driverKind: String(instance.driverKind),
+    };
     const observed = input.observedState(instance.id);
-    if (observed === undefined) return [];
+    if (observed === undefined || observed.models.length === 0) {
+      unavailable.push({ ...named, reason: "not-ready" });
+      continue;
+    }
     const serving = observed.models.filter((model) =>
-      modelCanTakeDelegatedWork(instance.driverKind, observed, model.id),
+      modelCanTakeDelegatedWork(instance.driverKind, observed, model.id, input.level),
     );
+    if (serving.length === 0) {
+      // It would serve a model if it carried Octant's tools, so that is what
+      // excludes it; otherwise it is still starting or signed out.
+      const servesWithTools = observed.models.some((model) =>
+        modelCanTakeDelegatedWork(
+          instance.driverKind,
+          { ...observed, capabilities: { appManagedTools: "supported" } },
+          model.id,
+        ),
+      );
+      unavailable.push({ ...named, reason: servesWithTools ? "tools-unsupported" : "not-ready" });
+      continue;
+    }
     const models =
       project === undefined || project.type === "chat"
         ? serving
         : serving.filter((model) => input.isTargetAllowed(project, instance.id, model.id));
-    if (models.length === 0) return [];
-    return [
-      {
-        providerInstanceId: String(instance.id),
-        displayName: instance.displayName,
-        driverKind: String(instance.driverKind),
-        modelIds: models.map((model) => String(model.id)),
-        reasoningByModel: Object.fromEntries(
-          models.map((model) => [
-            String(model.id),
-            model.options.flatMap((option) =>
-              option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
-                ? option.values
-                : [],
-            ),
-          ]),
-        ),
-      },
-    ];
-  });
+    if (models.length === 0) {
+      unavailable.push({ ...named, reason: "project-policy" });
+      continue;
+    }
+    targets.push({
+      ...named,
+      modelIds: models.map((model) => String(model.id)),
+      reasoningByModel: Object.fromEntries(
+        models.map((model) => [
+          String(model.id),
+          model.options.flatMap((option) =>
+            option.kind === "selection" && (option.id === "reasoning" || option.id === "effort")
+              ? option.values
+              : [],
+          ),
+        ]),
+      ),
+    });
+  }
+  return { targets, unavailable };
 }
 
 export function isAgentRunTargetEligible(
@@ -544,6 +605,7 @@ export function isAgentRunTargetEligible(
 export async function followUpAgentRunDelegation(
   options: AgentRunDelegationOptions,
   input: AgentRunFollowUpInput,
+  signal?: AbortSignal,
 ): Promise<AgentRunFollowUpResult> {
   let request: ReturnType<typeof decodeAgentRunResumeRequest>;
   try {
@@ -555,7 +617,7 @@ export async function followUpAgentRunDelegation(
   if (options.admission.settings.current().creationPosture !== "automatic")
     return { status: "refused", reason: "creation-posture-off" };
   if (options.isPaused?.()) return { status: "refused", reason: "session-paused" };
-  if (await markedDelegationRefused(options))
+  if (await markedDelegationRefused(options, signal))
     return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   const run = options.persistence.getById(request.runId);
   if (run === undefined || String(run.parentThreadId) !== options.parentThreadId)

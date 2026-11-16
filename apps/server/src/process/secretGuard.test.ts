@@ -7,7 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyProtectedFilesChoice,
   configureSecretGuardLocations,
+  currentServerProtectedPattern,
+  isProtectedPathOnServer,
   isProtectedSecretPath,
+  protectedAtLevel,
   secretGuardEntries,
   secretGuardLinuxPaths,
   secretGuardRefusal,
@@ -159,6 +162,38 @@ describe("secret guard refusals for host file tools", () => {
     expect(mixed).toContain("Cloud command-line credentials");
     expect(secretGuardSearchRefusal(home, options)).toContain("Refused");
     expect(secretGuardSearchRefusal(join(home, "project"), options)).toBeUndefined();
+  });
+
+  it("keeps only provider sign-ins in force at Full access and every protected entry below it", () => {
+    const home = fakeHome();
+    applyProtectedFilesChoice({ added: ["~/project/token"], removed: [] });
+    const entries = secretGuardEntries({ platform: "darwin", homeDirectory: home });
+    const groups = (fullAccess: boolean) =>
+      new Set(protectedAtLevel(entries, fullAccess).map((entry) => entry.ruleId));
+    expect(groups(false)).toEqual(new Set(entries.map((entry) => entry.ruleId)));
+    expect(groups(false).has("added")).toBe(true);
+    expect(groups(true)).toEqual(new Set(["provider-sign-ins"]));
+  });
+
+  it("judges a server path at Full access by the provider sign-ins alone, the person's own paths included", () => {
+    applyProtectedFilesChoice({ added: ["~/notes/token"], removed: [] });
+    const readable = [
+      "/home/dev/.ssh/id_ed25519",
+      "/home/dev/.aws/credentials",
+      "/root/.config/gcloud/application_default_credentials.json",
+      "/srv/app/backup/client.p12",
+      "/home/dev/notes/token",
+    ];
+    const signIns = ["/home/dev/.codex/auth.json", "/root/.claude/.credentials.json"];
+    for (const path of [...readable, ...signIns]) {
+      expect(isProtectedPathOnServer(path)).toBe(true);
+    }
+    for (const path of readable) expect(isProtectedPathOnServer(path, true)).toBe(false);
+    for (const path of signIns) expect(isProtectedPathOnServer(path, true)).toBe(true);
+    expect(currentServerProtectedPattern(true)).not.toBe(currentServerProtectedPattern());
+
+    applyProtectedFilesChoice({ added: [], removed: ["provider-sign-ins"] });
+    expect(isProtectedPathOnServer("/home/dev/.codex/auth.json", true)).toBe(false);
   });
 
   it("refuses a search rooted inside a browser profile whose stores the list names by pattern", () => {

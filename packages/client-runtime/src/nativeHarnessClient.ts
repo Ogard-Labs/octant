@@ -9,6 +9,7 @@ import {
   NativeHarnessRoutingCommandResult,
   type NativeHarnessRoutingConfiguration,
   NativeHarnessRoutingSettings,
+  SeesImagesAvailability,
   type NativeHarnessSessionCommand,
   NativeHarnessSessionCommandResult,
   NativeHarnessSessionView,
@@ -30,6 +31,18 @@ export interface NativeHarnessClientOptions {
 
 export interface NativeHarnessClient {
   routing(signal?: AbortSignal): Promise<NativeHarnessRoutingSettings>;
+  /**
+   * Whether Sees images could describe an image for a thread on this model
+   * in this Project now; it sends nothing.
+   */
+  seesImages(
+    input: {
+      readonly projectId?: string;
+      readonly providerInstanceId: string;
+      readonly modelId: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<SeesImagesAvailability>;
   updateRouting(
     input: {
       readonly configuration: NativeHarnessRoutingConfiguration;
@@ -41,6 +54,14 @@ export interface NativeHarnessClient {
     projectId: string,
     signal?: AbortSignal,
   ): Promise<NativeHarnessProjectRoutingOverride | null>;
+  /** The override and the version the next change must assert, which a cleared override keeps. */
+  projectRoutingState(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<{
+    readonly override: NativeHarnessProjectRoutingOverride | null;
+    readonly version: number;
+  }>;
   setProjectRouting(
     projectId: string,
     input: {
@@ -114,6 +135,7 @@ export class NativeHarnessClientFailure extends Error {
 
 const ROUTING_PATH = "/api/native-harness/routing";
 const PROJECT_ROUTING_PATH = "/api/native-harness/routing/projects";
+const SEES_IMAGES_PATH = "/api/native-harness/routing/sees-images";
 const SESSIONS_PATH = "/api/native-harness/sessions";
 const EGRESS_PATH = "/api/native-harness/egress/threads";
 
@@ -145,6 +167,16 @@ export function createNativeHarnessClient(
     });
 
   return {
+    async seesImages(input, signal) {
+      const query = new URLSearchParams({
+        providerInstanceId: input.providerInstanceId,
+        modelId: input.modelId,
+        ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      });
+      return decodeHostAnswer(SeesImagesAvailability)(
+        await get(`${SEES_IMAGES_PATH}?${query.toString()}`, signal),
+      );
+    },
     async routing(signal) {
       const body = await get(ROUTING_PATH, signal);
       return decodeHostAnswer(NativeHarnessRoutingSettings)(
@@ -165,6 +197,19 @@ export function createNativeHarnessClient(
       return override === null || override === undefined
         ? null
         : decodeHostAnswer(NativeHarnessProjectRoutingOverride)(override);
+    },
+    async projectRoutingState(projectId, signal) {
+      const body = (await get(
+        `/api/native-harness/routing/projects/${encodeURIComponent(projectId)}`,
+        signal,
+      )) as { override: unknown; version?: unknown };
+      return {
+        override:
+          body.override === null || body.override === undefined
+            ? null
+            : decodeHostAnswer(NativeHarnessProjectRoutingOverride)(body.override),
+        version: typeof body.version === "number" ? body.version : 0,
+      };
     },
     async setProjectRouting(projectId, input, signal) {
       return decodeHostAnswer(NativeHarnessRoutingCommandResult)(

@@ -12,7 +12,13 @@ import {
   type WorkTurnUpdated,
   type ProjectId,
 } from "@octant/contracts";
-import { WORK_TURN_CAPABILITIES } from "@octant/contracts";
+import { WORK_TURN_CAPABILITIES, decodeAgentResultSteered } from "@octant/contracts";
+import type { AgentResultSteered } from "@octant/contracts";
+import {
+  AGENT_RESULT_STEERED,
+  AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+  withAgentResultSteered,
+} from "../agentRun/agentResultSteeredRecord";
 import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 /** Isolate the new receipt from event and caller object aliases; legacy rows retain their shape. */
@@ -87,6 +93,9 @@ export class WorkTurnProjection {
         ...(accepted.attachments === undefined || accepted.attachments.length === 0
           ? {}
           : { attachments: accepted.attachments }),
+        ...(accepted.describedImages === undefined
+          ? {}
+          : { describedImages: accepted.describedImages }),
         ...(accepted.inputReceipt === undefined ? {} : { inputReceipt: accepted.inputReceipt }),
         ...(accepted.extensionSelections === undefined || accepted.extensionSelections.length === 0
           ? {}
@@ -150,6 +159,23 @@ export class WorkTurnProjection {
       updatedAt: updated.updatedAt,
     });
     this.#byRequest.set(updated.requestId, next);
+  }
+
+  /**
+   * A finished child's result steered into one of this thread's turns while
+   * it ran. It leaves the turn's version alone: the steering record is its
+   * own aggregate, and the turn's writers check the turn's version. A record
+   * for a turn of another thread, or one already shown, changes nothing.
+   */
+  applySteered(record: AgentResultSteered): void {
+    const requestId = this.#byThread
+      .get(String(record.threadId))
+      ?.find((candidate) => String(candidate) === record.turnKey);
+    const current = requestId === undefined ? undefined : this.#byRequest.get(requestId);
+    if (current === undefined) return;
+    const steeredResults = withAgentResultSteered(current.steeredResults, record);
+    if (steeredResults === current.steeredResults) return;
+    this.#byRequest.set(current.requestId, decodeWorkTurnState({ ...current, steeredResults }));
   }
 
   lookup(requestId: WorkTurnRequestId): WorkTurnState | undefined {
@@ -309,7 +335,7 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
   readonly projection: WorkTurnProjection;
   readonly maxScan?: number;
 }): "ok" | "snapshot-required" {
-  return hydrateJournalProjection({
+  const turns = hydrateJournalProjection({
     replay: input.replay,
     aggregateType: "work-turn",
     ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
@@ -327,6 +353,30 @@ export function hydrateWorkTurnProjectionFromJournal(input: {
       } else if (event.eventName === "work.thread-rewound@1") {
         input.projection.apply(event.payload as WorkThreadRewound);
       }
+    },
+  });
+  if (turns !== "ok") return turns;
+  // Steered results name turns the first pass already rebuilt.
+  return hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (event) => {
+      if (
+        (event.aggregateType !== undefined &&
+          event.aggregateType !== AGENT_RESULT_STEERING_AGGREGATE_TYPE) ||
+        event.eventName !== AGENT_RESULT_STEERED ||
+        event.eventVersion !== 1
+      ) {
+        return;
+      }
+      let record: AgentResultSteered;
+      try {
+        record = decodeAgentResultSteered(event.payload);
+      } catch {
+        return;
+      }
+      input.projection.applySteered(record);
     },
   });
 }

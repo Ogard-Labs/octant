@@ -25,12 +25,24 @@ export interface ServerTerminalLogin {
 
 const CLOSE_GRACE_MS = 2_000;
 
-/** The ssh login that opens the person's own shell in `folder` on the server. */
+/** Why no terminal may log in to the server now, such as its machine being suspended. */
+export interface ServerTerminalRefusal {
+  readonly kind: "refused";
+  readonly message: string;
+}
+
+/**
+ * The ssh login that opens the person's own shell in `folder` on the server,
+ * or the host's refusal, checked before anything is launched: a terminal
+ * spawns ssh itself, so the refusal a call gets must be checked here too.
+ */
 export function serverTerminalLogin(
-  connection: Pick<ServerConnection, "loginCommand">,
+  connection: Pick<ServerConnection, "loginCommand" | "refusal">,
   server: ServerAddress,
   folder: string,
-): ServerTerminalLogin {
+): ServerTerminalLogin | ServerTerminalRefusal {
+  const refusal = connection.refusal(server);
+  if (refusal !== undefined) return { kind: "refused", message: refusal };
   return connection.loginCommand(
     server,
     // `sh` runs this whatever the login shell is, then the person's own shell

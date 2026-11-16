@@ -374,3 +374,10 @@ ul.board-col-body {
 .board-card-request__more.board-card-request__more {
   justify-self: start;
 }
+
+/* A worker's card leads with the worker mark, as its sidebar row does. */
+.code-board__worker-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}

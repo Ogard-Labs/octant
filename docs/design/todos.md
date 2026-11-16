@@ -18,10 +18,22 @@ The list on one host is built: its events, the list rebuilt from them, the
 `/api/todos` read and command routes, version-checked edits, and the refusals
 for every caller but the person. The To-dos destination is built on that host:
 the page, quick add, filters, editing in place, reordering, the sidebar row and
-its badge, and New to-do in the command palette and on a shortcut. Not built
-yet: Start and a row's thread state, the list host setting, reaching a list on
-another host, live updates to other clients (a window reads the list again
-every 30 seconds while it is visible), and the phone screen.
+its badge, and New to-do in the command palette and on a shortcut. Start is
+built for this host's Projects and Chat: the draft with its source, the link,
+Link again, the thread state on a row, and Tick off. Every window on the list
+host follows changes as they happen: each change publishes the host's `todos`
+change topic, and a window reads the list again on it (and every 30 seconds
+while visible, for a feed that is reconnecting). Settings › To-dos › Keep the
+list on is built: this host, or a computer this window is paired with, saved
+on this host and refused once this host keeps a to-do. A window reaches a list
+on another computer through its own pairing with it, shows the last list
+read-only when that computer cannot be reached, and keeps quick adds as
+unsent drafts on the device. Not built yet: the hub as the default list host,
+Start into another host's Project, and a list host's changes reaching windows
+on other computers as they happen (they read it every 30 seconds). The phone
+screen is built: Inbox › To-dos lists the connected computer's open and done
+to-dos, adds one with quick add, ticks one off or opens it again, and starts a
+thread from one.
 [Delivery plan](#delivery-plan) lists the order of work.
 
 ## Outcome
@@ -90,11 +102,28 @@ Every person has one **list host**.
 
 - **Default.** A host that belongs to a hub uses the hub as its list host; a
   phone or browser that joined a hub as a guest uses the hub. A host in no hub
-  uses itself, and a phone paired with it uses that host.
+  uses itself, and a phone paired with it uses that host. Built so far: every
+  host uses itself until the person chooses; the hub default is not built,
+  because applied to a host that already keeps to-dos it would show an empty
+  list in place of the person's own.
 - **Choosing.** Settings › To-dos › Keep the list on names the list host: this
   host, the hub, or a computer this host is paired with. In the first version
   the choice can change only while this host's own list is empty; moving a
-  list from one host to another is later work.
+  list from one host to another is later work. The choice is journaled on this
+  host (`todo.list-host-chosen@1`, aggregate `todo-list-host`) and served at
+  `/api/todos/list-host` to this host's own windows only: the private listener
+  does not forward it. The host refuses a move to another host as
+  `list-not-empty` while it holds any to-do, done and dropped included; coming
+  back to this host is always allowed. While another host keeps the list,
+  this host refuses every change to its own list as `kept-elsewhere`, so a
+  stale window or a phone paired here cannot add a to-do nobody is shown. A
+  window that cannot read the choice shows no list rather than this host's.
+  The choice names the other host by its
+  stable id and last-seen name and grants nothing there: a window reaches it
+  through its own pairing (the desktop's paired-computer channel admits
+  `GET /api/todos` and `POST /api/todos/commands`), where the to-do routes
+  accept only a device that host's own person paired. A thread or Project of
+  this host is linked by this host's id, wherever the list lives.
 - **Journal.** The list host journals aggregate type `todo` with
   `todo.created@1`, `todo.edited@1` (title or notes), `todo.state-changed@1`,
   `todo.projects-set@1`, `todo.tags-set@1`, `todo.order-changed@1`,
@@ -128,7 +157,9 @@ Every person has one **list host**.
   stale and read-only, as for any unreachable host. Quick add still accepts
   text but keeps it as an unsent draft on that device with a Send button; it
   is never sent on its own, because a mutation names one destination and
-  is never queued as offline work.
+  is never queued as offline work. A draft keeps the id it was made with, so
+  sending it twice adds it once. A window that is not paired with the list
+  host says so and shows no list.
 - **Hub down.** A standby hub holds no copy of the list. While the hub is
   unreachable the list is read-only and drafts wait for the person to send
   them.
@@ -160,8 +191,11 @@ option.
    person picks one; with none, Start offers Chat or a Project.
 2. **The draft.** Start opens the ordinary new-thread draft for that Project
    on that Project's host, with the to-do's title (and notes, under it) in the
-   prompt and the to-do named as the draft's source, the way an issue is
-   attached as Create from context. The mode follows the Project (a Code
+   prompt and the to-do named as the draft's source: a "From to-do" label
+   beside Create from, which the person can remove to leave an ordinary
+   draft. Opening any other new-thread draft drops it too. The window keeps
+   the source; the host's create command carries nothing about it. The mode
+   follows the Project (a Code
    Project starts a Code thread, a Work Project a Work thread, no Project a
    Chat thread); provider, model, access level, checkout and worktree are the
    draft's usual choices. Nothing starts until the person sends.
@@ -170,12 +204,17 @@ option.
    mode, provider and guardrail level. The list host takes no part in
    creating the thread and gains nothing on the Project's host.
 4. **The link.** When the thread exists, the client sends
-   `todo.thread-linked@1` to the list host. If the list host refuses or cannot
+   `todo.thread-linked@1` to the list host. The link is made where the create
+   command answered with the thread, before its first turn starts, so a turn
+   that fails to start still leaves a linked thread. If the list host refuses or cannot
    be reached, the row says "Thread started, not linked" with a Link button;
    the thread itself is unaffected.
 5. **State.** The row shows the newest linked thread's state (Running,
    Waiting on you, PR #n, Done) by joining the link to that host's read model
-   in the client. No host projects another host's threads.
+   in the client. No host projects another host's threads. Done wins, then a
+   running turn, then a wait on the person, then the first pull request of a
+   Code thread; otherwise the row says Started. The state opens the thread; a
+   thread this window does not list reads Started.
 6. **Done.** Only the person ticks a to-do off. When its newest thread is
    Done the row offers Tick off. An agent never changes a to-do, as it never
    marks a thread Done.
@@ -212,7 +251,17 @@ A to-do may be started again; each start adds a link.
 - **Everywhere else.** The command palette offers New to-do and Open To-dos.
   New to-do, also on Mod+Shift+L (Settings › Keybindings), opens quick
   add in a dialog over the current page. The phone app shows the
-  list with quick add, Tick off and Start.
+  list with quick add, Tick off and Start. Built on the phone: Inbox ›
+  To-dos, from the computer the phone is connected to, with the open to-dos,
+  then those done, a quick add line (title only), and a tap that ticks one
+  off or opens it again; dropped to-dos stay off the phone. The phone reads
+  the list again every 30 seconds while it is in front. A long press on an
+  open to-do offers Start: it opens the Inbox's new-thread sheet with the
+  title and notes as the prompt and a removable "From to-do" label, in the
+  to-do's first Project on the computer new threads go to (its type is the
+  mode), or Chat when none is there. When the computer answers with the
+  thread, the phone links it; a link the list did not take reads "Thread
+  started, not linked" on the row, and the same long press offers Link.
 - **Empty.** One sentence: what goes here and that a to-do can be handed to
   an agent.
 

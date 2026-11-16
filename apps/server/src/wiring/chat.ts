@@ -3,6 +3,7 @@ import type { ThreadMoveHolds } from "../hub/threadMoveHolds";
 import { randomUUID } from "node:crypto";
 import { approvedWorkingFolderRoot } from "../approvedWorkingFolders";
 import {
+  LOCAL_HOST_ID,
   type ChatThread,
   type ChatThreadId,
   decodeAgentRunParentThreadId,
@@ -50,6 +51,7 @@ import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
   createChatThreadMentionDirectory,
+  chatMentionWithinReach,
   codeMentionWithinReach,
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
@@ -84,6 +86,10 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
+import { lookToolForThread } from "../image/lookTool";
+import { modelLabelOf } from "./imageDescriber";
+import { supportsConversationInput } from "./conversationInputs";
 import { providerToolCallPauseLimitMs, stalledTurnLimitMs } from "../providers/turnBudget";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
@@ -107,8 +113,10 @@ import type { CanvasWiring } from "./canvas";
  */
 const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 
-export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<
+export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
+  /** Sees images; absent on a host started without one. */
+  readonly imageDescriber?: ImageDescriber;
+} & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
@@ -117,6 +125,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "machineChangeFeed"
     | "windowAuthorityStore"
     | "personMemoryAccess"
+    | "octantInstructions"
   > &
   Pick<
     AgentRunsWiring,
@@ -161,7 +170,11 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<
     HarnessWiring,
-    "nativeHarnessComposition" | "nativeHarnessHooks" | "researchRouter" | "threadWork"
+    | "nativeHarnessComposition"
+    | "nativeHarnessHooks"
+    | "researchRouter"
+    | "threadWork"
+    | "webSearchSettings"
   > & {
     /** Wired by wireWorkFiles; read only after startup. */
     readonly workFileListingService: () => WorkFileListingService;
@@ -174,6 +187,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
   } & Pick<FoundationsWiring, "providerRuntimeRegistry" | "conversationInputTransfer">;
 
 export function wireChat(deps: ChatDependencies) {
+  const imageDescriber = deps.imageDescriber;
   const {
     conversationInputTransfer,
     threadAwaitsHarnessApproval,
@@ -209,6 +223,7 @@ export function wireChat(deps: ChatDependencies) {
     persistence,
     providerRuntimeRegistry,
     researchRouter,
+    webSearchSettings,
     reviewedModelManifest,
     routeCodeService,
     runtimeOutsideContentMarks,
@@ -224,6 +239,7 @@ export function wireChat(deps: ChatDependencies) {
     workTurnService,
     workRequestRuntime,
     personMemoryAccess,
+    octantInstructions,
     keptImageChoices,
     projectMemoryAccess,
   } = deps;
@@ -418,6 +434,10 @@ export function wireChat(deps: ChatDependencies) {
       // The host setting, read when each attempt starts.
       toolStepsPerTurn: () =>
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).toolStepsPerTurn,
+      octantInstructionBlocks: ({ thread }) =>
+        octantInstructions.contextBlocks({
+          projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+        }),
       personMemoryBlock: ({ thread, windowId }) =>
         personMemoryAccess.blockFor({
           mode: "chat",
@@ -509,9 +529,26 @@ export function wireChat(deps: ChatDependencies) {
       contextHarness,
       capacityScheduler,
       researchRouter,
+      webSearchReady: (searxngBaseUrl) => webSearchSettings.readyWithChatAddress(searxngBaseUrl),
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
+      ...(imageDescriber === undefined
+        ? {}
+        : {
+            describeImages: ({ thread, images, signal }) =>
+              describeTurnImages(imageDescriber, {
+                signal,
+                scope: { threadId: String(thread.id), threadType: "chat-thread" },
+                projectId: thread.projectId,
+                threadModel: modelLabelOf(
+                  { persistence, providerRuntimeRegistry },
+                  thread.providerInstanceId,
+                  thread.modelId,
+                ),
+                images,
+              }),
+          }),
       resolveAppManagedTools: ({
         windowId,
         thread,
@@ -580,6 +617,52 @@ export function wireChat(deps: ChatDependencies) {
                   thread,
                   port: canvasAgentToolPort,
                 }),
+                // Sees images for a model that cannot read images: only the
+                // thread's own attachments, since a Chat thread has no folder.
+                // It runs its own Watcher wrapper and marks nothing.
+                imageDescriber === undefined
+                  ? undefined
+                  : lookToolForThread({
+                      describer: imageDescriber,
+                      threadId: String(thread.id),
+                      threadType: "chat-thread",
+                      projectId: thread.projectId,
+                      threadModel: modelLabelOf(
+                        { persistence, providerRuntimeRegistry },
+                        thread.providerInstanceId,
+                        thread.modelId,
+                      ),
+                      readsImages: supportsConversationInput(
+                        providerRuntimeRegistry.observedState(thread.providerInstanceId),
+                        String(thread.modelId),
+                        "image/png",
+                      ),
+                      attachment: async (attachmentId) => {
+                        const attachment = persistence
+                          .readChatThreadView(thread.id)
+                          ?.attachments.find(
+                            (item) =>
+                              String(item.id) === attachmentId && item.status === "finalized",
+                          );
+                        if (attachment === undefined) return undefined;
+                        const bytes = await chatAttachmentStore.read({
+                          chatThreadId: thread.id,
+                          chatAttachmentId: attachment.id,
+                          displayName: attachment.displayName,
+                          size: attachment.byteLength,
+                          hash: attachment.digest,
+                          finalizedAt: attachment.createdAt,
+                        });
+                        return {
+                          name: attachment.displayName,
+                          mediaType: attachment.mediaType,
+                          bytes,
+                        };
+                      },
+                      recordExternalContentIngestion: (input) =>
+                        externalContentIngestionStore.record(input),
+                      uuid: randomUUID,
+                    }),
                 // Outside the taint wrapper too: what it returns is memory
                 // Octant wrote from the person's own messages, not outside
                 // content.
@@ -607,6 +690,14 @@ export function wireChat(deps: ChatDependencies) {
                   parentThreadId: String(thread.id),
                   mode: "chat",
                   ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                  // A Side Chat is offered no helpers at all (withheld above).
+                  askThroughHost: {
+                    lead: {
+                      hostId: LOCAL_HOST_ID,
+                      providerInstanceId: thread.providerInstanceId,
+                      modelId: thread.modelId,
+                    },
+                  },
                 }),
                 // Outside the taint wrapper, as in Work and Code: an offer's
                 // answer is Octant's own receipt of what the model wrote, and
@@ -713,15 +804,50 @@ export function wireChat(deps: ChatDependencies) {
       }),
       clock: () => new Date().toISOString(),
       uuid: randomUUID,
-      // A Code transcript reaches a composer only from the Project a window
-      // showing that composer alone would reach: a Code composer's own
-      // Project, any other composer's Code lead. Another pane's Project never
-      // becomes mentionable by sitting beside it (maintainer decision,
-      // 2026-11-14). A paired device holds no workspace and keeps its reach.
+      // A Chat or Code transcript reaches a composer only from the Project a
+      // window showing that composer alone would reach: the composer's own
+      // Project of that mode, any other composer's lead. Another pane's
+      // Project never becomes mentionable by sitting beside it (maintainer
+      // decision, 2026-11-14). Work threads open in every window, so their
+      // reach is unchanged. A paired device holds no workspace and keeps its
+      // reach.
       admitsMention: ({ windowId, readerThreadId, thread }) => {
-        if (thread.mode !== "code") return true;
+        if (thread.mode === "work") return true;
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         if (workspace === undefined) return true;
+        if (thread.mode === "chat") {
+          let target;
+          let reader;
+          try {
+            target = persistence.readChatThread(decodeChatThreadId(String(thread.threadId)));
+            // A Side Chat holds no Project of its own; it reads with the reach
+            // of the thread it sits beside.
+            const sidecar =
+              readerThreadId === undefined
+                ? undefined
+                : sideChatSidecars.findBySidecarThread(decodeChatThreadId(readerThreadId));
+            const readerChatId =
+              sidecar === undefined
+                ? readerThreadId
+                : sidecar.sourceMode === "chat"
+                  ? String(sidecar.sourceThreadId)
+                  : undefined;
+            reader =
+              readerChatId === undefined
+                ? undefined
+                : persistence.readChatThread(decodeChatThreadId(readerChatId));
+          } catch {
+            return false;
+          }
+          return (
+            target !== undefined &&
+            chatMentionWithinReach({
+              workspace,
+              readerChatProjectId: reader === undefined ? undefined : (reader.projectId ?? null),
+              mentionedProjectId: target.projectId ?? null,
+            })
+          );
+        }
         let target;
         let reader;
         try {

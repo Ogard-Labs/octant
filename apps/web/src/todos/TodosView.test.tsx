@@ -17,8 +17,8 @@ import {
 } from "@octant/domain/todo-policy";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-import { TodosView } from "./TodosView";
+import { describe, expect, it, vi } from "vitest";
+import { TodosView, type TodoStartProps } from "./TodosView";
 import { useTodoList } from "./useTodoList";
 
 const HOST = decodeStableHostId("11111111-1111-4111-8111-111111111111");
@@ -65,12 +65,34 @@ function fakeHost() {
   return { client, apply, view };
 }
 
-function Page(props: { readonly client: TodoClient }) {
-  const list = useTodoList(props.client);
+function Page(props: {
+  readonly client: TodoClient;
+  readonly start?: TodoStartProps;
+  readonly revision?: number;
+}) {
+  const list = useTodoList(props.client, props.revision);
   return (
-    <TodosView list={list} onClose={() => undefined} projects={[{ id: WEB, name: "Octant web" }]} />
+    <TodosView
+      list={list}
+      onClose={() => undefined}
+      projects={[{ id: WEB, name: "Octant web" }]}
+      {...(props.start === undefined ? {} : { start: props.start })}
+    />
   );
 }
+
+function startProps(overrides: Partial<TodoStartProps> = {}): TodoStartProps {
+  return {
+    threadStates: new Map(),
+    onStart: vi.fn(),
+    onOpenThread: vi.fn(),
+    unlinked: new Map(),
+    onLink: vi.fn(),
+    ...overrides,
+  };
+}
+
+const THREAD = "00000000-0000-4000-8000-0000000000d1";
 
 function rowTitles(): ReadonlyArray<string> {
   return within(screen.getByRole("list", { name: "To-dos" }))
@@ -223,5 +245,231 @@ describe("the To-dos page", () => {
     await screen.findByText("Second");
     expect(host.view().todos.map((todo) => todo.title)).toEqual(["Second", "First", "Third"]);
     expect(rowTitles()).toEqual(["Second", "First", "Third"]);
+  });
+});
+
+describe("starting from a to-do", () => {
+  it("starts in the to-do's only Project at once, and offers Chat or a Project when it has none", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Loose end",
+    });
+    host.apply({
+      kind: "add-todo",
+      todoId: crypto.randomUUID(),
+      title: "Web fix",
+      projects: [{ hostId: HOST, projectId: WEB, name: "Octant web" }],
+    });
+    const start = startProps();
+    render(<Page client={host.client} start={start} />);
+
+    await user.click(await screen.findByRole("button", { name: "Start Web fix" }));
+    expect(start.onStart).toHaveBeenLastCalledWith(expect.objectContaining({ title: "Web fix" }), {
+      kind: "project",
+      projectId: String(WEB),
+      name: "Octant web",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Start Loose end" }));
+    const choices = await screen.findAllByRole("menuitem");
+    expect(choices.map((choice) => choice.textContent)).toEqual(["Chat", "Octant web"]);
+    await user.click(choices[0] ?? document.body);
+    expect(start.onStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Loose end" }),
+      {
+        kind: "chat",
+      },
+    );
+  });
+
+  it("shows the newest thread's state, opens it, and offers Tick off once it is done", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const todoId = crypto.randomUUID();
+    host.apply({ kind: "add-todo", todoId, title: "Ship it" });
+    host.apply({
+      kind: "link-todo-thread",
+      todoId,
+      thread: { hostId: HOST, threadId: THREAD, mode: "code" },
+    });
+    const done = new Map([
+      [`code:${THREAD}`, { phase: "done" as const, label: "Done", title: "Ship the fix" }],
+    ]);
+    const start = startProps({ threadStates: done });
+    render(<Page client={host.client} start={start} />);
+
+    await user.click(await screen.findByRole("button", { name: "Done: open Ship the fix" }));
+    expect(start.onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD, mode: "code" }),
+      "Ship the fix",
+    );
+    await user.click(screen.getByRole("button", { name: "Tick off" }));
+    expect(await screen.findByText("No to-do matches these filters.")).toBeVisible();
+    expect(host.view().todos[0]?.state).toBe("done");
+  });
+
+  it("says when a started thread was not linked, and links it again on request", async () => {
+    const user = userEvent.setup();
+    const host = fakeHost();
+    const todoId = crypto.randomUUID();
+    host.apply({ kind: "add-todo", todoId, title: "Write notes" });
+    const start = startProps({ unlinked: new Map([[todoId, { threadId: THREAD, mode: "chat" }]]) });
+    render(<Page client={host.client} start={start} />);
+
+    expect(await screen.findByText("Thread started, not linked")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Link" }));
+    expect(start.onLink).toHaveBeenCalledWith(todoId);
+  });
+});
+
+describe("a change made elsewhere", () => {
+  it("shows a to-do another device added as soon as the host says the list changed", async () => {
+    const host = fakeHost();
+    const view = render(<Page client={host.client} revision={0} />);
+    expect(await screen.findByText(/Write down what you mean to do/)).toBeVisible();
+
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Added on the phone" });
+    view.rerender(<Page client={host.client} revision={1} />);
+
+    expect(await screen.findByRole("checkbox", { name: "Added on the phone" })).toBeVisible();
+  });
+});
+
+describe("a list host that cannot be reached", () => {
+  it("shows the last list read-only, keeps a quick add on this device, and sends it on request", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Already there" });
+    function Unreachable(props: { readonly away: boolean }) {
+      const list = useTodoList(host.client, undefined, {
+        key: "other-host:studio",
+        ...(props.away ? { unreachable: "Studio Mac cannot be reached." } : {}),
+      });
+      return (
+        <TodosView list={list} onClose={() => undefined} projects={[]} readOnly={props.away} />
+      );
+    }
+    const view = render(<Unreachable away={false} />);
+    await screen.findByRole("checkbox", { name: "Already there" });
+
+    view.rerender(<Unreachable away />);
+    expect(await screen.findByText(/^Studio Mac cannot be reached\./)).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Already there" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Actions for Already there" })).toBeNull();
+
+    await user.type(screen.getByRole("textbox", { name: "New to-do" }), "Call the bank{Enter}");
+    const held = screen.getByRole("region", { name: "Not sent" });
+    expect(within(held).getByText("Call the bank")).toBeVisible();
+    expect(within(held).getByRole("button", { name: "Send Call the bank" })).toBeDisabled();
+    expect(host.view().todos.map((todo) => todo.title)).toEqual(["Already there"]);
+
+    view.rerender(<Unreachable away={false} />);
+    await user.click(within(held).getByRole("button", { name: "Send Call the bank" }));
+    expect(await screen.findByRole("checkbox", { name: "Call the bank" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Not sent" })).toBeNull();
+    expect(host.view().todos.map((todo) => todo.title)).toEqual(["Call the bank", "Already there"]);
+  });
+
+  it("draws nothing of the previous host's list after the list moves", async () => {
+    const first = fakeHost();
+    first.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "On this computer" });
+    const second = fakeHost();
+    second.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "On the hub" });
+    function Moving(props: { readonly onHub: boolean }) {
+      const list = useTodoList(props.onHub ? second.client : first.client, undefined, {
+        key: props.onHub ? "other-host:hub" : "this-host",
+      });
+      return <TodosView list={list} onClose={() => undefined} projects={[]} />;
+    }
+    const view = render(<Moving onHub={false} />);
+    await screen.findByRole("checkbox", { name: "On this computer" });
+    view.rerender(<Moving onHub />);
+    expect(screen.queryByRole("checkbox", { name: "On this computer" })).toBeNull();
+    expect(await screen.findByRole("checkbox", { name: "On the hub" })).toBeVisible();
+  });
+});
+
+describe("unsent drafts", () => {
+  it("belong to the list host they were written for", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    function Held(props: { readonly listKey: string }) {
+      const list = useTodoList(host.client, undefined, {
+        key: props.listKey,
+        unreachable: "That computer cannot be reached.",
+      });
+      return (
+        <TodosView
+          list={list}
+          listKey={props.listKey}
+          onClose={() => undefined}
+          projects={[]}
+          readOnly
+        />
+      );
+    }
+    const view = render(<Held listKey="other-host:studio" />);
+    await user.type(
+      await screen.findByRole("textbox", { name: "New to-do" }),
+      "For the studio{Enter}",
+    );
+    expect(screen.getByRole("region", { name: "Not sent" })).toBeVisible();
+
+    view.rerender(<Held listKey="other-host:hub" />);
+    expect(screen.queryByRole("region", { name: "Not sent" })).toBeNull();
+    view.rerender(<Held listKey="other-host:studio" />);
+    expect(await screen.findByText("For the studio")).toBeVisible();
+  });
+});
+
+describe("unsent drafts in two windows", () => {
+  it("keeps both windows' drafts for the same list", async () => {
+    globalThis.localStorage.clear();
+    const user = userEvent.setup();
+    const host = fakeHost();
+    function Window(props: { readonly label: string }) {
+      const list = useTodoList(host.client, undefined, {
+        key: "other-host:studio",
+        unreachable: "That computer cannot be reached.",
+      });
+      return (
+        <section aria-label={props.label}>
+          <TodosView
+            list={list}
+            listKey="other-host:studio"
+            onClose={() => undefined}
+            projects={[]}
+            readOnly
+          />
+        </section>
+      );
+    }
+    render(
+      <>
+        <Window label="First window" />
+        <Window label="Second window" />
+      </>,
+    );
+    const first = screen.getByRole("region", { name: "First window" });
+    const second = screen.getByRole("region", { name: "Second window" });
+    await user.type(
+      within(first).getByRole("textbox", { name: "New to-do" }),
+      "From the first{Enter}",
+    );
+    await user.type(
+      within(second).getByRole("textbox", { name: "New to-do" }),
+      "From the second{Enter}",
+    );
+
+    const stored = JSON.parse(
+      globalThis.localStorage.getItem("octant.todos.unsent.v1:other-host:studio") ?? "[]",
+    ) as ReadonlyArray<{ readonly title: string }>;
+    expect(stored.map((draft) => draft.title)).toEqual(["From the first", "From the second"]);
+    expect(within(second).getByText("From the first")).toBeVisible();
   });
 });

@@ -52,6 +52,10 @@ import {
 } from "./secretGuard";
 import type { OsNetworkEgress } from "./threadEgressPolicy";
 import { pinnedRecipientAdmission } from "./pinnedRecipientAdmission";
+import {
+  buildWindowsConfinedLaunch,
+  type UnverifiedWindowsConfinementOptions,
+} from "./windowsConfinement";
 
 export class ProcessConfinementError extends Error {
   override readonly name = "ProcessConfinementError";
@@ -264,6 +268,12 @@ export interface ProcessConfinementOptions {
   readonly usersDirectory?: string;
   /** `PATH` used to resolve a `#!/usr/bin/env` interpreter; defaults to the host's. */
   readonly interpreterSearchPath?: string;
+  /**
+   * Opts a `win32` port into the Windows AppContainer launcher, which has not
+   * been verified on real Windows with a real provider. Without it every
+   * Windows launch is refused, as it was before the launcher existed.
+   */
+  readonly unverifiedWindowsConfinement?: UnverifiedWindowsConfinementOptions;
 }
 
 export interface RequireSandboxExecInput {
@@ -1133,6 +1143,12 @@ export function makeProcessConfinementLive(
       }
       if (platform === "linux") {
         return withReceipt(buildBubblewrapLaunch(prepared, { bwrapPath: sandboxPath }));
+      }
+      // Windows stays refused until its confinement has run on real Windows
+      // with a real provider; only a caller that names the unverified option
+      // reaches the dormant builder, and no production caller does.
+      if (platform === "win32" && options.unverifiedWindowsConfinement !== undefined) {
+        return buildWindowsConfinedLaunch(input, options.unverifiedWindowsConfinement);
       }
       throw new ProcessConfinementError(
         "incompatible",

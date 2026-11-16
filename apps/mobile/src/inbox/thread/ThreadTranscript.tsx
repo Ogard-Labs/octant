@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import {
   chatAttemptStatusLabel,
   mobileChatMessages,
@@ -9,7 +10,7 @@ import {
   type MobileCodeConversation,
   type MobileTurnTargets,
 } from "@octant/client-runtime";
-import type { ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
+import type { ChatAttachment, ReplyDetailLevel, WorkTurnState } from "@octant/contracts";
 import { MOBILE_COPY } from "../../copy";
 import { mobileSpacing, mobileTypography } from "../../theme/tokens";
 import { useTheme } from "../../../design-system";
@@ -18,6 +19,7 @@ import { MessageBubble } from "../../ui/MessageBubble";
 import { RoutineReceiptCard } from "../../ui/RoutineReceiptCard";
 import type { MessageActionItem } from "../../ui/MessageActions";
 import { ThreadWorkShelf } from "../../ui/ThreadWorkShelf";
+import { placeAttachments } from "./attachmentPlacement";
 import type { useChatThread } from "./useChatThread";
 
 type ChatThread = ReturnType<typeof useChatThread>;
@@ -33,6 +35,13 @@ export interface ThreadTranscriptProps {
   ) => ReadonlyArray<MessageActionItem>;
   /** The thread's Reply detail level, the host's per-thread choice or its default. */
   readonly replyDetail: ReplyDetailLevel;
+  /**
+   * A turn to bring into view, from a message search hit: the transcript
+   * reports where that turn sits so the screen can scroll to it. The id is the
+   * one each mode keys its turns by: a Chat or Work turn id, or the operation
+   * of a Code provider turn.
+   */
+  readonly focus?: { readonly turnId: string; readonly onFound: (y: number) => void };
 }
 
 export function ThreadTranscript(props: ThreadTranscriptProps) {
@@ -64,6 +73,26 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
           maxWidth: 280,
         },
         metaBlock: { gap: mobileSpacing.xs, marginBottom: mobileSpacing.sm },
+        chipRow: {
+          flexDirection: "row",
+          flexWrap: "wrap",
+          gap: mobileSpacing.xs,
+        },
+        chipRowUser: { justifyContent: "flex-end", marginTop: -2 },
+        chip: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 5,
+          maxWidth: "84%",
+          minHeight: 26,
+          paddingHorizontal: 9,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        messageWithAttachments: { gap: mobileSpacing.xs },
+        chipLabel: { flexShrink: 1, color: colors.textSecondary, fontSize: 12 },
         metaText: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
         warningText: { color: colors.danger, fontSize: 12, lineHeight: 16 },
       }),
@@ -73,16 +102,84 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
   const codeTurns = codeConversation?.turns;
   const view = chat.view;
   const messages = useMemo(() => (view === undefined ? [] : mobileChatMessages(view)), [view]);
+  const attachmentsByMessage = useMemo(
+    () =>
+      view === undefined
+        ? new Map<string, ReadonlyArray<ChatAttachment>>()
+        : placeAttachments({
+            attachments: view.attachments,
+            turns: view.turns,
+            shownMessageIds: messages.map((entry) => String(entry.content.contentId)),
+          }),
+    [messages, view],
+  );
+  const attachmentChips = (attachments: ReadonlyArray<ChatAttachment>, user: boolean) => (
+    <View style={[styles.chipRow, user ? styles.chipRowUser : null]}>
+      {attachments.map((attachment) => (
+        <View
+          accessibilityLabel={`${MOBILE_COPY.attachmentLabel}: ${attachment.displayName}`}
+          key={String(attachment.id)}
+          style={styles.chip}
+          testID={`mobile-attachment-${String(attachment.id)}`}
+        >
+          <Ionicons
+            color={colors.textTertiary}
+            name={attachment.mediaType.startsWith("image/") ? "image-outline" : "document-outline"}
+            size={13}
+          />
+          <Text numberOfLines={1} style={styles.chipLabel}>
+            {attachment.displayName}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+  const looseAttachments = attachmentsByMessage.get("") ?? [];
+  const focusContentId =
+    props.focus === undefined || view === undefined
+      ? undefined
+      : view.turns
+          .find((turn) => String(turn.id) === props.focus?.turnId)
+          ?.userMessageRef.contentId.toString();
+  const sectionY = useRef<number | undefined>(undefined);
+  const messageY = useRef<number | undefined>(undefined);
+  const reported = useRef(false);
+  const reportFocus = () => {
+    if (reported.current || sectionY.current === undefined || messageY.current === undefined)
+      return;
+    reported.current = true;
+    props.focus?.onFound(sectionY.current + messageY.current);
+  };
+  const onSectionLayout = (event: { nativeEvent: { layout: { y: number } } }) => {
+    sectionY.current = event.nativeEvent.layout.y;
+    reportFocus();
+  };
+  // Work and Code render one View per turn, so the focused turn's View reports
+  // where it sits, as the focused Chat message does.
+  const focusTurnLayout = (turnId: string) =>
+    turnId === props.focus?.turnId
+      ? {
+          onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
+            messageY.current = event.nativeEvent.layout.y;
+            reportFocus();
+          },
+          testID: "mobile-thread-focused-turn",
+        }
+      : {};
 
   return (
     <>
       {workTurns !== undefined ? (
-        <View style={styles.transcript} testID="mobile-work-transcript">
+        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-work-transcript">
           {workTurns.length === 0 ? (
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
             workTurns.map((turn, index) => (
-              <View key={String(turn.turnId)} style={styles.transcript}>
+              <View
+                key={String(turn.turnId)}
+                style={styles.transcript}
+                {...focusTurnLayout(String(turn.turnId))}
+              >
                 <MessageBubble
                   replyDetail={props.replyDetail}
                   body={turn.prompt}
@@ -125,7 +222,7 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         </View>
       ) : null}
       {codeTurns !== undefined ? (
-        <View style={styles.transcript} testID="mobile-code-transcript">
+        <View onLayout={onSectionLayout} style={styles.transcript} testID="mobile-code-transcript">
           {codeConversation?.hasEarlier === true ? (
             <Text style={styles.metaText}>{MOBILE_COPY.codeEarlierTurns}</Text>
           ) : null}
@@ -133,7 +230,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
             <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
           ) : (
             codeTurns.map((turn, turnIndex) => (
-              <View key={turn.operationId} style={styles.transcript}>
+              <View
+                key={turn.operationId}
+                style={styles.transcript}
+                {...focusTurnLayout(String(turn.operationId))}
+              >
                 {turn.prompt.length === 0 ? null : (
                   <MessageBubble
                     replyDetail={props.replyDetail}
@@ -163,7 +264,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                   />
                 ))}
                 {turn.status === "waiting" ? (
-                  <Text style={styles.metaText}>{MOBILE_COPY.turnRunning}</Text>
+                  <Text style={styles.metaText}>
+                    {turn.usageLimit === undefined
+                      ? MOBILE_COPY.turnRunning
+                      : MOBILE_COPY.turnWaitingOnUsageLimit}
+                  </Text>
                 ) : turn.status === "failed" || turn.status === "interrupted" ? (
                   <Text style={styles.warningText}>{chatAttemptStatusLabel(turn.status)}</Text>
                 ) : null}
@@ -180,7 +285,11 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
         </View>
       ) : null}
       {view !== undefined ? (
-        <View style={styles.transcript} testID="mobile-thread-transcript">
+        <View
+          onLayout={onSectionLayout}
+          style={styles.transcript}
+          testID="mobile-thread-transcript"
+        >
           {chat.pendingPrompt !== undefined ? (
             <Text style={styles.metaText} testID="mobile-chat-pending">
               Sending… {chat.pendingPrompt}
@@ -218,13 +327,9 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 }
               : {})}
           />
-          {view.attachments.length > 0 || view.citations.length > 0 ? (
+          {looseAttachments.length > 0 || view.citations.length > 0 ? (
             <View style={styles.metaBlock} testID="mobile-thread-meta">
-              {view.attachments.map((attachment) => (
-                <Text key={String(attachment.id)} style={styles.metaText}>
-                  {MOBILE_COPY.attachmentLabel}: {attachment.displayName}
-                </Text>
-              ))}
+              {looseAttachments.length > 0 ? attachmentChips(looseAttachments, false) : null}
               {view.citations.map((citation) => (
                 <Text key={String(citation.citationId)} style={styles.metaText}>
                   {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
@@ -255,29 +360,44 @@ export function ThreadTranscript(props: ThreadTranscriptProps) {
                 retryable !== undefined &&
                 chat.activeAttempt === undefined &&
                 props.allowProductMutations;
+              const sentWith = attachmentsByMessage.get(String(content.contentId)) ?? [];
               return (
-                <MessageBubble
-                  replyDetail={props.replyDetail}
-                  body={content.body}
+                <View
                   key={content.contentId}
-                  role={content.role}
-                  showActions={isLastAssistant}
-                  testID={`mobile-message-${content.contentId}`}
-                  turnActions={props.turnActionsFor(targets)}
-                  {...(content.parts === undefined ? {} : { parts: content.parts })}
-                  {...(showRetry
+                  {...(String(content.contentId) === focusContentId
                     ? {
-                        extraActions: [
-                          {
-                            id: "retry",
-                            label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
-                            icon: "refresh-outline" as const,
-                            onPress: () => void chat.retry(),
-                          },
-                        ],
+                        onLayout: (event: { nativeEvent: { layout: { y: number } } }) => {
+                          messageY.current = event.nativeEvent.layout.y;
+                          reportFocus();
+                        },
+                        testID: "mobile-thread-focused-message",
                       }
                     : {})}
-                />
+                  style={styles.messageWithAttachments}
+                >
+                  <MessageBubble
+                    replyDetail={props.replyDetail}
+                    body={content.body}
+                    role={content.role}
+                    showActions={isLastAssistant}
+                    testID={`mobile-message-${content.contentId}`}
+                    turnActions={props.turnActionsFor(targets)}
+                    {...(content.parts === undefined ? {} : { parts: content.parts })}
+                    {...(showRetry
+                      ? {
+                          extraActions: [
+                            {
+                              id: "retry",
+                              label: `Retry ${chatAttemptStatusLabel(retryable.outcome).toLowerCase()}`,
+                              icon: "refresh-outline" as const,
+                              onPress: () => void chat.retry(),
+                            },
+                          ],
+                        }
+                      : {})}
+                  />
+                  {sentWith.length > 0 ? attachmentChips(sentWith, true) : null}
+                </View>
               );
             })
           )}

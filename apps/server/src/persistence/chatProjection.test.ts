@@ -9,12 +9,18 @@ import {
   type ChatSettings,
   type ChatThread,
 } from "@octant/contracts";
+import { CANVAS_SCHEMA_VERSION } from "@octant/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  AGENT_RESULT_STEERED,
+  AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+} from "../agentRun/agentResultSteeredRecord";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { rebuildProjection } from "./projection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
+import { searchThreads } from "./threadSearchProjection";
 import {
   CHAT_SETTINGS_AGGREGATE_ID,
   readChatContent,
@@ -522,6 +528,119 @@ describe("ChatProjection", () => {
     connection.close();
   });
 
+  it("shows a child result steered into a running turn on that turn, through replay and a rebuild", () => {
+    const connection = openConnection();
+    const store = journal(connection);
+    const { projection } = chatRuntime();
+    const runId = "82000000-0000-4000-8000-000000000060";
+    const record = {
+      kind: "agent-result-steered",
+      threadId: ids.thread,
+      turnKey: ids.turn,
+      delivery: {
+        kind: "agent-result",
+        runId,
+        runIds: [runId],
+        runGenerations: [{ runId, generation: 1 }],
+      },
+      body: "A delegated subagent has finished.",
+      steeredAt: now,
+    };
+    const steer = () =>
+      store.append({
+        aggregate: {
+          aggregateType: AGENT_RESULT_STEERING_AGGREGATE_TYPE,
+          aggregateId: crypto.randomUUID(),
+        },
+        expectedVersion: 0,
+        events: [pending(AGENT_RESULT_STEERED, record)],
+      });
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    const attempt = {
+      id: ids.attempt,
+      turnId: ids.turn,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      modelId: "model-a",
+      contextManifestId: ids.manifest,
+      outcome: "streaming",
+      responseRefs: [],
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: {
+                contentId: ids.content,
+                digest: digest("delegate it"),
+                byteLength: "delegate it".length,
+              },
+              attachmentIds: [],
+              attempts: [attempt],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "delegate it",
+            digest: digest("delegate it"),
+            byteLength: "delegate it".length,
+          });
+        },
+      },
+    );
+    steer();
+    // The turn ends after the result entered it; the card stays.
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: { ...attempt, outcome: "completed" },
+        }),
+      ],
+    });
+    // The same delivery read again shows once.
+    steer();
+
+    const expected = [
+      { delivery: record.delivery, body: record.body, steeredAt: record.steeredAt },
+    ];
+    expect(
+      readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]?.steeredResults,
+    ).toEqual(expected);
+
+    rebuildProjection({ connection, journal: store, projection, clock: () => now });
+
+    expect(
+      readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]?.steeredResults,
+    ).toEqual(expected);
+    connection.close();
+  });
+
   it("adds a retry attempt to the projected turn and thread view", () => {
     const connection = openConnection();
     const store = journal(connection);
@@ -736,6 +855,166 @@ describe("ChatProjection", () => {
     // Each delta writes the same number of rows: the earlier deltas' bodies
     // are not read and rewritten again as the reply grows.
     expect(new Set(indexWrites).size).toBe(1);
+
+    // Search across modes finds the turn by words spread over its prompt and
+    // two reply pieces, and the deleted thread leaves it.
+    const visible = [{ mode: "chat" as const, threadId: ids.thread, updatedAt: now }];
+    expect(
+      searchThreads(connection, "ask walrus quokka", visible, 50).matches.map((match) => [
+        match.anchorId,
+        match.field,
+      ]),
+    ).toEqual([[ids.turn, "reply"]]);
+    expect(searchThreads(connection, "neutral", visible, 50).matches).toEqual([
+      expect.objectContaining({ field: "title", anchorId: "" }),
+    ]);
+    // Research notes are part of the reply the thread shows.
+    const researchId = "82000000-0000-4000-8000-000000000071";
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 2 + deltas.length,
+        events: [
+          pending("chat.attempt-updated@1", {
+            kind: "attempt-updated",
+            attempt: {
+              ...attempt,
+              outcome: "streaming",
+              researchRef: {
+                contentId: researchId,
+                digest: digest("lemur census notes"),
+                byteLength: "lemur census notes".length,
+              },
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: researchId,
+            threadId: ids.thread,
+            role: "research",
+            body: "lemur census notes",
+            digest: digest("lemur census notes"),
+            byteLength: "lemur census notes".length,
+          });
+        },
+      },
+    );
+    expect(
+      searchThreads(connection, "lemur census", visible, 50).matches.map((match) => match.anchorId),
+    ).toEqual([ids.turn]);
+
+    // A rewind removes the turns it names and never a Canvas the thread made.
+    const canvasId = "82000000-0000-4000-8000-000000000072";
+    store.append({
+      aggregate: { aggregateType: "canvas", aggregateId: canvasId },
+      expectedVersion: 0,
+      events: [
+        pending("canvas.created@1", {
+          canvasId,
+          version: {
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            canvasId,
+            versionId: "82000000-0000-4000-8000-000000000073",
+            sequence: 1,
+            definition: {
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              title: "Habitat map",
+              provenance: {
+                mode: "chat",
+                hostId: "local",
+                projectId: null,
+                threadId: ids.thread,
+                actor: { kind: "system", actorId: ids.actor },
+                providerInstanceId: ids.provider,
+                modelId: "model-a",
+                createdAt: now,
+              },
+              sourceManifest: [],
+              blocks: [
+                {
+                  blockId: "intro",
+                  schemaVersion: CANVAS_SCHEMA_VERSION,
+                  kind: "rich-text",
+                  text: "Wetland corridors",
+                },
+              ],
+            },
+            createdBy: { kind: "system", actorId: ids.actor },
+            createdAt: now,
+          },
+        }),
+      ],
+    });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 3 + deltas.length,
+      events: [
+        pending("chat.thread-rewound@1", {
+          kind: "thread-rewound",
+          thread: thread({ version: 4 + deltas.length }),
+          rewindId: "82000000-0000-4000-8000-000000000074",
+          fromTurnId: ids.turn,
+          removedTurnIds: [ids.turn],
+          rewoundAt: now,
+        }),
+      ],
+    });
+    expect(searchThreads(connection, "lemur census", visible, 50).matches).toEqual([]);
+    expect(
+      searchThreads(connection, "wetland corridors", visible, 50).matches.map((match) => [
+        match.field,
+        match.anchorId,
+      ]),
+    ).toEqual([["canvas", canvasId]]);
+
+    // An attachment's file name joins its turn's prompt; a purged one leaves it.
+    const attachment = (status: "finalized" | "purged") =>
+      pending("chat.attachment-updated@1", {
+        kind: "attachment-updated",
+        attachment: {
+          id: "82000000-0000-4000-8000-000000000070",
+          threadId: ids.thread,
+          turnId: ids.turn,
+          displayName: "budget-q3.pdf",
+          mediaType: "application/pdf",
+          byteLength: 10,
+          digest: digest("pdf"),
+          status,
+          createdAt: now,
+        },
+      });
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 4 + deltas.length,
+      events: [attachment("finalized")],
+    });
+    expect(
+      searchThreads(connection, "budget-q3", visible, 50).matches.map((match) => [
+        match.anchorId,
+        match.field,
+      ]),
+    ).toEqual([[ids.turn, "prompt"]]);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 5 + deltas.length,
+      events: [attachment("purged")],
+    });
+    expect(searchThreads(connection, "budget-q3", visible, 50).matches).toEqual([]);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 6 + deltas.length,
+      events: [
+        pending("chat.deleted@1", { kind: "deleted", threadId: ids.thread, deletedAt: now }),
+      ],
+    });
+    expect(
+      connection
+        .prepare("SELECT COUNT(*) AS count FROM thread_search_document WHERE thread_id = ?")
+        .get(ids.thread),
+    ).toEqual({ count: 0 });
     connection.close();
   });
 
@@ -999,7 +1278,10 @@ describe("ChatProjection", () => {
       );
       bytesPerDelta.push(boundBytes - before);
     }
-    expect(bytesPerDelta.at(-1)).toBe(bytesPerDelta[1]);
+    // Search across modes leads each piece in with the end of the reply so
+    // far, which grows only until it reaches its fixed length; from there on a
+    // late delta writes exactly what an earlier one did.
+    expect(bytesPerDelta.at(-1)).toBe(bytesPerDelta[99]);
 
     const streamedIds = Array.from({ length: deltaCount + 1 }, (_, index) => contentId(index));
     const readAttempt = () =>

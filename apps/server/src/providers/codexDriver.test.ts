@@ -28,6 +28,7 @@ import {
   type CodexLaunchAuthority,
 } from "./codexProcess";
 import { CodexRpcClientFailure } from "./codexRpcClient";
+import { SECRET_QUESTION_REFUSAL } from "./secretQuestion";
 import type { CodexServerMessage } from "./codexProtocol";
 import type {
   CodexAccountReadResult,
@@ -712,7 +713,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
       capabilities: {
         streaming: "supported",
         resume: "supported",
-        userQuestions: "unsupported",
+        userQuestions: "supported",
         nativeChildAgents: "unsupported",
         harnessAutoReview: "supported",
       },
@@ -1169,7 +1170,7 @@ describe("Codex thread and turn lifecycle", () => {
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
-      config: { model_reasoning_effort: "low", skills: { config: [] } },
+      config: { model_reasoning_effort: "low", web_search: "disabled", skills: { config: [] } },
     });
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
@@ -1177,7 +1178,7 @@ describe("Codex thread and turn lifecycle", () => {
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "user",
-      config: { skills: { config: [] } },
+      config: { web_search: "disabled", skills: { config: [] } },
     });
     await acquired.close();
   });
@@ -1789,9 +1790,9 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("keeps Codex's shell on and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+  it("lets a Work thread read the Project's AGENTS.md and keep Codex's shell, as Code does, on start and every resume", async () => {
     const workOff = {
-      project_doc_max_bytes: 0,
+      web_search: "disabled",
       skills: { config: [] },
     };
     const f = fixture();
@@ -1816,6 +1817,13 @@ describe("Codex thread and turn lifecycle", () => {
       "config",
       "features.shell_tool",
     ]);
+    // Codex finds the Project's AGENTS.md by itself; no zero budget hides it.
+    for (const method of ["thread/start", "thread/resume"]) {
+      expect(f.calls.find((call) => call.method === method)?.input).not.toHaveProperty([
+        "config",
+        "project_doc_max_bytes",
+      ]);
+    }
     await work.close();
 
     const code = fixture();
@@ -1843,6 +1851,7 @@ describe("Codex thread and turn lifecycle", () => {
       "features.plugins": false,
       "features.apps": false,
       mcp_servers: { node_repl: { enabled: false }, "docs.local": { enabled: false } },
+      web_search: "disabled",
       skills: { config: [] },
     };
     const f = fixture({
@@ -2061,7 +2070,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(valid.resumeCursor).toEqual({ driverKind: "codex", value: "thread-existing" });
     expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
       threadId: "thread-existing",
-      config: { skills: { config: [] } },
+      config: { web_search: "disabled", skills: { config: [] } },
     });
     for (const resumeCursor of [
       { driverKind: "opencode" as const, value: "thread-existing" },
@@ -2825,7 +2834,7 @@ describe("Codex execution authority and approvals", () => {
     });
   });
 
-  it("asks before every command on both prompting postures, since the sandbox outside Codex never escalates", () => {
+  it("asks before every command at Ask first and Accept edits, since the sandbox outside Codex never escalates", () => {
     // Below Full access the process runs inside Octant's profile and macOS
     // refuses Codex's own Seatbelt inside it, so turns name the sandbox
     // external. Under an external sandbox `on-request` runs every command
@@ -2839,6 +2848,18 @@ describe("Codex execution authority and approvals", () => {
         networkAccess: "restricted",
       });
     }
+  });
+
+  it("tells Codex its sandbox has network when the launch took no egress proxy", () => {
+    // Network limits are off by default, so the process keeps open network;
+    // `restricted` would tell the model it has none.
+    expect(codexTurnExecutionSettings("approval-gated", false, false, true).sandboxPolicy).toEqual({
+      type: "externalSandbox",
+      networkAccess: "enabled",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", false, false, false).sandboxPolicy).toEqual(
+      { type: "externalSandbox", networkAccess: "restricted" },
+    );
   });
 
   it("carries the posture into a turn on a thread created under an older one", async () => {
@@ -2899,17 +2920,59 @@ describe("Codex execution authority and approvals", () => {
     );
   });
 
-  it("lets the reviewer answer on both prompting postures when the thread asks for Auto", () => {
+  it("runs Auto as Codex's own Auto, on request with Codex's reviewer inside Octant's sandbox", () => {
+    // Codex's own Auto is `on-request` with its reviewer; under the external
+    // sandbox Octant names, commands then run unasked inside Octant's wall.
+    expect(codexExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandbox: "read-only",
+      approvalsReviewer: "auto_review",
+    });
+    expect(codexTurnExecutionSettings("approval-gated", true)).toEqual({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+      approvalsReviewer: "auto_review",
+    });
+  });
+
+  it("keeps Ask first asking for every command once the reviewer is withdrawn", () => {
+    expect(codexExecutionSettings("approval-gated", false)).toEqual({
+      approvalPolicy: "untrusted",
+      sandbox: "read-only",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("keeps Accept edits asking for commands even when its prompts go to the reviewer", () => {
+    // Auto is `approval-gated` with the reviewer; Accept edits with it still
+    // reads as Accept edits, so its commands keep asking.
     expect(codexExecutionSettings("auto-accept-edits", true)).toEqual({
       approvalPolicy: "untrusted",
       sandbox: "read-only",
       approvalsReviewer: "auto_review",
     });
-    expect(codexExecutionSettings("approval-gated", true)).toEqual({
-      approvalPolicy: "untrusted",
-      sandbox: "read-only",
+  });
+
+  it("starts an Auto thread on request with Codex's reviewer", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-existing" },
+        executionPolicy: "approval-gated",
+        autoApprove: true,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Run the tests.", attachments: [], tools: [] }),
+    );
+    expect(f.calls.find(({ method }) => method === "turn/start")?.input).toMatchObject({
+      approvalPolicy: "on-request",
       approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
     });
+    await acquired.close();
   });
 
   it.each([
@@ -2929,7 +2992,7 @@ describe("Codex execution authority and approvals", () => {
         approvalPolicy,
         sandbox,
         approvalsReviewer: "user",
-        config: { skills: { config: [] } },
+        config: { web_search: "disabled", skills: { config: [] } },
       });
       await acquired.close();
     },
@@ -3540,25 +3603,144 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
-  it.each(["full-access", "approval-gated", "plan"] as const)(
-    "keeps stable user questions unsupported in %s mode",
-    async (policy) => {
-      const f = fixture();
-      const acquired = await acquireConnection(makeCodexDriver(f.options()));
-      await startSession(acquired.connection, sessionId, policy);
-      const answer = await Effect.runPromise(
-        Effect.exit(
-          acquired.connection.answerUserInput({
-            sessionId,
-            requestId: "question",
-            answer: "private answer",
-          }),
-        ),
+  it("asks Codex's question set through the questionnaire in Plan and answers Codex by question id", async () => {
+    const f = fixture();
+    let request = 0;
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ requestId: () => `request-${++request}` })),
+    );
+    await startSession(acquired.connection, sessionId, "plan");
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+    );
+    const asked = takeEvents(acquired.connection, 2);
+    const userInput = (id: string, questions: ReadonlyArray<object>): CodexServerMessage =>
+      ({
+        kind: "request",
+        id,
+        method: "item/tool/requestUserInput",
+        params: { threadId: "thread-1", turnId: "turn-1", itemId: `item-${id}`, questions },
+      }) as CodexServerMessage;
+    f.emit(
+      userInput("ask-1", [
+        {
+          id: "scope",
+          header: "Scope",
+          question: "Which module first?",
+          isOther: true,
+          options: [
+            { label: "Parser", description: "Start with parsing" },
+            { label: "Writer", description: "Start with output" },
+          ],
+        },
+        { id: "tests", header: "Tests", question: "Add tests too?", options: null },
+      ]),
+    );
+    const events = await asked;
+    expect(events).toMatchObject([
+      {
+        kind: "user-input-request",
+        prompt: "Which module first?",
+        options: [
+          { label: "Parser", description: "Start with parsing" },
+          { label: "Writer", description: "Start with output" },
+        ],
+        questionIndex: 1,
+        questionCount: 2,
+      },
+      { kind: "user-input-request", prompt: "Add tests too?", questionIndex: 2, questionCount: 2 },
+    ]);
+    for (const [event, answer] of [
+      [events[0], "Parser"],
+      [events[1], "Yes, unit tests"],
+    ] as const) {
+      if (event?.kind !== "user-input-request") throw new Error("Codex asked a question.");
+      await Effect.runPromise(
+        acquired.connection.answerUserInput({ sessionId, requestId: event.requestId, answer }),
       );
-      expect(String(answer)).toContain("unsupported");
-      await acquired.close();
-    },
-  );
+    }
+    expect(f.calls.filter((call) => call.method === "approval/respond")).toEqual([
+      {
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-1",
+          result: {
+            answers: { scope: { answers: ["Parser"] }, tests: { answers: ["Yes, unit tests"] } },
+          },
+        },
+      },
+    ]);
+
+    // A password is never collected in chat: Codex is told why, and nobody is asked.
+    f.emit(
+      userInput("ask-2", [
+        {
+          id: "pw",
+          header: "Database",
+          question: "What is the database password?",
+          isSecret: true,
+        },
+      ]),
+    );
+    await vi.waitFor(() =>
+      expect(f.calls.at(-1)).toEqual({
+        method: "approval/respond",
+        input: {
+          providerRequestId: "ask-2",
+          result: { answers: { pw: { answers: [SECRET_QUESTION_REFUSAL] } } },
+        },
+      }),
+    );
+    await acquired.close();
+  });
+
+  it("runs a Plan session in Codex's own Plan mode and returns a thread that recorded it to the default mode", async () => {
+    const plan = fixture();
+    const planned = await acquireConnection(makeCodexDriver(plan.options()));
+    await startSession(planned.connection, sessionId, "plan");
+    await Effect.runPromise(
+      planned.connection.send({ sessionId, prompt: "plan it", attachments: [], tools: [] }),
+    );
+    // Plan's own sandbox and approval answers stay as they are (see the Plan
+    // authority tests); only Codex's mode joins them.
+    expect(plan.calls.find((call) => call.method === "turn/start")?.input).toMatchObject({
+      collaborationMode: {
+        mode: "plan",
+        settings: { model: "gpt-5.4", developer_instructions: null },
+      },
+    });
+    await planned.close();
+
+    const work = fixture({
+      threadResume: async (value) => ({
+        thread: { id: value.threadId },
+        model: "gpt-5.4",
+        modelProvider: "openai",
+        serviceTier: null,
+        cwd: projectRoot,
+        reasoningEffort: "high",
+        collaborationMode: { mode: "plan" },
+      }),
+    });
+    const resumed = await acquireConnection(makeCodexDriver(work.options()));
+    await Effect.runPromise(
+      resumed.connection.resume({
+        sessionId,
+        resumeCursor: { driverKind: "codex", value: "thread-1" },
+        executionPolicy: "approval-gated",
+      }),
+    );
+    await Effect.runPromise(
+      resumed.connection.send({ sessionId, prompt: "build it", attachments: [], tools: [] }),
+    );
+    expect(work.calls.find((call) => call.method === "turn/start")?.input).toMatchObject({
+      collaborationMode: {
+        mode: "default",
+        settings: { model: "gpt-5.4", reasoning_effort: "high", developer_instructions: null },
+      },
+    });
+    await resumed.close();
+  });
 });
 
 function compactOf(connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) {
@@ -3848,6 +4030,39 @@ describe("Codex running as itself", () => {
     await lockedDown.close();
   });
 
+  it("switches Codex's own web search off on start and every resume unless the setup has web tools on", async () => {
+    for (const [nativeSetup, searches] of [
+      [undefined, false],
+      [{ ...ownSetup, webTools: false }, false],
+      [ownSetup, true],
+    ] as const) {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "full-access",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId: "session-resumed" as never,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "full-access",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      for (const method of ["thread/start", "thread/resume"]) {
+        const config = f.calls.find((call) => call.method === method)?.input;
+        if (searches) expect(config).not.toHaveProperty(["config", "web_search"]);
+        else expect(config).toMatchObject({ config: { web_search: "disabled" } });
+      }
+      await acquired.close();
+    }
+  });
+
   it("runs Codex's own subagents at every level once the person allows them, on a process of their own", async () => {
     for (const [executionPolicy, nativeSetup, ownSubagents] of [
       ["full-access", ownSetup, true],
@@ -3984,6 +4199,95 @@ describe("Codex running as itself", () => {
       await acquired.close();
     },
   );
+
+  it("reports a subagent's requested model, closing answer and thread usage only when Codex reports them", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        nativeSetup: ownSetup,
+      }),
+    );
+    const observed = takeEvents(acquired.connection, 3);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Delegate.", attachments: [], tools: [] }),
+    );
+    const collab = (id: string, item: Readonly<Record<string, unknown>>) =>
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "collabAgentToolCall", id, status: "completed", ...item },
+        completedAtMs: 20,
+      });
+    f.emit(
+      collab("collab-1", {
+        tool: "spawnAgent",
+        receiverThreadIds: ["thread-child", "thread-quiet"],
+        model: "gpt-5.4-mini",
+      }),
+    );
+    const breakdown = (inputTokens: number, outputTokens: number) => ({
+      totalTokens: inputTokens + outputTokens,
+      inputTokens,
+      cachedInputTokens: 0,
+      outputTokens,
+      reasoningOutputTokens: 0,
+    });
+    f.emit(
+      notification("thread/tokenUsage/updated", {
+        threadId: "thread-child",
+        turnId: "turn-child",
+        tokenUsage: {
+          total: breakdown(1200, 300),
+          last: breakdown(10, 3),
+          modelContextWindow: null,
+        },
+      }),
+    );
+    f.emit(
+      collab("collab-2", {
+        tool: "wait",
+        receiverThreadIds: [],
+        agentsStates: { "thread-child": { status: "completed", message: "Two tests fail." } },
+      }),
+    );
+    const events = await observed;
+    expect(events[0]).toMatchObject({ childAgentId: "thread-child", modelId: "gpt-5.4-mini" });
+    expect(events[2]).toMatchObject({
+      childAgentId: "thread-child",
+      status: "completed",
+      finalSummary: "Two tests fail.",
+      usage: { inputTokens: 1200, outputTokens: 300, totalTokens: 1500 },
+    });
+    await acquired.close();
+
+    const quiet = await parentWithSubagent();
+    const finished = takeEvents(quiet.acquired.connection, 1);
+    quiet.f.emit(
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-3",
+          tool: "wait",
+          status: "completed",
+          receiverThreadIds: [],
+          agentsStates: { "thread-child": { status: "completed", message: null } },
+        },
+        completedAtMs: 30,
+      }),
+    );
+    const done = (await finished)[0];
+    expect(done).toMatchObject({ status: "completed" });
+    expect(done).not.toHaveProperty("modelId");
+    expect(done).not.toHaveProperty("finalSummary");
+    expect(done).not.toHaveProperty("usage");
+    await quiet.acquired.close();
+  });
 
   it("refuses a subagent's request outside the Project as it refuses the parent's, without asking", async () => {
     const { f, acquired } = await parentWithSubagent();

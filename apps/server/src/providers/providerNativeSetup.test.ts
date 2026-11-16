@@ -61,7 +61,7 @@ function sources(instance: ProviderInstance, project: Project) {
 }
 
 describe("a session's native setup read from the journal", () => {
-  it("stays off for an account and Project the person never changed", () => {
+  it("runs the provider as itself for an account the person never changed", () => {
     expect(
       sessionNativeSetup(sources(codex(), codeProject()), {
         providerInstanceId: codex().id,
@@ -69,37 +69,65 @@ describe("a session's native setup read from the journal", () => {
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toBeUndefined();
+    ).toEqual({
+      subagents: true,
+      webTools: true,
+      skills: true,
+      toolServers: true,
+      hooks: true,
+      projectCode: false,
+    });
   });
 
-  it("turns on with the account's switch, and loads the Project's code only once the Project trusts this provider", () => {
-    const fromAccount = sessionNativeSetup(sources(codex({ nativeSetup: true }), codeProject()), {
-      providerInstanceId: codex().id,
-      projectId,
-      mode: "code",
-      executionPolicy: "approval-gated",
-    });
-    expect(fromAccount).toMatchObject({ subagents: true, projectCode: false });
+  it("loads nothing, web search and fetch included, for an account the person turned off until its Project is trusted", () => {
+    const off = codex({ nativeSetup: false });
+    expect(
+      sessionNativeSetup(sources(off, codeProject()), {
+        providerInstanceId: off.id,
+        projectId,
+        mode: "code",
+        executionPolicy: "approval-gated",
+      }),
+    ).toBeUndefined();
 
     const trusted = codeProject({ nativeProviders: ["codex"] });
     expect(
-      sessionNativeSetup(sources(codex(), trusted), {
-        providerInstanceId: codex().id,
+      sessionNativeSetup(sources(off, trusted), {
+        providerInstanceId: off.id,
         projectId,
         mode: "code",
         executionPolicy: "approval-gated",
       }),
-    ).toMatchObject({ subagents: true, projectCode: true });
+    ).toMatchObject({ subagents: true, webTools: false, projectCode: true });
 
     // Another provider's trust in the same Project does not count.
     expect(
-      sessionNativeSetup(sources(codex(), codeProject({ nativeProviders: ["claude"] })), {
-        providerInstanceId: codex().id,
+      sessionNativeSetup(sources(off, codeProject({ nativeProviders: ["claude"] })), {
+        providerInstanceId: off.id,
         projectId,
         mode: "code",
         executionPolicy: "approval-gated",
       }),
     ).toBeUndefined();
+  });
+
+  it("loads a Project's own code only once the Project trusts this provider", () => {
+    expect(
+      sessionNativeSetup(sources(codex(), codeProject()), {
+        providerInstanceId: codex().id,
+        projectId,
+        mode: "code",
+        executionPolicy: "approval-gated",
+      }),
+    ).toMatchObject({ projectCode: false });
+    expect(
+      sessionNativeSetup(sources(codex(), codeProject({ nativeProviders: ["codex"] })), {
+        providerInstanceId: codex().id,
+        projectId,
+        mode: "code",
+        executionPolicy: "approval-gated",
+      }),
+    ).toMatchObject({ projectCode: true });
   });
 
   it("never lets a Project's trust reach a Chat thread", () => {

@@ -229,7 +229,15 @@ export class ThreadMentionService {
         return decodeThreadMentionCommandResult({
           kind: "mentions-resolved",
           requestId: command.requestId,
-          ...(await this.#resolve(context.windowId, command.threadIds, context.readerThreadId)),
+          // A turn's own reader wins; the renderer's preflight names its
+          // composer as its search did. Either way only threads this window
+          // can Open are judged, so naming a reader never widens the set.
+          ...(await this.#resolve(
+            context.windowId,
+            command.threadIds,
+            context.readerThreadId ??
+              (command.readerThreadId === undefined ? undefined : String(command.readerThreadId)),
+          )),
         });
       case "open-side-chat":
         return await this.#openSideChat(context.windowId, command);
@@ -702,6 +710,27 @@ export function codeMentionWithinReach(input: {
 }): boolean {
   const reach = input.readerCodeProjectId ?? input.workspace.contextByMode.code.projectId;
   return reach !== null && String(reach) === String(input.mentionedProjectId);
+}
+
+/**
+ * Whether a window reaches a mentioned Chat thread's Project for a composer,
+ * as a window showing that composer alone would: a Chat composer reaches its
+ * own Project (`null` for an unscoped Chat), any other composer the window's
+ * Chat lead. A Chat thread opens only in a window whose Chat layout shows its
+ * Project, so without this a Chat pane of another Project would make its
+ * threads attachable from the composer beside it.
+ */
+export function chatMentionWithinReach(input: {
+  readonly workspace: WindowWorkspace;
+  /** The composer's Chat Project; `undefined` when the composer is not a Chat thread. */
+  readonly readerChatProjectId: ProjectId | null | undefined;
+  readonly mentionedProjectId: ProjectId | null;
+}): boolean {
+  const reach =
+    input.readerChatProjectId === undefined
+      ? input.workspace.contextByMode.chat.projectId
+      : input.readerChatProjectId;
+  return String(reach) === String(input.mentionedProjectId);
 }
 
 /**

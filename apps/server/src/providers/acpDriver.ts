@@ -2,6 +2,8 @@ import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import { compactAcpConversation } from "./acpCompaction";
 import { readAcpFileReview } from "./acpFileReview";
 import { isAbsolute, resolve } from "node:path";
+import { providerCommandOf } from "@octant/domain";
+import { advertisedSlashCommands } from "./providerSlashCommands";
 import {
   CorrelationId,
   UtcTimestamp,
@@ -12,6 +14,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderCapabilitySupport,
   type ProviderFailure,
+  type ProviderInputModality,
   type ProviderInstanceId,
   type ProviderModelOptionValues,
   type ProviderNativeSetup,
@@ -19,6 +22,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
+  type ProviderSlashCommand,
   type ProviderToolAnswer,
   type ProviderToolDefinition,
   type ProviderApprovalCall,
@@ -38,6 +42,7 @@ import {
 } from "./acpUsage";
 import { ACP_CLIENT_TERMINAL_TOOL_NAMES, ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
 import {
+  attachmentMediaTypeToModality,
   rejectUnsupportedChatTurn,
   renderProviderTurnPrompt,
   textOnlyInputModalities,
@@ -56,7 +61,7 @@ import type {
   AcpProcessPort,
   AcpSessionMode,
 } from "./acpProcess";
-import type { AcpProviderProfile } from "./acpProfiles";
+import { acpSubagentsRun, type AcpProviderProfile } from "./acpProfiles";
 import { createAcpManagedToolsBridge, type AcpManagedToolsBridge } from "./acpManagedTools";
 import {
   AcpFailure,
@@ -64,6 +69,7 @@ import {
   type AcpConfigOptionsResult,
   type AcpMcpHttpServer,
   type AcpNewSessionResult,
+  type AcpPromptImage,
   type AcpPromptResult,
   type AcpServerRequest,
   type AcpServerRequestMessage,
@@ -102,7 +108,11 @@ export interface AcpClientPort {
     meta?: Readonly<Record<string, unknown>>,
   ) => Promise<AcpNewSessionResult>;
   readonly closeSession: (sessionId: string) => Promise<void>;
-  readonly prompt: (sessionId: string, prompt: string) => Promise<AcpPromptResult>;
+  readonly prompt: (
+    sessionId: string,
+    prompt: string,
+    images?: ReadonlyArray<AcpPromptImage>,
+  ) => Promise<AcpPromptResult>;
   readonly setConfigOption: (
     sessionId: string,
     configId: string,
@@ -168,6 +178,8 @@ interface AcpRetainedRuntime {
   readonly client: AcpClientPort;
   readonly managedTools: AcpManagedToolsLease | undefined;
   readonly appManagedTools: ProviderCapabilitySupport;
+  /** Whether this process's `initialize` reply advertised image prompt blocks. */
+  readonly imageInput: boolean;
   readonly version: string;
   readonly commands: Set<string>;
   readonly compatibility: string;
@@ -265,6 +277,30 @@ function baseCapabilities(
     acpClientCapabilities: "supported",
     nativeSetup: profile.nativeSetupSupport ?? NO_NATIVE_SETUP,
   } as const;
+}
+
+/**
+ * What an approval says when the agent asks about a call Octant never saw.
+ * The agent's own subagents run in Work and Code outside Plan wherever the
+ * person's setup carries them (maintainer decision, 2026-11-14), and a
+ * subagent's request names a call only the child saw, so it is shown plainly
+ * with Allow and Deny under the thread's level instead of failing the turn. A
+ * profile with its own sentence keeps it everywhere; elsewhere, and in Chat
+ * and Plan, such a request still fails the turn.
+ */
+function unnamedPermission(
+  profile: AcpProviderProfile,
+  mode: AcpSessionMode,
+  executionPolicy: ProviderExecutionPolicy,
+  nativeSetup: ProviderNativeSetup | undefined,
+): { readonly unnamedPermissionDescription?: string } {
+  if (profile.unnamedPermissionDescription !== undefined) {
+    return { unnamedPermissionDescription: profile.unnamedPermissionDescription };
+  }
+  if (!acpSubagentsRun(mode, executionPolicy, nativeSetup)) return {};
+  return {
+    unnamedPermissionDescription: `A ${profile.displayName} subagent asks to run a tool. ${profile.displayName} doesn't say which.`,
+  };
 }
 
 /** Every ACP agent but a key provider loads none of its own setup. */
@@ -365,11 +401,23 @@ function providerFailure(
   }
 }
 
+const ACP_IMAGE_INPUT_MODALITIES: readonly ProviderInputModality[] = ["text", "image"];
+
+/**
+ * Whether the agent's own `initialize` reply says it takes image prompt
+ * blocks. Attachments reach an ACP agent only then; otherwise it stays
+ * text only (maintainer decision, 2026-11-14).
+ */
+function acceptsImagePrompts(initialized: AcpConnection["initialized"]): boolean {
+  return initialized.agentCapabilities.promptCapabilities?.image === true;
+}
+
 function normalizeModels(
   profile: AcpProviderProfile,
   options: ReadonlyArray<AcpSessionConfigOption>,
   models: AcpSessionModelState | undefined,
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
+  imageInput = false,
 ) {
   const model = options.find((option) => option.id === "model");
   // The config option and the session's model state are two ACP spellings of
@@ -414,7 +462,9 @@ function normalizeModels(
         reasoning !== undefined || declaredLevels.length > 0
           ? ("supported" as const)
           : ("unavailable" as const),
-      inputModalities: textOnlyInputModalities,
+      // ACP advertises image prompts for the agent, not per model, so every
+      // model it lists carries what the agent said it accepts.
+      inputModalities: imageInput ? ACP_IMAGE_INPUT_MODALITIES : textOnlyInputModalities,
       // The agent reasons, and that capability is reported above. A level is
       // declared only because the session applies it: the driver sets the
       // profile's reasoning option, or carries it in the session metadata, when
@@ -490,7 +540,8 @@ function normalizeProbe(
   credentialStatus?: "stored",
   optionsByModel?: ReadonlyMap<string, ReadonlyArray<AcpSessionConfigOption>>,
 ): ProviderProbeResult {
-  const models = normalizeModels(profile, options, sessionModels, optionsByModel);
+  const imageInput = acceptsImagePrompts(initialized);
+  const models = normalizeModels(profile, options, sessionModels, optionsByModel, imageInput);
   const reasoning =
     resolveReasoningOption(profile, options) !== undefined ||
     models.some((model) => model.reasoning === "supported")
@@ -514,6 +565,7 @@ function normalizeProbe(
         negotiatedAppManagedTools(initialized, profile, version),
         version,
       ),
+      nativeAttachments: imageInput ? "supported" : "unsupported",
       resume,
       reasoning,
     },
@@ -548,6 +600,15 @@ function commandInventory(notification: AcpServerNotification): ReadonlyArray<st
     names.push(candidate.name);
   }
   return names;
+}
+
+/** The commands an `available_commands_update` lists, with what the menu shows for each. */
+function advertisedCommandsOf(
+  notification: AcpServerNotification,
+): ReadonlyArray<ProviderSlashCommand> | undefined {
+  const update = notification.params.update;
+  if (update.sessionUpdate !== "available_commands_update") return undefined;
+  return advertisedSlashCommands(update.availableCommands);
 }
 
 function isReviewedCommandInventory(
@@ -741,6 +802,13 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const { connection, client } = yield* managedHomeClient;
+        // The agent lists its commands after `session/new`; the probe's
+        // client closes with its scope, and the listener with it.
+        let advertised: ReadonlyArray<ProviderSlashCommand> = [];
+        client.onNotification((notification) => {
+          const commands = advertisedCommandsOf(notification);
+          if (commands !== undefined) advertised = commands;
+        });
         if (profile.authenticateOnProbe) {
           yield* request(() => client.authenticate(), {
             stage: "authentication",
@@ -803,8 +871,9 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           options.authentication === "api-key" ? "stored" : undefined,
           profile.discoverModelOptions === true ? optionsByModel : undefined,
         );
-        options.runtimeRegistry.setObservedState(observed);
-        return observed;
+        const listed = advertised.length === 0 ? observed : { ...observed, commands: advertised };
+        options.runtimeRegistry.setObservedState(listed);
+        return listed;
       });
     },
     acquire: ({ instanceId, projectRoot, mode, extraFolders = [], sandboxPolicy }) => {
@@ -1047,6 +1116,10 @@ function makeConnection(
       if (notification.params.sessionId === state.sourceSessionId && commands !== undefined) {
         state.runtime.commands.clear();
         for (const command of commands) state.runtime.commands.add(command);
+        options.runtimeRegistry.setObservedCommands(
+          options.instanceId,
+          advertisedCommandsOf(notification) ?? [],
+        );
         return;
       }
       if (
@@ -1163,6 +1236,9 @@ function makeConnection(
         void state.client.respondPermission(requestMessage.id).catch(() => undefined);
         return;
       }
+      // An unseen subagent's run is journaled before the approval it asks for.
+      if (mapped.kind === "approval")
+        for (const preceding of mapped.preceding ?? []) offer(preceding);
       // Plan is read-only, so nothing it asks for is anyone's to approve. Work
       // and Code share the shell at the thread's level, so an `execute`
       // request reaches the person in Work as it does in Code.
@@ -1199,6 +1275,7 @@ function makeConnection(
         readonly modelId: string;
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly tools: ReadonlyArray<ProviderToolDefinition>;
+        readonly nativeSetup?: ProviderNativeSetup;
       },
       source: AcpNewSessionResult,
       scope: Scope.CloseableScope,
@@ -1226,6 +1303,10 @@ function makeConnection(
         ...(profile.childRunMetaKey === undefined
           ? {}
           : { childRunMetaKey: profile.childRunMetaKey }),
+        ...unnamedPermission(profile, mode, input.executionPolicy, input.nativeSetup),
+        ...(profile.unseenChildCalls === undefined
+          ? {}
+          : { unseenChildCalls: profile.unseenChildCalls }),
       };
       let state!: SessionState;
       const removeNotification = client.onNotification((message) =>
@@ -1502,8 +1583,12 @@ function makeConnection(
             if (refusal !== undefined) throw failure("incompatible", refusal);
             const shellRefusal = shellWithoutRequestRefusal(mode, input.executionPolicy);
             if (shellRefusal !== undefined) throw failure("unsupported", shellRefusal);
+            // A Project trusted for the agent, outside Plan, loads the files
+            // the refusal is about, as the agent does on its own.
             const projectRefusal =
-              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+              runtimeRoot === projectRoot && input.nativeSetup?.projectCode !== true
+                ? profile.refusesProject?.(projectRoot)
+                : undefined;
             if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
             if (bridgeTools.length > 0 && process.platform !== "darwin") {
@@ -1534,6 +1619,10 @@ function makeConnection(
               commandSessionId ??= notification.params.sessionId;
               if (commandSessionId !== notification.params.sessionId) commandsMismatch = true;
               startupCommands = commands;
+              options.runtimeRegistry.setObservedCommands(
+                options.instanceId,
+                advertisedCommandsOf(notification) ?? [],
+              );
             });
             const appManagedTools = negotiatedAppManagedTools(
               connection.initialized,
@@ -1763,6 +1852,7 @@ function makeConnection(
               client,
               managedTools: runtimeTools,
               appManagedTools,
+              imageInput: acceptsImagePrompts(connection.initialized),
               version: connection.version,
               commands: new Set(
                 !commandsMismatch && commandSessionId === source.sessionId ? startupCommands : [],
@@ -1990,18 +2080,57 @@ function makeConnection(
         stateFor(input.sessionId).pipe(
           Effect.flatMap((state) => {
             const { bridgeTools } = partitionTools(input.tools);
-            const validationInput = { ...input, tools: bridgeTools };
+            // Attachments go only to an agent that advertised image prompts,
+            // and only as images; anything else is refused, not dropped.
+            if (input.attachments.length > 0) {
+              if (!state.runtime.imageInput) {
+                return Effect.fail(failure("unsupported", "Native attachments are unsupported."));
+              }
+              if (
+                input.attachments.some(
+                  (attachment) => attachmentMediaTypeToModality(attachment.mediaType) !== "image",
+                )
+              ) {
+                return Effect.fail(failure("unsupported", `${name} takes only image attachments.`));
+              }
+            }
+            const images: ReadonlyArray<AcpPromptImage> = input.attachments.map((attachment) => ({
+              mimeType: attachment.mediaType,
+              data: Buffer.from(attachment.bytes).toString("base64"),
+            }));
+            const validationInput = { ...input, attachments: [], tools: bridgeTools };
             return rejectUnsupportedChatTurn(validationInput, {
               ...capabilities,
               appManagedTools: state.appManagedTools,
             }).pipe(
               Effect.flatMap(() => {
                 const prompt = renderProviderTurnPrompt(input);
-                if (profile.reviewedCommands !== undefined && prompt.trimStart().startsWith("/")) {
+                // An agent with a reviewed inventory runs no slash command in
+                // Plan or Chat, since a command can write; elsewhere it runs
+                // only a command on that inventory, and one its session
+                // listed once it has listed any, so an unreviewed command
+                // cannot run.
+                const reviewed = profile.reviewedCommands;
+                const opensWithSlash = prompt.trimStart().startsWith("/");
+                const readOnly = mode === "chat" || state.executionPolicy === "plan";
+                const listed = [...state.runtime.commands];
+                const command = providerCommandOf(
+                  input.prompt,
+                  (reviewed ?? [])
+                    .filter((commandName) => listed.length === 0 || listed.includes(commandName))
+                    .map((commandName) => ({ name: commandName })),
+                );
+                if (
+                  reviewed !== undefined &&
+                  opensWithSlash &&
+                  (readOnly || command === undefined)
+                ) {
                   return Effect.fail(
                     failure(
                       "unauthorized",
-                      `${name} slash commands are disabled. Rephrase the request without a leading slash.`,
+                      readOnly
+                        ? `${name} slash commands do not run in Plan or Chat. Rephrase the request without a leading slash.`
+                        : `${name} runs only the slash commands it listed and Octant reviewed. Rephrase the request without a leading slash.`,
                     ),
                   );
                 }
@@ -2026,7 +2155,7 @@ function makeConnection(
                 if (state.runtime.usage !== undefined) beginAcpUsageTurn(state.runtime.usage);
                 state.promptActive = true;
                 void state.client
-                  .prompt(state.sourceSessionId, prompt)
+                  .prompt(state.sourceSessionId, prompt, images)
                   .then((result) => {
                     state.promptActive = false;
                     void cancelForms(state);
@@ -2213,10 +2342,17 @@ function makeConnection(
                 }
               });
             }
-            if (profile.userQuestions === "unsupported") {
+            // The refusal names what the probe reported for this release, so a
+            // form-asking agent on an unverified release says `unavailable`.
+            const questions = baseCapabilities(
+              profile,
+              undefined,
+              state.runtime.version,
+            ).userQuestions;
+            if (questions !== "supported") {
               return Effect.fail(
                 failure(
-                  "unsupported",
+                  questions,
                   `${name} cannot request user input through its current ACP runtime.`,
                 ),
               );

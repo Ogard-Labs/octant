@@ -1,5 +1,6 @@
 import type { SandboxPolicySelection } from "@octant/contracts/sandbox-policy";
 import {
+  forkSession as forkClaudeSession,
   listSessions as listClaudeSessions,
   query as queryClaude,
   type Options as ClaudeSdkOptions,
@@ -12,12 +13,14 @@ import type {
   ProviderExecutionPolicy,
   ProviderFailure,
   ProviderNativeSetup,
+  ProviderSlashCommand,
   ProviderToolDefinition,
   ThreadPublishedSnapshot,
 } from "@octant/contracts";
 import { withClaudeAccountDirectory } from "./claudeAccountDirectory";
 import { createManagedMcpTools, type ManagedToolAnswer } from "./managedMcpTools";
 import { Effect, Stream, type Scope } from "effect";
+import { isAbsolute } from "node:path";
 
 import {
   claudeOffersTool,
@@ -40,6 +43,7 @@ import {
 } from "./claudeAgentSdkDecoder";
 import { BoundedAsyncInput, makeClaudeCloseCoordinator } from "./claudeAgentSdkLifecycle";
 import type { ClaudeProcessPort, SpawnClaudeCodeProcess } from "./claudeProcess";
+import type { ClaudeTaskToolOutput } from "./claudeTaskList";
 import type { ProviderRuntimeProxiedNetwork } from "../network/providerRuntimeNetwork";
 
 export type ClaudePermissionMode = "default" | "bypassPermissions" | "plan" | "auto";
@@ -53,8 +57,15 @@ export type ClaudeToolDecision =
  * final and runs the tool without consulting `canUseTool`, so the hook can
  * only say "allow" for a call Octant would let through unasked; "ask" hands
  * the call to `canUseTool`, where approvals and questions are raised.
+ * "own-rules" answers nothing, so Claude Code's own permission rules (the
+ * person's `permissions.allow`, `ask`, and `deny`) run first and only a call
+ * they leave to ask reaches `canUseTool`: a forced "ask" skips the person's
+ * allow rules in the bundled runtime.
  */
-export type ClaudePreToolDecision = ClaudeToolDecision | { readonly behavior: "ask" };
+export type ClaudePreToolDecision =
+  | ClaudeToolDecision
+  | { readonly behavior: "ask" }
+  | { readonly behavior: "own-rules" };
 
 export interface ClaudeToolRequest {
   readonly toolName: string;
@@ -70,6 +81,10 @@ export interface ClaudeToolRequest {
 
 export interface ClaudePreToolRequest {
   readonly sessionId: string;
+  /**
+   * The session's working directory when the call was made: the Project
+   * root, or any folder a `cd` moved the session into.
+   */
   readonly projectRoot: string;
   readonly toolName: string;
   readonly input: unknown;
@@ -81,7 +96,12 @@ export interface ClaudeSandboxSettings {
   readonly enabled: true;
   readonly failIfUnavailable: true;
   readonly autoAllowBashIfSandboxed: false;
-  readonly allowUnsandboxedCommands: false;
+  /**
+   * True below Full access, so a `Bash` call may leave the sandbox with
+   * `dangerouslyDisableSandbox` once the gate asked about it; false for a Full
+   * access thread that kept its sandbox.
+   */
+  readonly allowUnsandboxedCommands: boolean;
   readonly filesystem: {
     readonly denyRead: readonly ["/"];
     /** The Project root, then its extra folders. */
@@ -89,12 +109,40 @@ export interface ClaudeSandboxSettings {
     readonly allowWrite: readonly [string, ...string[]];
   };
   /**
-   * The sandbox's commands reach the network only through this loopback
-   * port: Octant's egress proxy for the session. The Agent SDK's
-   * `sandbox.network.httpProxyPort` points the sandbox at an outside proxy
-   * instead of its own, so the proxy decides every host.
+   * With Network limits on, the sandbox's commands reach the network only
+   * through this loopback port: Octant's egress proxy for the session. The
+   * Agent SDK's `sandbox.network.httpProxyPort` points the sandbox at an
+   * outside proxy instead of its own, so the proxy decides every host. With
+   * them off, `allowedDomains: ["*"]` keeps Claude's own proxy from
+   * restricting hosts or asking about each one: open network is the default.
    */
-  readonly network?: { readonly httpProxyPort: number };
+  readonly network?: ClaudeSandboxNetwork;
+}
+
+export type ClaudeSandboxNetwork =
+  | { readonly httpProxyPort: number }
+  | { readonly allowedDomains: readonly ["*"] };
+
+/** The SDK's own copy of a sandbox network setting, so a caller's value is never shared. */
+function sdkSandboxNetwork(
+  network: ClaudeSandboxNetwork,
+): { httpProxyPort: number } | { allowedDomains: string[] } {
+  return "httpProxyPort" in network
+    ? { httpProxyPort: network.httpProxyPort }
+    : { allowedDomains: [...network.allowedDomains] };
+}
+
+/**
+ * Claude Code's own system prompt, with Octant's additions only appended.
+ * Every launch sends it: agent-sdk 0.3.211 reads a missing `systemPrompt` as
+ * the custom prompt `""`, and the runtime then replaces its default prompt
+ * (output styles, commit and pull-request guidance, environment details)
+ * with that empty one, so Claude ran without its own prompt.
+ */
+export interface ClaudeSystemPrompt {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+  readonly append?: string;
 }
 
 export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -143,12 +191,26 @@ export interface ClaudeOpenQueryInput {
   readonly persistSession?: false;
   readonly tools: readonly string[];
   /**
+   * Present: the session holds Claude Code's whole built-in tool set except
+   * these, and `tools` names the ones Octant's gate has its own rule for.
+   * Absent: the session holds exactly `tools`.
+   */
+  readonly withheldTools?: readonly string[];
+  /**
    * What this session loads of the person's own Claude setup, already held to
    * what the driver supports for the session's mode and posture. Absent opens
    * the query with no setting sources, skills, agents, plugins, or MCP
    * servers but Octant's own.
    */
   readonly nativeSetup?: ProviderNativeSetup;
+  /**
+   * Instruction files Octant read for this session because its setting
+   * sources do not load them (`claudeSessionInstructions`), appended to
+   * Claude Code's own system prompt and never in place of it.
+   */
+  readonly instructions?: string;
+  /** The account keeps Claude's own memory for this launch (`providerOwnMemoryLaunches`). */
+  readonly ownMemory?: true;
   /**
    * The auto-compact window for this query alone, from the person's
    * compaction point; absent leaves the runtime its own.
@@ -191,6 +253,11 @@ export interface ClaudeInitialization {
    */
   readonly compactAnnounced: boolean;
   /**
+   * The runtime's own slash commands and skills as it announced them, which
+   * a composer lists as the provider's. Absent when it announced none.
+   */
+  readonly commands?: ReadonlyArray<ProviderSlashCommand>;
+  /**
    * Where the runtime compacts the session by itself, in tokens, when it said
    * compaction is on. Absent when it said nothing usable.
    */
@@ -204,6 +271,9 @@ export interface ClaudeSessionMetadata {
   readonly projectRoot: string;
   readonly lastModified: number;
   readonly createdAt?: number;
+  /** The name the person gave the session, or else the runtime's summary of it. */
+  readonly title?: string;
+  readonly gitBranch?: string;
 }
 
 export type ClaudeJsonValue =
@@ -225,6 +295,19 @@ export interface ClaudeTaskUsage {
   readonly totalTokens: number;
   readonly toolUses: number;
   readonly durationMs: number;
+}
+
+/**
+ * One agent a workflow started, as the runtime's `workflow_progress` reports
+ * it (Claude Code 2.1.211): its place in the script, its label, and how far
+ * it got. The agent's own messages stay inside the runtime; each tool call it
+ * makes reaches Octant's gate on its own.
+ */
+export interface ClaudeWorkflowAgent {
+  readonly index: number;
+  readonly label: string;
+  readonly state: "start" | "progress" | "done" | "error";
+  readonly lastToolName?: string;
 }
 
 export type ClaudeResultSubtype =
@@ -298,6 +381,11 @@ export type ClaudeDecodedMessage =
       readonly kind: "assistant";
       readonly sessionId: string;
       readonly messageId: string;
+      /**
+       * The SDK's id for this message in the session transcript, which
+       * `forkSession` and `resumeSessionAt` cut at. Absent when not reported.
+       */
+      readonly uuid?: string;
       readonly error?: string;
       readonly content: readonly ClaudeAssistantContent[];
       readonly usage: ClaudeUsage;
@@ -306,6 +394,12 @@ export type ClaudeDecodedMessage =
       readonly kind: "stream-event";
       readonly sessionId: string;
       readonly event: ClaudeStreamEvent;
+    }
+  | {
+      /** The runtime's whole command list after a mid-session change. */
+      readonly kind: "commands-changed";
+      readonly sessionId: string;
+      readonly commands: ReadonlyArray<ProviderSlashCommand>;
     }
   | {
       readonly kind: "tool-results";
@@ -331,6 +425,11 @@ export type ClaudeDecodedMessage =
           /** Attached by the driver from the file the person approved publishing. */
           readonly snapshot?: ThreadPublishedSnapshot;
         };
+        /**
+         * A task tool's structured result, read only from a message that
+         * settles one call. The mapper keeps it only for a task tool call.
+         */
+        readonly taskOutput?: ClaudeTaskToolOutput;
       }[];
     }
   | {
@@ -378,10 +477,30 @@ export type ClaudeDecodedMessage =
       readonly subtype: "task_started" | "task_updated" | "task_progress" | "task_notification";
       readonly taskId: string;
       readonly toolUseId?: string;
+      /**
+       * Work the runtime runs in the background and wakes the model for when
+       * it ends: a command or watch (`local_bash`), or a workflow
+       * (`local_workflow`).
+       */
+      readonly background?: true;
+      /**
+       * A workflow's task: `task_started` names the workflow, and its
+       * `task_progress` frames say where each agent it started stands.
+       */
+      readonly workflow?: {
+        readonly name?: string;
+        readonly agents?: readonly ClaudeWorkflowAgent[];
+      };
       readonly status?: string;
       readonly description?: string;
       readonly summary?: string;
       readonly usage?: ClaudeTaskUsage;
+    }
+  | {
+      /** Whether the runtime is running a turn, as it reports it. */
+      readonly kind: "session-state";
+      readonly sessionId: string;
+      readonly state: "idle" | "running" | "requires_action";
     }
   | {
       readonly kind: "rate-limit";
@@ -446,8 +565,25 @@ export type ClaudeDecodedMessage =
     }
   | { readonly kind: "ignored" };
 
+/** The image types Claude's Messages API takes as `image` content blocks. */
+export const CLAUDE_IMAGE_MEDIA_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+] as const;
+export type ClaudeImageMediaType = (typeof CLAUDE_IMAGE_MEDIA_TYPES)[number];
+
+/** One image the person attached, sent beside the message text as a base64 image block. */
+export interface ClaudeImageInput {
+  readonly mediaType: ClaudeImageMediaType;
+  readonly data: string;
+}
+
 export interface ClaudeUserMessage {
   readonly text: string;
+  /** Images the person attached, sent as image content blocks after the text. */
+  readonly images?: ReadonlyArray<ClaudeImageInput>;
   /**
    * Octant's context for this message, handed to Claude Code by the
    * `UserPromptSubmit` hook so the message itself is only the person's text.
@@ -494,6 +630,15 @@ export interface ClaudeQueryPort {
   readonly requestCompaction: () => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
   /**
+   * Stops one task the runtime started, such as a subagent, by the runtime's
+   * own task id, and leaves the turn that started it running. The runtime
+   * reports the stop with a task notification; this only asks for it.
+   * `unsupported` when the runtime offers no single-task stop.
+   */
+  readonly stopTask: (
+    taskId: string,
+  ) => Effect.Effect<"requested" | "unsupported", ProviderFailure>;
+  /**
    * Kills this query's runtime process tree outright, without asking it to
    * stop first. Only this query's own process is signalled.
    */
@@ -518,11 +663,46 @@ export interface ClaudeAgentSdkPort {
     readonly projectRoot: string;
     readonly configDirectory?: string;
   }) => Effect.Effect<ClaudeSessionMetadata | undefined, ProviderFailure>;
+  /**
+   * Copies a session of this Project into a new one ending at (and holding)
+   * the message `upToMessageId`, with fresh message ids, and returns the new
+   * session's id. The source is not changed. Absent on a port that cannot.
+   */
+  readonly forkSession?: (input: {
+    readonly sessionId: string;
+    readonly projectRoot: string;
+    readonly upToMessageId: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * The account's sessions whose own folder is `projectRoot`, as the runtime
+   * lists them. A port without it offers no session to start a thread from.
+   */
+  readonly listSessions?: (input: {
+    readonly projectRoot: string;
+    readonly configDirectory?: string;
+  }) => Effect.Effect<ReadonlyArray<ClaudeSessionMetadata>, ProviderFailure>;
 }
+
+// Mutable because the SDK's `SDKUserMessage` content is; the port builds a
+// fresh one for each message and shares it with no caller.
+type ClaudeAgentSdkInputContent =
+  | string
+  | Array<
+      | { readonly type: "text"; readonly text: string }
+      | {
+          readonly type: "image";
+          readonly source: {
+            readonly type: "base64";
+            readonly media_type: ClaudeImageMediaType;
+            readonly data: string;
+          };
+        }
+    >;
 
 export interface ClaudeAgentSdkInputMessage {
   readonly type: "user";
-  readonly message: { readonly role: "user"; readonly content: string };
+  readonly message: { readonly role: "user"; readonly content: ClaudeAgentSdkInputContent };
   readonly parent_tool_use_id: null;
   readonly origin: { readonly kind: "human" };
   readonly uuid: `${string}-${string}-${string}-${string}-${string}`;
@@ -545,8 +725,9 @@ interface ClaudeAgentSdkHookOptions {
   readonly signal: AbortSignal;
 }
 
+/** A hook's answer; one with no `hookSpecificOutput` decides nothing. */
 interface ClaudeAgentSdkHookOutput {
-  readonly hookSpecificOutput: {
+  readonly hookSpecificOutput?: {
     readonly hookEventName: "PreToolUse";
     readonly permissionDecision: "allow" | "deny" | "ask";
     readonly permissionDecisionReason?: string;
@@ -626,35 +807,46 @@ export interface ClaudeNativeQueryOptions {
  * query reads no settings file, enables no skill, and starts no MCP server
  * but Octant's, which is how every session opened before this rule.
  *
- * The account's home settings are where its skills, plugins, and hooks live
- * (`user`), so turning on skills or hooks reads that file; when hooks are off
- * (Chat and Plan) a flag setting keeps every hook from running, and it
- * outranks the file. Project settings and `.mcp.json` come only with the
- * Project's own code: Claude Code reads a Project's skills only with the
- * `project` source, which also loads that Project's hooks, so Project skills
- * load in a trusted Project and not otherwise. The runtime has no switch that
- * starts the account's MCP servers without also reading a Project's
- * `.mcp.json` (`strictMcpConfig` governs both), so MCP servers start only
- * with the Project's code. Claude's own memory stays off by flag as well as
- * by its environment switch.
+ * The account's home settings are where its skills, plugins, hooks, and MCP
+ * servers live (`user`), so turning on any of them reads that file. The
+ * plugins the person installed and enabled there load with it: the SDK's
+ * `plugins` option only adds session plugin folders, and Claude Code 2.1.211
+ * loads every plugin its merged settings enable (read from the bundled
+ * binary, 2026-11-14). When hooks are off (Chat and Plan) a flag setting keeps
+ * every hook from running, a plugin's included, and it outranks the file.
+ *
+ * Project settings and `.mcp.json` come only with the Project's own code.
+ * Claude Code reads a Project's `.mcp.json` only while the `project` setting
+ * source is on, its home servers only while `user` is, and its per-folder
+ * servers only while `local` is (2.1.211, read from the bundled binary,
+ * 2026-11-14). So `strictMcpConfig: false` with only `user` starts the
+ * account's own servers, its claude.ai connectors, and its plugins' servers,
+ * while a Project's servers stay held until the Project is trusted. The
+ * `enabledMcpjsonServers` settings would not hold them: a launch with no
+ * terminal approves every pending Project server once the `project` source
+ * is on. Claude's own memory stays off by flag as well as by its environment
+ * switch, unless the account keeps its own memory.
  */
 export function claudeNativeQueryOptions(
   setup: ProviderNativeSetup | undefined,
+  ownMemory = false,
 ): ClaudeNativeQueryOptions {
   if (setup === undefined) {
     return { settingSources: [], skills: [], strictMcpConfig: true, settings: {} };
   }
-  const readsHome = setup.skills || setup.hooks || setup.projectCode;
+  const readsHome = setup.skills || setup.hooks || setup.toolServers || setup.projectCode;
   const settingSources: ClaudeSettingSource[] = [];
   if (readsHome) settingSources.push("user");
   if (setup.projectCode) settingSources.push("project", "local");
   return {
     settingSources,
     skills: setup.skills ? "all" : [],
-    strictMcpConfig: !setup.projectCode,
+    strictMcpConfig: !(setup.toolServers || setup.projectCode),
     settings: {
       ...(readsHome && !setup.hooks ? { disableAllHooks: true as const } : {}),
-      ...(readsHome ? { autoMemoryEnabled: false as const } : {}),
+      // Home settings could turn auto-memory on behind the account's switch,
+      // so they are held to it; an account that keeps its own memory is not.
+      ...(readsHome && !ownMemory ? { autoMemoryEnabled: false as const } : {}),
     },
   };
 }
@@ -665,6 +857,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly model: string;
   readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
+  readonly systemPrompt: ClaudeSystemPrompt;
   readonly resume?: string;
   readonly sessionId?: string;
   readonly persistSession?: false;
@@ -676,7 +869,9 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly mcpServers: Readonly<Record<string, never>>;
   readonly strictMcpConfig: boolean;
   readonly additionalDirectories: readonly string[];
-  readonly tools: readonly string[];
+  readonly tools: readonly string[] | ClaudeToolPreset;
+  readonly disallowedTools?: readonly string[];
+  readonly allowedTools?: readonly string[];
   readonly agents: Readonly<Record<string, never>>;
   readonly plugins: readonly [];
   readonly includePartialMessages: true;
@@ -732,6 +927,8 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
     servers: Record<string, McpSdkServerConfigWithInstance>,
   ) => Promise<McpSetServersResult>;
   readonly interrupt: () => Promise<unknown>;
+  /** Older runtimes cannot stop one task without interrupting the turn. */
+  readonly stopTask?: (taskId: string) => Promise<void>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Promise<void>;
   readonly initializationResult: () => Promise<unknown>;
   /** The runtime's own account of its window; older runtimes do not answer. */
@@ -754,6 +951,11 @@ export interface ClaudeAgentSdkBridge {
     readonly dir: string;
     readonly includeWorktrees: false;
   }) => Promise<unknown>;
+  /** The SDK's own session copy; absent on a bridge that cannot make one. */
+  readonly forkSession?: (
+    sessionId: string,
+    options: { readonly dir: string; readonly upToMessageId: string },
+  ) => Promise<unknown>;
 }
 
 export interface ClaudeAgentSdkPortOptions {
@@ -863,8 +1065,9 @@ const SANDBOX_KEYS = [
   "filesystem",
 ] as const;
 const SANDBOX_FILESYSTEM_KEYS = ["allowRead", "allowWrite", "denyRead"] as const;
-/** The only network setting Octant sends: the session's egress proxy port. */
+/** The only network settings Octant sends: the session's egress proxy port, or every host. */
 const SANDBOX_NETWORK_KEYS = ["httpProxyPort"] as const;
+const SANDBOX_OPEN_NETWORK_KEYS = ["allowedDomains"] as const;
 
 function hasExactKeys(
   value: unknown,
@@ -877,6 +1080,28 @@ function hasExactKeys(
 
 function isExactPathTuple(value: unknown, expected: string): boolean {
   return Array.isArray(value) && value.length === 1 && value[0] === expected;
+}
+
+/**
+ * Whether Claude's sandbox lets a command out of it after the gate asks: only
+ * at Guarded and Reviewed. Plan's read-only rule and a Full access thread
+ * that kept its sandbox are held by the sandbox itself, not only the hook.
+ */
+export function claudeSandboxLetsCommandsOut(policy: ProviderExecutionPolicy): boolean {
+  return policy === "approval-gated" || policy === "auto-accept-edits";
+}
+
+function isValidSandboxNetwork(network: unknown): boolean {
+  if (hasExactKeys(network, SANDBOX_OPEN_NETWORK_KEYS)) {
+    return isExactPathTuple(network.allowedDomains, "*");
+  }
+  return (
+    hasExactKeys(network, SANDBOX_NETWORK_KEYS) &&
+    typeof network.httpProxyPort === "number" &&
+    Number.isInteger(network.httpProxyPort) &&
+    network.httpProxyPort >= 1 &&
+    network.httpProxyPort <= 65_535
+  );
 }
 
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
@@ -892,22 +1117,14 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
     if (sandbox === undefined) return false;
     const { network, ...rest } = sandbox;
     if (!hasExactKeys(rest, SANDBOX_KEYS)) return false;
-    // A network setting is only ever the proxy port: anything that would let
-    // the sandbox pick its own domains, sockets, or bindings is refused.
-    if (
-      network !== undefined &&
-      (!hasExactKeys(network, SANDBOX_NETWORK_KEYS) ||
-        !Number.isInteger(network.httpProxyPort) ||
-        network.httpProxyPort < 1 ||
-        network.httpProxyPort > 65_535)
-    ) {
-      return false;
-    }
+    // A network setting is only ever the proxy port or every host: anything
+    // that would let the sandbox pick its own sockets or bindings is refused.
+    if (network !== undefined && !isValidSandboxNetwork(network)) return false;
     if (
       sandbox.enabled !== true ||
       sandbox.failIfUnavailable !== true ||
       sandbox.autoAllowBashIfSandboxed !== false ||
-      sandbox.allowUnsandboxedCommands !== false ||
+      sandbox.allowUnsandboxedCommands !== claudeSandboxLetsCommandsOut(input.executionPolicy) ||
       !hasExactKeys(sandbox.filesystem, SANDBOX_FILESYSTEM_KEYS)
     ) {
       return false;
@@ -925,25 +1142,80 @@ function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   }
 }
 
-function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): boolean {
+/** Claude Code's whole built-in tool set, as the SDK names it. */
+interface ClaudeToolPreset {
+  readonly type: "preset";
+  readonly preset: "claude_code";
+}
+
+/**
+ * The tool options for a launch. With the full set the runtime gets its own
+ * preset less the withheld tools. The SDK notes that a native build may drop
+ * Grep and Glob from the preset in favour of searching through its shell
+ * unless they are listed in `allowedTools`; they are listed so a search stays
+ * a read the gate answers, not a command that asks. The `PreToolUse` hook
+ * still answers every call to them first.
+ */
+function claudeToolSetOptions(
+  input: Pick<ClaudeOpenQueryInput, "tools" | "withheldTools">,
+): Pick<ClaudeAgentSdkInvocationOptions, "tools" | "disallowedTools" | "allowedTools"> {
+  if (input.withheldTools === undefined) return { tools: [...input.tools] };
+  return {
+    tools: { type: "preset", preset: "claude_code" },
+    disallowedTools: [...input.withheldTools],
+    allowedTools: ["Grep", "Glob"],
+  };
+}
+
+/**
+ * Why a call asks for background work Octant cannot hold, or undefined. A
+ * background command (`Bash` with `run_in_background`) and a command watch
+ * (`Monitor`) run as background tasks the driver holds inside the turn that
+ * started them (maintainer decision, 2026-11-14), so neither is refused in
+ * general. Plan keeps the tool set and behaviour it had, so its read-only
+ * commands still run in the foreground. A watch that lasts the whole session
+ * would hold its turn open with nothing to end it but a stop, and a WebSocket
+ * watch is opened by the runtime process itself, outside the command sandbox
+ * and its network rules.
+ */
+function unavailableBackgroundWork(
+  toolName: unknown,
+  input: unknown,
+  executionPolicy: ClaudeOpenQueryInput["executionPolicy"],
+): string | undefined {
+  if (typeof input !== "object" || input === null) return undefined;
+  const fields = input as Readonly<Record<string, unknown>>;
   if (
-    toolName !== "Bash" ||
-    typeof input !== "object" ||
-    input === null ||
-    Array.isArray(input) ||
-    !Object.hasOwn(input, "run_in_background")
+    toolName === "Bash" &&
+    executionPolicy === "plan" &&
+    fields.run_in_background !== undefined &&
+    fields.run_in_background !== false
   ) {
-    return false;
+    return "Claude background commands are unavailable in Plan.";
   }
-  return (input as Readonly<Record<string, unknown>>).run_in_background !== false;
+  // A remote workflow is sent to a cloud session that clones the Project
+  // outside this host, its sandbox, and its gate.
+  if (toolName === "Workflow") {
+    return fields.remote !== undefined && fields.remote !== false
+      ? "Claude's Workflow runs on this host; a remote run is unavailable."
+      : undefined;
+  }
+  if (toolName !== "Monitor") return undefined;
+  if (fields.ws !== undefined) return "Claude's Monitor may watch a command, not a WebSocket.";
+  if (fields.persistent !== undefined && fields.persistent !== false) {
+    return "Claude's Monitor may not keep a watch for the whole session.";
+  }
+  return undefined;
 }
 
 function liveBridge(): ClaudeAgentSdkBridge {
   return {
     query: (invocation) => {
-      const { sandbox, settings, ...baseOptions } = invocation.options;
+      const { sandbox, settings, allowedTools, disallowedTools, ...baseOptions } =
+        invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
+        systemPrompt: { ...invocation.options.systemPrompt },
         ...(settings === undefined
           ? {}
           : {
@@ -962,7 +1234,12 @@ function liveBridge(): ClaudeAgentSdkBridge {
         skills: invocation.options.skills === "all" ? "all" : [],
         mcpServers: { ...invocation.options.mcpServers },
         additionalDirectories: [...invocation.options.additionalDirectories],
-        tools: [...invocation.options.tools],
+        tools:
+          "preset" in invocation.options.tools
+            ? { type: "preset", preset: "claude_code" }
+            : [...invocation.options.tools],
+        ...(disallowedTools === undefined ? {} : { disallowedTools: [...disallowedTools] }),
+        ...(allowedTools === undefined ? {} : { allowedTools: [...allowedTools] }),
         agents: { ...invocation.options.agents },
         plugins: [...invocation.options.plugins],
         ...(sandbox === undefined
@@ -971,7 +1248,10 @@ function liveBridge(): ClaudeAgentSdkBridge {
             ? { sandbox: { enabled: false } }
             : {
                 sandbox: {
-                  ...sandbox,
+                  enabled: sandbox.enabled,
+                  failIfUnavailable: sandbox.failIfUnavailable,
+                  autoAllowBashIfSandboxed: sandbox.autoAllowBashIfSandboxed,
+                  allowUnsandboxedCommands: sandbox.allowUnsandboxedCommands,
                   filesystem: {
                     denyRead: [...sandbox.filesystem.denyRead],
                     allowRead: [...sandbox.filesystem.allowRead],
@@ -979,7 +1259,7 @@ function liveBridge(): ClaudeAgentSdkBridge {
                   },
                   ...(sandbox.network === undefined
                     ? {}
-                    : { network: { httpProxyPort: sandbox.network.httpProxyPort } }),
+                    : { network: sdkSandboxNetwork(sandbox.network) }),
                 },
               }),
         hooks: {
@@ -993,6 +1273,8 @@ function liveBridge(): ClaudeAgentSdkBridge {
       });
     },
     listSessions: (options) => listClaudeSessions(options),
+    forkSession: (sessionId, options) =>
+      forkClaudeSession(sessionId, { dir: options.dir, upToMessageId: options.upToMessageId }),
   };
 }
 
@@ -1060,6 +1342,7 @@ function killAndConfirmExit(
 
 export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): ClaudeAgentSdkPort {
   const sdk = options.sdk ?? liveBridge();
+  const copySession = sdk.forkSession;
   const inputCapacity = options.inputCapacity ?? DEFAULT_INPUT_CAPACITY;
 
   return {
@@ -1148,12 +1431,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               if (callback.agentID !== undefined && input.nativeSetup?.subagents !== true) {
                 return { behavior: "deny", message: "Claude subagent tool use is unavailable." };
               }
-              if (requestsUnavailableBackgroundTool(toolName, toolInput)) {
-                return {
-                  behavior: "deny",
-                  message: "Claude background tool use is unavailable.",
-                };
-              }
+              const backgroundRefusal = unavailableBackgroundWork(
+                toolName,
+                toolInput,
+                input.executionPolicy,
+              );
+              if (backgroundRefusal !== undefined)
+                return { behavior: "deny", message: backgroundRefusal };
               // This only authorizes forwarding to the app. The in-process
               // handler still waits for the server's tool policy and answer.
               if (isManagedTool(toolName)) return { behavior: "allow", updatedInput: toolInput };
@@ -1220,12 +1504,17 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     },
                   };
                 }
-                if (requestsUnavailableBackgroundTool(hookInput.tool_name, hookInput.tool_input)) {
+                const backgroundRefusal = unavailableBackgroundWork(
+                  hookInput.tool_name,
+                  hookInput.tool_input,
+                  input.executionPolicy,
+                );
+                if (backgroundRefusal !== undefined) {
                   return {
                     hookSpecificOutput: {
                       hookEventName: "PreToolUse",
                       permissionDecision: "deny",
-                      permissionDecisionReason: "Claude background tool use is unavailable.",
+                      permissionDecisionReason: backgroundRefusal,
                     },
                   };
                 }
@@ -1235,7 +1524,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   typeof hookInput.cwd !== "string" ||
                   typeof hookInput.tool_name !== "string" ||
                   typeof hookInput.tool_use_id !== "string" ||
-                  hookInput.cwd !== input.projectRoot ||
+                  // The session's working directory moves with a `cd`, so it is
+                  // passed on as the call's folder and the driver judges it
+                  // against the folders the session holds: after `cd apps/web`
+                  // every later call used to be refused here.
+                  !isAbsolute(hookInput.cwd) ||
                   hookInput.session_id !== initializedSessionId ||
                   toolUseId === undefined ||
                   toolUseId !== hookInput.tool_use_id
@@ -1283,6 +1576,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   toolUseId,
                   signal: callback.signal,
                 });
+                if (decision.behavior === "own-rules") return {};
                 return {
                   hookSpecificOutput: {
                     hookEventName: "PreToolUse",
@@ -1295,7 +1589,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 };
               };
-            const native = claudeNativeQueryOptions(input.nativeSetup);
+            const native = claudeNativeQueryOptions(input.nativeSetup, input.ownMemory === true);
             const flagSettings: ClaudeFlagSettings = {
               ...native.settings,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
@@ -1312,18 +1606,27 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               cwd: input.projectRoot,
               env: {
                 ...input.authEnvironment,
+                // The runtime says when it goes idle, so the driver can tell a
+                // turn it starts by itself from a queued notice from the end
+                // of the person's turn.
+                CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1",
                 MCP_TOOL_TIMEOUT: "660000",
-                // Claude Code 2.1.211 replaces its `TodoWrite` checklist with
-                // `TaskCreate`/`TaskUpdate` unless this is off (observed
-                // 2026-10-20 in the init tool list). The checklist keeps
-                // `TodoWrite`, which restates the whole list in every call,
-                // so the task panel never has to piece it together.
-                CLAUDE_CODE_ENABLE_TASKS: "false",
+                // `CLAUDE_CODE_ENABLE_TASKS` is left to Claude Code: its
+                // default replaces the `TodoWrite` checklist with the task
+                // tools, and Octant adds to a provider rather than taking its
+                // features away (maintainer decision, 2026-11-14). The task
+                // panel follows those tools from their results and rebuilds a
+                // resumed session's list from the one Claude stored.
               },
               model: input.model,
               ...(Object.keys(flagSettings).length === 0 ? {} : { settings: flagSettings }),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
+              systemPrompt: {
+                type: "preset",
+                preset: "claude_code",
+                ...(input.instructions === undefined ? {} : { append: input.instructions }),
+              },
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
               ...(input.resumeSessionId === undefined && input.sessionId !== undefined
                 ? { sessionId: input.sessionId }
@@ -1340,7 +1643,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               // The Project's extra folders, which Claude Code then counts as
               // its workspace beside `cwd`; its sandbox lists them too.
               additionalDirectories: [...(input.additionalDirectories ?? [])],
-              tools: [...input.tools],
+              ...claudeToolSetOptions(input),
               agents: {},
               plugins: [],
               includePartialMessages: true,
@@ -1358,7 +1661,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                         },
                         ...(input.sandbox.network === undefined
                           ? {}
-                          : { network: { httpProxyPort: input.sandbox.network.httpProxyPort } }),
+                          : { network: input.sandbox.network }),
                       },
                     }),
               // The SDK composes the launch and its `SpawnOptions` carry no
@@ -1412,10 +1715,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             const streamEnded = (failed: ProviderFailure) => {
               sessionAnnounced.reject(failed);
             };
-            // Status notes and rate-limit frames the runtime sends before it
-            // initializes (a resumed `/compact` does) are held and delivered
-            // right after the initialized message, so a consumer still sees
-            // the session initialize first and the notes in their own order.
+            // Status notes, rate-limit frames and session states the runtime
+            // sends before it initializes (a resumed `/compact` does) are held
+            // and delivered right after the initialized message, so a consumer
+            // still sees the session initialize first and the notes in their
+            // own order.
             const heldBeforeInitialization: ClaudeDecodedMessage[] = [];
             const decodeNext = (message: unknown): readonly ClaudeDecodedMessage[] => {
               if (phase.kind !== "initializing")
@@ -1435,6 +1739,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               const sessionId = rawSessionId(message);
               if (sessionId !== undefined) announce(sessionId);
               if (decoded.kind === "ignored") return [];
+              // Only the latest state matters, so a run of them holds one.
+              if (decoded.kind === "session-state") {
+                const earlier = heldBeforeInitialization.findIndex(
+                  (held) => held.kind === "session-state",
+                );
+                if (earlier !== -1) heldBeforeInitialization.splice(earlier, 1);
+              }
               if (
                 heldBeforeInitialization.length >= MAX_NOTES_BEFORE_INITIALIZATION ||
                 (announcedSessionId !== undefined && decoded.sessionId !== announcedSessionId)
@@ -1510,9 +1821,15 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               Stream.map((message) => {
                 if (message.kind !== "result") return message;
                 const baseline = costBaseline;
-                costBaseline = undefined;
                 pendingCostInputs = Math.max(0, pendingCostInputs - 1);
                 const total = message.totalCostUsd;
+                // A turn the runtime starts by itself after this result sends
+                // no prompt to take a new baseline at, so this result's total
+                // is its baseline; a prompt still reads a fresh one.
+                costBaseline =
+                  pendingCostInputs === 0 && total !== undefined && Number.isFinite(total)
+                    ? total
+                    : undefined;
                 return baseline !== undefined && total !== undefined && total >= baseline
                   ? { ...message, costUsd: total - baseline }
                   : message;
@@ -1558,7 +1875,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 catch: (error) => sanitizeFailure(error, "session discovery"),
               }),
               messages,
-              send: ({ text, context, onContextDelivered, appManagedTools = [], onAppToolCall }) =>
+              send: ({
+                text,
+                images = [],
+                context,
+                onContextDelivered,
+                appManagedTools = [],
+                onAppToolCall,
+              }) =>
                 request(async () => {
                   if (appManagedTools.length > 0) {
                     if (query?.setMcpServers === undefined || onAppToolCall === undefined) {
@@ -1645,7 +1969,23 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   try {
                     return await prompt.offer({
                       type: "user",
-                      message: { role: "user", content: text },
+                      message: {
+                        role: "user",
+                        content:
+                          images.length === 0
+                            ? text
+                            : [
+                                { type: "text", text },
+                                ...images.map((image) => ({
+                                  type: "image" as const,
+                                  source: {
+                                    type: "base64" as const,
+                                    media_type: image.mediaType,
+                                    data: image.data,
+                                  },
+                                })),
+                              ],
+                      },
                       parent_tool_use_id: null,
                       origin: { kind: "human" },
                       uuid: messageId,
@@ -1708,6 +2048,13 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     throw error;
                   }
                 }, "interruption"),
+              stopTask: (taskId) =>
+                request(async () => {
+                  const stop = query?.stopTask;
+                  if (stop === undefined) return "unsupported" as const;
+                  await stop.call(query, taskId);
+                  return "requested" as const;
+                }, "task stop"),
               setPermissionMode: (mode) =>
                 request(() => query!.setPermissionMode(mode), "permission update"),
               supportedModels: () =>
@@ -1738,6 +2085,18 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
       });
       return Effect.acquireRelease(acquire, (query, _exit) => query.close());
     },
+    listSessions: ({ projectRoot, configDirectory }) =>
+      Effect.tryPromise({
+        try: async () =>
+          decodeSessions(
+            await withClaudeAccountDirectory(configDirectory, () =>
+              sdk.listSessions({ dir: projectRoot, includeWorktrees: false }),
+            ),
+            projectRoot,
+            { titles: true },
+          ),
+        catch: (error) => sanitizeFailure(error, "session lookup"),
+      }),
     findSession: ({ sessionId, projectRoot, configDirectory }) =>
       Effect.tryPromise({
         try: async () => {
@@ -1755,5 +2114,25 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
         },
         catch: (error) => sanitizeFailure(error, "session lookup"),
       }),
+    ...(copySession === undefined
+      ? {}
+      : {
+          forkSession: ({ sessionId, projectRoot, upToMessageId, configDirectory }) =>
+            Effect.tryPromise({
+              try: async () => {
+                const forked: unknown = await withClaudeAccountDirectory(configDirectory, () =>
+                  copySession(sessionId, { dir: projectRoot, upToMessageId }),
+                );
+                const id =
+                  typeof forked === "object" && forked !== null && "sessionId" in forked
+                    ? forked.sessionId
+                    : undefined;
+                if (typeof id !== "string" || id.trim().length === 0 || id === sessionId)
+                  throw new Error("Claude did not name the copied session.");
+                return id;
+              },
+              catch: (error) => sanitizeFailure(error, "session copy"),
+            }),
+        }),
   };
 }

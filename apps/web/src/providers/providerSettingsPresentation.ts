@@ -8,6 +8,7 @@ import {
   type ProviderInstance,
   type ProviderObservedState,
   type ProviderRefusalReason,
+  type KeyProviderDriverKind,
 } from "@octant/contracts";
 import { isOutsideDriverQuarantined } from "@octant/domain";
 import { thisComputerName } from "../platform";
@@ -16,7 +17,12 @@ export const capabilityLabels: ReadonlyArray<
   readonly [
     Exclude<
       keyof ProviderObservedState["capabilities"],
-      "sessionCompaction" | "nativeArtifacts" | "nativeSetup" | "reviewVerdicts" | "sessionRollback"
+      | "sessionCompaction"
+      | "nativeArtifacts"
+      | "nativeSetup"
+      | "reviewVerdicts"
+      | "sessionRollback"
+      | "turnModes"
     >,
     string,
   ]
@@ -59,6 +65,29 @@ export function reviewVerdictsLabel(
  * said for every provider: one that cannot is not hidden, because the person
  * should know a rewind then starts a fresh session from the kept turns as text.
  */
+/**
+ * Where the runtime runs turns on this host, said only when that is narrower
+ * than every mode, so a person reads why Chat or Plan does not offer it.
+ */
+export function turnModesLabel(
+  capabilities: ProviderObservedState["capabilities"],
+): string | undefined {
+  const modes = capabilities.turnModes;
+  if (modes === undefined) return undefined;
+  const offered = [
+    modes.chat === "supported" ? "Chat" : undefined,
+    modes.work === "supported" ? "Work" : undefined,
+    modes.code === "supported" ? "Code" : undefined,
+  ].filter((mode) => mode !== undefined);
+  const where =
+    offered.length === 0
+      ? "No mode on this computer"
+      : `${offered.join(" and ")}${modes.plan === "supported" ? "" : " outside Plan"}`;
+  return modes.unsupportedReason === "host-confinement"
+    ? `${where}. This computer's sandbox cannot confine it in the other modes.`
+    : `${where}.`;
+}
+
 export function sessionRollbackLabel(capabilities: ProviderObservedState["capabilities"]): string {
   return capabilities.sessionRollback === "supported"
     ? "Supported. A rewound thread continues its own session from the kept turns."
@@ -177,6 +206,11 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   // An outside driver package never borrows a bundled provider's name.
   if (driverKind === "outside-harness-endpoint") return "Outside driver";
   return "OpenAI-compatible";
+}
+
+/** A key provider's product name, as its own-setup and Project trust controls show it. */
+export function keyProviderLabel(driverKind: KeyProviderDriverKind): string {
+  return driverKind === "claude" ? "Claude Code" : driverLabel(driverKind);
 }
 
 export function providerRefusalCopy(

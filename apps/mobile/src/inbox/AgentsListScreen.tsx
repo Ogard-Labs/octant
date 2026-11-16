@@ -14,6 +14,8 @@ import {
   MobileInboxFailure,
   type MobileInboxHostFailure,
   type MobileInboxRow,
+  searchMobileTranscripts,
+  type MobileTranscriptHit,
 } from "@octant/client-runtime";
 import { MOBILE_COPY } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
@@ -23,7 +25,7 @@ import { useTheme, type ThemeColors } from "../../design-system";
 import { ListRow, ListSection, NavBar, SegmentedControl, ToolbarButton } from "../ui/NativeChrome";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { HomeComposerSheet } from "./HomeComposerSheet";
-import { sectionForAgentRow } from "./agentsListPresentation";
+import { searchHitsBesideList, sectionForAgentRow } from "./agentsListPresentation";
 import { createRequestGuard } from "./requestGuard";
 import { usePlacement } from "./usePlacement";
 
@@ -31,7 +33,8 @@ export type AgentListView = "all" | "attention" | "working" | "review";
 
 export interface AgentsListScreenProps {
   readonly onBack: () => void;
-  readonly onOpenThread: (row: MobileInboxRow) => void;
+  /** Opens a thread; a message search hit also names the turn to scroll to. */
+  readonly onOpenThread: (row: MobileInboxRow, focusTurnId?: string) => void;
   readonly view: AgentListView;
   readonly onSelectView: (view: AgentListView) => void;
 }
@@ -67,6 +70,31 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [messageHits, setMessageHits] = useState<ReadonlyArray<MobileTranscriptHit>>([]);
+  // Titles filter in place; message text is the host's search, asked once the
+  // person pauses typing, across every paired computer and every mode.
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!searchOpen || trimmed.length < 2) {
+      setMessageHits([]);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void Promise.all(
+        transports.map((transport) =>
+          searchMobileTranscripts(transport, trimmed, controller.signal),
+        ),
+      ).then((results) => {
+        if (controller.signal.aborted) return;
+        setMessageHits(results.flatMap((result) => (result.status === "ready" ? result.hits : [])));
+      });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query, searchOpen, transports]);
   // The filter switches in place, and the navigator holds the choice, so the
   // list comes back on the same view after a thread is opened and closed.
   const view = props.view;
@@ -195,6 +223,15 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
       .map((section) => ({ title: section.title, rows: searchedRows(section.rows) }))
       .filter((section) => section.rows.length > 0);
   }, [grouped, hostLabel, query, view]);
+  // The filtered list already shows its own title matches; the hits add the rest.
+  const threadHits = useMemo(
+    () =>
+      searchHitsBesideList(
+        messageHits,
+        sections.flatMap((section) => section.rows),
+      ),
+    [messageHits, sections],
+  );
 
   const viewOptions: ReadonlyArray<{ readonly id: AgentListView; readonly label: string }> = [
     { id: "all", label: MOBILE_COPY.statusAllShort },
@@ -393,10 +430,48 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
       <ScrollView contentContainerStyle={styles.list} contentInsetAdjustmentBehavior="automatic">
         {loading ? <ActivityIndicator color={colors.accent} /> : null}
-        {!loading && sections.length === 0 ? (
+        {!loading && sections.length === 0 && threadHits.length === 0 ? (
           <Text style={styles.help}>
             {transports.length === 0 ? MOBILE_COPY.inboxEmpty : "No threads here yet"}
           </Text>
+        ) : null}
+        {threadHits.length > 0 ? (
+          <ListSection testID="mobile-agents-message-hits" title={MOBILE_COPY.searchMessages}>
+            {threadHits.map((hit, index) => (
+              <ListRow
+                detail={formatScreenshotSafeLabel(
+                  hit.field === "tool"
+                    ? `${MOBILE_COPY.searchToolOutput} · ${hit.snippet}`
+                    : hit.field === "canvas"
+                      ? `${MOBILE_COPY.searchCanvas} · ${hit.snippet}`
+                      : hit.snippet,
+                )}
+                icon={modeIcon(hit.mode)}
+                key={`${hit.hostId}:${hit.mode}:${hit.threadId}:${hit.turnId ?? hit.canvasId ?? "title"}`}
+                label={formatScreenshotSafeLabel(hit.title)}
+                last={index === threadHits.length - 1}
+                onPress={() =>
+                  props.onOpenThread(
+                    rows.find(
+                      (row) =>
+                        row.hostId === hit.hostId &&
+                        row.mode === hit.mode &&
+                        row.threadId === hit.threadId,
+                    ) ?? {
+                      hostId: hit.hostId,
+                      mode: hit.mode,
+                      threadId: hit.threadId,
+                      title: hit.title,
+                      status: "active",
+                      freshness: "",
+                    },
+                    hit.turnId,
+                  )
+                }
+                testID={`mobile-agents-message-hit-${hit.mode}-${hit.threadId}`}
+              />
+            ))}
+          </ListSection>
         ) : null}
         {sections.map((section) => (
           <ListSection key={section.title} title={section.title}>

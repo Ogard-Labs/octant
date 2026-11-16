@@ -136,6 +136,13 @@ bun run --filter @octant/mobile start:mock
 bun run --filter @octant/mobile start:mock:stale
 ```
 
+The full workspace places its threads relative to the device's clock, so the
+Work and Code tabs' Activity arrangement files them under Today, Yesterday, a
+weekday, and Earlier. Its Code thread "Speed up the sync worker" stopped at a
+usage limit and offers Resume when it resets. Searching "keychain" finds a turn
+older than the review thread's first page, which opens that page with Jump to
+latest.
+
 Both commands clear the Expo cache so changing scenarios is deterministic. To
 return to live host-backed development after running a mock scenario, clear the
 cache once as well:

@@ -1,3 +1,4 @@
+import type { AgentResultSteeredIntoTurn } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { useId, useState } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
@@ -131,5 +132,33 @@ function FoldedText(props: { readonly text: string; readonly markdown?: boolean 
         </OctantButton>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Finished subagents' results the host steered into a turn while it ran. The
+ * parent agent read them mid-turn rather than in a turn of their own, so they
+ * sit inside that turn, after its reply, and say so; the cards are the same a
+ * queued delivery shows.
+ */
+export function SteeredChildResults(props: {
+  readonly steered: ReadonlyArray<AgentResultSteeredIntoTurn> | undefined;
+  readonly providerGroups?: ReadonlyArray<PickerGroup> | undefined;
+}) {
+  if (props.steered === undefined || props.steered.length === 0) return null;
+  return (
+    <>
+      {props.steered.map((entry) => (
+        <article
+          aria-label="Subagent results delivered into the running turn"
+          className="turn-child-result"
+          data-steered="true"
+          key={`${String(entry.delivery.runId)}:${entry.steeredAt}`}
+        >
+          <p className="oct-meta child-result__steered">Delivered into the running turn</p>
+          <ChildResultCards providerGroups={props.providerGroups} text={entry.body} />
+        </article>
+      ))}
+    </>
   );
 }

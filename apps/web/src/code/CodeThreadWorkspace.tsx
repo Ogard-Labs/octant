@@ -5,6 +5,7 @@ import {
   type ProjectMemoryProposalClient,
 } from "../projects/ProjectMemoryProposalPrompt";
 import { ProviderCloudSessions } from "./ProviderCloudSessions";
+import { CoordinatorWorkerCards, type CoordinatorWorkersSource } from "./CoordinatorWorkersPanel";
 import { useDroppedFolderMentions } from "../composer/useDroppedFolderMentions";
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
@@ -25,9 +26,14 @@ import {
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts/code";
-import type { CodeCheckpoint, CodeThreadChangedFileState } from "@octant/contracts/code-operations";
+import type {
+  CodeCheckpoint,
+  CodeOperationId,
+  CodeThreadChangedFileState,
+} from "@octant/contracts/code-operations";
 import type { PermissionMode, CodeTurnReviewCapture } from "@octant/contracts";
 import {
+  parkedStopReleased,
   decidesCodeEffectsByApproval,
   permissionModeOf,
   startedCodeThreadPickerGroups,
@@ -36,10 +42,12 @@ import {
 } from "@octant/domain";
 import { ChevronDown, CirclePause, X } from "lucide-react";
 import { OctantMenu } from "../ui/base/OctantMenu";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { ThreadReplyDetailMenu, ThreadReplyDetailScope } from "../transcript/ThreadReplyDetail";
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -62,6 +70,11 @@ import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
+import { ThreadWakeups } from "../wakeups/ThreadWakeups";
+import { CodeLiveTasks } from "./CodeLiveTasks";
+import { CodeNativeSession } from "./CodeNativeSession";
+import { createCodeSessionClient, type CodeSessionClient } from "./codeSessionClient";
+import type { ThreadWakeupClient } from "../wakeups/threadWakeupClient";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import {
   applyComposerCaret,
@@ -80,7 +93,7 @@ import { serverCodeProjectFor, useServerCodeProjects } from "../projects/serverP
 import { serverCodeThreadProviderGroups } from "./composer/serverCodeComposer";
 import { TrackerReferenceComposerHints } from "../tracker/TrackerReferenceComposerHints";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
-import { ChildResultCards } from "../agents/ChildResultCards";
+import { ChildResultCards, SteeredChildResults } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { parseAutomationFollowUpTurnPrompt } from "@octant/contracts/automation";
 import { ScheduledFollowUpMark } from "../automation/ScheduledFollowUpMark";
@@ -119,6 +132,8 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
+import { useSeesImages } from "../harness/useSeesImages";
+import { DescribedImagesNote } from "../harness/DescribedImagesNote";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
 import { CodeTurnReviewPreviewCard } from "./CodeTurnReviewPreviewCard";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
@@ -169,6 +184,7 @@ import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPick
 import { PermissionModePicker, threadKeepsFullAccessSandbox } from "./PermissionModePicker";
 import { ThreadGuardrailLevel } from "./GuardrailLevelIndicator";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
+import { useProjectTrustNotice } from "../providers/ProjectTrustNotice";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
@@ -177,6 +193,8 @@ import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
+  PLAN_PROVIDER_COMMAND_REFUSAL,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
@@ -199,6 +217,14 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 export interface CodeThreadWorkspaceProps {
   readonly onOpenReview?: (request?: CodeReviewFileRequest) => void;
   readonly controller: CodeController;
+  /**
+   * A search hit's provider turn to bring into view once. Earlier pages load
+   * until the turn is among them, so the reader lands on it with every newer
+   * turn below.
+   */
+  readonly revealOperationId?: CodeOperationId;
+  /** Called once `revealOperationId` is on screen or the thread proves not to hold it; the jump is spent. */
+  readonly onTurnRevealed?: () => void;
   /**
    * Set where a paired device shows the thread: it has no window on the host
    * to take dropped files with, and is not offered provider cloud sessions.
@@ -298,9 +324,17 @@ export interface CodeThreadWorkspaceProps {
    * the end of its transcript. Absent on any other thread.
    */
   readonly coordinatorWorkerAsks?: ReactNode;
+  /**
+   * A coordinator's workers, drawn as small cards at the end of the turn that
+   * started each one. Absent on any other thread.
+   */
+  readonly coordinatorWorkers?: CoordinatorWorkersSource;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
+  /** The thread's wake-ups; absent builds one from the server address. */
+  readonly wakeupClient?: ThreadWakeupClient;
+  readonly codeSessionClient?: CodeSessionClient;
   readonly extensionClient?: ExtensionClient;
   readonly automationClient?: AutomationClient;
   readonly memoryProposalClient?: ProjectMemoryProposalClient;
@@ -336,6 +370,49 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ? serverCodeProjectFor(serverCodeProjects, view?.thread.projectId)
     : undefined;
   const displayReady = props.controller.conversationHistory === "loaded";
+  const revealOperationId = props.revealOperationId;
+  // The turn's first own row (its prompt) is where the reader lands; a fork's
+  // inherited rows belong to its source thread, which a hit never names.
+  const revealKey =
+    revealOperationId === undefined
+      ? undefined
+      : props.controller.conversation.find(
+          (message) =>
+            message.sourceThreadId === undefined &&
+            message.operationId !== undefined &&
+            String(message.operationId) === String(revealOperationId),
+        )?.id;
+  const earlierConversation = props.controller.earlierConversation;
+  const loadEarlierConversation = props.controller.loadEarlierConversation;
+  const onTurnRevealed = props.onTurnRevealed;
+  const ownTurnsExhausted = props.controller.conversation.some(
+    (message) => message.sourceThreadId !== undefined,
+  );
+  useEffect(() => {
+    if (revealOperationId === undefined || !displayReady || revealKey !== undefined) return;
+    // The hit is older than the loaded run: walk back a page at a time so the
+    // run stays contiguous with the newest turns. Once nothing of the thread's
+    // own is left (a fork's source turns start loading), the thread no longer
+    // holds the turn; a failed page leaves the reader at the newest turns.
+    if (
+      earlierConversation === undefined ||
+      earlierConversation === "none-left" ||
+      earlierConversation === "failed" ||
+      ownTurnsExhausted
+    ) {
+      onTurnRevealed?.();
+      return;
+    }
+    if (earlierConversation === "idle") loadEarlierConversation();
+  }, [
+    displayReady,
+    earlierConversation,
+    loadEarlierConversation,
+    onTurnRevealed,
+    ownTurnsExhausted,
+    revealKey,
+    revealOperationId,
+  ]);
   const firstPromptInFlight = props.controller.firstPromptInFlight;
   // A thread whose first prompt is on its way is not empty: asking the host
   // for scaffolds and workspace presets there fetched offers nobody could use.
@@ -410,6 +487,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft(next);
       props.controller.setPendingDraft?.(next);
     },
+    provider: composerProviderCommands(
+      props.providerGroups,
+      view?.thread.providerInstanceId,
+      view?.thread.executionPolicy === "plan" ? PLAN_PROVIDER_COMMAND_REFUSAL : undefined,
+    ),
   });
   const activeThreadKeyRef = useRef(String(props.threadId));
   activeThreadKeyRef.current = String(props.threadId);
@@ -529,6 +611,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const { serverUrl, windowCapability, codeSessionClient } = props;
+  const sessionClient = useMemo(
+    () =>
+      codeSessionClient ??
+      (serverUrl === undefined || windowCapability === undefined
+        ? undefined
+        : createCodeSessionClient({ serverUrl, windowCapability })),
+    [codeSessionClient, serverUrl, windowCapability],
+  );
   const messageQueue = useThreadMessageQueue({
     mode: "code",
     hostId: props.hostId,
@@ -656,6 +747,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   ).length;
   // Read before the early returns below, which would otherwise change the hook
   // order. The transcript draws the inline Canvases and the card list the rest.
+  const projectTrustNotice = useProjectTrustNotice({
+    mode: "code",
+    threadId: String(props.threadId),
+    projectId: view?.thread.projectId,
+    providerInstanceId: view?.thread.providerInstanceId,
+  });
   const threadCanvases = useThreadCanvasCards({
     client: view === undefined ? undefined : props.canvasClient,
     mode: "code",
@@ -687,6 +784,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const seesImages = useSeesImages({
+    readsImages:
+      view === undefined
+        ? undefined
+        : boundModelReadsImages(props.providerGroups ?? [], view.thread),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: view === undefined ? undefined : String(view.thread.projectId),
+    providerInstanceId: view === undefined ? undefined : String(view.thread.providerInstanceId),
+    modelId: view === undefined ? undefined : String(view.thread.modelId),
+  });
   const folderDrops = useDroppedFolderMentions({
     scope:
       view === undefined
@@ -703,8 +813,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     hostId: props.hostId,
     refused: serverCheckout || props.pairedDevice === true,
     onFiles: (files) => {
-      if (boundModelReadsImages(providerGroups, thread) === false)
-        attachments.refuse("Choose a vision model to attach images.");
+      if (seesImages.takesImages === false)
+        attachments.refuse(seesImages.refusal ?? "Choose a vision model to attach images.");
       else void attachments.attach(files);
     },
   });
@@ -717,8 +827,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       if (props.attachmentClient === undefined) {
         reason = "Image attachments are unavailable on this host.";
         attachments.refuse(reason);
-      } else if (boundModelReadsImages(providerGroups, thread) === false) {
-        reason = "Choose a vision model to attach images.";
+      } else if (seesImages.takesImages === false) {
+        reason = seesImages.refusal ?? "Choose a vision model to attach images.";
         attachments.refuse(reason);
       } else {
         reason = await attachments.attach([file]);
@@ -778,10 +888,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.turnStatus === "waiting" &&
     (props.controller.turnErrorCategory === "stale" ||
       props.controller.turnErrorCategory === "tools-changed");
+  // A turn parked on a usage limit stops holding the composer once the thread
+  // has moved off that account: the host records the released stop on the
+  // move, and the queue reads the same record.
+  const releasedStop = parkedStopReleased(
+    thread,
+    props.controller.latestProviderTurnOperationId === undefined
+      ? undefined
+      : String(props.controller.latestProviderTurnOperationId),
+  );
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
-    (props.controller.turnStatus === "waiting" && !parkedTurn);
+    (props.controller.turnStatus === "waiting" && !parkedTurn && !releasedStop);
   const queueFollowUp =
     busy ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -866,6 +985,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     }
   };
   const messages = props.controller.conversation;
+  // Only a coordinator's worker carries a host move's reason.
+  const continuedOnFallback =
+    view?.thread.coordinatorThreadId === undefined || view.thread.coordinatorChoice === undefined
+      ? undefined
+      : continuedOnFallbackPlacement(messages, view.thread.providerHandoff);
   const loadedOperationIds = new Set(
     messages.flatMap((message) =>
       message.role === "assistant" && message.operationId !== undefined
@@ -932,6 +1056,22 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ),
     threadCanvases.cards,
   );
+  // A worker's card goes where its turn ended, by the host's creation time for
+  // the worker. A worker the transcript cannot place yet (turns not loaded, or
+  // created before the first turn) is listed at the end, so none is hidden.
+  const workerCardPlacement =
+    props.coordinatorWorkers === undefined
+      ? undefined
+      : placeByTurn(
+          threadTurnSpans(
+            messages,
+            (message) => message.id,
+            (message) => (message.role === "user" ? message.at : undefined),
+          ),
+          props.coordinatorWorkers.rows,
+          (row) => row.createdAt,
+          (row) => row.threadId,
+        );
   const imagePlacement = placeByTurn(
     threadTurnSpans(
       messages,
@@ -1124,9 +1264,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (files.length === 0) return false;
     // The host refuses this turn anyway. Saying so at the paste is kinder than
     // letting the user write the message first and lose it at send.
-    if (boundModelReadsImages(providerGroups, thread) === false) {
+    if (seesImages.takesImages === false) {
       attachments.refuse(
-        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
+        seesImages.refusal ??
+          `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
       );
       return true;
     }
@@ -1710,6 +1851,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     serverUrl={props.serverUrl}
                     windowCapability={props.windowCapability}
                   />
+                  {props.coordinatorWorkers === undefined ||
+                  workerCardPlacement === undefined ? null : (
+                    <CoordinatorWorkerCards
+                      onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                      rows={props.coordinatorWorkers.rows.filter(
+                        (row) => !workerCardPlacement.placed.has(row.threadId),
+                      )}
+                    />
+                  )}
                   {props.coordinatorWorkerAsks}
                 </>
               }
@@ -1721,6 +1871,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               itemKey={(message) => message.id}
               items={messages}
               key={String(props.threadId)}
+              {...(revealKey === undefined ? {} : { revealKey })}
+              {...(onTurnRevealed === undefined ? {} : { onRevealed: () => onTurnRevealed() })}
               listClassName="code-thread-workspace__transcript thread-column"
               {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
               lead={
@@ -1741,11 +1893,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 </>
               }
               {...(canvasClient === undefined &&
-              (imageClient === undefined || imageProfiles === undefined)
+              (imageClient === undefined || imageProfiles === undefined) &&
+              workerCardPlacement === undefined
                 ? {}
                 : {
                     afterItem: (message: (typeof messages)[number]) => (
                       <>
+                        {props.coordinatorWorkers === undefined ? null : (
+                          <CoordinatorWorkerCards
+                            onOpenWorker={props.coordinatorWorkers.onOpenWorker}
+                            rows={workerCardPlacement?.byRow.get(message.id) ?? []}
+                          />
+                        )}
                         {canvasClient === undefined ? null : (
                           <ThreadCanvases
                             cards={canvasPlacement.byRow.get(message.id)}
@@ -1803,14 +1962,23 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     ? undefined
                     : checkpoints.byAnchor.get(String(message.operationId));
                 const gallery =
-                  message.attachments === undefined ? null : (
-                    <CodeAttachmentGallery
-                      attachments={message.attachments}
-                      {...(props.attachmentClient === undefined
-                        ? {}
-                        : { client: props.attachmentClient })}
-                      threadId={message.sourceThreadId ?? props.threadId}
-                    />
+                  message.attachments === undefined &&
+                  message.describedImages === undefined ? null : (
+                    <>
+                      {message.attachments === undefined ? null : (
+                        <CodeAttachmentGallery
+                          attachments={message.attachments}
+                          {...(props.attachmentClient === undefined
+                            ? {}
+                            : { client: props.attachmentClient })}
+                          threadId={message.sourceThreadId ?? props.threadId}
+                        />
+                      )}
+                      <DescribedImagesNote
+                        className="code-thread-workspace__handoff"
+                        images={message.describedImages}
+                      />
+                    </>
                   );
                 // Code's conversation turns do not carry the delivery mark, so the
                 // host's own delivery wording is what says this is a subagent's
@@ -2213,6 +2381,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         ) : null}
                       </TurnActionMenu>
                     </article>
+                    <SteeredChildResults
+                      providerGroups={providerGroups}
+                      steered={message.steeredResults}
+                    />
                     {message.role === "assistant" && message.operationId !== undefined ? (
                       <SideTaskInline
                         last={message === lastReply}
@@ -2226,6 +2398,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         }
                         turnId={String(message.operationId)}
                       />
+                    ) : null}
+                    {continuedOnFallback?.afterId === message.id ? (
+                      <OctantSeparatorWithLabel aria-label="Continued on the fallback">
+                        Octant moved this thread: {continuedOnFallback.reason}
+                      </OctantSeparatorWithLabel>
                     ) : null}
                   </div>
                 );
@@ -2307,6 +2484,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     })
                   }
                   summary={request.summary}
+                  {...(request.levelChange === undefined
+                    ? {}
+                    : { levelChange: request.levelChange })}
                 />
               ) : (
                 <ProviderQuestionCard
@@ -2363,7 +2543,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           turnActive={busy}
         />
         <ThreadComposer
-          queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+          queue={
+            <>
+              <ThreadWakeups
+                mode="code"
+                threadId={String(props.threadId)}
+                serverUrl={props.serverUrl}
+                windowCapability={props.windowCapability}
+                client={props.wakeupClient}
+              />
+              <CodeLiveTasks threadId={props.threadId} client={sessionClient} />
+              <CodeNativeSession
+                threadId={props.threadId}
+                client={sessionClient}
+                threadHasTurns={props.controller.conversation.length > 0}
+              />
+              <ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />
+            </>
+          }
           threadBusy={busy || (messageQueue.snapshot?.items.length ?? 0) > 0}
           presentation="follow-up"
           {...(threadDropKey === undefined ? {} : { threadDropKey })}
@@ -2460,6 +2657,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onPolicyChange={continuation.change}
                 onProviderChange={changeProvider}
                 disabled={busy}
+              />
+              <ThreadAccountControl
+                groups={threadModelGroups}
+                providerInstanceId={thread.providerInstanceId}
+                modelId={thread.modelId}
+                usageLimitHandoff={thread.usageLimitHandoff}
+                onMove={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "move-code-thread-account",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    providerInstanceId,
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The conversation could not be moved. Nothing changed.";
+                }}
+                onUsageLimitHandoffChange={async (providerInstanceId) => {
+                  const result = await props.controller.execute({
+                    kind: "set-code-thread-usage-limit-handoff",
+                    threadId: thread.id,
+                    expectedVersion: thread.version,
+                    ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                  });
+                  return result?.kind === "thread-updated"
+                    ? undefined
+                    : "The choice could not be saved. Nothing changed.";
+                }}
               />
             </ThreadInfo>
           }
@@ -2661,8 +2886,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 refusedReason={
                   props.attachmentClient === undefined
                     ? "Image attachments are unavailable on this host."
-                    : boundModelReadsImages(providerGroups, thread) === false
-                      ? `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`
+                    : seesImages.takesImages === false
+                      ? (seesImages.refusal ??
+                        `${providerModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`)
                       : undefined
                 }
                 onRefused={attachments.refuse}
@@ -2784,6 +3010,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           }
           notices={[
             ...(folderDrops.notice === undefined ? [] : [folderDrops.notice]),
+            ...(projectTrustNotice === undefined ? [] : [projectTrustNotice]),
             ...(attachments.message === undefined
               ? []
               : [{ key: "attachment", tone: "warning" as const, text: attachments.message }]),
@@ -3216,4 +3443,43 @@ function observedTaskChangedFiles(
 
 function messageHappenedAt(message: CodeConversationMessage): string | undefined {
   return message.at;
+}
+
+/**
+ * Where the transcript says the host moved a coordinator's running worker
+ * on to its role's next model: after the last message journaled before the
+ * move, so it reads between the turn that stopped and the one that
+ * continues, and stands even when that turn was never admitted. Only the
+ * thread's latest move carries its reason.
+ */
+function continuedOnFallbackPlacement(
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly at?: string;
+    readonly operationId?: unknown;
+  }>,
+  handoff: CodeThread["providerHandoff"],
+): { readonly afterId: string; readonly reason: string } | undefined {
+  const reason = handoff?.continuedOnFallback;
+  if (handoff === undefined || reason === undefined) return undefined;
+  const movedAt = Date.parse(String(handoff.changedAt));
+  // A prompt's time is its turn's start, which never moves; a reply's is its
+  // turn's last update, which may come after the move. So the stopped turn
+  // is found by its prompt, and the marker goes after that turn's reply.
+  const promptIndex = messages.findLastIndex(
+    (message) =>
+      message.role === "user" && message.at !== undefined && Date.parse(message.at) <= movedAt,
+  );
+  const prompt = messages[promptIndex];
+  if (prompt === undefined) return undefined;
+  const reply = messages
+    .slice(promptIndex + 1)
+    .find(
+      (message) =>
+        message.role === "assistant" &&
+        prompt.operationId !== undefined &&
+        String(message.operationId) === String(prompt.operationId),
+    );
+  return { afterId: (reply ?? prompt).id, reason };
 }

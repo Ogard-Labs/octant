@@ -10,6 +10,7 @@ import {
   COORDINATOR_BOUND_FIELDS,
   COORDINATOR_WORKER_LEVELS,
 } from "../projects/coordinatorChoices";
+import { CoordinatorBoundsDialog } from "../projects/CoordinatorBoundsDialog";
 import { serverCodeThreadProviderGroups } from "../code/composer/serverCodeComposer";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import type { AutoReview } from "../code/autoReview";
@@ -22,6 +23,8 @@ import {
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
+  composerProviderCommands,
+  CHAT_PROVIDER_COMMAND_REFUSAL,
 } from "../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../composer/useComposerAtMenu";
 import { useExtensionDraftSelections } from "../chat/useExtensionDraftSelections";
@@ -81,7 +84,7 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, Network, ShieldCheck } from "lucide-react";
+import { FolderOpen, GitBranch, Network, ShieldCheck, X } from "lucide-react";
 import {
   useCallback,
   useContext,
@@ -109,10 +112,8 @@ import {
   type ComposerProjectGithubSource,
   type ComposerProjectEntry,
 } from "../projects/ComposerProjectSelector";
-import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantPopover } from "../ui/base/OctantPopover";
-import { OctantSelectField } from "../ui/base/OctantSelect";
 import { RecentThreadList, type RecentThreadListItem } from "./RecentThreadList";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
@@ -291,6 +292,11 @@ export interface DraftThreadWorkspaceProps {
    */
   readonly pendingPrompt?: string;
   readonly onPendingPromptConsumed?: () => void;
+  /**
+   * The to-do this draft was started from. Its thread is linked to the to-do
+   * once it exists; removing the label leaves an ordinary draft.
+   */
+  readonly todoSource?: { readonly title: string; readonly onRemove: () => void };
   readonly codeHome?: Pick<
     CodeHomeProps,
     | "loadAssignedLinearIssues"
@@ -528,6 +534,31 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             })}
       />
     ) : null;
+  const todoSource = props.todoSource;
+  const todoSourceLabel =
+    todoSource === undefined ? null : (
+      <span className="draft-todo-source">
+        <span className="oct-row-detail">From to-do</span>
+        <span className="draft-todo-source__title">{todoSource.title}</span>
+        <OctantIconButton
+          className="draft-todo-source__remove"
+          label="Do not link this thread to the to-do"
+          onClick={todoSource.onRemove}
+          type="button"
+        >
+          <X aria-hidden="true" size={12} />
+        </OctantIconButton>
+      </span>
+    );
+  const sourceSlot =
+    todoSourceLabel === null ? (
+      createFromControl
+    ) : (
+      <>
+        {todoSourceLabel}
+        {createFromControl}
+      </>
+    );
   const issueContext =
     createFromSelection?.kind === "github" ? createFromSelection.request : undefined;
   const linearIssueContext =
@@ -885,11 +916,21 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }}
       />
     );
+    const coordinatorSettings =
+      props.coordinator === undefined ||
+      props.coordinator.onChoicesChange === undefined ||
+      String(props.coordinator.projectId) !== String(selectedProjectId) ? undefined : (
+        <CoordinatorDraftSettings
+          choices={props.coordinator.choices ?? {}}
+          onChoicesChange={props.coordinator.onChoicesChange}
+        />
+      );
     const composer = (
       <CodeComposerAdapter
         {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
         {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
         {...(beneath === undefined ? {} : { beneath })}
+        {...(coordinatorSettings === undefined ? {} : { afterComposer: coordinatorSettings })}
         {...(promptRequest === undefined ? {} : { promptRequest })}
         {...hostSelectorBinding}
         {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
@@ -948,7 +989,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ) : undefined
         }
         folderControl={folderControl}
-        {...(createFromControl === null ? {} : { createFromControl })}
+        {...(sourceSlot === null ? {} : { createFromControl: sourceSlot })}
         {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
         providerGroups={props.providerGroups}
         {...(props.selectedProviderInstanceId === undefined
@@ -1025,7 +1066,13 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
           folderControl={folderControl}
-          {...(createFromControl === null || onServer ? {} : { createFromControl })}
+          {...(onServer
+            ? todoSourceLabel === null
+              ? {}
+              : { createFromControl: todoSourceLabel }
+            : sourceSlot === null
+              ? {}
+              : { createFromControl: sourceSlot })}
           providerGroups={
             onServer ? serverCodeThreadProviderGroups(props.providerGroups) : props.providerGroups
           }
@@ -1131,6 +1178,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     draft: prompt,
     onDraftChange: setPrompt,
     textarea: () => textareaRef.current,
+    provider: composerProviderCommands(
+      props.providerGroups,
+      props.selectedProviderInstanceId,
+      props.mode === "chat" ? CHAT_PROVIDER_COMMAND_REFUSAL : undefined,
+    ),
   });
   const draftProviderFamily = providerFamilyForThread(
     props.providerGroups,
@@ -1258,7 +1310,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           <WelcomeHeading />
         </div>
         <div className="draft-thread__composer composer-stack">
-          {createFromControl}
+          {sourceSlot}
           <ThreadComposer
             notices={
               props.errorMessage === undefined
@@ -1601,59 +1653,69 @@ function CreateFromIssueControl(props: {
  * The start screen's question for a draft opened with New coordinator. The
  * thread it starts becomes a coordinator before its first message
  * (docs/design/coordinator-threads.md), and the way back to an ordinary
- * thread stays one click away.
+ * thread stays one click away. Its settings sit under the composer
+ * ({@link CoordinatorDraftSettings}): above it, a select and three number
+ * fields came before the box the person types the work into.
  */
 function CoordinatorDraftHeading(props: { readonly coordinator: CoordinatorDraft }) {
-  const { onCancel, onChoicesChange } = props.coordinator;
-  const choices = props.coordinator.choices ?? {};
   return (
     <>
       <Network aria-hidden="true" className="welcome__mark" size={20} />
       <h1 className="oct-title oct-title--hero welcome__question">New coordinator</h1>
       <p className="oct-row-detail welcome__status">
-        Describe the line of work. This thread reads the Project and starts worker threads for it.{" "}
-        <OctantButton onClick={onCancel} type="button" variant="link">
+        One thread that plans the work and hands it to worker threads.
+      </p>
+      <p className="oct-row-detail welcome__status">
+        <OctantButton onClick={props.coordinator.onCancel} type="button" variant="link">
           Start an ordinary thread instead
         </OctantButton>
       </p>
-      {onChoicesChange === undefined ? null : (
-        <div className="draft-thread__context-strip">
-          <OctantSelectField
-            aria-label="Workers start at"
-            onValueChange={(value) => {
-              const { workerLevel: _previous, ...rest } = choices;
-              const level = COORDINATOR_WORKER_LEVELS.find((entry) => entry.id === value)?.level;
-              onChoicesChange(level === undefined ? rest : { ...rest, workerLevel: level });
-            }}
-            options={COORDINATOR_WORKER_LEVELS}
-            value={choices.workerLevel ?? ""}
-          />
-          {COORDINATOR_BOUND_FIELDS.map((field) => (
-            <OctantInput
-              aria-label={field.label}
-              key={field.bound}
-              max={field.max}
-              min={1}
-              onChange={(event) => {
-                const { [field.bound]: _previous, ...rest } = choices.bounds ?? {};
-                const value = Number(event.currentTarget.value);
-                // A cleared or out-of-range field returns that bound to its default.
-                const bounds =
-                  Number.isInteger(value) && value >= 1 && value <= field.max
-                    ? { ...rest, [field.bound]: value }
-                    : rest;
-                const { bounds: _bounds, ...others } = choices;
-                onChoicesChange(Object.keys(bounds).length === 0 ? others : { ...others, bounds });
-              }}
-              placeholder={`${field.label}: ${String(field.default)}`}
-              title={field.label}
-              type="number"
-              value={choices.bounds?.[field.bound] ?? ""}
-            />
-          ))}
-        </div>
-      )}
     </>
+  );
+}
+
+/**
+ * The New coordinator draft's settings as one line under the composer, with
+ * the defaults filled in, and Change… to edit them in the same dialog a
+ * running coordinator's limits use, plus the workers' level.
+ */
+function CoordinatorDraftSettings(props: {
+  readonly choices: CoordinatorDraftChoices;
+  readonly onChoicesChange: (choices: CoordinatorDraftChoices) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const { choices } = props;
+  const level =
+    COORDINATOR_WORKER_LEVELS.find((entry) => entry.level === choices.workerLevel) ??
+    COORDINATOR_WORKER_LEVELS[0];
+  const parts = [
+    ...(level === undefined ? [] : [level.summary]),
+    ...COORDINATOR_BOUND_FIELDS.map((field) =>
+      field.summary(choices.bounds?.[field.bound] ?? field.default),
+    ),
+  ];
+  return (
+    <div aria-label="Coordinator settings" className="coordinator-draft-settings" role="group">
+      <span className="oct-row-detail">{parts.join(" · ")}</span>
+      <OctantButton onClick={() => setOpen(true)} size="sm" type="button" variant="link">
+        Change…
+      </OctantButton>
+      {open ? (
+        <CoordinatorBoundsDialog
+          bounds={choices.bounds}
+          onClose={() => setOpen(false)}
+          onSave={(bounds, workerLevel) => {
+            props.onChoicesChange({
+              ...(workerLevel?.level === undefined ? {} : { workerLevel: workerLevel.level }),
+              ...(Object.keys(bounds).length === 0 ? {} : { bounds }),
+            });
+            setOpen(false);
+          }}
+          title="New coordinator"
+          workerLevel={{ level: choices.workerLevel }}
+        />
+      ) : null}
+    </div>
   );
 }
 

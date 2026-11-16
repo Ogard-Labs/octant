@@ -307,6 +307,7 @@ describe("MachineChangeFeed", () => {
         { aggregateType: "thread-side-tasks" },
         { aggregateType: "thread-follow-up-suggestions" },
         { aggregateType: "thread-message-queue" },
+        { aggregateType: "todo" },
       ],
     });
 
@@ -314,7 +315,7 @@ describe("MachineChangeFeed", () => {
       value: {
         kind: "changed",
         sequence: 1,
-        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue"],
+        topics: ["browser-captures", "thread-follow-ups", "thread-message-queue", "todos"],
       },
     });
     controller.abort();
@@ -391,6 +392,17 @@ describe("MachineChangeFeed", () => {
     controller.abort();
   });
 
+  it("tells the thread's follow-up readers when one of its wake-ups changes", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    feed.publishCommitted({ events: [{ aggregateType: "thread-wakeup" }] });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["thread-follow-ups"] },
+    });
+    controller.abort();
+  });
+
   it("decodes every published topic under strict framing", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();
@@ -408,6 +420,7 @@ describe("MachineChangeFeed", () => {
       "tool-approvals",
       "thread-follow-ups",
       "thread-message-queue",
+      "todos",
     ]);
 
     await expect(stream.next()).resolves.toMatchObject({
@@ -426,6 +439,7 @@ describe("MachineChangeFeed", () => {
           "tool-approvals",
           "thread-follow-ups",
           "thread-message-queue",
+          "todos",
         ],
       },
     });

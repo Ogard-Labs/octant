@@ -86,7 +86,7 @@ export type RoutesDependencies = {
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes" | "nativeBrowserPresentationRoutes"> &
-  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes" | "codeSessionRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
@@ -123,6 +123,8 @@ export type RoutesDependencies = {
     | "threadExportRoutes"
     | "threadHandOffRoutes"
     | "threadMessageQueueRoutes"
+    | "threadWakeupRoutes"
+    | "workSessionRoutes"
   > &
   Pick<
     ZenWiring,
@@ -154,6 +156,7 @@ export type RoutesDependencies = {
     | "workOverviewRoutes"
     | "workPromotionRoutes"
     | "workRequestRoutes"
+    | "threadSearchRoutes"
     | "workThreadRoutes"
   > &
   Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
@@ -164,6 +167,7 @@ export type RoutesDependencies = {
     | "sandboxRestrictionsRoutes"
     | "windowAuthorityStore"
     | "todoRoutes"
+    | "octantInstructionsRoutes"
   >;
 
 export function wireRoutes(deps: RoutesDependencies) {
@@ -180,6 +184,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
+    codeSessionRoutes,
     appleToolchainRoutes,
     artifactLibraryRoutes,
     artifactMirrorRoutes,
@@ -235,6 +240,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     projectBindingRoutes,
     projectRoutes,
     personMemoryRoutes,
+    octantInstructionsRoutes,
     protectedFilesRoutes,
     sandboxRestrictionsRoutes,
     todoRoutes,
@@ -259,6 +265,8 @@ export function wireRoutes(deps: RoutesDependencies) {
     threadMentionRoutes,
     threadNotesRoutes,
     threadMessageQueueRoutes,
+    threadWakeupRoutes,
+    workSessionRoutes,
     usageDashboardRoutes,
     usageRoutes,
     validationEvidenceRoutes,
@@ -269,6 +277,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     workRequestRoutes,
     workResearchRoutes,
     workspacePresetRoutes,
+    threadSearchRoutes,
     workThreadRoutes,
     workTurnRoutes,
     zenBackgroundRoutes,
@@ -332,10 +341,14 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await discoveryRoutes(request)) ??
     (await chatRoutes(request)) ??
     (await threadMessageQueueRoutes(request)) ??
+    (await threadWakeupRoutes(request)) ??
+    (await workSessionRoutes(request)) ??
+    (await codeSessionRoutes(request)) ??
     (await threadCheckpointRoutes(request)) ??
     (await scaffoldRoutes(request)) ??
     (await workspacePresetRoutes(request)) ??
     (await productFeedbackRoutes(request)) ??
+    (await threadSearchRoutes(request)) ??
     (await workThreadRoutes(request)) ??
     (await workTurnRoutes(request)) ??
     (await workOverviewRoutes(request)) ??
@@ -375,6 +388,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await diskCleanupRoutes(request)) ??
     (await personMemoryRoutes(request)) ??
     (await todoRoutes(request)) ??
+    (await octantInstructionsRoutes(request)) ??
     (await usageDashboardRoutes(request)) ??
     (await localUsageHistoryRoutes(request)) ??
     (await terminalSessionRoutes(request)) ??

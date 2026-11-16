@@ -53,6 +53,8 @@ import { PersonMemoryStore } from "../personMemory/personMemoryStore";
 import { SandboxRestrictionsService } from "../sandboxRestrictionsService";
 import { createSandboxRestrictionsRoutes } from "../sandboxRestrictionsRoutes";
 import { configureSandboxRestrictionsAuthority } from "../process/sandboxRuntimePolicy";
+import { OctantInstructionsStore } from "../octantInstructions/octantInstructionsStore";
+import { createOctantInstructionsRouteHandler } from "../octantInstructions/octantInstructionsRoutes";
 import { ProtectedFilesService } from "../protectedFilesService";
 import { createProtectedFilesRouteHandler } from "../protectedFilesRoutes";
 import { ExtensionToolApprovalService } from "../extensions/extensionToolApprovalService";
@@ -166,6 +168,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
         dataDirectory: persistence.dataDirectory,
         identityFiles: options.serverIdentityFiles,
       }),
+  });
+  // The person's own instructions for Octant, hydrated before any turn runs
+  // so the first turn after a start already carries them.
+  const octantInstructions = new OctantInstructionsStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    projectExists: (projectId) => persistence.readProject(decodeProjectId(projectId)) !== undefined,
   });
   const codeApprovalStore = new CodeOperationApprovalStore({
     uuid: randomUUID,
@@ -390,6 +400,10 @@ export function wireAuthority(deps: AuthorityDependencies) {
     windowAuthorityStore,
   });
   const todoRoutes = createTodoRouteHandler({ store: todos, windowAuthorityStore });
+  const octantInstructionsRoutes = createOctantInstructionsRouteHandler({
+    store: octantInstructions,
+    windowAuthorityStore,
+  });
   const protectedFilesRoutes = createProtectedFilesRouteHandler({
     service: protectedFiles,
     windowAuthorityStore,
@@ -455,6 +469,8 @@ export function wireAuthority(deps: AuthorityDependencies) {
     personMemory,
     personMemoryAccess,
     personMemoryRoutes,
+    octantInstructions,
+    octantInstructionsRoutes,
     protectedFilesRoutes,
     sandboxRestrictions,
     sandboxRestrictionsRoutes,

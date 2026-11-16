@@ -6,6 +6,7 @@ import {
 import { ToolCatalogContinuation } from "../providers/ToolCatalogContinuation";
 import { ContinueElsewhere } from "../continuity/ContinueElsewhere";
 import { ThreadInfo } from "../composer/ThreadInfo";
+import { ThreadAccountControl } from "../providers/ThreadAccountControl";
 import { draftWithNote } from "../threadNotes/ThreadNotes";
 import { ThreadNativeSetupControl } from "../providers/ThreadNativeSetupControl";
 import { useContinuationInputPolicy } from "../continuity/useContinuationInputPolicy";
@@ -29,8 +30,10 @@ import type { ThreadMentionClient } from "@octant/client-runtime";
 import {
   buildAttachmentCapability,
   buildImageAttachmentCapability,
+  COMPOSER_IMAGE_MEDIA_TYPES,
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
+import { useSeesImages } from "../harness/useSeesImages";
 import { pastedImageName } from "./composerImagePaste";
 import { RewindDialog, composerAfterRewind } from "../transcript/RewindDialog";
 import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
@@ -41,6 +44,7 @@ import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import {
+  parkedStopReleased,
   providerAccountMoveTargets,
   startedConversationPickerGroups,
   type PickerGroup,
@@ -85,7 +89,11 @@ import type { ImageGenerationClient } from "@octant/client-runtime/image-generat
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageJobs, useGeneratedImageJobs } from "../image/GeneratedImageList";
 import { ImageGenerationOfferPrompt } from "../image/ImageGenerationOfferPrompt";
-import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
+import {
+  decodeBrowserThreadId,
+  decodeImageGenerationScopeId,
+  decodeMentionableThreadId,
+} from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type { HostId } from "@octant/contracts/host";
@@ -456,6 +464,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     draft: props.controller.pendingDraft,
     dialogueEnabled: true,
     ...(props.onOpenSideChat === undefined ? {} : { onSideChatOpened: props.onOpenSideChat }),
+    // The host lists and accepts only what this thread's own Project reaches,
+    // the same set a send resolves, so a pick is never refused at send.
+    ...(activeThreadId === undefined
+      ? {}
+      : { readerThreadId: decodeMentionableThreadId(String(activeThreadId)) }),
   });
   threadMentionChipsRef.current = threadMentions.chips;
   const threadDropKey = useComposerThreadDropRegistration({
@@ -519,6 +532,30 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     const timer = setTimeout(() => setStopGraceElapsed(true), FORCE_STOP_AFTER_MS);
     return () => clearTimeout(timer);
   }, [stoppingAttemptId]);
+  // A model that cannot read images may still take one when Sees images can
+  // describe it; the host decides again when the turn starts.
+  const threadObservation =
+    view === undefined
+      ? undefined
+      : props.providerSnapshot?.observedStates.find(
+          (observation) =>
+            String(observation.instanceId) === String(view.thread.providerInstanceId),
+        );
+  const seesImages = useSeesImages({
+    readsImages:
+      view === undefined
+        ? undefined
+        : supportsAttachmentFile(threadObservation, view.thread.modelId, { type: "image/png" }),
+    serverUrl: props.serverUrl,
+    windowCapability: props.windowCapability,
+    projectId: view?.thread.projectId === undefined ? undefined : String(view.thread.projectId),
+    providerInstanceId: view === undefined ? undefined : String(view.thread.providerInstanceId),
+    modelId: view === undefined ? undefined : String(view.thread.modelId),
+  });
+  const describesImages =
+    view !== undefined &&
+    seesImages.takesImages === true &&
+    !supportsAttachmentFile(threadObservation, view.thread.modelId, { type: "image/png" });
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -651,13 +688,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     attemptCanForceStop(props.providerSnapshot, activeAttempt);
   // The host would refuse to clear a thread's outside-content mark in any of
   // these states; a paused queue with nothing waiting does not stop it.
-  const threadBusy =
-    isSending ||
-    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
-    (messageQueue.snapshot?.items.length ?? 0) > 0;
+  // An attempt parked on a usage limit stops holding the thread once it has
+  // moved off that account: the host records the released attempt on the
+  // move, and the queue reads the same record.
+  const tailAttempt = view.turns.at(-1)?.attempts.at(-1);
+  const tailWaiting =
+    tailAttempt?.outcome === "waiting" && !parkedStopReleased(view.thread, String(tailAttempt.id));
+  const threadBusy = isSending || tailWaiting || (messageQueue.snapshot?.items.length ?? 0) > 0;
   const queueFollowUp =
     isSending ||
-    view.turns.at(-1)?.attempts.at(-1)?.outcome === "waiting" ||
+    tailWaiting ||
     messageQueue.busy ||
     messageQueue.uncertain ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -674,13 +714,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       modelId: view.thread.modelId,
     },
   });
-  const attachmentCapability: ChatComposerAttachmentCapability = buildAttachmentCapability(
-    providerState.observation,
-  );
+  const attachmentCapability: ChatComposerAttachmentCapability = describesImages
+    ? { kind: "supported" }
+    : buildAttachmentCapability(providerState.observation);
   // Images ride the ordinary attachment path but need their own honest check:
   // a provider can accept documents while the selected model rejects images.
-  const imageAttachmentCapability: ChatComposerAttachmentCapability =
-    buildImageAttachmentCapability(providerState.observation, view.thread.modelId);
+  const imageAttachmentCapability: ChatComposerAttachmentCapability = describesImages
+    ? { kind: "supported" }
+    : buildImageAttachmentCapability(providerState.observation, view.thread.modelId);
   const firstUpload = uploadingAttachments[0];
   const uploadingMessage =
     firstUpload === undefined
@@ -1563,6 +1604,30 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   onProviderChange={(selection) => selectProviderModel(selection)}
                   disabled={isSending || branchPending}
                 />
+                {/* Move to account stays in the thread's actions menu. */}
+                <ThreadAccountControl
+                  groups={props.providerGroups ?? []}
+                  providerInstanceId={view.thread.providerInstanceId}
+                  modelId={view.thread.modelId}
+                  usageLimitHandoff={view.thread.usageLimitHandoff}
+                  {...(view.thread.multiModelPool === undefined
+                    ? {}
+                    : {
+                        unavailableReason:
+                          "Turn off the model pool first; its models stay on the current account.",
+                      })}
+                  onUsageLimitHandoffChange={async (providerInstanceId) => {
+                    const result = await props.controller.execute({
+                      kind: "set-chat-thread-usage-limit-handoff",
+                      threadId: view.thread.id,
+                      expectedVersion: view.thread.version,
+                      ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+                    });
+                    return result?.kind === "thread-updated"
+                      ? undefined
+                      : "The choice could not be saved. Nothing changed.";
+                  }}
+                />
               </ThreadInfo>
             }
             attachment={attachmentCapability}
@@ -1626,7 +1691,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               // A pasted image usually has no file name; name it once so the chip,
               // its remove control, and any failure message all agree.
               const displayName = pastedImageName(file);
-              if (!supportsAttachmentFile(providerState.observation, view.thread.modelId, file)) {
+              const describedImage =
+                describesImages && COMPOSER_IMAGE_MEDIA_TYPES.includes(file.type);
+              if (
+                !describedImage &&
+                !supportsAttachmentFile(providerState.observation, view.thread.modelId, file)
+              ) {
                 setAttachmentStatus({
                   kind: "failed",
                   message: `${displayName} is unavailable to the selected provider and model.`,
@@ -2172,9 +2242,17 @@ function researchBackend(
     observation?.capabilities.appManagedTools === "supported" ||
     (observation?.verifiedToolModelIds?.some((id) => String(id) === String(view.thread.modelId)) ??
       false);
+  // The host says whether its data policy leaves a web search backend
+  // eligible; a host that predates the backend list has only Chat's address.
+  const webSearchReady =
+    controller.bootstrap?.webSearchReady ??
+    controller.bootstrap?.settings.searxngBaseUrl !== undefined;
   if (view.thread.researchRouting === "searxng") {
-    return controller.bootstrap?.settings.searxngBaseUrl === undefined || !effectiveAppManagedTools
-      ? { kind: "unavailable", reason: "SearXNG is not configured for this provider." }
+    return !webSearchReady || !effectiveAppManagedTools
+      ? {
+          kind: "unavailable",
+          reason: "No web search backend is ready for this provider under the data policy.",
+        }
       : { kind: "selected", backend: "searxng" };
   }
   if (view.thread.researchRouting === "provider-native") {
@@ -2182,7 +2260,7 @@ function researchBackend(
       ? { kind: "selected", backend: "provider-native" }
       : { kind: "unavailable", reason: "Provider-native research is unsupported." };
   }
-  if (controller.bootstrap?.settings.searxngBaseUrl !== undefined && effectiveAppManagedTools) {
+  if (webSearchReady && effectiveAppManagedTools) {
     return { kind: "selected", backend: "searxng" };
   }
   return observation?.capabilities.nativeWebResearch === "supported"

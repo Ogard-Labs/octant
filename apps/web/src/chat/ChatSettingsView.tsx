@@ -9,7 +9,6 @@ import { useMemo, useState } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { SettingRow, SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -80,7 +79,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       };
     });
   }
-  const [endpointError, setEndpointError] = useState<string>();
   const [formError, setFormError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const groups = useMemo(
@@ -136,11 +134,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
 
   const busy = props.busy === true || saving;
 
-  function setEndpoint(value: string) {
-    setDraft((current) => ({ ...current, searxngBaseUrl: value }));
-    setEndpointError(endpointValidationMessage(value));
-  }
-
   /**
    * Every page in Settings keeps what you change; a Save button here meant a
    * choice could look made and not be. A pick commits as it is made, and free
@@ -149,11 +142,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
    */
   async function commit(change: Partial<ReturnType<typeof draftFrom>>) {
     const next = { ...draft, ...change };
-    const nextEndpointError = endpointValidationMessage(next.searxngBaseUrl);
-    if (nextEndpointError !== undefined) {
-      setEndpointError(nextEndpointError);
-      return;
-    }
     const providerInstanceId =
       next.defaultProviderInstanceId === ""
         ? undefined
@@ -170,6 +158,9 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
       return;
     }
     setFormError(undefined);
+    // The SearXNG address moved to Settings › Web search. Until a backend list
+    // is saved there, the host reads its first entry from this stored address,
+    // so a Chat save carries it unchanged rather than clearing it.
     const searxngBaseUrl = next.searxngBaseUrl.trim();
     const command: UpdateChatSettingsCommand = {
       kind: "update-chat-settings",
@@ -334,29 +325,10 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             }}
             options={[
               { id: "automatic", label: "Automatic" },
-              { id: "searxng", label: "SearXNG" },
+              { id: "searxng", label: "Octant web search" },
               { id: "provider-native", label: "Provider-native" },
             ]}
             value={draft.defaultResearchRouting}
-          />
-        </SettingRow>
-        <SettingRow
-          description="HTTPS, or HTTP on a loopback address."
-          label="SearXNG base URL"
-          scope="host"
-          settingId="chat-searxng-url"
-        >
-          <OctantInput
-            aria-describedby={endpointError === undefined ? undefined : "searxng-base-url-error"}
-            aria-invalid={endpointError === undefined ? undefined : true}
-            aria-label="SearXNG base URL"
-            className="settings-view__text-input"
-            disabled={busy}
-            onBlur={() => void commit({})}
-            onChange={(event) => setEndpoint(event.currentTarget.value)}
-            placeholder="https://search.example"
-            type="url"
-            value={draft.searxngBaseUrl}
           />
         </SettingRow>
         <SettingRow
@@ -405,12 +377,6 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
             {props.message}
           </OctantAlert>
         )}
-        {endpointError === undefined ? null : (
-          /* ui-boundary-exception: inline-field-error */
-          <p className="provider-settings__alert" id="searxng-base-url-error" role="alert">
-            {endpointError}
-          </p>
-        )}
         {formError === undefined ? null : (
           <OctantAlert className="provider-settings__alert" tone="warning">
             {formError}
@@ -440,35 +406,4 @@ function draftFrom(settings: ChatSettings) {
       settings.providerFallback === undefined ? "" : String(settings.providerFallback.modelId),
     restartContinuation: settings.restartContinuation !== false,
   };
-}
-
-function endpointValidationMessage(value: string): string | undefined {
-  const endpoint = value.trim();
-  if (endpoint === "") return undefined;
-  try {
-    const url = new URL(endpoint);
-    if (
-      url.username !== "" ||
-      url.password !== "" ||
-      url.search !== "" ||
-      url.hash !== "" ||
-      endpoint.includes("?") ||
-      endpoint.includes("#")
-    ) {
-      return "Use a base URL without credentials, query, or fragment.";
-    }
-    if (url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname))) {
-      return undefined;
-    }
-  } catch {
-    // The same message covers malformed and disallowed endpoints.
-  }
-  return "Use HTTPS or a loopback HTTP address.";
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return (
-    normalized === "localhost" || normalized === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(normalized)
-  );
 }

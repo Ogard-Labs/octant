@@ -1,4 +1,5 @@
 import type { PreparedProductFeedbackTurn } from "../browser/productFeedbackTurnPort";
+import type { OctantInstructionsBlock } from "../octantInstructions/octantInstructionsStore";
 import type { ConversationInputReceipt } from "@octant/contracts/conversation-inputs";
 import { THREAD_MOVING_REFUSAL } from "../hub/threadMoveHolds";
 import type { ConversationInputTransfer } from "../attachments/conversationInputTransfer";
@@ -90,11 +91,22 @@ import {
   type ThreadWorkingDirectory,
   type WindowId,
   type ProviderRuntimeEvent,
+  type DescribedTurnImages,
+  type AdoptWorkNativeSessionResult,
+  type WorkNativeSessions,
+  type WorkThreadAdoptedSession,
+  decodeThreadWorkingDirectory,
+  ProviderNativeSessionId,
 } from "@octant/contracts";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
-import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
+import type {
+  ProviderDriver,
+  ProviderSessionHandle,
+  ProviderWakeupSchedule,
+} from "@octant/provider-sdk/driver";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import type { TurnToolEffects } from "../toolEffects/toolEffectLedger";
 import { nativeSetupOption, sessionNativeSetup } from "../providers/providerNativeSetup";
 import type {
@@ -108,6 +120,7 @@ import {
   accumulateTurnUsage,
   decideConversationSession,
   decideWorkTurnAuthority,
+  describedImageText,
   assertProviderAllowedByProjectPolicy,
   ProjectProviderPolicyRejected,
   FILE_MENTION_UNREADABLE_CONTEXT,
@@ -115,6 +128,7 @@ import {
   workProjectKeepsStatusFile,
   changedThreadToolStep,
   clampWorkAccess,
+  hostSandboxRefusal,
   threadToolStepLimit,
   workThreadAccessOf,
   workTurnCapabilityFacts,
@@ -163,6 +177,7 @@ import type { WorkTurnCutOffByRestart, WorkTurnProjection } from "./workTurnProj
 import type { RestartContinuationReadiness } from "../harness/threadRestartContinuation";
 import {
   WorkTurnRuntime,
+  workSessionTerms,
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
@@ -176,6 +191,7 @@ const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
+const isProviderNativeSessionId = Schema.is(ProviderNativeSessionId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 /**
@@ -263,6 +279,13 @@ export interface WorkTurnStartOptions {
    * cannot carry it.
    */
   readonly routineRun?: AutomationRunReference;
+  /**
+   * Set only by the host when it opens a turn the runtime started by itself
+   * in the thread's kept session: the turn takes up the session the last turn
+   * left and attaches to it, sending nothing. Host-only: the wire command
+   * cannot carry it.
+   */
+  readonly runtimeTurn?: true;
 }
 
 /**
@@ -286,6 +309,11 @@ export interface ServerWorkTurns {
 export interface WorkTurnServiceDependencies {
   /** Whether a move holds a thread; a held thread starts no turn. */
   readonly moveHold?: (threadId: string) => boolean;
+  /**
+   * The host's schedule for a thread's wake-ups, read at each session start;
+   * absent, or answering undefined, offers the runtime no wake-up tool.
+   */
+  readonly wakeupsForThread?: (threadId: string) => ProviderWakeupSchedule | undefined;
   readonly resolveSideChatReturns?: SideChatReturnResolver;
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
@@ -347,6 +375,20 @@ export interface WorkTurnServiceDependencies {
   readonly resolveDriver: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => ProviderDriver | undefined;
+  /**
+   * Journals that an empty thread continues a provider session begun outside
+   * Octant, marking it as carrying outside content first. Absent, no Work
+   * thread is started from such a session.
+   */
+  readonly recordAdoptedSession?: (
+    thread: WorkThread,
+    adopted: WorkThreadAdoptedSession,
+  ) => { readonly status: "recorded" } | { readonly status: "refused"; readonly message: string };
+  /**
+   * Stops the thread's session the host kept past its last turn, and every
+   * background task in it. Absent, no Work session is kept.
+   */
+  readonly stopKeptSession?: (threadId: WorkThreadId) => Promise<boolean>;
   readonly attachments?: WorkAttachmentStore;
   /**
    * Whether a provider can carry its native session on to another of its
@@ -374,6 +416,18 @@ export interface WorkTurnServiceDependencies {
     readonly providerInstanceId: WorkThread["providerInstanceId"];
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
+  /**
+   * Sees images: describes a turn's images for a model that cannot read
+   * them, or refuses with the reason. Absent, such a turn is refused as before.
+   */
+  readonly describeImages?: (input: {
+    readonly threadId: WorkThreadId;
+    readonly projectId: ProjectId;
+    readonly providerInstanceId: WorkThread["providerInstanceId"];
+    readonly modelId: WorkThread["modelId"];
+    readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
+  }) => Promise<TurnImagesDescription>;
   readonly turnRuntime?: WorkTurnRuntimePort;
   readonly prepareProductFeedbackForTurn?: (input: {
     readonly windowId: WindowId;
@@ -427,6 +481,12 @@ export interface WorkTurnServiceDependencies {
    * ignored: the stop has happened and must not report as failed.
    */
   readonly onTurnCancelled?: (threadId: WorkThreadId) => void;
+  /**
+   * The thread's turn just stopped on its account's usage limit, as the
+   * provider itself reported it. Fires after the stop is journaled. A
+   * rejection is ignored: the stop has happened and stays recorded.
+   */
+  readonly onUsageLimitStop?: (threadId: WorkThreadId) => Promise<void>;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
@@ -440,6 +500,13 @@ export interface WorkTurnServiceDependencies {
     readonly thread: WorkThread;
     readonly windowId: WindowId;
   }) => string | undefined;
+  /**
+   * The instructions the person wrote for Octant, as standing blocks in their
+   * order. Every turn gets them, whoever started it: they grant nothing.
+   */
+  readonly octantInstructionBlocks?: (input: {
+    readonly thread: WorkThread;
+  }) => ReadonlyArray<OctantInstructionsBlock>;
   readonly nativeHarness?: {
     readonly contextFor: (scope: NativeHarnessTurnScope) => ReadonlyArray<ProviderContextBlock>;
     /** The turn's record of tool calls about to take effect (toolEffects/toolEffectLedger.ts). */
@@ -584,6 +651,15 @@ export class WorkTurnService {
   /** Turns being prepared, per thread, until they are accepted or refused. */
   readonly #startingTurns = new Map<string, number>();
   /**
+   * Threads taking up a provider session begun outside Octant. A turn
+   * admitted meanwhile would start a session of its own and the adopted one
+   * journaled after it would be dropped, so admission refuses while a thread
+   * is here.
+   */
+  readonly #adoptingThreads = new Set<string>();
+  readonly #recordAdoptedSession: WorkTurnServiceDependencies["recordAdoptedSession"];
+  readonly #stopKeptSession: WorkTurnServiceDependencies["stopKeptSession"];
+  /**
    * The access each running turn holds, by thread. The native harness checks
    * edits against this rather than the thread's own access, so a goal-loop
    * round held ask-first stays ask-first for every provider.
@@ -600,6 +676,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #conversationInputTransfer: WorkTurnServiceDependencies["conversationInputTransfer"];
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
+  readonly #describeImages: WorkTurnServiceDependencies["describeImages"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
@@ -611,12 +688,14 @@ export class WorkTurnService {
   readonly #serverProjects: ServerWorkTurns | undefined;
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
   readonly #personMemoryBlock: WorkTurnServiceDependencies["personMemoryBlock"];
+  readonly #octantInstructionBlocks: WorkTurnServiceDependencies["octantInstructionBlocks"];
   readonly #spendCeiling: WorkTurnServiceDependencies["spendCeiling"];
   readonly #spendReservations = new Map<
     string,
     ReturnType<typeof decodeSpendCeilingReservationId>
   >();
   readonly #onTurnRequested: WorkTurnServiceDependencies["onTurnRequested"];
+  readonly #onUsageLimitStop: WorkTurnServiceDependencies["onUsageLimitStop"];
   readonly #onTurnCancelled: WorkTurnServiceDependencies["onTurnCancelled"];
   readonly #turnFileObserver: WorkTurnFileObserver | undefined;
   readonly #projectStatusFiles: WorkProjectStatusFiles | undefined;
@@ -648,9 +727,11 @@ export class WorkTurnService {
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
   readonly #moveHold: ((threadId: string) => boolean) | undefined;
+  readonly #wakeupsForThread: WorkTurnServiceDependencies["wakeupsForThread"];
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#moveHold = dependencies.moveHold;
+    this.#wakeupsForThread = dependencies.wakeupsForThread;
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
@@ -664,19 +745,24 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#conversationInputTransfer = dependencies.conversationInputTransfer;
     this.#supportsAttachments = dependencies.supportsAttachments;
+    this.#describeImages = dependencies.describeImages;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#prepareProductFeedbackForTurn = dependencies.prepareProductFeedbackForTurn;
     this.#outsideContentMarks = dependencies.outsideContentMarks;
     this.#forgeChanges = dependencies.forgeChanges;
+    this.#recordAdoptedSession = dependencies.recordAdoptedSession;
+    this.#stopKeptSession = dependencies.stopKeptSession;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#serverProjects = dependencies.serverProjects;
     this.#nativeHarness = dependencies.nativeHarness;
     this.#personMemoryBlock = dependencies.personMemoryBlock;
+    this.#octantInstructionBlocks = dependencies.octantInstructionBlocks;
     this.#spendCeiling = dependencies.spendCeiling;
     this.#onTurnRequested = dependencies.onTurnRequested;
+    this.#onUsageLimitStop = dependencies.onUsageLimitStop;
     this.#onTurnCancelled = dependencies.onTurnCancelled;
     this.#turnFileObserver = dependencies.turnFileObserver;
     this.#projectStatusFiles = dependencies.projectStatusFiles;
@@ -847,8 +933,6 @@ export class WorkTurnService {
     input: unknown,
     options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
-    if (process.platform === "win32")
-      throw this.#failure("unavailable", "Work execution requires Windows host confinement.");
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
     const existing = this.#projection.lookup(command.requestId);
@@ -875,6 +959,16 @@ export class WorkTurnService {
       throw this.#failure("stale", "This session is being compacted. Send again when it finishes.");
     }
     const key = String(command.threadId);
+    // Refused rather than held: the adoption may wait on the provider, and
+    // the message would otherwise run before the session it was meant to
+    // continue exists. This check and the count below run in one synchronous
+    // step, so an adoption that starts later sees this turn.
+    if (this.#adoptingThreads.has(key)) {
+      throw this.#failure(
+        "stale",
+        "This thread is taking up a session started elsewhere. Send again when it finishes.",
+      );
+    }
     this.#startingTurns.set(key, (this.#startingTurns.get(key) ?? 0) + 1);
     try {
       return await this.#admitTurn(authenticatedWindowId, command, options);
@@ -969,6 +1063,277 @@ export class WorkTurnService {
     return this.#startingTurns.has(String(threadId));
   }
 
+  /**
+   * Hands the thread's native session to a requested compaction, which
+   * resumes it on a connection of its own. A session the host kept past the
+   * last turn is stopped first, background tasks and all: two processes must
+   * never write the same native history, and the next turn must resume what
+   * the compaction left. Answers false while a turn is starting or running.
+   */
+  async releaseSessionForCompaction(threadId: WorkThreadId): Promise<boolean> {
+    if (this.isTurnActive(threadId) || this.isTurnStarting(threadId)) return false;
+    await this.#stopKeptSession?.(threadId);
+    return !(this.isTurnActive(threadId) || this.isTurnStarting(threadId));
+  }
+
+  /**
+   * The provider's own sessions, begun outside Octant in the folder this
+   * thread's turns run in, that the thread may start from; or the session it
+   * was started from.
+   */
+  async nativeSessions(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<WorkNativeSessions> {
+    const target = await this.#adoptionTarget(authenticatedWindowId, threadId);
+    if (target.status === "refused")
+      return {
+        threadId,
+        sessions: [],
+        unavailable: target.message,
+        ...(target.adopted === undefined ? {} : { adopted: { nativeSessionId: target.adopted } }),
+      };
+    const listed = await Effect.runPromise(
+      Effect.either(
+        target.nativeSessions.list({
+          instanceId: target.thread.providerInstanceId,
+          projectRoot: target.projectRoot,
+        }),
+      ),
+    );
+    if (listed._tag === "Left") return { threadId, sessions: [], unavailable: listed.left.message };
+    return {
+      threadId,
+      sessions: listed.right.flatMap((session) =>
+        isProviderNativeSessionId(session.nativeSessionId)
+          ? [
+              {
+                nativeSessionId: session.nativeSessionId,
+                lastModified: Math.max(0, session.lastModified),
+                ...(session.title === undefined ? {} : { title: session.title.slice(0, 200) }),
+                ...(session.gitBranch === undefined
+                  ? {}
+                  : { gitBranch: session.gitBranch.slice(0, 256) }),
+              },
+            ]
+          : [],
+      ),
+    };
+  }
+
+  /**
+   * Starts an empty thread from a provider session begun outside Octant in
+   * the folder its turns run in, under Work's own folder rules: the thread's
+   * approved folder and working directory, never a folder the caller names.
+   * The thread's first turn resumes it through the ordinary exact-resume
+   * checks. Only the person reaches this; the route refuses anyone else.
+   */
+  async adoptNativeSession(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+    nativeSessionId: ProviderNativeSessionId,
+  ): Promise<AdoptWorkNativeSessionResult> {
+    const key = String(threadId);
+    if (this.#adoptingThreads.has(key))
+      return {
+        kind: "work-native-session-refused",
+        message: "This thread is already taking up a session.",
+      };
+    this.#adoptingThreads.add(key);
+    try {
+      const target = await this.#adoptionTarget(authenticatedWindowId, threadId);
+      if (target.status === "refused")
+        return { kind: "work-native-session-refused", message: target.message };
+      const record = this.#recordAdoptedSession;
+      if (record === undefined || target.thread.bindingRevisionId === undefined)
+        return {
+          kind: "work-native-session-refused",
+          message: "This thread cannot continue a session started outside Octant.",
+        };
+      const providerSessionId = decodeProviderSessionId(this.#uuid());
+      const adopted = await Effect.runPromise(
+        Effect.either(
+          target.nativeSessions.adopt({
+            instanceId: target.thread.providerInstanceId,
+            projectRoot: target.projectRoot,
+            mode: "work",
+            sessionId: providerSessionId,
+            nativeSessionId,
+            modelId: target.thread.modelId,
+          }),
+        ),
+      );
+      if (adopted._tag === "Left")
+        return { kind: "work-native-session-refused", message: adopted.left.message };
+      // The provider claimed the session for this thread before the thread
+      // could record it. An adoption that is not recorded gives the claim
+      // back, or the session could never be offered or adopted again.
+      let committed = false;
+      const giveBack = () =>
+        Effect.runPromise(
+          (
+            target.nativeSessions.release?.({
+              instanceId: target.thread.providerInstanceId,
+              nativeSessionId,
+              sessionId: providerSessionId,
+            }) ?? Effect.void
+          ).pipe(Effect.catchAll(() => Effect.void)),
+        );
+      try {
+        // The thread must still be empty when the adoption commits. Nothing
+        // yields from here to the journal append, so no turn slips in.
+        const occupied = this.#conversationRefusal(target.thread);
+        if (occupied !== undefined)
+          return { kind: "work-native-session-refused", message: occupied.message };
+        // The session was claimed for the folder the Project granted before
+        // the provider was asked. A relink, archive or a withdrawn working
+        // folder meanwhile would record a session its first turn could not
+        // take up; the thread's own changes are refused by its version below.
+        if (
+          adoptionFolderAuthority(
+            this.#persistence.readProject(target.thread.projectId),
+            target.thread,
+          ) !== target.folderAuthority
+        )
+          return {
+            kind: "work-native-session-refused",
+            message:
+              "This thread's Project folder changed while it took up the session. Try again.",
+          };
+        const recorded = record(target.thread, {
+          nativeSessionId,
+          providerSessionId,
+          resumeCursor: adopted.right,
+          providerInstanceId: target.thread.providerInstanceId,
+          modelId: target.thread.modelId,
+          bindingRevisionId: target.thread.bindingRevisionId,
+          workingDirectory: target.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          ...(target.thread.workingFolderId === undefined
+            ? {}
+            : { workingFolderId: target.thread.workingFolderId }),
+        });
+        if (recorded.status === "refused")
+          return { kind: "work-native-session-refused", message: recorded.message };
+        committed = true;
+        return { kind: "work-native-session-adopted", threadId, nativeSessionId };
+      } finally {
+        if (!committed) await giveBack();
+      }
+    } finally {
+      this.#adoptingThreads.delete(key);
+    }
+  }
+
+  /**
+   * Why the thread cannot be started from an outside session because it
+   * already has a conversation, a session, or a turn being admitted or
+   * running. Read synchronously so a caller acts on it before another turn
+   * is admitted.
+   */
+  #conversationRefusal(
+    thread: WorkThread,
+  ): { readonly message: string; readonly adopted?: ProviderNativeSessionId } | undefined {
+    if (
+      thread.adoptedSession !== undefined ||
+      this.#projection.latestForThread(thread.id) !== undefined ||
+      this.isTurnStarting(thread.id) ||
+      this.isTurnActive(thread.id)
+    )
+      return {
+        message: "Only a thread with no messages yet can continue a session started elsewhere.",
+        ...(thread.adoptedSession === undefined
+          ? {}
+          : { adopted: thread.adoptedSession.nativeSessionId }),
+      };
+    return undefined;
+  }
+
+  /**
+   * What adopting a session for this thread would act on, or why it cannot:
+   * an active, empty thread not marked Done, in a Work Project on this
+   * computer the window holds, on its current binding, whose provider takes
+   * up its own sessions. The folder is the one the thread's turns run in.
+   */
+  async #adoptionTarget(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<
+    | {
+        readonly status: "ready";
+        readonly thread: WorkThread;
+        readonly projectRoot: string;
+        /** What the Project granted the thread's folder when the target was read. */
+        readonly folderAuthority: string;
+        readonly nativeSessions: NonNullable<ProviderDriver["nativeSessions"]>;
+      }
+    | {
+        readonly status: "refused";
+        readonly message: string;
+        readonly adopted?: ProviderNativeSessionId;
+      }
+  > {
+    this.#assertReady();
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
+    if (thread === undefined || String(thread.id) !== String(threadId))
+      return { status: "refused", message: "This thread is unavailable." };
+    const accessible = (await this.#projects.bootstrap(authenticatedWindowId)).active.some(
+      (project) =>
+        project.type === "work" &&
+        project.lifecycle === "active" &&
+        String(project.id) === String(thread.projectId),
+    );
+    if (!accessible)
+      return { status: "refused", message: "This thread is not open to this window." };
+    const occupied = this.#conversationRefusal(thread);
+    if (occupied !== undefined) return { status: "refused", ...occupied };
+    if (thread.completionConfirmed === true)
+      return { status: "refused", message: WORK_THREAD_MARKED_DONE_TURN_REFUSAL };
+    if (this.#serverProjects?.holds(thread) === true)
+      return {
+        status: "refused",
+        message: "Only a thread on this computer can continue a session started here.",
+      };
+    const project = this.#persistence.readProject(thread.projectId);
+    if (
+      project?.type !== "work" ||
+      project.lifecycle !== "active" ||
+      thread.bindingRevisionId === undefined ||
+      String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+    )
+      return { status: "refused", message: "This thread's Project folder changed. Reload it." };
+    let projectRoot: string;
+    try {
+      const root = approvedWorkingFolderRoot(project, thread.workingFolderId);
+      if (root === undefined) throw new Error("Working folder is unavailable");
+      projectRoot = await this.#workingDirectories.resolve(
+        root,
+        thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+      );
+    } catch {
+      return { status: "refused", message: "This thread's folder is unavailable." };
+    }
+    const provider = this.#persistence.readProviderInstance(thread.providerInstanceId);
+    const driver =
+      provider === undefined || !provider.enabled
+        ? undefined
+        : this.#resolveDriver(thread.providerInstanceId);
+    if (driver?.nativeSessions === undefined)
+      return {
+        status: "refused",
+        message: "This thread's provider cannot continue a session started outside Octant.",
+      };
+    const folderAuthority = adoptionFolderAuthority(project, thread);
+    if (folderAuthority === undefined)
+      return { status: "refused", message: "This thread's folder is unavailable." };
+    return {
+      status: "ready",
+      thread,
+      projectRoot,
+      folderAuthority,
+      nativeSessions: driver.nativeSessions,
+    };
+  }
+
   async #admitTurn(
     authenticatedWindowId: WindowId,
     command: StartWorkThreadTurnCommand,
@@ -997,6 +1362,17 @@ export class WorkTurnService {
       options?.accessCeiling === undefined
         ? (thread?.access ?? DEFAULT_WORK_ACCESS)
         : clampWorkAccess(thread?.access ?? DEFAULT_WORK_ACCESS, options.accessCeiling);
+    // Judged at that level, not only the thread's stored one, before anything
+    // is journaled or started: a host without Octant's sandbox runs only the
+    // level that uses none.
+    const sandboxRefusal = hostSandboxRefusal({
+      platform: process.platform,
+      access: {
+        ...workThreadAccessOf(turnAccess),
+        ...(thread?.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+      },
+    });
+    if (sandboxRefusal !== undefined) throw this.#failure("unavailable", sandboxRefusal);
     const projectBootstrap = await this.#projects.bootstrap(authenticatedWindowId);
     // A thread in a server Work Project binds its turn here, before anything
     // starts: the harness's tools on the server, or why it cannot run there.
@@ -1174,15 +1550,56 @@ export class WorkTurnService {
     if (starting.status === "unknown") {
       throw this.#failure("invalid", "An image attached to this turn is no longer staged.");
     }
-    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
-      throw this.#failure(
-        "unsupported",
-        "The selected model does not support images. Choose a vision model, or remove the attachments.",
-      );
-    }
     let attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
     if (attachmentInputs === undefined) {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
+    }
+    // A model that cannot read images gets the words Sees images writes for
+    // each one; the images stay attached to the turn for the record. With no
+    // model to describe them, the turn is refused rather than sent without.
+    let describedImages: DescribedTurnImages | undefined;
+    let describedTexts: ReadonlyArray<string> = [];
+    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
+      if (this.#describeImages === undefined) {
+        throw this.#failure(
+          "unsupported",
+          "The selected model does not support images. Choose a vision model, or remove the attachments.",
+        );
+      }
+      // A turn stopped or revoked while its images are described sends no further one.
+      const describing = new AbortController();
+      const watch = setInterval(() => {
+        if (options?.admissionCurrent?.() === false) describing.abort();
+      }, 250);
+      const described = await this.#describeImages({
+        signal: describing.signal,
+        threadId: command.threadId,
+        projectId: command.authority.projectId,
+        providerInstanceId: command.authority.providerInstanceId,
+        modelId: command.authority.modelId,
+        images: attachmentInputs.map((input) => ({
+          attachmentId: input.attachmentId,
+          name: input.displayName,
+          mediaType: input.mediaType,
+          bytes: input.bytes,
+        })),
+      }).finally(() => clearInterval(watch));
+      if (described.status === "refused") throw this.#failure("unsupported", described.reason);
+      describedImages = described.images.map((image) => ({
+        attachmentId: image.attachmentId,
+        name: image.name,
+        describedBy: image.describedBy,
+        description: image.text,
+      }));
+      describedTexts = described.images.map((image) =>
+        describedImageText({
+          name: image.name,
+          attachmentId: image.attachmentId,
+          describedBy: image.describedBy,
+          description: image.text,
+        }),
+      );
+      attachmentInputs = [];
     }
 
     const selections =
@@ -1340,7 +1757,37 @@ export class WorkTurnService {
           "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
         );
       }
-      let continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
+      let continuing: Pick<WorkTurnState, "providerSessionId" | "resumeCursor"> | undefined =
+        sessionDecision.kind === "continue-session" ? previous : undefined;
+      // A thread started from a session begun outside Octant resumes it on
+      // its first turn, only on the provider, model, binding and folder it
+      // was adopted under; the provider's exact-resume checks still apply.
+      // A thread a rewind emptied also has no turn, but its adopted session
+      // still holds the removed turns: it is not resumed, and the thread
+      // starts again in a fresh session, as a Code thread rewound to its
+      // first message does.
+      const adopted =
+        previous === undefined && !this.#projection.rewoundSinceLatest(command.threadId)
+          ? thread?.adoptedSession
+          : undefined;
+      if (adopted !== undefined) {
+        if (
+          String(adopted.providerInstanceId) !== String(command.authority.providerInstanceId) ||
+          String(adopted.modelId) !== String(command.authority.modelId) ||
+          String(adopted.bindingRevisionId) !== String(command.authority.bindingRevisionId) ||
+          adopted.workingDirectory !== command.authority.workingDirectory ||
+          String(adopted.workingFolderId ?? "") !== String(command.authority.workingFolderId ?? "")
+        ) {
+          throw this.#failure(
+            "stale",
+            "This thread continues a session started outside Octant under another provider, model or folder. Change it back, or start a new thread.",
+          );
+        }
+        continuing = {
+          providerSessionId: adopted.providerSessionId,
+          resumeCursor: adopted.resumeCursor,
+        };
+      }
       if (sessionDecision.kind === "new-session-with-handoff" && thread === undefined) {
         // Without the thread there is no conversation to read, and a session
         // started anyway would answer as if it had never been given one.
@@ -1480,8 +1927,9 @@ export class WorkTurnService {
       // Code thread's do. Carrying marks the thread as having read outside
       // content before the text is returned. A failed read costs the turn its
       // messages, not the person their turn; the messages wait for the next.
+      // A turn the runtime started sends nothing, so it carries none.
       const agentMessages =
-        thread === undefined
+        thread === undefined || options?.runtimeTurn === true
           ? []
           : await (
               this.#carryAgentMessages?.(String(command.threadId)) ?? Promise.resolve([])
@@ -1525,6 +1973,9 @@ export class WorkTurnService {
               posture: "required",
               block,
             }),
+          ),
+          ...octantInstructionsContributions(
+            thread === undefined ? [] : (this.#octantInstructionBlocks?.({ thread }) ?? []),
           ),
           ...personMemoryContributions(
             thread === undefined
@@ -1609,6 +2060,16 @@ export class WorkTurnService {
                   block: { kind: "user-message" as const, text: externalData.content.text },
                 },
               ]),
+          ...describedTexts.map(
+            (text, index): WorkTurnContextContribution => ({
+              text,
+              sourceKind: "message",
+              referenceId: `described-image:${command.turnId}:${index}`,
+              category: "workspace-context",
+              posture: "required",
+              block: { kind: "user-message", text },
+            }),
+          ),
           {
             text: command.prompt,
             sourceKind: "message",
@@ -1638,6 +2099,14 @@ export class WorkTurnService {
         continuing = undefined;
       }
       const resumeCursor = continuing?.resumeCursor;
+      // The runtime's own turn opens in the session the last turn left, or
+      // not at all: a fresh session has no turn of the runtime's to attach.
+      if (
+        options?.runtimeTurn === true &&
+        (continuing?.providerSessionId === undefined || resumeCursor === undefined)
+      ) {
+        throw this.#failure("stale", "The runtime's own turn has no session to open in.");
+      }
       const providerSessionId =
         continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
       // Blocks of the earlier turns the continued session already holds; sending
@@ -1713,6 +2182,7 @@ export class WorkTurnService {
               ? {}
               : { sideChatReturns: command.sideChatReturns }),
             ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
+            ...(describedImages === undefined ? {} : { describedImages }),
             ...(command.extensionSelections === undefined ||
             command.extensionSelections.length === 0
               ? {}
@@ -1788,6 +2258,7 @@ export class WorkTurnService {
         ...(resumeCursor === undefined ? {} : { resumeCursor }),
         projectRoot,
         projectCanonicalRoot: project?.binding.canonicalRoot ?? projectRoot,
+        ...(project === undefined ? {} : { project }),
         extraFolders,
         ...(server === undefined ? {} : { serverTools: server.tools }),
         driver,
@@ -1797,6 +2268,7 @@ export class WorkTurnService {
         contextPlan: planned,
         sessionHolds,
         agentMessageIds: agentMessages.map((message) => message.messageId),
+        ...(options?.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
         admissionCurrent: () =>
           folderCurrent() && options?.admissionCurrent?.() !== false && inputsCurrent?.() !== false,
         ...(options?.routineRun === undefined ? {} : { routineRun: options.routineRun }),
@@ -2198,6 +2670,11 @@ export class WorkTurnService {
     readonly projectRoot: string;
     /** The Project's bound root, where `STATUS.md` lives; the turn may run in a subfolder. */
     readonly projectCanonicalRoot: string;
+    /**
+     * The Project as admission read it, which `projectRoot` and
+     * `extraFolders` came from; a kept session's terms are taken from it.
+     */
+    readonly project?: Project;
     /** The Project's extra folders, granted what the bound root is granted. */
     readonly extraFolders: ReadonlyArray<string>;
     /**
@@ -2220,6 +2697,8 @@ export class WorkTurnService {
     readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
     /** Agent messages this turn's context carries, confirmed delivered once sent. */
     readonly agentMessageIds: ReadonlyArray<string>;
+    /** The runtime started this turn in the thread's kept session; see {@link WorkTurnStartOptions}. */
+    readonly runtimeTurn?: true;
     readonly admissionCurrent?: () => boolean;
     readonly routineRun?: AutomationRunReference;
     readonly signal: AbortSignal;
@@ -2378,6 +2857,10 @@ export class WorkTurnService {
           : { admissionCurrent: input.admissionCurrent }),
         command: input.command,
         providerSessionId: input.providerSessionId,
+        ...(input.runtimeTurn === true ? { runtimeTurn: true as const } : {}),
+        // The Project the turn took its root and extra folders from: a folder
+        // removed since is still in the session, so its terms must name it.
+        ...sessionTermsOption(input.thread, input.project),
         ...(this.#outsideContentMarks === undefined
           ? {}
           : { outsideContentMarks: this.#outsideContentMarks }),
@@ -2405,6 +2888,7 @@ export class WorkTurnService {
               input.access === "auto-accept-edits" ? "auto-accept-edits" : "approval-gated",
           }),
         ),
+        ...wakeupsOption(this.#wakeupsForThread?.(String(input.command.threadId))),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider" &&
         input.driver.conversationOwnership !== "host-resumable"
@@ -2675,6 +3159,9 @@ export class WorkTurnService {
       }
       const settled = this.#projection.lookup(input.command.requestId);
       if (settled !== undefined) this.#liveUpdates.settle(input.command.threadId, settled);
+      if (settled?.failure?.usageLimit !== undefined) {
+        await this.#onUsageLimitStop?.(input.command.threadId).catch(() => undefined);
+      }
     } finally {
       // Every turn that reached the provider leaves a ledger row, whatever its
       // outcome: one that reported nothing is recorded as unreported, so a
@@ -2996,24 +3483,31 @@ export class WorkTurnService {
 
   /** The conversation a requested compaction may summarize, sourced as turn context sources it. */
   sessionCompactionConversation(threadId: WorkThreadId): ReadonlyArray<SessionConversationMessage> {
-    return this.#projection.listForThread(threadId).flatMap((turn) =>
-      turn.transcript.flatMap(
-        (entry, index): ReadonlyArray<SessionConversationMessage> =>
-          entry.text.trim() === ""
-            ? []
-            : [
-                {
-                  source: {
-                    kind: "message",
-                    referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
-                  },
-                  role: entry.role,
-                  exchangeKey: String(turn.turnId),
-                  content: entry.text,
+    return this.#projection.listForThread(threadId).flatMap((turn) => {
+      // The words Sees images wrote for the turn's images were part of what
+      // the person's message said to the model, so a rebuilt history and a
+      // compaction read them with it.
+      const described = describedImageLines(turn.describedImages);
+      return turn.transcript.flatMap((entry, index): ReadonlyArray<SessionConversationMessage> => {
+        const text =
+          index === 0 && entry.role === "user" && described.length > 0
+            ? [...described, entry.text].join("\n\n")
+            : entry.text;
+        return text.trim() === ""
+          ? []
+          : [
+              {
+                source: {
+                  kind: "message",
+                  referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
                 },
-              ],
-      ),
-    );
+                role: entry.role,
+                exchangeKey: String(turn.turnId),
+                content: text,
+              },
+            ];
+      });
+    });
   }
 
   /** Whether a turn on this thread is accepted, running, or waiting on the person. */
@@ -3557,6 +4051,20 @@ function projectMemoryContributions(
   }));
 }
 
+/** The person's instructions for Octant, placed after Octant's own and before person memory. */
+function octantInstructionsContributions(
+  blocks: ReadonlyArray<OctantInstructionsBlock>,
+): ReadonlyArray<WorkTurnContextContribution> {
+  return blocks.map((block) => ({
+    text: block.text,
+    sourceKind: "instruction",
+    referenceId: block.key,
+    category: block.kind,
+    posture: "required",
+    block,
+  }));
+}
+
 /** What Octant remembers about the person, placed after instructions and before the Project's own context. */
 function personMemoryContributions(
   text: string | undefined,
@@ -3572,4 +4080,59 @@ function personMemoryContributions(
       block: { kind: "person-memory", text },
     },
   ];
+}
+
+/** The model-facing text of each image a turn's model got described, in order. */
+function describedImageLines(images: DescribedTurnImages | undefined): ReadonlyArray<string> {
+  return (images ?? []).flatMap((image) =>
+    image.description === undefined
+      ? []
+      : [
+          describedImageText({
+            name: image.name,
+            attachmentId: image.attachmentId,
+            describedBy: image.describedBy,
+            description: image.description,
+          }),
+        ],
+  );
+}
+
+function wakeupsOption(wakeups: ProviderWakeupSchedule | undefined): {
+  readonly wakeups?: ProviderWakeupSchedule;
+} {
+  return wakeups === undefined ? {} : { wakeups };
+}
+
+/**
+ * What a Work Project grants a thread's folder: its current binding and
+ * root and the thread's approved working folder. Undefined when the Project
+ * grants it nothing (gone, archived, or the folder withdrawn).
+ */
+function adoptionFolderAuthority(
+  project: Project | undefined,
+  thread: WorkThread,
+): string | undefined {
+  if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+  let workingFolder: string | undefined;
+  try {
+    workingFolder = approvedWorkingFolderRoot(project, thread.workingFolderId);
+  } catch {
+    workingFolder = undefined;
+  }
+  if (workingFolder === undefined) return undefined;
+  return JSON.stringify([
+    String(project.bindingHistory.at(-1)?.revisionId ?? ""),
+    project.binding.canonicalRoot,
+    workingFolder,
+  ]);
+}
+
+/** The thread's terms a kept session is held to; see {@link workSessionTerms}. */
+function sessionTermsOption(
+  thread: WorkThread | undefined,
+  project: Project | undefined,
+): { readonly sessionTerms?: string } {
+  const terms = thread === undefined ? undefined : workSessionTerms(thread, project);
+  return terms === undefined ? {} : { sessionTerms: terms };
 }

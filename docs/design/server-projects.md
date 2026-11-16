@@ -18,10 +18,12 @@ sidebar, composer, and thread view that open them; and Work Projects there,
 whose Work threads run on the Octant Harness with file tools and commands on
 the server, with the Work sidebar, composer, and thread view that open them
 ([Work Projects](#work-projects)); routines that target a server Project,
+chosen in Automation Center's editor or confirmed from a thread there and
 run by this host's scheduler ([Routines](#routines)); person-operated
 loopback dev-server previews ([Previews](#person-operated-dev-server-previews));
-and the seam and host lifecycle for machines in the person's own cloud
-account, with no target plugin yet
+and the seam, host lifecycle, host-key pinning, suspended refusal and
+Settings screen for machines in the person's own cloud account, with no
+target plugin yet
 ([Machines in the person's cloud account](#machines-in-the-persons-cloud-account)).
 Remaining items are under [Not built yet](#not-built-yet).
 
@@ -152,7 +154,9 @@ checks never change registry/configuration or journal state.
   no SSH config, and forwards no agent to the server. Each connection runs
   with `BatchMode=yes` (no password or passphrase prompt),
   `StrictHostKeyChecking=yes` (an unknown or changed host key refuses; the
-  person accepts a new server's key by running `ssh` to it once themselves),
+  person accepts a new server's key by running `ssh` to it once themselves,
+  except for a cloud machine whose provider-reported key the host pinned:
+  [Machines in the person's cloud account](#machines-in-the-persons-cloud-account)),
   `ForwardAgent=no`, `ForwardX11=no`, `ClearAllForwardings=yes`,
   `PermitLocalCommand=no`, a ten-second connect timeout, and keepalives that
   end a silent connection after about thirty seconds.
@@ -252,9 +256,13 @@ checks never change registry/configuration or journal state.
   and refuse one outside the folder, judged on this host. A search uses the
   server's `find` and `grep -E`, so its pattern is a POSIX extended expression
   there.
-- **Protected paths.** The file tools, the Files panel and file editor, `@` path
-  mentions, and search refuse the secret guard's list at every level, Full
-  access included, as the guard's tools refuse it locally. It is one list
+- **Protected paths.** The Files panel and file editor, `@` path mentions, and
+  search refuse the secret guard's list at every level. A thread's file tools
+  refuse it below Full access, and at Full access only the Provider sign-ins
+  group, as Octant's own file tools do locally (maintainer decision,
+  2026-11-15): the level is read on every call, and the server's script and
+  this host's check both use that level's form of the pattern, the list with
+  every other group and every added path left out. It is one list
   (`serverProtectedPathPattern` in the secret guard policy), so the two cannot
   drift, and the person's own changes in Settings › Permissions › Protected
   files apply: an added `~/x` or absolute path, and a removed group. The server
@@ -493,8 +501,19 @@ Project's connection, under the same levels, approvals, and journal.
 - **Who sees them.** Automation lists and changes a server Project's routines
   for the host's own person, the principals that may read the server catalog;
   a restricted device reaches none.
+- **The editor.** Automation Center's routine editor lists the server
+  Projects of the chosen mode beside local ones, named with their
+  `alias:folder`, from the server catalog the window already reads, so a
+  restricted device, whose read is refused, lists none. A chosen server
+  Project binds the binding its host derives (the catalog reports a Code
+  Project's own folder checkout and a Work Project's binding revision, at
+  version 1), its execution profile is offered Octant Harness models only,
+  and the routine is saved and edited through the same Automation route as
+  any other, so every occurrence revalidates it as above.
 - **File triggers** watch a folder of this host, so a file routine cannot
-  target a server Project and is refused there.
+  target a server Project: the editor offers no file trigger for one, naming
+  why, the Automation route refuses one at save with the same reason, and
+  revalidation refuses one at every occurrence.
 
 ### Panels
 
@@ -628,10 +647,6 @@ Project's connection, under the same levels, approvals, and journal.
   Settings row above, which also offers a saved-action presentation switch; a
   general Developer tools pane remains absent.
 - Extra folders in a server Project.
-- Choosing a server Project in Automation Center's routine editor: it lists
-  local Projects only, so a server Project's routine is made by confirming a
-  proposal from one of its threads. Its routines are listed and managed there
-  once made.
 - A Project-level guardrail level or reviewer for a server Project; the
   thread and account levels apply.
 - Real servers are untested: the connection, folder check, file tools,
@@ -710,6 +725,51 @@ service stays out of scope
   behind a Project and the state its provider last reported (`cloudMachine`
   on the catalog entry). Octant never claims a state or a cost it did not
   read.
+- **Host keys are pinned at creation.** A target reports the machine's SSH
+  host public keys with its endpoint (`hostKeys`, at most eight, OpenSSH
+  key types only, read from the provider's own record of the machine, never
+  by connecting to it). They are journaled in `created@1`, and from then on
+  every connection to that server (calls, terminals, previews, setup checks,
+  and the binding's own folder check) checks the host key against those keys
+  alone: the host writes them to a known hosts file in the private folder
+  its shared connections use and adds `UserKnownHostsFile` (that file),
+  `GlobalKnownHostsFile=none`, `KnownHostsCommand=none`,
+  `VerifyHostKeyDNS=no`, `CheckHostIP=no` and a fixed `HostKeyAlias`, with
+  `StrictHostKeyChecking=yes` and `UpdateHostKeys=no` unchanged, so no
+  setting of the person's (DNS SSHFP records included) can vouch for another
+  key. The pinned keys are part of the shared connection's identity, so a
+  connection opened before a pin was installed or changed is never reused
+  under it. So a
+  brand-new machine is accepted without a manual first login, and a machine
+  that answers with any other key is refused as `server-unreachable`. The
+  pin never changes after creation, whatever a later describe reports, and a
+  destroyed machine pins nothing, so an address the provider reuses is not
+  held to an old key. A target that reports no keys leaves the person's
+  known hosts to decide, as for any registered server. This is the one file
+  Octant writes for SSH; it holds only public keys the person's own
+  provider reported.
+- **A suspended machine refuses by name.** While a machine's last reported
+  state is `suspended`, a turn in its Project is refused before it launches,
+  and every call, terminal and preview stream to its server is refused
+  before ssh starts, with "This
+  machine is suspended; resume it first in Settings › Permissions ›
+  Servers." instead of failing as an unreachable server. The Project's row
+  in Settings › Permissions › Servers says so and offers Resume there.
+- **Reported cost only.** A target may report the provider's own hourly
+  cost (`costPerHour`: the amount as the provider wrote it, an ISO 4217
+  currency, and the provider record it came from), with creation or any
+  later answer. The host journals it with the answer and shows it as
+  reported, with its source and when it was read; it never estimates,
+  converts or totals a cost, and shows none when the provider reports none.
+- **Screen.** Settings › Permissions › Servers lists the machines (state,
+  target, when the provider last answered, reported cost, endpoint and
+  whether its key is pinned) with Refresh, Suspend, Resume, Bind Project and
+  Destroy, Destroy asking the host's one-time confirmation in a dialog, and
+  a Create form for an offered target (name, Project kind, folder, image,
+  size, region, the credential broker reference and an optional setup
+  script). The section is absent when no target is offered and no live
+  machine is on record, and when the host refuses the list, as it does for a
+  restricted device; every act is still the host's to refuse.
 
 _Rationale:_ creation is journaled first because the failure that matters is
 a paid machine nobody knows about; a refused or uncertain creation still
@@ -721,16 +781,11 @@ cannot stand in for the person's answer.
 
 - The first real target plugin for one cloud provider, with the launch class
   that confines it, its credential broker namespace and the person's
-  credential setup, and pinning the machine's provider-reported host key so
-  the strict host check accepts a new machine without a manual first login.
+  credential setup (the Create form takes a broker reference until then).
+  With no target plugin, the screen stays absent.
 - A key Octant makes for each machine (`octant-key` sign-in), installed at
   creation.
-- A suspended machine's Project refusing turns with a named reason until the
-  person resumes it (today its calls fail closed as `server-unreachable`), and
-  waking a suspended machine when the person opens its Project.
-- The provider's reported cost, shown only when the provider reports it.
-- The Settings and Project interface, which stays absent until a target
-  plugin exists.
+- Waking a suspended machine when the person opens its Project.
 
 ## Person-operated dev-server previews
 

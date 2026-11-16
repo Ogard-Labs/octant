@@ -26,6 +26,7 @@ import {
 import { codexAccountProcessEnvironment } from "./codexProcess";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import { makeClaudeDriver, type ClaudeResumeIdentityPort } from "./claudeDriver";
+import { readClaudeGitIdentity } from "./claudeGitIdentity";
 import {
   type ProviderRuntimeNetworkPort,
   type ProviderServerAccessPort,
@@ -38,7 +39,7 @@ import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
-import { makeOpenCodeDriver } from "./openCodeDriver";
+import { makeOpenCodeDriver, type OpenCodeProtectedPaths } from "./openCodeDriver";
 import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
@@ -77,6 +78,8 @@ export interface ProviderDriverFactoryOptions {
   /** The host's process authority clock, which Claude's pre-tool grants expire on. */
   readonly claudeAuthorityNow?: () => number;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
+  /** The host's protected files and folders in force, as absolute paths at each level. */
+  readonly protectedPaths?: () => OpenCodeProtectedPaths;
   readonly permissionPersistence: () => PermissionPersistence;
   readonly claudeInstances?: ReadonlyArray<ProviderInstance>;
   /**
@@ -84,6 +87,8 @@ export interface ProviderDriverFactoryOptions {
    * journal at each call. Absent leaves artifact delivery off.
    */
   readonly claudeArtifactDelivery?: (instanceId: ProviderInstanceId) => boolean;
+  /** The person's runtime-turn count from Settings, read each time Claude starts a turn itself. */
+  readonly runtimeTurnsPerTurn?: () => number;
   /** The person's current own-memory switch for a Claude Code or Codex account. */
   readonly providerOwnMemory?: (instanceId: ProviderInstanceId) => boolean;
   /** Host Claude env from the snapshot gate. Omit to use the last gated copy. */
@@ -109,8 +114,6 @@ export function makeProviderDriver(
   instance: ProviderInstance,
   options: ProviderDriverFactoryOptions,
 ): ProviderDriver {
-  if (process.platform === "win32" && instance.driverKind !== "ollama")
-    throw new Error("Provider processes require Windows host confinement.");
   if (isImageProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
   }
@@ -157,6 +160,9 @@ export function makeProviderDriver(
           process: options.openCodeProcess,
           runtimeRegistry: options.runtimeRegistry,
           permissionPersistence: options.permissionPersistence,
+          ...(options.protectedPaths === undefined
+            ? {}
+            : { protectedPaths: options.protectedPaths }),
         }),
         // Plan windows come from the account behind the CLI's own sign-in,
         // not from the runtime, so both OpenCode lines report them alike.
@@ -264,12 +270,16 @@ export function makeProviderDriver(
       const readArtifactDelivery = options.claudeArtifactDelivery;
       const readClaudeOwnMemory = options.providerOwnMemory;
       return makeClaudeDriver({
+        ...(options.runtimeTurnsPerTurn === undefined
+          ? {}
+          : { runtimeTurnsPerTurn: options.runtimeTurnsPerTurn }),
         ...(readClaudeOwnMemory === undefined
           ? {}
           : { ownMemory: () => readClaudeOwnMemory(instance.id) }),
         ...(readArtifactDelivery === undefined
           ? {}
           : { artifactDelivery: () => readArtifactDelivery(instance.id) }),
+        gitIdentity: readClaudeGitIdentity,
         instanceId: instance.id,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,

@@ -31,6 +31,7 @@ import {
 } from "../agentRun/agentResultDeliveryBatch";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { TurnImage, TurnImagesDescription } from "../harness/imageDescription";
 import { chooseThreadTerminalFolder } from "./codeTerminalFolder";
 import { chooseCodeRewindFilePoint } from "./codeForkPoint";
 import { turnChangedFiles } from "./codeTurnChangedFiles";
@@ -98,8 +99,10 @@ import {
   turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
+import { hostSandboxRefusal } from "@octant/domain/guardrail-policy";
 import {
   decideRunMerge,
+  describedImageText,
   FILE_MENTION_UNREADABLE_CONTEXT,
   runMergeRefusalText,
   THREAD_MENTION_UNREADABLE_CONTEXT,
@@ -131,9 +134,14 @@ import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoverySer
 import { ReviewFindingServiceError } from "./reviewFindingService";
 import type { ProjectForgeChoices } from "./standingMergeAllowance";
 
-import type { ServerTerminalLogin } from "../serverProjects/serverTerminal";
+import type { ServerTerminalLogin, ServerTerminalRefusal } from "../serverProjects/serverTerminal";
 
 type Awaitable<T> = T | Promise<T>;
+
+/** What a turn's start records about the images Sees images described. */
+type DescribedStartImages = NonNullable<
+  Extract<CodeOperationEvent, { readonly kind: "conversation-turn-started" }>["describedImages"]
+>;
 
 /**
  * Why a thread whose checkout is a folder on another machine runs nothing: a
@@ -1087,6 +1095,8 @@ export interface CodeOperationTurnPort {
     readonly checkoutRoot: string;
     readonly approvalId: string;
     readonly decision: "approved" | "denied";
+    /** The window that answered, which a level change acts for. */
+    readonly windowId?: WindowId;
   }) => Promise<CodeOperationTurnResult>;
   readonly forceStop?: (input: {
     readonly thread: CodeThread;
@@ -1230,7 +1240,9 @@ export interface CodeOperationServiceOptions {
    */
   readonly holdsServerThread?: (thread: CodeThread) => boolean;
   /** The login a server thread's terminal opens on its server, or undefined when it has none now. */
-  readonly serverTerminalLogin?: (thread: CodeThread) => ServerTerminalLogin | undefined;
+  readonly serverTerminalLogin?: (
+    thread: CodeThread,
+  ) => ServerTerminalLogin | ServerTerminalRefusal | undefined;
   /**
    * Git on a server thread's server, for the Git panel, or undefined when the
    * thread has none now. Every command it runs is on the server.
@@ -1344,6 +1356,16 @@ export interface CodeOperationServiceOptions {
   /** Whether the thread's own provider and model can read an image. */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   /**
+   * Sees images: describes a starting turn's images for a thread whose model
+   * cannot read them, or refuses with the reason. Absent, such a turn is
+   * refused as before.
+   */
+  readonly describeImages?: (input: {
+    readonly thread: CodeThread;
+    readonly images: ReadonlyArray<TurnImage>;
+    readonly signal?: AbortSignal;
+  }) => Promise<TurnImagesDescription>;
+  /**
    * Every turn of a thread, oldest first, or undefined when it cannot all be
    * read. `includeRewound` keeps the turns a rewind removed, in the order they
    * ran. Absent on a host that cannot rewind, which refuses a rewind.
@@ -1352,8 +1374,15 @@ export interface CodeOperationServiceOptions {
     threadId: CodeThreadId,
     options?: { readonly includeRewound?: boolean },
   ) => ReadonlyArray<CodeConversationTurn> | undefined;
-  /** Whether the thread's provider reports it can cut its own session back. */
-  readonly supportsSessionRollback?: (thread: CodeThread) => boolean;
+  /**
+   * Whether a rewind keeping turns through `lastKeptTurn` continues a copy of
+   * the provider's own session rather than a text handoff, as the rewind's
+   * preview promises it.
+   */
+  readonly supportsSessionRollback?: (
+    thread: CodeThread,
+    lastKeptTurn: CodeOperationId | undefined,
+  ) => Awaitable<boolean>;
   readonly events: CodeOperationEventPort;
   /**
    * Resolves the `#thread` mentions a Code turn names.
@@ -1957,6 +1986,39 @@ export class CodeOperationService {
                     turnRefusal = admissionRefusal();
                 }
               }
+              // Images for a model that cannot read them are described before
+              // the start is journaled, so the start records who described
+              // each one and a restart sends the same words again.
+              let describedImages: DescribedStartImages | undefined;
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined &&
+                starting.attachments.length > 0 &&
+                this.#options.describeImages !== undefined &&
+                this.#options.supportsAttachments?.(turnThread) !== true
+              ) {
+                // A Stop while the images are described sends no further one.
+                const describing = new AbortController();
+                const watch = setInterval(() => {
+                  if (!preparationCurrent()) describing.abort();
+                }, 250);
+                const described = await this.#describeStartImages(
+                  turnThread,
+                  starting.attachments,
+                  describing.signal,
+                ).finally(() => clearInterval(watch));
+                if (described.status === "refused") {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    "invalid",
+                    described.reason,
+                    "refused",
+                  );
+                } else {
+                  describedImages = described.images;
+                }
+              }
               if (
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
@@ -2007,6 +2069,7 @@ export class CodeOperationService {
                       ...(starting.attachments.length === 0
                         ? {}
                         : { attachments: starting.attachments }),
+                      ...(describedImages === undefined ? {} : { describedImages }),
                       ...(checkpoint === undefined ? {} : { checkpoint }),
                     },
                   });
@@ -3718,7 +3781,11 @@ export class CodeOperationService {
         // other folder. Plan starts no terminal there either.
         let serverLogin: ServerTerminalLogin | undefined;
         if (checkout.kind === "remote-root") {
-          serverLogin = this.#options.serverTerminalLogin?.(thread);
+          const login = this.#options.serverTerminalLogin?.(thread);
+          // The server's own refusal (a suspended machine) is named as it is.
+          if (login !== undefined && "kind" in login)
+            return this.#failed(command.operationId, "unavailable", login.message);
+          serverLogin = login;
           if (
             serverLogin === undefined ||
             command.browserGrant === "on" ||
@@ -4412,6 +4479,7 @@ export class CodeOperationService {
             checkoutRoot: root.checkoutRoot,
             approvalId: command.approvalId,
             decision: command.decision,
+            windowId,
           }),
         );
       case "force-stop-provider-turn":
@@ -5542,6 +5610,12 @@ export class CodeOperationService {
   ): Promise<CodeOperationResult> {
     const turns = this.#rewindTurns(command.operationId, thread, command.fromOperationId);
     if (turns.status === "refused") return turns.result;
+    // A server thread's session is never copied on this host.
+    const native =
+      checkout.kind !== "remote-root" &&
+      (await Promise.resolve(
+        this.#options.supportsSessionRollback?.(thread, turns.kept.at(-1)?.operationId),
+      ).catch(() => false)) === true;
     const point = this.#rewindFilePoint(thread, checkout, turns.all, command.fromOperationId);
     let files: Extract<CodeOperationResult, { kind: "rewind-preview" }>["files"];
     if (point.kind !== "checkpoint") files = point;
@@ -5565,11 +5639,7 @@ export class CodeOperationService {
       fromOperationId: command.fromOperationId,
       removedTurns: turns.removed.length,
       files,
-      // A server thread's session is never copied on this host.
-      rollback:
-        checkout.kind !== "remote-root" && this.#options.supportsSessionRollback?.(thread) === true
-          ? "native"
-          : "handoff",
+      rollback: native ? "native" : "handoff",
     });
   }
 
@@ -6160,6 +6230,12 @@ export class CodeOperationService {
     folderCurrent?: () => boolean,
     includeProductFeedback = false,
   ): Promise<CodeOperationResult> {
+    // `thread` carries the level this turn runs at: the composer's, a
+    // recorded start's, or a coordinator's Plan, clamped to the thread's own.
+    // Checked before the worktree is prepared or any runtime starts.
+    const sandboxRefusal = hostSandboxRefusal({ platform: process.platform, access: thread });
+    if (sandboxRefusal !== undefined)
+      return this.#failed(command.operationId, "unavailable", sandboxRefusal, "refused");
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
       return this.#failed(
@@ -6254,17 +6330,24 @@ export class CodeOperationService {
         ? []
         : [{ kind: "user-message", text: issueContext.text } as const]),
     ];
-    // A model that cannot read a picture is told so plainly rather than sent
-    // the turn with its images quietly removed.
+    // A model that cannot read a picture gets the words Sees images wrote for
+    // each one at the start, or is told so plainly rather than sent the turn
+    // with its images quietly removed.
+    let sentReferences = references;
     if (references.length > 0 && !supportsImages) {
-      return this.#failed(
-        command.operationId,
-        "invalid",
-        "The selected model does not support images. Choose a vision model, or remove the attachments.",
-        "refused",
-      );
+      const descriptions = await this.#recordedDescriptions(command, references);
+      if (descriptions === undefined) {
+        return this.#failed(
+          command.operationId,
+          "invalid",
+          "The selected model does not support images. Choose a vision model, or remove the attachments.",
+          "refused",
+        );
+      }
+      context.push(...descriptions.map((text) => ({ kind: "user-message" as const, text })));
+      sentReferences = [];
     }
-    const attachments = await this.#attachmentInputs(command.threadId, references);
+    const attachments = await this.#attachmentInputs(command.threadId, sentReferences);
     if (attachments === undefined) {
       return this.#failed(
         command.operationId,
@@ -6399,6 +6482,97 @@ export class CodeOperationService {
       this.#options.consumeIssueContextFramed?.(String(thread.id));
     }
     return this.#providerResult(command.operationId, turn);
+  }
+
+  /**
+   * Describe a starting turn's images with Sees images, keeping each
+   * description in the content store so the journal holds only who described
+   * it and where the words are.
+   */
+  async #describeStartImages(
+    thread: CodeThread,
+    references: ReadonlyArray<CodeAttachmentReference>,
+    signal: AbortSignal,
+  ): Promise<
+    | { readonly status: "described"; readonly images: DescribedStartImages }
+    | { readonly status: "refused"; readonly reason: string }
+  > {
+    const inputs = await this.#attachmentInputs(thread.id, references);
+    if (inputs === undefined) {
+      return { status: "refused", reason: "An image attached to this turn is unavailable." };
+    }
+    const described = await this.#options.describeImages?.({
+      thread,
+      signal,
+      images: inputs.map((input) => ({
+        attachmentId: input.attachmentId,
+        name: input.displayName,
+        mediaType: input.mediaType,
+        bytes: input.bytes,
+      })),
+    });
+    if (described === undefined) {
+      return { status: "refused", reason: "Images cannot be described on this host." };
+    }
+    if (described.status === "refused") return described;
+    const images = described.images.flatMap((image) => {
+      const reference = references.find(
+        (candidate) => String(candidate.attachmentId) === image.attachmentId,
+      );
+      return reference === undefined
+        ? []
+        : [
+            {
+              attachmentId: reference.attachmentId,
+              name: reference.displayName,
+              describedBy: image.describedBy,
+              description: this.#options.evidence.put(
+                describedImageText({
+                  name: reference.displayName,
+                  attachmentId: String(reference.attachmentId),
+                  describedBy: image.describedBy,
+                  description: image.text,
+                }),
+              ),
+            },
+          ];
+    });
+    if (images.length !== references.length) {
+      return {
+        status: "refused",
+        reason: "An image attached to this turn could not be described.",
+      };
+    }
+    const [first, ...rest] = images;
+    return first === undefined
+      ? { status: "refused", reason: "An image attached to this turn could not be described." }
+      : { status: "described", images: [first, ...rest] };
+  }
+
+  /**
+   * The words this turn's start recorded for each of its images, in the
+   * images' order, or undefined when any image has none.
+   */
+  async #recordedDescriptions(
+    command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+    references: ReadonlyArray<CodeAttachmentReference>,
+  ): Promise<ReadonlyArray<string> | undefined> {
+    const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
+    const start = frames.find((frame) => frame.event.kind === "conversation-turn-started");
+    const described =
+      start?.event.kind === "conversation-turn-started" ? start.event.describedImages : undefined;
+    if (described === undefined) return undefined;
+    const texts: string[] = [];
+    for (const reference of references) {
+      const entry = described.find(
+        (candidate) => String(candidate.attachmentId) === String(reference.attachmentId),
+      );
+      if (entry === undefined) return undefined;
+      const text = await this.#options.evidence.read?.(entry.description);
+      if (text === undefined || text.trim().length === 0) return undefined;
+      texts.push(text);
+    }
+    return texts;
   }
 
   /**

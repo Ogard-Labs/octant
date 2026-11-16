@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SubagentsTray, ThreadSubagentsTray } from "./ComposerSubagentsTray";
+import { ObservedChildDetail } from "./ObservedChildActivity";
 import type { AgentHierarchyInputEntry } from "./buildAgentHierarchyModel";
 import { observedChildFixture, resultPacketFixture } from "./agentActivityFixtures";
 
@@ -74,11 +75,69 @@ describe("SubagentsTray", () => {
     expect(toggle).toHaveTextContent("1 failed · earlier ones not retained");
     expect(screen.getByText(/Earlier observed children/)).toBeVisible();
     await user.click(toggle);
-    await user.click(
-      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /^Inspect parser\. / }));
     expect(onOpenSubagent).toHaveBeenCalledWith("observation:provider-child");
     expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Stop for an observed child the running turn can stop, and keeps its status until the provider reports it", async () => {
+    const user = userEvent.setup();
+    const stopObserved = vi.fn(async () => ({ status: "stop-requested" as const }));
+    renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
+      stopClient: { stopObserved },
+    });
+    await user.click(screen.getByRole("button", { name: /Stop subagent: Inspect parser/ }));
+    expect(stopObserved).toHaveBeenCalledWith(
+      expect.objectContaining({ observationId: observedChildFixture().observationId }),
+    );
+    expect(screen.getByRole("button", { name: /Stop subagent/ })).toHaveTextContent("Stopping");
+    expect(screen.getByRole("button", { name: /Opens it in Agents/ })).toHaveTextContent("Working");
+  });
+
+  it("previews a finished observed child's closing report and reported usage, never inventing zeros", () => {
+    renderTray([], {
+      observations: [
+        observedChildFixture({
+          childAgentId: "reported",
+          observationId: "reported",
+          lifecycleStatus: "failed",
+          finalSummary: "Parser handles nested quotes.",
+          usage: { inputTokens: 14_700, outputTokens: 300 },
+        }),
+        observedChildFixture({
+          childAgentId: "total-only",
+          observationId: "total-only",
+          task: "Count tokens",
+          lifecycleStatus: "failed",
+          usage: { totalTokens: 2_000 },
+        }),
+        observedChildFixture({
+          childAgentId: "silent",
+          observationId: "silent",
+          task: "Say nothing",
+          lifecycleStatus: "failed",
+        }),
+      ],
+    });
+    const reported = screen.getByRole("button", { name: /^Inspect parser\. / });
+    expect(reported).toHaveTextContent("Parser handles nested quotes.");
+    expect(reported).toHaveTextContent("IN 14.7k · OUT 300");
+    expect(screen.getByRole("button", { name: /^Count tokens\. / })).toHaveTextContent("2k tokens");
+    const silent = screen.getByRole("button", { name: /^Say nothing\. / });
+    expect(silent).not.toHaveTextContent(/IN |OUT |tokens/);
+  });
+
+  it("says why a stop was refused", async () => {
+    const user = userEvent.setup();
+    renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
+      stopClient: {
+        stopObserved: async () => ({ status: "refused" as const, reason: "not-live" as const }),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /Stop subagent/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("no longer running");
   });
 
   it("previews the latest attributed result using that generation's model and reported evidence", () => {
@@ -279,6 +338,64 @@ describe("SubagentsTray", () => {
       "Subagents could not be stopped. They are still running.",
     );
   });
+
+  it("lists both kinds of subagent as one list, naming the provider on every row and asking first", async () => {
+    const user = userEvent.setup();
+    const route = {
+      requestedProviderInstanceId: "55555555-5555-4555-8555-555555555555",
+      requestedModelId: "gpt-6-astra",
+      executionProviderInstanceId: "55555555-5555-4555-8555-555555555555",
+      executionModelId: "gpt-6-astra",
+      poolDerived: false,
+    };
+    renderTray([{ ...entry("a", "running"), route }], {
+      observations: [
+        observedChildFixture({
+          observationId: "done",
+          task: "Finished scan",
+          lifecycleStatus: "completed",
+        }),
+        observedChildFixture({
+          observationId: "stuck",
+          task: "Stuck scan",
+          lifecycleStatus: "failed",
+        }),
+      ],
+      providers: new Map([
+        ["55555555-5555-4555-8555-555555555555", { driverKind: "codex", displayName: "Codex" }],
+      ]),
+    });
+    // A finished provider-started subagent counts like a finished managed one.
+    expect(screen.getByRole("button", { name: /Subagents,/ })).toHaveTextContent(
+      "1 failed · 1 working · 1 done",
+    );
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Stuck scan"),
+      expect.stringContaining("Task a"),
+    ]);
+    expect(rows[0]).toHaveTextContent("Failed · Started by Codex · Model unknown");
+    expect(rows[1]).toHaveTextContent("Working · Codex · gpt-6-astra");
+    expect(rows[0]?.querySelector('[data-driver-kind="codex"]')).not.toBeNull();
+    // Only the run Octant started offers Stop.
+    expect(within(rows[0] as HTMLElement).queryByRole("button", { name: /Stop/ })).toBeNull();
+    await user.click(within(rows[1] as HTMLElement).getByRole("button", { name: /Stop subagent/ }));
+  });
+
+  it("shows a compare group as one line with its members counted by state", async () => {
+    const user = userEvent.setup();
+    const { onOpenSubagent } = renderTray([
+      { ...entry("a", "running"), compareGroup: "plans" },
+      { ...entry("b", "completed"), compareGroup: "plans" },
+      { ...entry("c", "running"), compareGroup: "plans" },
+    ]);
+    const rows = within(screen.getByRole("list")).getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    const group = within(rows[0] as HTMLElement).getByRole("button", { name: /^Compare plans\./ });
+    expect(group).toHaveTextContent("3 subagents · 2 working · 1 done");
+    await user.click(group);
+    expect(onOpenSubagent).toHaveBeenCalledWith();
+  });
 });
 
 describe("ThreadSubagentsTray", () => {
@@ -369,14 +486,39 @@ describe("ThreadSubagentsTray", () => {
       }),
     );
     expect(onOpenSubagent).toHaveBeenCalledWith("90000000-0000-4000-8000-000000000002");
-    await userEvent.click(
-      screen.getByRole("button", { name: /Inspect observed child: Inspect parser/ }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: /^Inspect parser\. / }));
     expect(onOpenSubagent).toHaveBeenLastCalledWith("observation:provider-child");
     expect(
       screen.queryByRole("button", {
         name: "Stop subagent: Task 90000000-0000-4000-8000-000000000002",
       }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ObservedChildDetail", () => {
+  afterEach(cleanup);
+
+  it("folds the subagent's final summary and states usage only as reported", async () => {
+    const user = userEvent.setup();
+    render(
+      <ObservedChildDetail
+        child={observedChildFixture({
+          lifecycleStatus: "completed",
+          finalSummary: "Parser handles nested quotes.",
+          usage: { inputTokens: 900, outputTokens: 120 },
+        })}
+        onBack={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Usage: IN 900 · OUT 120")).toBeVisible();
+    expect(screen.getByText("Parser handles nested quotes.")).not.toBeVisible();
+    await user.click(screen.getByText("Final summary from the subagent"));
+    expect(screen.getByText("Parser handles nested quotes.")).toBeVisible();
+    cleanup();
+
+    render(<ObservedChildDetail child={observedChildFixture()} onBack={vi.fn()} />);
+    expect(screen.getByText("Usage not reported")).toBeVisible();
+    expect(screen.queryByText("Final summary from the subagent")).not.toBeInTheDocument();
   });
 });

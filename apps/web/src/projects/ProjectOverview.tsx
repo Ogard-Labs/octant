@@ -5,6 +5,7 @@ import { createDesktopPaneClient } from "@octant/client-runtime/desktop-pane-cli
 import { createProjectTerminalClient } from "@octant/client-runtime/project-terminal-client";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { OctantInstructionsClient } from "@octant/client-runtime/octant-instructions-client";
 import type {
   ProjectAction,
   ProjectAvailability,
@@ -32,6 +33,10 @@ import { ProjectFoldersSection } from "./ProjectFoldersSection";
 import type { ProjectChange } from "./useProjectController";
 import { ProjectDesktopRecipeSection } from "./ProjectDesktopRecipeSection";
 import { ProjectAutoReviewerSection } from "./ProjectAutoReviewerSection";
+import {
+  ProjectModelRolesSection,
+  type ProjectModelRolesSectionProps,
+} from "./ProjectModelRolesSection";
 import { ProjectPermissionModeSection } from "./ProjectPermissionModeSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import { ProjectNativeProvidersSection } from "./ProjectNativeProvidersSection";
@@ -42,6 +47,7 @@ import {
   projectColorMenuValue,
 } from "./ProjectTile";
 import { ProjectSpendCeilingSection } from "../usage/ProjectSpendCeilingSection";
+import { ProjectInstructionsSettings } from "../settings/OctantInstructionsSettings";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 
@@ -136,7 +142,11 @@ export interface ProjectOverviewProps {
   readonly providerInstances?: ReadonlyArray<ProviderInstance>;
   readonly project: ProjectSummary;
   readonly projectClient?: ProjectClient;
+  /** The person's instructions for this Project, beside its memory. */
+  readonly octantInstructionsClient?: OctantInstructionsClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
+  /** Absent when the window cannot reach the host's model roles; the Models section is then not shown. */
+  readonly modelRoles?: Omit<ProjectModelRolesSectionProps, "projectId" | "disabled">;
 }
 
 export function ProjectOverview(props: ProjectOverviewProps) {
@@ -463,6 +473,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 />
               </ProjectOverviewInspector>
             )}
+            {props.octantInstructionsClient === undefined ? null : (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-instructions`}
+                label="Instructions"
+                summary="Your rules for work in this Project"
+              >
+                <ProjectInstructionsSettings
+                  client={props.octantInstructionsClient}
+                  projectId={String(props.project.id)}
+                  readOnly={archived || connectionStale}
+                />
+              </ProjectOverviewInspector>
+            )}
             {props.projectClient === undefined || props.project.type === "chat" ? null : (
               <ProjectOverviewInspector
                 key={`${String(props.project.id)}-design-system`}
@@ -655,6 +678,19 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                 enabled={props.project.statusFile === "enabled"}
                 onChange={(enabled) => props.onWorkStatusFileChange?.(props.project.id, enabled)}
               />
+            ) : null}
+            {props.project.type !== "chat" && props.modelRoles !== undefined ? (
+              <ProjectOverviewInspector
+                key={`${String(props.project.id)}-models`}
+                label="Models"
+                summary="Which models this Project's coordinators and helper agents use for each role"
+              >
+                <ProjectModelRolesSection
+                  {...props.modelRoles}
+                  disabled={archived || connectionStale}
+                  projectId={String(props.project.id)}
+                />
+              </ProjectOverviewInspector>
             ) : null}
             {props.spendCeilingClient === undefined ? null : (
               <ProjectOverviewInspector

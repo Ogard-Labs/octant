@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { stopWindowsProcessTree, windowsSystemProgram } from "./windowsProcessTree";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
@@ -91,7 +92,16 @@ export async function persistProcessReceipt(
   };
 }
 
-export async function reconcileProcessReceipts(options: ProcessReceiptOptions): Promise<void> {
+export async function reconcileProcessReceipts(
+  options: ProcessReceiptOptions & {
+    /**
+     * Keeps a receipt whose process could not be shown stopped, and moves on
+     * to the next, rather than failing the whole pass. The receipt stays for
+     * the next start. Absent, such a receipt fails the pass, as it always has.
+     */
+    readonly onUncertain?: (receipt: OwnedProcessReceipt) => void;
+  },
+): Promise<void> {
   validateReceiptDirectory(options.receiptDirectory);
   if (options.receiptDirectory === undefined) return;
   let names: string[];
@@ -124,14 +134,20 @@ export async function reconcileProcessReceipts(options: ProcessReceiptOptions): 
         await unlink(path).catch(() => undefined);
         continue;
       }
-      await terminateOwnedProcess(
-        receipt.pid,
-        receipt.processIdentity,
-        options.shutdownTimeoutMs ?? 2_000,
-        identity,
-        options.killProcessGroup ?? signalProcessGroup,
-        processGroupExists,
-      );
+      try {
+        await terminateOwnedProcess(
+          receipt.pid,
+          receipt.processIdentity,
+          options.shutdownTimeoutMs ?? 2_000,
+          identity,
+          options.killProcessGroup ?? signalProcessGroup,
+          processGroupExists,
+        );
+      } catch (error) {
+        if (options.onUncertain === undefined) throw error;
+        options.onUncertain(receipt);
+        continue;
+      }
       await unlink(path).catch(() => undefined);
     } catch (error) {
       // Only disappearance of the receipt file itself is benign. Once the
@@ -401,8 +417,14 @@ function defaultProcessGroupExists(pid: number): boolean {
 }
 
 function signalProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  // Windows has no process groups: the tree stop ends the owned root and every
+  // process it started, where a signal to the pid ended only the root.
+  if (process.platform === "win32") {
+    void stopWindowsProcessTree(pid);
+    return;
+  }
   try {
-    process.kill(process.platform === "win32" ? pid : -pid, signal);
+    process.kill(-pid, signal);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   }
@@ -457,8 +479,87 @@ export async function readProcessIdentity(pid: number): Promise<string | undefin
     }
     return hashIdentity(["darwin", match[1], match[2], match[3]]);
   }
+  if (process.platform === "win32") return await readWindowsProcessIdentity(pid);
   if (!processLeaderExists(pid)) return undefined;
   throw new Error("Owned process identity is unavailable on this platform.");
+}
+
+/**
+ * Reconciles a supervisor's receipts on a Windows host. A process there is
+ * stopped with its whole tree through the tree stop (Windows has no process
+ * groups), each owned check reads its identity through PowerShell, so the
+ * wait is longer than a POSIX one, and a receipt whose process cannot be
+ * shown stopped is kept for the next start instead of holding up this one.
+ */
+export async function reconcileWindowsProcessReceipts(
+  options: Pick<ProcessReceiptOptions, "receiptDirectory" | "supervisor" | "processIdentity"> & {
+    readonly stopTree?: (pid: number) => Promise<unknown>;
+    readonly onUncertain?: (receipt: OwnedProcessReceipt) => void;
+  },
+): Promise<void> {
+  const stopTree = options.stopTree ?? stopWindowsProcessTree;
+  await reconcileProcessReceipts({
+    supervisor: options.supervisor,
+    ...(options.receiptDirectory === undefined
+      ? {}
+      : { receiptDirectory: options.receiptDirectory }),
+    ...(options.processIdentity === undefined ? {} : { processIdentity: options.processIdentity }),
+    killProcessGroup: (pid) => void stopTree(pid),
+    shutdownTimeoutMs: WINDOWS_RECONCILE_TIMEOUT_MS,
+    onUncertain:
+      options.onUncertain ??
+      ((receipt) =>
+        console.warn(
+          `Octant kept a ${receipt.supervisor} ownership receipt: process ${receipt.pid} could not be shown stopped.`,
+        )),
+  });
+}
+
+const WINDOWS_RECONCILE_TIMEOUT_MS = 15_000;
+
+/** Runs one program with an exact argument list and no shell; answers its stdout. */
+export type WindowsIdentityRead = (program: string, args: ReadonlyArray<string>) => Promise<string>;
+
+/**
+ * A Windows process's identity: its pid and its creation time, which a
+ * reused pid never repeats. Windows has no `/proc` and no `ps`, so the time
+ * is read through Windows PowerShell from System32, started with an exact
+ * argument list and no shell, the pid being a checked integer. Measured on
+ * windows-2025: without a Windows identity every owned-process receipt
+ * failed ("Owned process identity is unavailable on this platform"), and a
+ * provider launch that waits for its receipt never started.
+ */
+export async function readWindowsProcessIdentity(
+  pid: number,
+  read: WindowsIdentityRead = async (program, args) =>
+    (
+      await execFileAsync(program, [...args], {
+        timeout: 10_000,
+        maxBuffer: 4_096,
+        windowsHide: true,
+      })
+    ).stdout,
+): Promise<string | undefined> {
+  if (!Number.isSafeInteger(pid) || pid < 1) return undefined;
+  let stdout: string;
+  try {
+    stdout = await read(windowsSystemProgram("WindowsPowerShell\\v1.0\\powershell.exe"), [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()`,
+    ]);
+  } catch (error) {
+    if (!processLeaderExists(pid)) return undefined;
+    throw error;
+  }
+  const started = stdout.trim();
+  if (!/^\d{1,20}$/.test(started)) {
+    if (!processLeaderExists(pid)) return undefined;
+    throw new Error("Owned process identity could not be observed.");
+  }
+  return hashIdentity(["win32", String(pid), started]);
 }
 
 function processLeaderExists(pid: number): boolean {

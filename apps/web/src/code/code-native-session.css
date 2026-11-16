@@ -1,0 +1,81 @@
+.code-native-session {
+  padding: 0.25rem 0.75rem;
+  font-size: var(--oct-text-xs);
+  color: var(--octant-text-secondary);
+}
+/* On a narrow composer the id drops below the label rather than cutting both. */
+.code-native-session__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--oct-space-2);
+  min-height: 28px;
+}
+.code-native-session__icon {
+  flex: none;
+}
+.code-native-session__label {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+/* The id is what a person copies into a terminal, so it never wraps; on a
+   narrow composer it is cut with an ellipsis and stays whole in its title. */
+.code-native-session__id {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--oct-font-mono);
+  color: var(--octant-text-primary);
+}
+.code-native-session__choices {
+  margin: 0.25rem 0 0;
+}
+.code-native-session__legend {
+  margin: 0 0 0.25rem;
+  color: var(--octant-text-primary);
+}
+.code-native-session__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+.code-native-session__choice {
+  border-radius: var(--oct-radius-sm);
+}
+.code-native-session__choice[data-checked] {
+  background: var(--oct-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--oct-hairline);
+}
+.code-native-session__option {
+  display: grid;
+  justify-items: start;
+  width: 100%;
+  min-width: 0;
+  padding: 0.25rem var(--oct-space-2);
+  text-align: start;
+  white-space: normal;
+}
+.code-native-session__title {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--octant-text-primary);
+}
+.code-native-session__meta {
+  color: var(--octant-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.code-native-session__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.25rem;
+}
+.code-native-session__message {
+  margin: 0.25rem 0 0;
+}

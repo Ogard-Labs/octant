@@ -9,7 +9,9 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
+import { DescribedImageName, ImageDescribedBy } from "./imageDescription";
 import {
+  AgentResultsSteeredIntoTurn,
   AgentRunId,
   AgentRunResultDeliveryMark,
   AgentRunResultDeliveryRunIds,
@@ -39,6 +41,7 @@ import {
   ProviderUsageLimit,
 } from "./providers";
 import { UsageResumeThreadState } from "./usageResume";
+import { ThreadUsageLimitHandoff } from "./usageLimitHandoff";
 import { DiagnosticFailureCode } from "./diagnostics";
 import { PreviewContextSelection } from "./previews";
 import { CanvasContextSelection, MAX_CHAT_TURN_CANVAS_SELECTIONS } from "./canvasContext";
@@ -74,6 +77,12 @@ export type ChatCitationId = typeof ChatCitationId.Type;
 export const ThreadWorkItemId = brandedUuid("ThreadWorkItemId");
 export type ThreadWorkItemId = typeof ThreadWorkItemId.Type;
 
+/**
+ * The research route. `searxng` is Octant's own `web-search` over the host's
+ * backend list, whatever backends it holds; the value keeps its name from when
+ * SearXNG was the only backend so stored threads, settings, and older clients
+ * read it unchanged, and the UI labels it "Octant web search".
+ */
 export const ChatResearchRouting = Schema.Literal("automatic", "searxng", "provider-native");
 export type ChatResearchRouting = typeof ChatResearchRouting.Type;
 
@@ -241,6 +250,7 @@ export const ChatCitation = Schema.Struct({
   attemptId: ChatAttemptId,
   sourceTitle: Schema.NonEmptyTrimmedString,
   sourceUrl: Schema.NonEmptyTrimmedString,
+  /** `searxng` is Octant's own search, whichever of the host's backends answered. */
   backend: Schema.Literal("searxng", "provider-native"),
   snippetRef: Schema.optional(ChatContentReference),
   retrievedAt: UtcTimestamp,
@@ -310,6 +320,22 @@ export const ChatAttempt = Schema.Struct({
   contextManifestId: ContextManifestId,
   inputReceipt: Schema.optional(ConversationInputReceipt),
   sideChatSourceReceipt: Schema.optional(SideChatSourceReceipt),
+  /**
+   * The turn's images Sees images described because the attempt's model
+   * cannot read images: who described each, and the words in the thread's
+   * content store, so a later turn's history and a compaction read them
+   * and a purge erases them with the thread.
+   */
+  describedImages: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        attachmentId: ChatAttachmentId,
+        name: DescribedImageName,
+        describedBy: ImageDescribedBy,
+        description: ChatContentReference,
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_CHAT_TURN_ATTACHMENTS)),
+  ),
   outcome: ChatAttemptOutcome,
   responseRefs: Schema.Array(ChatContentReference),
   researchRef: Schema.optional(ChatContentReference),
@@ -429,6 +455,12 @@ export const ChatTurn = Schema.Struct({
    * idempotent: the server refuses to begin a second turn for the same run.
    */
   delivery: Schema.optional(AgentRunResultDeliveryMark),
+  /**
+   * Finished children's results the host steered into this turn while it
+   * ran, in arrival order. The journaled `agent-run.result-steered` record is
+   * the source; this is its projection onto the turn.
+   */
+  steeredResults: Schema.optional(AgentResultsSteeredIntoTurn),
   createdAt: UtcTimestamp,
 })
   .annotations(strict)
@@ -489,6 +521,18 @@ export const ChatThread = Schema.Struct({
    * on this thread's own stream; absent means no recovery is pending.
    */
   usageResume: Schema.optional(UsageResumeThreadState),
+  /**
+   * The person's opt-in to hand this thread to one named account when its
+   * account hits its usage limit; see {@link ThreadUsageLimitHandoff}.
+   */
+  usageLimitHandoff: Schema.optional(ThreadUsageLimitHandoff),
+  /**
+   * The attempt the latest provider change released: it had stopped on the
+   * old account's usage limit, and moving off that account means it no longer
+   * holds the thread. It keeps its limit in history; the queue and the
+   * composer read this to stop waiting on it.
+   */
+  releasedStopId: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
   /**
    * Set when a person turned off **Continue after restart** for this thread:
    * an answer a host restart cuts off waits for them instead of continuing by
@@ -642,6 +686,17 @@ export const MoveChatThreadAccountCommand = Schema.Struct({
   kind: Schema.Literal("move-chat-thread-account"),
   ...ChatThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
+}).annotations(strict);
+
+/**
+ * The person's "when this account hits its usage limit, hand off to" choice
+ * for the thread. Absent `providerInstanceId` turns it off. Refused while the
+ * thread's model pool is on, since the pool names the current account.
+ */
+export const SetChatThreadUsageLimitHandoffCommand = Schema.Struct({
+  kind: Schema.Literal("set-chat-thread-usage-limit-handoff"),
+  ...ChatThreadCommandFields,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
 }).annotations(strict);
 
 /**
@@ -970,6 +1025,7 @@ export const ChatCommand = Schema.Union(
   WakeChatThreadCommand,
   ChangeChatProviderCommand,
   MoveChatThreadAccountCommand,
+  SetChatThreadUsageLimitHandoffCommand,
   SelectChatMultiModelPoolCommand,
   ChangeChatResearchCommand,
   ChangeChatInstructionsCommand,
@@ -1125,6 +1181,12 @@ export type ChatThreadWindowRequest = typeof ChatThreadWindowRequest.Type;
 export const ChatBootstrap = Schema.Struct({
   settings: ChatSettings,
   threads: Schema.Array(ChatThread),
+  /**
+   * Whether the host's data policy leaves one of its web search backends
+   * eligible, so the `searxng` research route can be ready. Absent from a host
+   * that predates the backend list, where Chat's SearXNG address decides.
+   */
+  webSearchReady: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type ChatBootstrap = typeof ChatBootstrap.Type;
 

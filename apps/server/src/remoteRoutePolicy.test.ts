@@ -360,6 +360,30 @@ describe("remote route policy", () => {
     expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(4);
   });
 
+  it("forwards your instructions for a device the host's person paired, and names no catalogued action for any other device", async () => {
+    const fixture = handler();
+    const read = await fixture.route(request("/api/octant-instructions"));
+    await read.arrayBuffer();
+    const post = await fixture.route(
+      request("/api/octant-instructions/commands", {
+        method: "POST",
+        headers: { origin, "sec-fetch-site": "same-origin", "content-type": "application/json" },
+        body: "{}",
+      }),
+    );
+    await post.arrayBuffer();
+
+    expect(read.status).toBe(200);
+    expect(post.status).toBe(200);
+    expect(fixture.authenticatedProduct).toHaveBeenCalledTimes(2);
+    expect(
+      classifyProductAction(
+        new Request(`${origin}/api/octant-instructions/commands`, { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect(classifyProductAction(new Request(`${origin}/api/octant-instructions`))).toBeUndefined();
+  });
+
   it("forwards a thread's notes and recap for a device the host's person paired, and names no catalogued action for any other device", async () => {
     const fixture = handler();
     const post = await fixture.route(
@@ -1055,6 +1079,28 @@ describe("remote route policy", () => {
       expect(classifyProductAction(new Request(`${origin}${path}`, { method }))).toBeUndefined();
     }
     expect(inspect("/api/pending-requests/defer", "POST")).toMatchObject({ maxBodyBytes: 1_024 });
+  });
+
+  it("lets a paired device send the query an exact route declares, and refuses a query on an exact route that declares none", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (path: string) =>
+      routePolicy.inspect(
+        request(path, { method: "GET", headers: { origin, "sec-fetch-site": "same-origin" } }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+
+    // The load read takes `?detail=vitals`, and the route itself refuses any
+    // other query; the listener has to let the query through to it.
+    expect(inspect("/api/host/resources?detail=vitals")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/search?q=release&scope=all")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(status(inspect("/api/replica-sync/status?x=1"))).not.toBe("allow");
   });
 
   it("admits a paired device's reply detail read and nothing that could change it", () => {

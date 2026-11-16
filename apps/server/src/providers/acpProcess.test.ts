@@ -32,6 +32,7 @@ import {
   SEATBELT_DENY_SERVER_CONTROL_SOCKETS,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
+import { projectCodeEntries } from "@octant/domain";
 import { acpProviderProfiles, type AcpProviderProfile } from "./acpProfiles";
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeAcpAgent.py", import.meta.url));
@@ -655,9 +656,10 @@ describe("ACP child-server profiles", () => {
       OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
+    // An approval-gated launch asks before reaching a folder outside the Project.
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
       permissions: expect.arrayContaining([
-        { action: "external_directory", effect: "deny", resource: "*" },
+        { action: "external_directory", effect: "ask", resource: "*" },
         { action: "skill", effect: "deny", resource: "*" },
       ]),
     });
@@ -2189,8 +2191,7 @@ describe("Mistral Vibe running as itself", () => {
     "VIBE_DEFAULT_AGENT",
     "VIBE_AGENT_PATHS",
     "VIBE_INSTALLED_AGENTS",
-    // Below Full access a subagent's request reaches Octant naming none of
-    // what it asks, so Vibe's own subagents stay off there.
+    // A launch that names no Work or Code mode starts none of Vibe's own subagents.
     "VIBE_ENABLE_SUBAGENTS",
   ];
 
@@ -2207,6 +2208,8 @@ describe("Mistral Vibe running as itself", () => {
       "VIBE_ENABLE_CONNECTORS",
       "VIBE_ENABLE_EXPERIMENTAL_HOOKS",
       "VIBE_TOOL_PATHS",
+      "VIBE_EXPERIMENTAL_ENABLE_REGISTRY_SKILLS",
+      "VIBE_DISABLED_TOOLS",
     ]) {
       expect(own, name).not.toHaveProperty(name);
     }
@@ -2227,18 +2230,41 @@ describe("Mistral Vibe running as itself", () => {
     expect(readOnly.VIBE_TOOL_PATHS).toBe("[]");
   });
 
-  it("lets Vibe start its own subagents only at Full access in Work or Code, once the person allows them", () => {
+  it("keeps Vibe's own web search and fetch off unless the setup has web tools on", () => {
+    const off = '["web_search","web_fetch"]';
+    expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_DISABLED_TOOLS).toBe(off);
+    expect(
+      sanitizeAcpEnvironment(
+        vibe,
+        {},
+        {
+          managedHome: "/x",
+          executionPolicy: "full-access",
+          mode: "code",
+          nativeSetup: { ...everything, webTools: false },
+        },
+      ).VIBE_DISABLED_TOOLS,
+    ).toBe(off);
+    expect(
+      sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x", nativeSetup: everything }),
+    ).not.toHaveProperty("VIBE_DISABLED_TOOLS");
+  });
+
+  it("lets Vibe start its own subagents, as the person's own agents, in Work or Code at every level outside Plan", () => {
     expect(sanitizeAcpEnvironment(vibe, {}, { managedHome: "/x" }).VIBE_ENABLE_SUBAGENTS).toBe(
       "false",
     );
-    for (const [executionPolicy, mode, nativeSetup, released] of [
-      ["full-access", "code", everything, true],
-      ["full-access", "work", everything, true],
-      ["full-access", "chat", everything, false],
-      ["full-access", "code", { ...everything, subagents: false }, false],
-      ["approval-gated", "code", everything, false],
-      ["auto-accept-edits", "code", everything, false],
-      ["plan", "code", everything, false],
+    const agentGuards = ["VIBE_AGENT_PATHS", "VIBE_INSTALLED_AGENTS", "VIBE_ENABLED_AGENTS"];
+    for (const [executionPolicy, mode, nativeSetup, subagents, ownAgents] of [
+      ["full-access", "code", everything, true, true],
+      ["full-access", "work", everything, true, true],
+      ["full-access", "chat", everything, false, false],
+      ["full-access", "code", { ...everything, subagents: false }, false, false],
+      ["approval-gated", "code", everything, true, true],
+      ["approval-gated", "work", everything, true, true],
+      ["auto-accept-edits", "code", everything, true, true],
+      ["plan", "code", everything, false, false],
+      ["plan", "work", everything, false, false],
     ] as const) {
       const environment = sanitizeAcpEnvironment(
         vibe,
@@ -2246,8 +2272,13 @@ describe("Mistral Vibe running as itself", () => {
         { managedHome: "/x", executionPolicy, mode, nativeSetup },
       );
       expect(environment.VIBE_ENABLE_SUBAGENTS, `${executionPolicy} ${mode}`).toBe(
-        released ? undefined : "false",
+        subagents ? undefined : "false",
       );
+      for (const name of agentGuards) {
+        expect(environment[name], `${name} ${executionPolicy} ${mode}`).toBe(
+          ownAgents ? undefined : vibe.process.guards[name],
+        );
+      }
     }
   });
 
@@ -2289,5 +2320,129 @@ describe("Mistral Vibe running as itself", () => {
     expect(vibe.sessionMode("chat", "approval-gated", true)).toBe("ask");
     expect(vibe.sessionMode("code", "plan", true)).toBe("plan");
     expect(kimi.ownReviewer).toBeUndefined();
+  });
+});
+
+describe("ACP agents running as themselves", () => {
+  const everything = {
+    subagents: true,
+    webTools: true,
+    skills: true,
+    toolServers: true,
+    hooks: true,
+    projectCode: true,
+  } as const;
+  // What Plan and an untrusted Project carry: the person's skills, no Project code.
+  const untrusted = { ...everything, toolServers: false, hooks: false, projectCode: false };
+
+  it("holds each agent's Project entries until the Project is trusted for it, and the trust prompt names every one", () => {
+    for (const profile of Object.values(acpProviderProfiles)) {
+      const held = profile.process.forbiddenRootEntries ?? [];
+      const release = profile.process.nativeSetup;
+      if (profile.kind === "opencode") continue;
+      expect(release, profile.kind).toBeDefined();
+      if (release === undefined) continue;
+      const launch = { executionPolicy: "approval-gated" as const, mode: "code" as const };
+      const named = new Set(projectCodeEntries(profile.kind).map((entry) => entry.path));
+      const beforeTrust = new Set(release(untrusted, launch).releasedRootEntries);
+      for (const entry of held) {
+        expect(release(everything, launch).releasedRootEntries, profile.kind).toContain(entry);
+        // An entry readable before trust is instruction text, never code.
+        if (beforeTrust.has(entry)) expect(entry, profile.kind).toBe("AGENTS.md");
+        else expect(named.has(entry), `${profile.kind} ${entry}`).toBe(true);
+      }
+    }
+  });
+
+  it("starts an agent's own subagents at Guarded in Code and keeps them off in Plan and Chat", () => {
+    const grokGuard = (
+      executionPolicy: "approval-gated" | "plan",
+      mode: "code" | "chat",
+      nativeSetup: ProviderNativeSetup = everything,
+    ) =>
+      sanitizeAcpEnvironment(grok, {}, { managedHome: "/x", executionPolicy, mode, nativeSetup })
+        .GROK_SUBAGENTS;
+    expect(grokGuard("approval-gated", "code")).toBeUndefined();
+    expect(grokGuard("plan", "code", untrusted)).toBe("0");
+    expect(grokGuard("approval-gated", "chat")).toBe("0");
+    expect(grokGuard("approval-gated", "code", { ...everything, subagents: false })).toBe("0");
+
+    const devinConfig = (ownSubagents: boolean) =>
+      JSON.parse(
+        devin.process.managedFiles({
+          managedHome: "/x",
+          executionPolicy: "approval-gated",
+          ownSubagents,
+        })[0]?.content ?? "{}",
+      ) as { readonly subagents_enabled: boolean };
+    expect(devinConfig(true).subagents_enabled).toBe(true);
+    expect(devinConfig(false).subagents_enabled).toBe(false);
+  });
+
+  it("keeps Goose's Project plugins and skills unreadable until the Project is trusted", async () => {
+    const target = fixture(goose);
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: join(target.canonicalRoot, "host-auth"),
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: goose,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const plugins = join(target.canonicalRoot, ".agents/plugins");
+    const denies = (args: ReadonlyArray<string>) =>
+      args.some((arg) => arg.includes(`(deny file-read* (subpath "${plugins}"))`));
+    expect(denies((await launch()).args)).toBe(true);
+    expect(denies((await launch(untrusted)).args)).toBe(true);
+    expect(denies((await launch(everything)).args)).toBe(false);
+  });
+
+  it("reads the person's own Kimi Code skills, servers and hooks with their setup, and none without it", async () => {
+    const target = fixture(kimi);
+    const hostDirectory = join(target.canonicalRoot, "host-auth");
+    mkdirSync(hostDirectory, { recursive: true });
+    const confinement = makeAcpConfinementLive({
+      platform: "darwin",
+      sandboxPath: target.sandboxPath,
+      temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      hostAuthenticationPath: hostDirectory,
+    });
+    const launch = (nativeSetup?: ProviderNativeSetup) =>
+      Effect.runPromise(
+        confinement.prepare({
+          profile: kimi,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome: join(target.canonicalRoot, "managed-home"),
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: { PATH: "/usr/bin" },
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+    const deniesHome = (args: ReadonlyArray<string>, entry: string) =>
+      args.some((arg) => arg.includes(`${realpathSync(hostDirectory)}/${entry}"`));
+    const locked = (await launch()).args;
+    const own = (await launch(everything)).args;
+    for (const entry of ["mcp.json", "skills", "plugins", "hooks", "AGENTS.md"]) {
+      expect(deniesHome(locked, entry), entry).toBe(true);
+      expect(deniesHome(own, entry), entry).toBe(false);
+    }
+    // Plan carries no hooks or servers, so those stay held while skills load.
+    const plan = (await launch(untrusted)).args;
+    expect(deniesHome(plan, "skills")).toBe(false);
+    expect(deniesHome(plan, "hooks")).toBe(true);
+    expect(deniesHome(plan, "mcp.json")).toBe(true);
   });
 });

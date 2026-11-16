@@ -82,6 +82,7 @@ function codeRow(hostId: string, thread: CodeThread): MobileInboxRow {
     title: thread.title,
     status: thread.lifecycle,
     freshness: thread.updatedAt,
+    projectId: String(thread.projectId),
   };
 }
 
@@ -294,6 +295,11 @@ export async function createMobileCodeFromPrompt(input: {
     proposal: MobileCodeDeliveryTargetProposal,
   ) => Promise<CodeDeliveryTarget | undefined>;
   readonly uuid?: () => string;
+  /**
+   * Told as soon as the host has made the thread, before its first turn: a
+   * turn that then fails to start still leaves a thread the caller can name.
+   */
+  readonly onCreated?: (row: MobileInboxRow) => void;
 }): Promise<MobileInboxRow> {
   const prompt = input.prompt.trim();
   if (prompt.length === 0) {
@@ -462,6 +468,7 @@ export async function createMobileCodeFromPrompt(input: {
     throw new MobileInboxFailure("unavailable", "The Code task could not be reconciled.");
   }
   const retry = { threadId: String(thread.id), deliveryTarget, operationId, sessionId };
+  input.onCreated?.(codeRow(input.transport.hostId, thread));
   if (input.retry !== undefined) {
     const reconciled = await findCodeOperationResultForRetry({
       transport: input.transport,
