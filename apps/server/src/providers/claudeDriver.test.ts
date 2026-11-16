@@ -793,8 +793,11 @@ describe("Claude execution policy", () => {
       ],
       fullToolSet: false,
     });
-    // A Code Plan turn runs read-only commands only where its Seatbelt profile
-    // can name the programs; Chat has no shell, and Work never runs in Plan.
+    // A Work or Code Plan turn runs read-only commands only where its Seatbelt
+    // profile can name the programs; Chat has no shell.
+    expect(claudeExecutionOptions("plan", false, "work", "darwin")).toEqual(
+      claudeExecutionOptions("plan", false, "code", "darwin"),
+    );
     expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
       "Read",
       "Glob",
@@ -809,8 +812,8 @@ describe("Claude execution policy", () => {
     ]);
     for (const [mode, platform] of [
       ["code", "linux"],
+      ["work", "linux"],
       ["chat", "darwin"],
-      ["work", "darwin"],
     ] as const) {
       expect(claudeExecutionOptions("plan", false, mode, platform).tools).toEqual([
         "Read",

@@ -2588,8 +2588,8 @@ maintainer's hardware, or names the maintainer gate.
      removes a device and lists it again ends the session too.
    - **Postures belong to a Code Project, Code thread or local Work thread.** A
      Code Project's posture is whether it remembers Full access for its threads.
-     Work retains its four exact levels: Ask first, Accept folder edits, Auto and
-     Full access. It has no Plan overlay or remembered Project access default.
+     Work retains its exact levels: Ask first, Accept folder edits, Auto, Plan
+     and Full access. It has no remembered Project access default.
      Reading one asks for an unlock or open administration session, stricter than
      reading an alert. The same read route lists active eligible targets by name.
      Every reading carries a digest of the current thread, Project, binding and

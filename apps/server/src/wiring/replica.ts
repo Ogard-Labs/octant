@@ -176,8 +176,11 @@ export function wireReplica(deps: ReplicaDependencies) {
     canvas: (canvasId) => persistence.canvasProjection.getById(canvasId),
     projectName: (projectId) =>
       persistence.readProjects().find((project) => String(project.id) === projectId)?.name,
+    // A Work or Code thread in Plan syncs nothing out; Chat has no Plan.
     planMode: (version) => {
       const provenance = version.definition.provenance;
+      if (provenance.mode === "work")
+        return workThreadProjection.read(provenance.threadId as never)?.access === "plan";
       if (provenance.mode !== "code") return false;
       return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
     },
@@ -267,7 +270,7 @@ export function wireReplica(deps: ReplicaDependencies) {
           updatedAt: String(thread.updatedAt),
           projectId: String(thread.projectId),
           active: thread.lifecycle === "active",
-          readOnly: false,
+          readOnly: thread.access === "plan",
         }),
       ),
       ...persistence.readCodeThreads().map((thread) =>

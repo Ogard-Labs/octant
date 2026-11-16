@@ -1722,8 +1722,10 @@ starts a Code session at the same level, and a Work turn journals `shell` and
   turns as in Code, and an empty Work thread can continue a Claude Code
   session begun outside Octant in the folder its turns run in
   ([Provider runtimes](design/provider-runtimes.md#background-commands-and-runtime-started-turns)).
-  Claude's own plan-then-approve stays Code's: it moves a thread into and
-  out of Plan, and Work has no Plan.
+  Claude's own plan-then-approve works as in Code: `EnterPlanMode` and,
+  from Plan, `ExitPlanMode` reach the person as level changes, and a Work
+  Plan session starts with Code Plan's read-only tool list and profile
+  ([Provider runtimes](design/provider-runtimes.md#plan-mode-as-level-changes)).
 - **Codex:** Work threads start and resume with the shell features on and the
   approval policy and sandbox the level maps to in Code; `command` and
   `permissions` requests inside the root reach the person at Guarded. A Work
@@ -10553,9 +10555,11 @@ the model at another size.
      stored as approval-gated, auto-accept-edits, or Full access has its
      write, edit, command, or check refused as `plan-mode-denied`, including
      a call from tools composed before the narrowing. A turn's posture only
-     narrows the thread's, never widens it. Work and Chat have no Plan
-     posture (a Work turn is ask-first or auto-accept-edits; Chat is
-     approval-gated), so no narrowed turn reaches them. A child agent
+     narrows the thread's, never widens it. Chat has no Plan posture (it is
+     approval-gated), so no narrowed turn reaches it; a Work thread in Plan
+     runs every turn at Plan, and its harness calls are judged by the level
+     the running turn holds, so its writes and commands are refused the same
+     way. A child agent
      is admitted, and a scheduled resume is granted, under the same narrower
      posture: the parent's live grant is its thread (with the window's session
      grant) clamped to the posture its running turn holds, so a turn narrowed to
@@ -14032,11 +14036,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default for every new thread, Work and
     Code; Settings › Work and Settings › Code change it, a Project, Work or Code, may override
     it, and any thread can switch mode at any time from the composer in one
-    click (maintainer decision, 2026-10-31). Work has no Plan, so a Plan
-    answer leaves new Work threads at Ask first. A new Work thread takes its
-    Project's mode, else Work's default; a Project override can be Auto, Ask
-    first, Accept edits, or Full access, and a device the host's own person
-    did not pair cannot pick Full access for it.
+    click (maintainer decision, 2026-10-31). No Work thread starts in Plan,
+    so a Plan answer leaves new Work threads at Ask first. A new Work thread
+    takes its Project's mode, else Work's default; a Project override can be
+    Auto, Ask first, Accept edits, or Full access, and a device the host's
+    own person did not pair cannot pick Full access for it. A Work thread
+    moves to Plan from its own mode picker, as a Code thread does.
   - **Computer keeps its first-action ask** at every level, Full access
     included: it asks at the first action in each application, once per
     thread. The Browser asks at Full access only on a signed-in profile; a
@@ -14365,6 +14370,25 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     default access, behind the one-time warning).
   - **Plan in Work.** Work threads get the Plan level, so the provider's
     own plan mode, `EnterPlanMode` and `ExitPlanMode` work there as in Code.
+    Built: Plan is a Work thread's level (`access: "plan"`, never a Settings
+    or Project default), journaled through `change-work-thread-access` like
+    any level change and offered by the web and phone mode pickers, the
+    owner posture card and `octant agent --access plan`. In Plan, Work is
+    read-only on the host as Code's Plan is: the provider launches with
+    Code Plan's read-only profile and tool set (Claude's Plan tool list,
+    Codex's Plan collaboration mode), Octant Harness writes and commands are
+    refused, and every Work tool family refuses what changes something
+    (Browser effects past reading the open page, every Computer action,
+    Project memory writes, image generation and saves, sibling messages)
+    while helpers it starts run in Plan, and the artifact mirror and replica
+    sync refuse its Canvases. It may still propose a side task or a routine
+    and write its own Canvas. The agent's ask to plan first or to leave Plan
+    is a level-change request (a structured `levelChange` on the Work
+    approval, carrying the plan whole with paths and secrets redacted) that
+    Octant Shield and a provider's reviewer never answer; approving it moves
+    the thread as the person who answered and ends the turn, and an approved
+    plan returns the thread to the guarded level it left (its
+    `planReturnAccess`), never to Full access.
   - **Project terminal.** The person's own Project terminal runs unconfined
     by default, as the person's shell does outside Octant, and a Work
     Project's terminal no longer runs at the approval-gated posture. Octant's
@@ -14650,7 +14674,7 @@ access` agree); a thread's own change is journaled as
   `full-access` is remembered for the Code Project through the same
   `change-code-project-access` command `octant project access` sends, so it
   works the same on a host with no desktop window; a Work thread takes the
-  level through `change-work-thread-access` (no Plan overlay). Because the
+  level through `change-work-thread-access`, Plan included. Because the
   flag saves Full access on the Project rather than only on the new thread,
   the terminal says so and prints the `octant project access <name>
 approval-gated` command that undoes it. The terminal shows no one-time
@@ -14659,8 +14683,9 @@ approval-gated` command that undoes it. The terminal shows no one-time
   `octant settings access <mode> [--work]` sets the global default new
   threads start at, Code unless `--work`, through `update-code-settings` /
   `update-work-settings`. A Work thread
-  takes the same levels without Plan: Settings › Work sets the one a new
-  thread starts at and its composer changes it
+  takes the same levels, Plan included, though Plan is never a default:
+  Settings › Work sets the one a new thread starts at and its composer
+  changes it
   ([Modes](#modes-chat-work-and-code)).
   One provider-owned exception is accepted: on OpenCode 2.x, approval-gated
   honours permission grants the person saved in OpenCode itself for the same
@@ -15578,10 +15603,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
   Seatbelt rules do not apply there.
-  A Code Plan turn on macOS may run read-only commands through the Bash
-  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
-  offers the Bash tool gets the grants below; a Chat or Work Plan launch
-  and the readiness probes keep no fork and no exec but their own. The
+  A Work or Code Plan turn on macOS may run read-only commands through the
+  Bash tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch
+  that offers the Bash tool gets the grants below; a Chat launch and the
+  readiness probes keep no fork and no exec but their own. The
   launch may fork,
   and may exec exactly these programs, by literal and resolved path:
   `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
@@ -19261,7 +19286,7 @@ documents its authority, privacy, and release boundaries):
 - The [guardrail levels](#security-and-authority) and the
   [key providers' native features](#providers). Built in Code: Ask first,
   Accept edits, Auto (with the key CLI providers' own reviewers), Plan and Full
-  access. Built in Work: Auto, Ask first, Accept edits and Full access.
+  access. Built in Work: Auto, Ask first, Accept edits, Plan and Full access.
   [Octant Shield](#octant-shield) is in scope; its Judge is built for every
   runtime that routes approvals through Octant, and its Watcher for the
   results Octant hands a model.
