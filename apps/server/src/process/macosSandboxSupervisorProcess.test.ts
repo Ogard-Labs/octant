@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { buildDenyDefaultSeatbeltProfile } from "./seatbeltProfile";
 
 function heartbeat(path: string): string {
   try {
@@ -216,6 +217,46 @@ const timer=setInterval(()=>{try {if(fs.readFileSync(process.argv[4],"utf8")!==p
       execFileSync(executable, ["--reap", root, "--stale"], { timeout: 10000 });
       expect(readdirSync(root).some((name) => name.endsWith(".scope"))).toBe(false);
 
+      const escapeLabel = `app.octant.sandbox.escape.${root.split("/").at(-1)}`;
+      const escapePlist = join(root, "escape.plist");
+      const escapeCanary = join(root, "escaped-job");
+      writeFileSync(
+        escapePlist,
+        `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${escapeLabel}</string><key>ProgramArguments</key><array><string>/usr/bin/touch</string><string>${escapeCanary}</string></array><key>RunAtLoad</key><true/></dict></plist>`,
+      );
+      const profile = buildDenyDefaultSeatbeltProfile({
+        boundRoot: root,
+        temporaryDirectory: root,
+        networkEgress: "none",
+        allowFileReadStar: true,
+      });
+      try {
+        const escaped = spawnSync(
+          executable,
+          [
+            "--run",
+            root,
+            "escape:epoch",
+            "--",
+            "/usr/bin/sandbox-exec",
+            "-p",
+            profile,
+            "/bin/sh",
+            "-c",
+            `if /bin/launchctl bootstrap gui/$(id -u) '${escapePlist}'; then exit 31; fi; if /usr/bin/sudo -n /usr/bin/true; then exit 32; fi; if '${executable}' --run '${root}' nested:epoch -- /usr/bin/sandbox-exec -p '(version 1)(allow default)' /usr/bin/touch '${escapeCanary}'; then exit 33; fi; printf escape-refused`,
+          ],
+          { cwd: root, encoding: "utf8", timeout: 15000 },
+        );
+        expect(escaped.status, escaped.stderr).toBe(0);
+        expect(escaped.stdout).toContain("escape-refused");
+        expect(existsSync(escapeCanary)).toBe(false);
+      } finally {
+        spawnSync("/bin/launchctl", ["bootout", `gui/${process.getuid?.()}/${escapeLabel}`], {
+          timeout: 5000,
+          stdio: "ignore",
+        });
+      }
+
       const terminal = spawnSync(
         "/usr/bin/python3",
         [
@@ -263,7 +304,14 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
     } finally {
       child?.kill("SIGKILL");
       if (existsSync(executable)) {
-        for (const ownedEpoch of [epoch, "host-death:epoch", "terminal:epoch", "loader:epoch"]) {
+        for (const ownedEpoch of [
+          epoch,
+          "host-death:epoch",
+          "terminal:epoch",
+          "loader:epoch",
+          "escape:epoch",
+          "nested:epoch",
+        ]) {
           try {
             execFileSync(executable, ["--reap", root, ownedEpoch], { timeout: 10000 });
           } catch {
