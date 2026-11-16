@@ -24,10 +24,13 @@ html:root[data-octant-window-inactive="true"] {
   --oct-accent-fg: var(--octant-text-muted);
 }
 
-/* The toolbar's ink: the title band, each pane's title row and the sidebar's
-   header. Their words and glyphs drop to a muted step together; rows, the
-   thread and the composer keep theirs, as a Mac window's content does. */
+/* The toolbar's ink: the title band, each pane's title row, and the sidebar's
+   header with the controls beside the window buttons (hide sidebar, back and
+   forward). Their words and glyphs drop to a muted step together; rows, the
+   thread and the composer keep theirs, as a Mac window's content does. Seen
+   in the real window: with the sidebar open those three controls sit in the
+   sidebar, not the title band, and stayed lit beside grey window buttons. */
 html[data-octant-window-inactive="true"]
-  :is(.window-chrome, .workspace-pane__header, .sidebar__chrome) {
+  :is(.window-chrome, .workspace-pane__header, .sidebar__chrome, .sidebar__native-leading) {
   opacity: var(--oct-window-inactive-opacity);
 }

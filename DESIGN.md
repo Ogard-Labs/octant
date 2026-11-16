@@ -407,7 +407,8 @@ half pixel.
 
 **A window that is not in front.** In the desktop app a window steps back while
 another window or app has the keyboard, as a Mac window does: the toolbar's ink
-(the title band, each pane's title row and the sidebar's header) drops to
+(the title band, each pane's title row, and the sidebar's header with the
+controls beside the window buttons) drops to
 `--oct-window-inactive-opacity` (0.55), and the accent gives way to the neutral
 control (a default button, a switch that is on, a checked box, accent text and
 glyphs). Rows, the thread and the composer keep their ink. The change is

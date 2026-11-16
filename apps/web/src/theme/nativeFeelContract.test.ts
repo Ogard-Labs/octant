@@ -129,7 +129,7 @@ describe("native feel", () => {
     // The drawn ground reads the theme's role, so the role itself stays.
     expect(inactive).not.toMatch(/^\s*--octant-accent:/m);
     expect(inactive).toMatch(
-      /:is\(\.window-chrome, \.workspace-pane__header, \.sidebar__chrome\) \{\s*opacity: var\(--oct-window-inactive-opacity\);/,
+      /:is\(\.window-chrome, \.workspace-pane__header, \.sidebar__chrome, \.sidebar__native-leading\) \{\s*opacity: var\(--oct-window-inactive-opacity\);/,
     );
     expect(inactive).not.toMatch(/transition|animation/);
     expect(read("App.tsx")).toContain("root.dataset.octantWindowInactive");
