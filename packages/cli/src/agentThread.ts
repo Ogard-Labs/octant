@@ -778,12 +778,7 @@ export async function createAgentThread(
     }
   }
   if (input.model === undefined && model === undefined)
-    model =
-      input.chooseModel === undefined
-        ? models.length === 1
-          ? models[0]
-          : undefined
-        : await input.chooseModel(models);
+    model = input.chooseModel === undefined ? undefined : await input.chooseModel(models);
   if (model === undefined) {
     return {
       kind: "refused",

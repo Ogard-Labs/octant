@@ -126,6 +126,7 @@ function host(codeAccessPersistence: "current-session" | "project-default") {
             settings: {
               defaultExecutionPolicy: "approval-gated",
               defaultPermissionPersistence: "current-session",
+              defaultModel: { providerInstanceId: ids.provider, modelId: "loopback-model" },
               version: 0,
               updatedAt: now,
             },
@@ -229,6 +230,20 @@ function workHost() {
             },
             threads: [],
             checkouts: [],
+          },
+        };
+      if (request.path === "/api/work/threads/bootstrap")
+        return {
+          status: 200,
+          body: {
+            threads: [],
+            settings: {
+              defaultProviderInstanceId: ids.provider,
+              defaultModelId: "loopback-model",
+              defaultAccess: "ask-first",
+              version: 0,
+              updatedAt: now,
+            },
           },
         };
       if (request.path === "/api/shell/bootstrap") {
@@ -1274,6 +1289,33 @@ describe("coding provider selection from the terminal", () => {
     });
     expect(result.kind).toBe("created");
     expect(fake.created()).toBeDefined();
+  });
+
+  it("refuses noninteractive creation without a default even with one eligible model", async () => {
+    const fake = host("current-session");
+    const session = {
+      ...fake.session,
+      send: async (request: LocalControlRequest) =>
+        request.path === "/api/code/bootstrap"
+          ? {
+              status: 200,
+              body: {
+                settings: {
+                  defaultExecutionPolicy: "approval-gated",
+                  defaultPermissionPersistence: "current-session",
+                  version: 0,
+                  updatedAt: now,
+                },
+                threads: [],
+                checkouts: [],
+              },
+            }
+          : fake.session.send(request),
+    };
+    expect(
+      await createAgentThread(session, { mode: "code", title: "No default", projectName: "Repo" }),
+    ).toMatchObject({ kind: "refused" });
+    expect(fake.created()).toBeUndefined();
   });
 
   it("uses the host Code default before offering an interactive model choice", async () => {

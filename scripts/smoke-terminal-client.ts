@@ -111,6 +111,14 @@ for (const width of [70, 80, 100, 160]) {
     if (width >= 100 && !frame.includes("Threads")) throw new Error("Missing sidebar");
     if (width >= 140 && !frame.includes("Context and usage")) throw new Error("Missing info panel");
     const running = screen.run();
+    if (width === 70) {
+      test.mockInput.pressKey("b", { ctrl: true });
+      await test.waitForFrame((frame) => frame.includes("Threads"));
+      test.mockInput.pressKey("b", { ctrl: true });
+      test.mockInput.pressKey("g", { ctrl: true });
+      await test.waitForFrame((frame) => frame.includes("Context and usage"));
+      test.mockInput.pressKey("g", { ctrl: true });
+    }
     test.mockInput.pressKey("p", { ctrl: true });
     await test.waitForFrame((frame) => frame.includes("Command palette"));
     await test.mockInput.typeText("diff");

@@ -668,6 +668,64 @@ describe("App", () => {
    * first picker entry — which the picker itself marks unusable — and failing
    * only after the work exists.
    */
+  it("starts the Code draft on the shared default rather than the first catalogued model", async () => {
+    const user = userEvent.setup();
+    const providerApi = providersWithToolModel();
+    const catalog = await providerApi.bootstrap();
+    const observed = catalog.observedStates[0];
+    const first = observed?.models[0];
+    if (observed === undefined || first === undefined) throw new Error("Missing provider fixture");
+    const modelId = decodeProviderModelId("default-code-model");
+    const codeApi = codesRecordingCreates();
+    const codeBootstrap = await codeApi.bootstrap();
+    render(
+      <App
+        codeClient={{
+          ...codeApi,
+          bootstrap: async () => ({
+            ...codeBootstrap,
+            settings: {
+              ...codeBootstrap.settings,
+              defaultModel: { providerInstanceId: observed.instanceId, modelId },
+            },
+          }),
+        }}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={{
+          ...providerApi,
+          bootstrap: async () => ({
+            ...catalog,
+            observedStates: [
+              {
+                ...observed,
+                models: [first, { ...first, id: modelId, displayName: "Default Code model" }],
+              },
+            ],
+          }),
+        }}
+        shellClient={client(codeDraftShellBootstrap(projectId))}
+      />,
+    );
+    await user.type(
+      await screen.findByRole("textbox", { name: "First message" }),
+      "Use the configured default",
+    );
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() =>
+      expect(codeApi.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "create-code-thread",
+          thread: expect.objectContaining({ providerInstanceId: observed.instanceId, modelId }),
+        }),
+      ),
+    );
+  });
+
   it("reports no usable Code model instead of starting a turn on a chat-only model", async () => {
     const user = userEvent.setup();
     const codeApi = codesRecordingCreates();

@@ -3874,6 +3874,18 @@ function LaunchedShell(
       hostPlatform,
     ],
   );
+  const codeDefaultProviderId = codeController.bootstrap?.settings.defaultModel?.providerInstanceId;
+  const codeDefaultModelId = codeController.bootstrap?.settings.defaultModel?.modelId;
+  useEffect(() => {
+    if (
+      activeMode !== "code" ||
+      codeDefaultProviderId === undefined ||
+      codeDefaultModelId === undefined
+    )
+      return;
+    setDraftProviderInstanceId(codeDefaultProviderId);
+    setDraftModelId(codeDefaultModelId);
+  }, [activeMode, codeDefaultProviderId, codeDefaultModelId]);
   const firstRunDiscoveryNotice = describeDiscoveryNotice(firstRunDiscovery, hostPlatform);
   const recordFirstRunOutcome = useCallback(
     (outcome: FirstRunOnboardingOutcome) =>
@@ -7231,7 +7243,7 @@ function LaunchedShell(
         draftProviderGroups,
         draftProviderInstanceId !== undefined && draftModelId !== undefined
           ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-          : undefined,
+          : codeController.bootstrap?.settings.defaultModel,
       );
       const providerInstanceId =
         codeSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;
@@ -7637,7 +7649,7 @@ function LaunchedShell(
           draftProviderGroups,
           draftProviderInstanceId !== undefined && draftModelId !== undefined
             ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-            : undefined,
+            : codeController.bootstrap?.settings.defaultModel,
         );
         const providerInstanceId =
           codeDraftSelection?.providerInstanceId ?? codeProviderChoices[0]?.instanceId;

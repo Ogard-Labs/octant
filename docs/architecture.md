@@ -6612,11 +6612,11 @@ The exact API, account limitations and verification boundary are owned by
   provider account and model for a new Chat thread before its first prompt.
   Work and Code also list enabled text providers, including native coding runtimes.
   Code and Work read their host-configured provider/model defaults. The Code
-  first-run model choice is saved in Code settings (`defaultModel`), shared
+  first-run model choice and Settings › Code's Default model are saved in Code settings (`defaultModel`), shared
   with the terminal; the app's current draft choice remains a local preference.
   Without a usable default,
-  an interactive terminal offers a picker. Noninteractive callers must supply
-  a unique model when several choices exist. Unknown or ambiguous
+  an interactive terminal offers a picker. Noninteractive callers without a usable default must supply
+  a unique model, even when there is only one catalogued choice. Unknown or ambiguous
   names refuse before inference; a qualified name must identify exactly one
   account/model pair. The creation flag cannot silently override or be ignored
   when attaching with `--thread` or `--last`; that combination is refused.

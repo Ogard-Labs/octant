@@ -189,6 +189,7 @@ class AgentScreen {
     | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
     | undefined;
   #destroyed = false;
+  #refreshSequence = 0;
   #lastAskId: string | undefined;
   #staleAnswer = false;
   #note = "";
@@ -492,6 +493,7 @@ class AgentScreen {
   }
 
   async refresh(): Promise<void> {
+    const refreshSequence = ++this.#refreshSequence;
     const readingThreadId = this.#threadId;
     const readingMode = this.#mode;
     const [thread, session, sites] = await Promise.all([
@@ -499,11 +501,20 @@ class AgentScreen {
       readAgentSession(this.#input.session, this.#threadId),
       listAgentSiteApprovals(this.#input.session, this.#port.mode, this.#threadId).catch(() => []),
     ]);
+    let navigationFailed = false;
     const navigation = await listAgentNavigation(this.#input.session, readingMode).catch(() => {
-      this.#note = "Thread list unavailable; retrying.";
+      navigationFailed = true;
       return this.#threads;
     });
-    if (this.#destroyed || readingThreadId !== this.#threadId || readingMode !== this.#mode) return;
+    if (
+      this.#destroyed ||
+      refreshSequence !== this.#refreshSequence ||
+      readingThreadId !== this.#threadId ||
+      readingMode !== this.#mode
+    )
+      return;
+    if (navigationFailed) this.#note = "Thread list unavailable; retrying.";
+    else if (this.#note === "Thread list unavailable; retrying.") this.#note = "";
     this.#threads = navigation;
     if (thread?.projectId !== this.#filesProjectId) {
       this.#filesProjectId = thread?.projectId;
@@ -514,7 +525,12 @@ class AgentScreen {
           path: "/api/projects/bootstrap",
           method: "GET",
         });
-        if (readingThreadId !== this.#threadId) return;
+        if (
+          this.#destroyed ||
+          refreshSequence !== this.#refreshSequence ||
+          readingThreadId !== this.#threadId
+        )
+          return;
         if (projects.status === 200) {
           const project = decodeHostAnswer(ProjectBootstrap)(projects.body).active.find(
             (project) => String(project.id) === thread.projectId,
