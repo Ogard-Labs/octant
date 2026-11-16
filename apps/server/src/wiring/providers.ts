@@ -666,7 +666,10 @@ export type ProvidersDependencies = Pick<
   Pick<IntegrationsWiring, "githubExtensionSnapshot" | "providerRuntimeNetwork"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workThreadProjection" | "resolveThreadStrict"
+  >;
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
@@ -1116,9 +1119,11 @@ export function wireProviders(deps: ProvidersDependencies) {
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
           isPairedDeviceScope: isRestrictedDeviceScope,
+          // The mark adds a network server's ask only under Strict; outside it
+          // the remembered grants decide as they did before the mark.
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
-              .externalContentIngested,
+              .externalContentIngested && deps.resolveThreadStrict(threadId),
           outsideContent: (threadId) =>
             readApprovalOutsideContent(persistence.connection, threadId),
           verifiedPublisherKey: (version) =>

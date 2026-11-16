@@ -1,4 +1,5 @@
 import type { Questionnaire } from "@octant/contracts";
+import type { StalledTurnScope } from "../providers/turnBudget";
 import { isAbsolute } from "node:path";
 import {
   DEFAULT_THREAD_TOOL_STEPS_PER_TURN,
@@ -259,6 +260,8 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /** Strict for this launch, as the host resolved it; absent is Strict. */
+  readonly strict?: boolean;
   /** What the session may load of the provider's own setup; absent keeps it all off. */
   readonly nativeSetup?: ProviderNativeSetup;
   /** The host's schedule for this thread's wake-ups; absent offers the runtime none. */
@@ -341,7 +344,7 @@ export interface CodeTurnRunnerOptions {
    * Read as each turn starts, so a changed setting applies to the next turn
    * and a running turn keeps the limit it started with.
    */
-  readonly stalledTurnLimitMs?: () => number | null;
+  readonly stalledTurnLimitMs?: (turn: StalledTurnScope) => number | null;
   /**
    * The longest one provider tool call pauses the stalled-turn clock, in
    * milliseconds, `null` when that bound is Off. Read as each turn starts,
@@ -357,7 +360,7 @@ export interface CodeTurnRunnerOptions {
 export class CodeTurnRunner {
   readonly #maxEvents: number | undefined;
   readonly #toolStepLimit: (fullAccess: boolean) => number | undefined;
-  readonly #stalledTurnLimitMs: () => number | null;
+  readonly #stalledTurnLimitMs: (turn: StalledTurnScope) => number | null;
   readonly #providerToolCallPauseLimitMs: () => number | null;
   readonly #maxStreamedOutputBytes: number;
 
@@ -517,6 +520,7 @@ export class CodeTurnRunner {
         executionPolicy: input.thread.executionPolicy,
         ...(input.harnessAutoReviewEnabled === true ? { autoApprove: true } : {}),
         ...(input.thread.fullAccessSandbox === true ? { fullAccessSandbox: true } : {}),
+        ...(input.strict === false ? { strict: false } : {}),
         ...(input.nativeSetup === undefined ? {} : { nativeSetup: input.nativeSetup }),
         ...(input.wakeups === undefined ? {} : { wakeups: input.wakeups }),
         // The host answers the runtime's own asks to plan or to leave Plan.
@@ -550,7 +554,13 @@ export class CodeTurnRunner {
         return yield* fail("interrupted", "Code turn was cancelled before provider send.");
       }
 
-      const idle = yield* makeIdleTimeout(stalledTurnLimitMs(), providerToolCallPauseLimitMs());
+      const idle = yield* makeIdleTimeout(
+        stalledTurnLimitMs({
+          fullAccess: input.thread.executionPolicy === "full-access",
+          strict: input.strict !== false,
+        }),
+        providerToolCallPauseLimitMs(),
+      );
       const shareEventLoop = makeEventLoopShare();
       const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({

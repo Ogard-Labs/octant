@@ -64,10 +64,11 @@ The command palette's **Approve** and **Deny** commands use
 thread.
 
 A Code answer counts as refused when the host says `operation-failed` or reports
-the turn `failed`, or `interrupted` with a reason. A bare `interrupted` is the
-third denial in one turn: the provider received that Deny and the host then
-stopped the turn, so it counts as answered. The start-screen card, the command
-palette, and the open Code thread all read Code answers this way.
+the turn `failed`, or `interrupted` with a reason. A Deny goes back to the
+model and the turn keeps running, however many denials it has had, so the
+answer reports the turn `running`; a bare `interrupted` still counts as
+answered. The start-screen card, the command palette, and the open Code thread
+all read Code answers this way.
 
 ## Stopping a Code turn
 

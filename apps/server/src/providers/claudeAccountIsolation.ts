@@ -4,6 +4,8 @@ import { basename, dirname, join, resolve } from "node:path";
 
 import type { ClaudeAuthentication } from "@octant/contracts";
 
+import { providerHostEnvironment } from "./providerHostEnvironment";
+
 /**
  * Isolated Claude-account launch environment.
  *
@@ -35,8 +37,8 @@ const PASSTHROUGH_VARIABLES = new Set([
 ]);
 
 /**
- * Static switches every Claude launch sets, each one channel of the runtime's
- * own kept off by its own switch. The `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+ * Static switches every Claude launch under Strict sets, each one channel of
+ * the runtime's own kept off by its own switch. The `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
  * umbrella is deliberately not among them: blanket-blocking every
  * non-essential channel was stricter than Octant needs, so each channel that
  * matters is named here instead (maintainer decision, 2026-10-20). The
@@ -63,6 +65,22 @@ export const ISOLATED_CLAUDE_LAUNCH_GUARDS = {
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
   CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
+} as const;
+
+/**
+ * The switches a launch outside Strict still sets. None is a channel: the
+ * runtime replacing its own binary stays off because Octant installs and
+ * updates provider CLIs itself, and memory and the built-in subagents keep
+ * the lifts the account's and the session's own settings decide. Telemetry,
+ * error reports, `/bug`, `/feedback`, the feedback survey and marketplace
+ * auto-install follow the person's own Claude Code settings, as they do in
+ * Claude Code on its own (Architecture: "Octant adds no restrictions of its
+ * own unless Strict is on").
+ */
+export const OPEN_CLAUDE_LAUNCH_GUARDS = {
+  DISABLE_AUTOUPDATER: "1",
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+  CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
 } as const;
 
 const HOST_DISABLE_ONLY_SWITCH = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
@@ -100,7 +118,18 @@ export function hostDisableOnlySwitches(hostEnvironment: NodeJS.ProcessEnv): Nod
 }
 
 /** Whether a launch environment carries one of the host's own switches that keep Claude artifacts off. */
-export function disablesNonessentialTraffic(environment: NodeJS.ProcessEnv): boolean {
+export function disablesNonessentialTraffic(
+  environment: NodeJS.ProcessEnv,
+  strict = true,
+): boolean {
+  if (!strict) {
+    // Outside Strict nothing of Octant's sits in the launch, so the person's
+    // own exported switches are read as Claude Code reads them.
+    return (
+      environment[HOST_DISABLE_ONLY_SWITCH] === "1" ||
+      HOST_TELEMETRY_OPT_OUTS.some((name) => optsOut(environment[name]))
+    );
+  }
   return (
     environment[HOST_DISABLE_ONLY_SWITCH] === "1" || environment[HOST_TELEMETRY_OPT_OUT] === "1"
   );
@@ -125,13 +154,19 @@ export const CLAUDE_ARTIFACT_LIFTED_GUARD = "DISABLE_TELEMETRY";
 
 /**
  * The environment of a launch that offers Claude's Artifact tool: the
- * runtime's opt-in for an Agent SDK launch, and every guard but
+ * runtime's opt-in for an Agent SDK launch, and under Strict every guard but
  * {@link CLAUDE_ARTIFACT_LIFTED_GUARD}. A host that exports the umbrella or its
  * own telemetry opt-out keeps its launch exactly as it was: either would keep
  * the flag service off anyway, and the person's own switch is never weakened.
+ * Outside Strict the launch carries no guard of Octant's on telemetry, so the
+ * switch lifts nothing: the person's own Claude Code settings decide.
  */
-export function claudeArtifactLaunchEnvironment(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (disablesNonessentialTraffic(environment)) return environment;
+export function claudeArtifactLaunchEnvironment(
+  environment: NodeJS.ProcessEnv,
+  strict = true,
+): NodeJS.ProcessEnv {
+  if (disablesNonessentialTraffic(environment, strict)) return environment;
+  if (!strict) return { ...environment, CLAUDE_CODE_ARTIFACT: "1" };
   const { [CLAUDE_ARTIFACT_LIFTED_GUARD]: _lifted, ...kept } = environment;
   return { ...kept, CLAUDE_CODE_ARTIFACT: "1" };
 }
@@ -164,6 +199,12 @@ export interface IsolatedClaudeAccountEnvironmentInput {
   readonly configDirectory: string;
   readonly authentication: ClaudeAuthentication;
   readonly apiKey?: string;
+  /**
+   * Whether the launch is Strict. Absent is Strict: the fixed passthrough list
+   * and every channel guard. Off, the launch gets the host's environment less
+   * Octant's own variables and other providers' keys.
+   */
+  readonly strict?: boolean;
 }
 
 function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -187,6 +228,7 @@ function passthroughHostEnvironment(hostEnvironment: NodeJS.ProcessEnv): NodeJS.
 export function isolatedClaudeAccountEnvironment(
   input: IsolatedClaudeAccountEnvironmentInput,
 ): NodeJS.ProcessEnv {
+  if (input.strict === false) return openClaudeAccountEnvironment(input);
   const environment = passthroughHostEnvironment(input.hostEnvironment);
   environment.CLAUDE_CONFIG_DIR = input.configDirectory;
   environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
@@ -198,6 +240,27 @@ export function isolatedClaudeAccountEnvironment(
     ...hostDisableOnlySwitches(input.hostEnvironment),
     ...ISOLATED_CLAUDE_LAUNCH_GUARDS,
   };
+}
+
+/**
+ * The launch environment for one Claude account outside Strict: the host's
+ * environment as `providerHostEnvironment` leaves it, with Octant's account
+ * directory and an API-key account's broker key applied and only
+ * {@link OPEN_CLAUDE_LAUNCH_GUARDS} set. An Octant account's own sign-in
+ * decides which account a turn runs as, so no host Anthropic key or token
+ * crosses (`providerHostEnvironment` names none of them as Claude's own) and
+ * the host's account directories are replaced by the account's.
+ */
+function openClaudeAccountEnvironment(
+  input: IsolatedClaudeAccountEnvironmentInput,
+): NodeJS.ProcessEnv {
+  const environment = providerHostEnvironment(input.hostEnvironment);
+  environment.CLAUDE_CONFIG_DIR = input.configDirectory;
+  environment.CLAUDE_SECURESTORAGE_CONFIG_DIR = input.configDirectory;
+  if (input.authentication === "api-key" && input.apiKey !== undefined) {
+    environment.ANTHROPIC_API_KEY = input.apiKey;
+  }
+  return { ...environment, ...OPEN_CLAUDE_LAUNCH_GUARDS };
 }
 
 /**

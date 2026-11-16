@@ -1348,9 +1348,10 @@ export interface CodeOperationServiceOptions {
    */
   readonly projectForgeChoices?: (thread: CodeThread) => ProjectForgeChoices;
   /**
-   * Whether the thread has read outside content, read at each post. A marked
-   * thread's comment below Full access needs an approval for the act whatever
-   * the Project chose. Absent reads as marked.
+   * Whether the thread has read outside content under Strict, read at each
+   * post. Such a thread's comment below Full access needs an approval for the
+   * act whatever the Project chose; outside Strict the mark adds no ask.
+   * Absent reads as marked.
    */
   readonly threadReadOutsideContent?: (thread: CodeThread) => boolean;
   readonly reviewFindings: CodeOperationReviewFindingPort;

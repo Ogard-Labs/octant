@@ -327,21 +327,43 @@ describe("a person's clear of a thread's outside-content mark", () => {
 });
 
 describe("delegation on a thread that read outside content", () => {
-  it("refuses to start a helper below Full access", () => {
+  it("under Strict refuses to start a helper below Full access", () => {
     expect(
-      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: false }),
+      outsideContentRefusesDelegation({
+        externalContentIngested: true,
+        fullAccessThread: false,
+        strict: true,
+      }),
     ).toBe(true);
   });
 
   it("lets a Full access thread keep delegating", () => {
     expect(
-      outsideContentRefusesDelegation({ externalContentIngested: true, fullAccessThread: true }),
+      outsideContentRefusesDelegation({
+        externalContentIngested: true,
+        fullAccessThread: true,
+        strict: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("outside Strict lets a thread below Full access keep delegating after outside content", () => {
+    expect(
+      outsideContentRefusesDelegation({
+        externalContentIngested: true,
+        fullAccessThread: false,
+        strict: false,
+      }),
     ).toBe(false);
   });
 
   it("never refuses a thread that read nothing from outside", () => {
     expect(
-      outsideContentRefusesDelegation({ externalContentIngested: false, fullAccessThread: false }),
+      outsideContentRefusesDelegation({
+        externalContentIngested: false,
+        fullAccessThread: false,
+        strict: true,
+      }),
     ).toBe(false);
   });
 });

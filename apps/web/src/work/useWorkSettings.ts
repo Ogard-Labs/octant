@@ -15,6 +15,8 @@ export interface WorkSettingsChange {
   /** Absent keeps the stored choice. */
   readonly defaultFullAccessSandbox?: boolean;
   /** Absent keeps the stored choice. */
+  readonly defaultStrict?: boolean;
+  /** Absent keeps the stored choice. */
   readonly restartContinuation?: boolean;
 }
 
@@ -122,6 +124,7 @@ export function useWorkSettings(
           ...(change.defaultFullAccessSandbox === undefined
             ? {}
             : { defaultFullAccessSandbox: change.defaultFullAccessSandbox }),
+          ...(change.defaultStrict === undefined ? {} : { defaultStrict: change.defaultStrict }),
           ...(change.restartContinuation === undefined
             ? {}
             : { restartContinuation: change.restartContinuation }),
