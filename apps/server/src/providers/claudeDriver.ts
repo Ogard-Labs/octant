@@ -89,7 +89,7 @@ import {
   type ClaudePendingQuestion,
 } from "./claudeEventMapper";
 import { CLAUDE_TASK_TOOLS, ClaudeTaskList, readClaudeStoredTaskList } from "./claudeTaskList";
-import { providerOwnMemoryLaunches } from "@octant/domain";
+import { providerOwnMemoryLaunches, windowsProviderLaunch } from "@octant/domain";
 import {
   canonicalClaudeAccountDirectory,
   claudeArtifactLaunchEnvironment,
@@ -1163,6 +1163,8 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /** The host's platform; defaults to the running one. */
+  readonly platform?: NodeJS.Platform;
   /**
    * The person's git identity for commits made inside the command sandbox,
    * which cannot read their global gitconfig; read at each sandboxed launch.
@@ -3378,6 +3380,19 @@ function makeConnection(
       signal: AbortSignal,
       resumeSessionId?: string,
     ): Promise<SessionState> => {
+      // Windows has no Octant sandbox, so each launch there is decided from
+      // its own mode, level and Strict value before anything runs: below Full
+      // access Claude's own permission modes hold it outside Strict, and
+      // Strict and a kept sandbox are refused by name.
+      if ((options.platform ?? process.platform) === "win32") {
+        const windows = windowsProviderLaunch({
+          mode: mode ?? "code",
+          executionPolicy: input.executionPolicy,
+          fullAccessSandbox: input.fullAccessSandbox,
+          strict: input.strict,
+        });
+        if (windows.status === "refused") throw failure("incompatible", windows.reason);
+      }
       // An account nobody has checked yet (a fresh start, or a runtime exit that
       // cleared the reading) shows "Not checked". The turn runs that check
       // itself instead of failing on the missing reading.

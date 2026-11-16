@@ -20,6 +20,11 @@ import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts
 import { Effect, Either, Fiber } from "effect";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  WINDOWS_CHAT_PROVIDER_REFUSAL,
+  WINDOWS_KEPT_SANDBOX_REFUSAL,
+  WINDOWS_STRICT_REFUSAL,
+} from "@octant/domain/guardrail-policy";
+import {
   captureOpenCodeRuntimeConfig,
   createPrivateOpenCodeProfile,
   makeOpenCodeProcessLive,
@@ -834,6 +839,37 @@ describe("OpenCodeProcessPort", () => {
     expect(execRules).toEqual(['(allow process-exec (literal "/usr/bin/false"))']);
   });
 
+  it("refuses a Windows launch that needs Octant's sandbox by name before OpenCode is read or served", async () => {
+    const fixture = probeWrapper("v2-ready");
+    for (const [launch, message] of [
+      [{ mode: "code", executionPolicy: "approval-gated" }, WINDOWS_STRICT_REFUSAL],
+      [
+        { mode: "code", executionPolicy: "full-access", fullAccessSandbox: true, strict: false },
+        WINDOWS_KEPT_SANDBOX_REFUSAL,
+      ],
+      [{ mode: "chat", executionPolicy: "plan", strict: false }, WINDOWS_CHAT_PROVIDER_REFUSAL],
+    ] as const) {
+      const prepare = vi.fn((input: { executable: string; args: ReadonlyArray<string> }) => ({
+        command: input.executable,
+        args: input.args,
+      }));
+      const refused = await Effect.runPromise(
+        Effect.flip(
+          Effect.scoped(
+            makeOpenCodeProcessLive({
+              confinement: { prepare },
+              platform: "win32",
+              runtimeConfigResolver: async () => undefined,
+              startupTimeoutMs: 2_000,
+            }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),
+          ),
+        ),
+      );
+      expect(refused).toMatchObject({ category: "incompatible", message });
+      expect(prepare).not.toHaveBeenCalled();
+    }
+  });
+
   it("refuses a 2.x Chat or Plan launch before anything starts where the jail can start no process", async () => {
     const fixture = probeWrapper("v2-ready");
     for (const launch of [
@@ -854,7 +890,7 @@ describe("OpenCodeProcessPort", () => {
           Effect.scoped(
             makeOpenCodeProcessLive({
               confinement,
-              platform: "win32",
+              platform: "freebsd",
               runtimeConfigResolver: async () => undefined,
               startupTimeoutMs: 2_000,
             }).start({ binaryPath: fixture.binaryPath, cwd: fixture.root, ...launch }),

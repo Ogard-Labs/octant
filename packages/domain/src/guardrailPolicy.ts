@@ -160,14 +160,15 @@ export function refusesFullAccessSandbox(input: {
 }
 
 /**
- * Why a level cannot run on a Windows host. Every level below Full access, and
- * Full access with the sandbox kept, runs inside Octant's process sandbox, and
+ * Why Octant's own terminals and commands cannot run below Full access on a
+ * Windows host. Below Full access they run inside Octant's process sandbox, and
  * Windows has no sandbox Octant can use yet: its launcher is built but has not
- * run a real provider on a person's Windows machine. A turn there is refused
- * rather than run with less confinement than its level promises.
+ * run on a person's Windows machine. A provider turn is judged by
+ * {@link hostProviderTurnRefusal} instead, since the provider's own approvals
+ * hold it there.
  */
 export const WINDOWS_SANDBOX_MISSING_REASON =
-  "This level needs Octant's process sandbox, which Windows does not have yet. On this computer only Full access runs; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
+  "This needs Octant's process sandbox, which Windows does not have yet. On this computer Octant's own terminals and commands run only at Full access; switch the thread to Full access with the sandbox off, or run it on a Mac or Linux host.";
 
 /**
  * Whether a turn at `access` needs Octant's process sandbox: every level
@@ -178,8 +179,8 @@ export function levelNeedsSandbox(access: ThreadAccess): boolean {
 }
 
 /**
- * Why a turn, terminal or command at `access` refuses on this host, or
- * undefined when it may run. The caller passes the level the work runs at
+ * Why one of Octant's own terminals or commands at `access` refuses on this
+ * host, or undefined when it may run. The caller passes the level the work runs at
  * (a turn's clamped level, not only the thread's stored one), and the host's
  * own platform.
  */
@@ -190,6 +191,102 @@ export function hostSandboxRefusal(input: {
   return input.platform === "win32" && levelNeedsSandbox(input.access)
     ? WINDOWS_SANDBOX_MISSING_REASON
     : undefined;
+}
+
+/**
+ * Why Strict refuses on a Windows host below Full access. Strict runs the
+ * provider inside Octant's process sandbox instead of its own approvals alone,
+ * and Windows has no Octant sandbox yet; at Full access Strict confines nothing
+ * on any platform, so it runs there.
+ */
+export const WINDOWS_STRICT_REFUSAL =
+  "Strict needs a sandbox Windows doesn't have yet. Turn Strict off for this thread to run it with the provider's own approvals, or run it on a Mac or Linux host.";
+
+/** Why Full access with the sandbox kept refuses on a Windows host. */
+export const WINDOWS_KEPT_SANDBOX_REFUSAL =
+  "Keeping the sandbox at Full access needs a sandbox Windows doesn't have yet. Turn Keep the sandbox off, or run it on a Mac or Linux host.";
+
+/**
+ * Why a Chat provider launch refuses on a Windows host. Chat has no folder or
+ * shell, which a provider runtime is held to by Octant's sandbox; a provider's
+ * own approvals do not remove its file and shell tools.
+ */
+export const WINDOWS_CHAT_PROVIDER_REFUSAL =
+  "Chat keeps a provider without a folder or shell through Octant's sandbox, which Windows doesn't have yet. Use Work or Code, or an Octant Harness model, on this computer.";
+
+/**
+ * Why a provider turn at `access` refuses on this host, or undefined when it
+ * may start. On Windows a turn below Full access runs with the provider's own
+ * approvals and no Octant sandbox claimed, so only what needs Octant's sandbox
+ * refuses there: Strict below Full access and Full access with the sandbox
+ * kept. Octant's own terminals and commands keep {@link hostSandboxRefusal}.
+ */
+export function hostProviderTurnRefusal(input: {
+  readonly platform: string | undefined;
+  readonly access: ThreadAccess;
+  readonly strict: boolean;
+}): string | undefined {
+  if (input.platform !== "win32") return undefined;
+  if (input.access.executionPolicy === "full-access") {
+    return input.access.fullAccessSandbox === true ? WINDOWS_KEPT_SANDBOX_REFUSAL : undefined;
+  }
+  return input.strict ? WINDOWS_STRICT_REFUSAL : undefined;
+}
+
+/**
+ * How one provider launch runs on a Windows host, decided from that launch's
+ * own mode, level and Strict value, so no earlier launch or cached read admits
+ * another. `unconfined` starts the provider with no Octant sandbox: at Full
+ * access with no approvals, below it with the provider's own approvals, every
+ * ask still answered and journaled on the server. A launch that does not say
+ * whether it is Strict is Strict.
+ */
+export type WindowsProviderLaunch =
+  | { readonly status: "unconfined"; readonly approvals: "none" | "provider" }
+  | { readonly status: "refused"; readonly reason: string };
+
+export function windowsProviderLaunch(input: {
+  readonly mode: "chat" | "work" | "code";
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly fullAccessSandbox?: boolean | undefined;
+  readonly strict?: boolean | undefined;
+}): WindowsProviderLaunch {
+  if (input.mode === "chat") return { status: "refused", reason: WINDOWS_CHAT_PROVIDER_REFUSAL };
+  if (input.executionPolicy === "full-access") {
+    return input.fullAccessSandbox === true
+      ? { status: "refused", reason: WINDOWS_KEPT_SANDBOX_REFUSAL }
+      : { status: "unconfined", approvals: "none" };
+  }
+  if (input.strict !== false) return { status: "refused", reason: WINDOWS_STRICT_REFUSAL };
+  return { status: "unconfined", approvals: "provider" };
+}
+
+/**
+ * Whether a Windows host reads a provider's version and model catalog with no
+ * Octant sandbox, for a read that serves no one thread: while new threads start
+ * at open Full access, or while neither the Code nor the Work default in
+ * Settings is Strict, since the turns such a read serves then run unconfined.
+ */
+export function hostReadsProviderCatalogUnconfined(input: {
+  readonly code?:
+    | {
+        readonly defaultExecutionPolicy: ProviderExecutionPolicy;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+        readonly defaultStrict?: boolean | undefined;
+      }
+    | undefined;
+  readonly work?:
+    | {
+        readonly defaultAccess: WorkAccess;
+        readonly defaultFullAccessSandbox?: boolean | undefined;
+        readonly defaultStrict?: boolean | undefined;
+      }
+    | undefined;
+}): boolean {
+  return (
+    hostStartsThreadsAtOpenFullAccess(input) ||
+    (input.code?.defaultStrict !== true && input.work?.defaultStrict !== true)
+  );
 }
 
 /**

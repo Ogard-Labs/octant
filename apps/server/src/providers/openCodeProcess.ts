@@ -30,6 +30,11 @@ import { Cause, Effect, Exit, Option, type Scope } from "effect";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
+  resolveWindowsProviderProgram,
+  windowsUnconfinedLaunch,
+} from "../process/windowsProviderProgram";
+import { windowsProviderLaunch, type WindowsProviderLaunch } from "@octant/domain/guardrail-policy";
+import {
   makeProcessConfinementLive,
   ProcessConfinementError,
   seatbeltAllowLiteralMetadataRule,
@@ -95,6 +100,12 @@ export interface OpenCodeProcessStartInput {
    * unwrapped.
    */
   readonly fullAccessSandbox?: boolean;
+  /**
+   * Whether this launch is Strict; absent is Strict. On Windows a launch below
+   * Full access runs only outside Strict, with OpenCode's own permission rules
+   * and no Octant sandbox.
+   */
+  readonly strict?: boolean;
   /** Exact loopback ports owned by this connection's app-managed tool bridges. */
   readonly loopbackPorts?: ReadonlyArray<number>;
   /**
@@ -1257,6 +1268,46 @@ function openCodeWallPolicy(input: OpenCodeProcessStartInput): ProviderExecution
     : executionPolicy;
 }
 
+/** How one OpenCode launch runs on Windows, from that launch's own authority. */
+function openCodeWindowsLaunch(input: OpenCodeProcessStartInput): WindowsProviderLaunch {
+  return windowsProviderLaunch({
+    mode: input.mode ?? "code",
+    executionPolicy: input.executionPolicy ?? "approval-gated",
+    fullAccessSandbox: input.fullAccessSandbox,
+    strict: input.strict,
+  });
+}
+
+/**
+ * An OpenCode launch on Windows, which has no Octant sandbox: Full access, or
+ * a level below it outside Strict, where OpenCode's own permission rules hold
+ * the server (Plan's read-only rules included), starts unconfined; anything
+ * else is refused by name. An npm shim is resolved to the program it starts.
+ */
+function prepareWindowsOpenCodeLaunch(
+  input: OpenCodeProcessStartInput,
+  profile: PrivateOpenCodeProfile,
+  args: ReadonlyArray<string>,
+): Effect.Effect<OpenCodeLaunch, ProviderFailure> {
+  const form = openCodeWindowsLaunch(input);
+  if (form.status === "refused") return Effect.fail(failure("incompatible", form.reason));
+  const program = resolveWindowsProviderProgram({
+    displayName: "OpenCode",
+    executable: input.binaryPath,
+    args,
+    environment: profile.environment,
+  });
+  if (program.status === "refused") {
+    return Effect.fail(failure("invalid-configuration", program.message));
+  }
+  return Effect.succeed({
+    command: program.command,
+    args: [...program.args],
+    cwd: input.cwd,
+    environment: profile.environment,
+  });
+}
+
 function prepareOpenCodeLaunch(
   input: OpenCodeProcessStartInput,
   profile: PrivateOpenCodeProfile,
@@ -1272,6 +1323,7 @@ function prepareOpenCodeLaunch(
   // OpenCode 2 removed the legacy `--pure` serve flag. Keep the runtime
   // protocol selected by the version probe aligned with its CLI contract.
   const args = openCodeServerArgs(runtime, port);
+  if (platform === "win32") return prepareWindowsOpenCodeLaunch(input, profile, args);
   if (openCodeRefusesTurnHere({ runtime, platform, mode, executionPolicy })) {
     return Effect.fail(failure("unsupported", OPENCODE_CHAT_PLAN_REFUSAL));
   }
@@ -1939,11 +1991,27 @@ export function makeOpenCodeProcessLive(
   return {
     start: (input) =>
       Effect.gen(function* () {
+        // On Windows the launch is decided from its own authority before
+        // anything runs, and an admitted one reads its version unconfined, as
+        // it then runs; the confined read has no Windows form.
+        const windows =
+          resolvedOptions.platform === "win32" ? openCodeWindowsLaunch(input) : undefined;
+        if (windows?.status === "refused") {
+          return yield* Effect.fail(failure("incompatible", windows.reason));
+        }
         // Probe first so the server command and auth identity follow the
         // runtime that actually answered, rather than treating the beta
         // label as a legacy semantic version.
         const probe = yield* probeOpenCodeBinary(input.binaryPath, undefined, {
-          confinement: resolvedOptions.confinement,
+          confinement:
+            windows === undefined
+              ? resolvedOptions.confinement
+              : windowsUnconfinedLaunch({
+                  displayName: "OpenCode",
+                  ...(options.inheritedEnvironment === undefined
+                    ? {}
+                    : { environment: options.inheritedEnvironment }),
+                }),
         });
         const runtime = runtimeForVersion(probe.version);
         const resolver =
@@ -1963,8 +2031,10 @@ export function makeOpenCodeProcessLive(
             failure("invalid-configuration", "OpenCode runtime routing could not be prepared."),
         });
         const executionPolicy = openCodeWallPolicy(input);
+        // A Windows launch has no Octant wall to hold a proxy or a server
+        // folder to, so it takes neither.
         const network =
-          executionPolicy === "full-access"
+          executionPolicy === "full-access" || windows !== undefined
             ? undefined
             : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                 runtime: "opencode",
@@ -1973,10 +2043,13 @@ export function makeOpenCodeProcessLive(
                 loopbackPorts: input.loopbackPorts ?? [],
                 environment: options.inheritedEnvironment ?? process.env,
               });
-        const servers = yield* acquireProviderServerAccess(options.serverAccess, {
-          root: input.cwd,
-          executionPolicy,
-        });
+        const servers =
+          windows === undefined
+            ? yield* acquireProviderServerAccess(options.serverAccess, {
+                root: input.cwd,
+                executionPolicy,
+              })
+            : undefined;
         const { network: _ignored, servers: _ignoredServers, ...requested } = input;
         let terminate: (() => Promise<void>) | undefined;
         return yield* Effect.acquireReleaseInterruptible(

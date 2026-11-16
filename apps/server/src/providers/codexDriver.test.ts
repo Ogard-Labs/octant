@@ -1008,6 +1008,44 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(other.startCount()).toBe(1);
   });
 
+  it("never lets a Strict session reuse a process started outside Strict at the same level", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const f = fixture();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    const scopes: Scope.CloseableScope[] = [];
+    const open = async (id: typeof sessionId, strict: boolean | undefined) => {
+      const scope = await Effect.runPromise(Scope.make());
+      scopes.push(scope);
+      await Effect.runPromise(
+        driver.acquire({ instanceId, projectRoot }).pipe(
+          Effect.flatMap((connection) =>
+            connection.start({
+              sessionId: id,
+              modelId: "gpt-5.4" as never,
+              executionPolicy: "approval-gated",
+              ...(strict === undefined ? {} : { strict }),
+            }),
+          ),
+          Effect.provideService(Scope.Scope, scope),
+        ),
+      );
+    };
+    await open(sessionId, false);
+    await open(secondSessionId, undefined);
+    expect(f.startCount()).toBe(2);
+    expect(f.authorities()).toEqual([
+      {
+        kind: "thread",
+        root: projectRoot,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        strict: false,
+      },
+      { kind: "thread", root: projectRoot, mode: "code", executionPolicy: "approval-gated" },
+    ]);
+    await Promise.all(scopes.map((scope) => Effect.runPromise(Scope.close(scope, Exit.void))));
+  });
+
   it("reads the account and models through a process that carries no thread", async () => {
     const f = fixture();
     await Effect.runPromise(Effect.scoped(makeCodexDriver(f.options()).probe({ instanceId })));
@@ -2848,6 +2886,35 @@ describe("Codex execution authority and approvals", () => {
         networkAccess: "restricted",
       });
     }
+  });
+
+  it("keeps Codex's own sandbox and approvals below Full access when no Octant sandbox holds the process", () => {
+    // Windows outside Strict: no wall exists to name as external, so Ask first
+    // and Accept edits keep asking for every command and run an approved one
+    // in Codex's own workspace-write sandbox, Auto runs as Codex's own Auto,
+    // and Plan stays read-only.
+    for (const policy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(codexTurnExecutionSettings(policy, false, false, true, true)).toEqual({
+        approvalPolicy: "untrusted",
+        sandboxPolicy: { type: "workspaceWrite" },
+        approvalsReviewer: "user",
+      });
+    }
+    expect(codexTurnExecutionSettings("approval-gated", true, false, true, true)).toEqual({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "workspaceWrite" },
+      approvalsReviewer: "auto_review",
+    });
+    expect(codexTurnExecutionSettings("plan", false, false, true, true)).toEqual({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "readOnly" },
+      approvalsReviewer: "user",
+    });
+    expect(codexTurnExecutionSettings("full-access", false, false, true, true)).toEqual({
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "dangerFullAccess" },
+      approvalsReviewer: "user",
+    });
   });
 
   it("tells Codex its sandbox has network when the launch took no egress proxy", () => {

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import {
   ActorId,
   ReplayCursor,
@@ -211,6 +211,7 @@ function harness(
       typeof ProjectTerminalService
     >[0]["serverProject"];
     readonly strict?: boolean;
+    readonly shell?: string;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-project-terminal-"));
@@ -250,6 +251,7 @@ function harness(
     clock: () => now,
     ...(options.serverProject === undefined ? {} : { serverProject: options.serverProject }),
     ...(options.strict === undefined ? {} : { strict: () => options.strict === true }),
+    ...(options.shell === undefined ? {} : { shell: () => options.shell ?? "" }),
   });
   const events = () =>
     journal
@@ -573,6 +575,47 @@ describe("Project terminal actions", () => {
     expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
     expect(terminals.launches.at(-1)?.command).toBe(`cd '${root}/apps/web' && { bun run dev\n}`);
     expect(terminals.writes).toEqual([]);
+  });
+
+  it("runs a saved action on Windows in the terminal shell Settings names, in that shell's words", async () => {
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      for (const [shell, line] of [
+        [
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          `Set-Location -LiteralPath '${win32.join(root, "apps/web")}' -ErrorAction Stop\nbun run dev`,
+        ],
+        [
+          "C:\\Windows\\System32\\cmd.exe",
+          `cd /d "${win32.join(root, "apps/web")}" && bun run dev`,
+        ],
+      ] as const) {
+        const { service, terminals } = harness({ projects: withActions("apps/web"), shell });
+        await service.execute(windowId, "local-window", start());
+        const result = await service.execute(windowId, "local-window", run());
+        expect(result).toMatchObject({ kind: "project-terminal", terminal: { state: "running" } });
+        expect(terminals.launches.at(-1)).toMatchObject({ shell, command: line });
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("refuses a saved action on Windows when the configured shell is not one Octant writes actions for", async () => {
+    vi.stubGlobal("process", Object.create(process, { platform: { value: "win32" } }));
+    try {
+      const { service, terminals } = harness({
+        projects: withActions("."),
+        shell: "C:\\msys64\\usr\\bin\\bash.exe",
+      });
+      await service.execute(windowId, "local-window", start());
+      const before = terminals.launches.length;
+      const result = await service.execute(windowId, "local-window", run());
+      expect(JSON.stringify(result)).toContain("cannot run in the terminal shell");
+      expect(terminals.launches).toHaveLength(before);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("runs none of a saved command when its folder cannot be entered", async () => {

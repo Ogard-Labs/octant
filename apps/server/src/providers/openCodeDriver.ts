@@ -1808,6 +1808,7 @@ function makeConnection(
     let runtimePolicy: ProviderExecutionPolicy | undefined;
     // Whether the running server was launched inside the Full access sandbox.
     let runtimeFullAccessSandbox = false;
+    let runtimeOutsideStrict = false;
     let runtimeOwnSkills = false;
     let runtimeOwnSetupKey = ownSetupKey(undefined);
     let runtimeKind: "legacy" | "beta" | undefined;
@@ -2056,6 +2057,7 @@ function makeConnection(
       runtimePolicy = undefined;
       runtimeOwnSkills = false;
       runtimeFullAccessSandbox = false;
+      runtimeOutsideStrict = false;
       runtimeOwnSetupKey = ownSetupKey(undefined);
       runtimeVersion = undefined;
       runtimeIsolated = false;
@@ -2070,6 +2072,7 @@ function makeConnection(
       managedToolServerName: string | undefined,
       ownSkills: boolean,
       ownSetup: ResolvedOwnSetup | undefined,
+      outsideStrict: boolean,
     ): Effect.Effect<OpenCodeClientPort, ProviderFailure> =>
       Effect.tryPromise({
         try: async () => {
@@ -2079,6 +2082,9 @@ function makeConnection(
             if (
               runtimePolicy !== executionPolicy ||
               runtimeFullAccessSandbox !== fullAccessSandbox ||
+              // On Windows a launch outside Strict below Full access runs
+              // with no Octant sandbox, so a Strict session never reuses it.
+              runtimeOutsideStrict !== outsideStrict ||
               runtimeOwnSkills !== ownSkills ||
               runtimeOwnSetupKey !== ownSetupKey(ownSetup)
             ) {
@@ -2106,6 +2112,7 @@ function makeConnection(
                   mode,
                   executionPolicy,
                   ...(fullAccessSandbox ? { fullAccessSandbox: true } : {}),
+                  ...(outsideStrict ? { strict: false } : {}),
                   ...(ownSkills ? { ownSkills: true as const } : {}),
                   ...(ownSetup === undefined || !ownSetup.toolServers
                     ? {}
@@ -2140,6 +2147,7 @@ function makeConnection(
             processMonitor = monitor;
             runtimePolicy = executionPolicy;
             runtimeFullAccessSandbox = fullAccessSandbox;
+            runtimeOutsideStrict = outsideStrict;
             runtimeOwnSkills = ownSkills;
             runtimeOwnSetupKey = ownSetupKey(ownSetup);
             runtimeKind = started.runtime ?? "legacy";
@@ -2498,6 +2506,7 @@ function makeConnection(
                 state.managedTools?.serverName,
                 state.nativeSetup?.skills === true,
                 ownSetup,
+                input.strict === false && input.executionPolicy !== "full-access",
               ),
             ),
             Effect.flatMap((runtimeClient) => {
@@ -2679,6 +2688,7 @@ function makeConnection(
                     state.managedTools?.serverName,
                     state.nativeSetup?.skills === true,
                     ownSetup,
+                    input.strict === false && input.executionPolicy !== "full-access",
                   ),
                 ),
                 Effect.flatMap((runtimeClient) => {
