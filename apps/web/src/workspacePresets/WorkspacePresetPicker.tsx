@@ -51,35 +51,39 @@ export function WorkspacePresetPicker(props: WorkspacePresetPickerProps) {
       <h3 className="oct-section-label empty-start__label">Set up this workspace</h3>
       <ul className="empty-start__rows">
         {props.presets.map((preset) => (
-          <li className="empty-start__row empty-start__row--preset" key={String(preset.id)}>
-            <LayoutTemplate aria-hidden="true" className="empty-start__icon" size={16} />
-            <span className="empty-start__text">
-              <span className="empty-start__name">{preset.displayName}</span>
-              <span className="empty-start__summary">{preset.summary}</span>
-              <span className="empty-start__opens">
-                <span>Opens:</span>
-                {preset.panes.map((pane, index) => {
-                  const face = PANE_FACES[pane];
-                  return (
-                    <span className="empty-start__pane" key={pane}>
-                      {index === 0 ? null : <span aria-hidden="true">·</span>}
-                      <face.Icon aria-hidden={true} size={12} />
-                      {face.label}
-                    </span>
-                  );
-                })}
-              </span>
-            </span>
+          <li key={String(preset.id)}>
+            {/* The whole row is the control, as the template row under it is. A
+                small outlined "Apply" pill at the row's end was one more shape
+                on a page of rows, and a far smaller thing to hit. */}
             <OctantButton
               aria-label={`Apply ${preset.displayName}`}
-              className="empty-start__apply"
+              className="empty-start__row empty-start__row--preset empty-start__row--action"
               disabled={props.busy}
               onClick={() => props.onApply(preset)}
-              size="xs"
               type="button"
-              variant="outline"
+              variant="bare"
             >
-              Apply
+              <LayoutTemplate aria-hidden="true" className="empty-start__icon" size={16} />
+              <span className="empty-start__text">
+                <span className="empty-start__name">{preset.displayName}</span>
+                <span className="empty-start__summary">{preset.summary}</span>
+                <span className="empty-start__opens">
+                  <span>Opens:</span>
+                  {preset.panes.map((pane, index) => {
+                    const face = PANE_FACES[pane];
+                    return (
+                      <span className="empty-start__pane" key={pane}>
+                        {index === 0 ? null : <span aria-hidden="true">·</span>}
+                        <face.Icon aria-hidden={true} size={12} />
+                        {face.label}
+                      </span>
+                    );
+                  })}
+                </span>
+              </span>
+              <span aria-hidden="true" className="empty-start__apply">
+                Apply
+              </span>
             </OctantButton>
           </li>
         ))}

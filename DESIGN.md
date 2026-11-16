@@ -1713,10 +1713,13 @@ one row at the trailing edge (the dismissing answer outlined first, the acting
   the directory field under it; the same choice takes it back. Until
   2026-11-16 each template had a row of its own, so three rows, often two of
   them only saying what the machine lacks, were most of an empty thread's page
-  (maintainer request). A preset row ends with a
-  secondary (outline) Apply aligned to its first line, and what it opens is a
-  quiet 12px meta line of tool glyphs and words (Overview, Browser, Side chat),
-  never ids, which makes that row 72px. There is no accent, no tinted tile and no
+  (maintainer request). A preset row is one button too, with the same fill
+  under the pointer: pressing anywhere on it applies the preset, and the word
+  "Apply" in the meta ink on its first line says so. What it opens is a quiet
+  12px meta line of tool glyphs and words (Overview, Browser, Side chat), never
+  ids, which makes that row 72px. Until 2026-11-16 the row ended in a small
+  outlined Apply button, one more shape on a page of rows and a small thing to
+  hit (maintainer request). There is no accent, no tinted tile and no
   bold in the block. Nothing moves on hover, focus or load.
 - A section with nothing in it inside a card (an Inbox list, an Environment
   card) is one line in the detail role with at most one button, never an

@@ -34,12 +34,16 @@ describe("choosing a workspace preset", () => {
     expect(entry.querySelector(".octant-icon-globe")).not.toBeNull();
   });
 
-  it("applies the preset from a secondary action, keeping the block to no filled accent", async () => {
+  it("applies the preset when its whole row is pressed, with no filled or outlined button in the block", async () => {
     const user = userEvent.setup();
     const { onApply } = picker();
 
     const apply = screen.getByRole("button", { name: "Apply Design studio" });
-    expect(apply).toHaveAttribute("data-variant", "outline");
+    // The row is the one control: it holds the name and what opens.
+    expect(apply).toHaveAttribute("data-variant", "bare");
+    expect(apply).toHaveTextContent("Design studio");
+    expect(apply).toHaveTextContent("Side chat");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
     await user.click(apply);
 
     expect(onApply).toHaveBeenCalledWith(designStudio);
