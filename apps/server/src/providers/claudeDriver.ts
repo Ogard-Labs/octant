@@ -112,7 +112,11 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import { claudeNativeArtifactsSupport } from "./claudeNativeArtifacts";
 import { readClaudePublishedSnapshot } from "./claudePublishedSnapshot";
-import { secretGuardRefusal, secretGuardSearchRefusal } from "../process/secretGuard";
+import {
+  secretGuardRefusal,
+  secretGuardSearchRefusal,
+  secretGuardNativeReadOverlap,
+} from "../process/secretGuard";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 import { isAtLeastRelease } from "./releaseVersion";
@@ -3403,6 +3407,21 @@ function makeConnection(
           signal,
         );
         const ownClaudeAccountPaths = claudeOwnAccountPaths(environment.environment);
+        if (
+          input.strict === true &&
+          input.executionPolicy !== "plan" &&
+          secretGuardNativeReadOverlap([
+            projectRoot,
+            ...extraFolders,
+            ...(options.sandboxPolicy?.policy.filesystem.readOnlyRoots ?? []),
+            ...(options.sandboxPolicy?.policy.filesystem.readWriteRoots ?? []),
+            ...claudeSandboxToolchainReads(),
+          ]) !== undefined
+        )
+          throw failure(
+            "unsupported",
+            "Claude Strict cannot enforce the required protected-file rule inside an allowed command-read folder. Use a provider with a supported outer sandbox or review that folder grant; the protected rule has not been disabled.",
+          );
         const sandboxedFullAccess =
           input.executionPolicy === "full-access" &&
           (input.fullAccessSandbox === true || input.strict === true);

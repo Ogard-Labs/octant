@@ -8,7 +8,7 @@ export function claudeSandboxToolchainReads(
         "/usr",
         "/bin",
         "/sbin",
-        "/System",
+        "/System/Library",
         "/Library/Developer",
         "/dev",
         "/private/var/db/dyld",

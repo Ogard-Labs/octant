@@ -1,3 +1,4 @@
+import { applyProtectedFilesChoice, currentProtectedFilesChoice } from "../process/secretGuard";
 import { claudeSandboxToolchainReads } from "./claudeSandboxToolchain";
 import {
   decodeProviderInstanceId,
@@ -4666,6 +4667,45 @@ describe("Claude artifact delivery", () => {
       }
     },
   );
+
+  it("refuses a required protected path under a native command-read grant even before the file exists, leaving native Strict-off execution available", async () => {
+    const previous = currentProtectedFilesChoice();
+    applyProtectedFilesChoice({
+      ...previous,
+      added: [...previous.added, `${projectRoot}/private-token`],
+    });
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    try {
+      const protectedRun = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "full-access",
+            strict: true,
+          }),
+        ),
+      );
+      expect(protectedRun).toMatchObject({
+        _tag: "Left",
+        left: { category: "unsupported", message: expect.stringContaining("protected-file rule") },
+      });
+      expect(f.opens).toHaveLength(0);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      );
+      expect(f.opens).toHaveLength(1);
+    } finally {
+      applyProtectedFilesChoice(previous);
+      await acquired.close();
+    }
+  });
 
   it("denies parent-process code and unreviewed native effects at Strict Full access while retaining confined commands", async () => {
     const f = harness();

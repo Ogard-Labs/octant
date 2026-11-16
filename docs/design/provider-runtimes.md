@@ -786,6 +786,11 @@ These are withheld features,
 not claims of OS confinement for the parent CLI. The effective-policy panel
 reports this boundary. Ordinary Strict-off native features remain available.
 
+A Strict command-read folder overlapping a required protected-file rule is
+refused before opening the native query, including a protected name not yet
+created. The native route does not claim that a file-tool hook confines shell
+commands, and leaves the rule selected for a supported backend.
+
 Strict's native read rules re-allow public system toolchains, loader and
 resolver files beneath the root read deny; the effective-policy details list
 the exact paths. This grants no home/account folder and no system write.

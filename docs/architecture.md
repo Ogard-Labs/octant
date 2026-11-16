@@ -14050,6 +14050,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     not proof. These capability gaps must remain visible without blocking
     unrelated native provider features.
 
+    Claude Strict refuses a command-read folder that overlaps a required
+    protected-file rule its native sandbox cannot carry. This includes selected
+    names that do not exist yet: a direct-file hook is not shell confinement.
+    The rule stays selected and the refusal names the missing support.
+
     Claude's native command read boundary includes the disclosed public system
     toolchains and loader/resolver files, without adding home/account folders
     or system writes. Linux lifetime setup materializes top-level directory

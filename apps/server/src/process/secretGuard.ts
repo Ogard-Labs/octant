@@ -162,6 +162,19 @@ export function secretGuardEntries(input: {
   return [...entries, ...sshKeys];
 }
 
+/** Native command sandboxes that cannot carry a required protected-file rule
+ * must refuse overlapping read grants, including names not created yet. */
+export function secretGuardNativeReadOverlap(
+  roots: ReadonlyArray<string>,
+  platform: NodeJS.Platform = process.platform,
+): ResolvedProtectedEntry | undefined {
+  const forms = roots.flatMap((root) => pathForms(root, platform));
+  return withResolvedForms(secretGuardEntries({ platform }), platform).find((entry) => {
+    const location = entry.kind === "path" ? entry.path : entry.directory;
+    return forms.some((root) => isSameOrInside(location, root) || isSameOrInside(root, location));
+  });
+}
+
 export interface SecretGuardMediationPolicy {
   readonly entries: ReadonlyArray<ResolvedProtectedEntry>;
   readonly ownAccountPaths: ReadonlyArray<string>;
