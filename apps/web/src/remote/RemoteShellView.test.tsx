@@ -903,6 +903,9 @@ describe("RemoteShellView", () => {
     await waitFor(() =>
       expect(seen.map((request) => request.path)).toContain("/api/extensions/snapshot"),
     );
+    // Agent access lists the grants over the session, where a grant can be made.
+    await user.click(within(settings).getByRole("button", { name: "Agent access" }));
+    await waitFor(() => expect(seen.map((request) => request.path)).toContain("/api/agent-grants"));
     for (const request of seen) {
       expect(request.headers.get("x-octant-window-capability")).toBeNull();
     }

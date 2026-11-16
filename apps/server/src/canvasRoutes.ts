@@ -23,6 +23,7 @@ import {
   decodeCanvasOriginThreadId,
   decodeCanvasThreadReferenceCardsOutcome,
   decodeCanvasCreateResult,
+  decodeCanvasHtmlImportRequest,
   decodeCanvasHtmlImportResult,
   CANVAS_HTML_IMPORT_MAX_BYTES,
   decodeCanvasCommentCommandResult,
@@ -1220,7 +1221,15 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             origin,
           );
         }
-        const context = await resolveCreateContext(dependencies, authenticatedWindowId);
+        // A device the host's own person paired has no workspace on the host,
+        // so the import names its Project in its own workspace scope, which
+        // the host checks is an active Project of that mode before anything
+        // is journaled; the journal names the device.
+        const pairedPerson =
+          principal.kind === "remote-device" && principalActsAsHostPerson(principal);
+        const context = pairedPerson
+          ? await resolveNamedImportContext(dependencies, authenticatedWindowId, body.value)
+          : await resolveCreateContext(dependencies, authenticatedWindowId);
         if (context.kind !== "ok") {
           return jsonResponse(
             decodeCanvasHtmlImportResult({
@@ -1245,6 +1254,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
                 : String(context.activeContext.projectId),
           },
           context.project,
+          pairedPerson ? eventActorForPrincipal(principal) : undefined,
         );
         return jsonResponse(decodeCanvasHtmlImportResult(result), 200, origin);
       }
@@ -2153,6 +2163,42 @@ async function resolveCreateContext(
       type: project.type,
       lifecycle: project.lifecycle,
     },
+  };
+}
+
+/**
+ * The create context of an import a device the host's own person paired
+ * sends, read from the Project and mode its request names. That device reaches
+ * every active Project, as it does when it opens a thread there; a Chat import
+ * in no Project is owned by the thread it names, which the service checks.
+ */
+async function resolveNamedImportContext(
+  dependencies: CanvasRouteDependencies,
+  scopeId: WindowId,
+  requestInput: unknown,
+): Promise<AuthorizedCanvasContext> {
+  let request;
+  try {
+    request = decodeCanvasHtmlImportRequest(requestInput);
+  } catch {
+    return { kind: "unauthorized" };
+  }
+  const projectId = request.workspace.projectId;
+  if (projectId === null) {
+    return request.mode === "chat"
+      ? { kind: "ok", activeContext: { mode: "chat", projectId: null }, project: undefined }
+      : { kind: "unauthorized" };
+  }
+  const bootstrap = await dependencies.projects.bootstrap(scopeId);
+  const project = bootstrap.active.find((candidate) => String(candidate.id) === String(projectId));
+  if (project === undefined || project.lifecycle !== "active") {
+    return { kind: "unavailable", reason: "The Canvas Project is unavailable." };
+  }
+  if (project.type !== request.mode) return { kind: "unauthorized" };
+  return {
+    kind: "ok",
+    activeContext: { mode: request.mode, projectId: project.id },
+    project: { id: String(project.id), type: project.type, lifecycle: project.lifecycle },
   };
 }
 
