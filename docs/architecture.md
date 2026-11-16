@@ -2938,7 +2938,7 @@ thread. A crash between the steer and the record leaves the result delivered
 without a card.
 
 A subagent the provider runtime started itself is observed, never managed. Its
-one control is Stop, offered (`control: "stop"`) only while the thread's
+controls are Stop and, for Claude, Background and a message (below). Stop is offered (`control: "stop"`) only while the thread's
 running turn holds a connection that stops one child alone
 (`ProviderConnection.stopChildAgent`: Claude through the SDK's task stop,
 OpenCode by aborting a child session that runs under the turn's own session)
@@ -2946,7 +2946,18 @@ on that child's provider instance and session. `POST
 /api/agent-runs/observed/stop` checks the window as the summary read does and
 finds the child only among the observations that window may read; Codex
 (an interrupt on a subagent thread is unverified) and ACP (no protocol call)
-report it unsupported.
+report it unsupported. A running Claude subagent also takes Background and a
+message (`steering: ["background", "message"]`, offered only where the
+running turn's connection has `backgroundChildAgent` and
+`messageChildAgent`): `POST /api/agent-runs/observed/background` asks the
+runtime to background the one `Agent` call that started it (the SDK's
+`backgroundTasks(toolUseId)`), so the parent's turn goes on while it runs,
+and `POST /api/agent-runs/observed/message` queues the person's text (at
+most 4,096 characters, eight waiting per subagent), which reaches the
+subagent once as added context on its next tool call's `PreToolUse` hook,
+matched by the hook's `agent_id`, which Claude Code uses as the subagent's
+task id. Both take Stop's checks; a subagent that makes no further tool call
+never reads a queued message.
 
 A provider-started subagent carries what its runtime reports and nothing it
 does not: its model (Claude from the subagent call, Codex from the spawn call,
@@ -14236,15 +14247,20 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
   | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
-  The Claude Code and Codex columns are today's; their sandboxes change per
-  [Providers run in their own sandbox](#security-and-authority) (designed,
-  not built). Today Claude Code's Accept edits runs Claude's `default` mode
-  and Octant waives in-root edits itself, and Octant's gate judges each call
-  before Claude's own rules see the ones it would ask about
+  The Claude Code column is Strict's, and Plan's and Chat's at every
+  setting; outside Strict a Work or Code thread outside Plan runs Claude
+  Code's own modes and sandbox (below). Under Strict Claude Code's Accept
+  edits runs Claude's `default` mode and Octant waives in-root edits itself,
+  and Octant's gate judges each call before Claude's own rules see the ones
+  it would ask about
   ([Provider runtimes: Full built-in tool set](design/provider-runtimes.md#full-built-in-tool-set)).
+  The Codex column is today's; its sandbox changes per
+  [Providers run in their own sandbox](#security-and-authority) (designed,
+  not built for Codex).
 
   **The provider's own permission system decides, as on its own**
-  (maintainer decision, 2026-11-15; designed, not built):
+  (maintainer decision, 2026-11-15; built for Claude Code outside Strict,
+  OpenCode's `task` not built):
   - **Claude Code's own permission modes.** Octant maps its levels onto
     Claude Code's native modes: Ask first to `default`, Accept edits to
     `acceptEdits`, Auto to `auto`, Full access to `bypassPermissions`, and
@@ -14252,9 +14268,18 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     Claude Code rules decide each tool call, and Octant no longer
     second-guesses a call Claude's rules allow. When Claude Code asks, the
     ask reaches the person as an Octant approval, decided and journaled on
-    the server as today. Plan stays read-only and Chat has no shell.
+    the server as today. Plan stays read-only and Chat has no shell. Built
+    outside Strict in Work and Code outside Plan (`claudeOwnPermissions`):
+    the `PreToolUse` hook answers no decision for a call Octant does not
+    keep, so Claude's engine and the person's rules decide and `canUseTool`
+    sees only Claude's asks. Octant keeps its own ask for a command leaving
+    Claude's sandbox and for a path outside the session's folders, answers
+    questions, wake-ups and level changes itself, and refuses a mode switch
+    or wake-up the host does not answer. Strict keeps Octant's gate.
   - **Claude Code's full tool preset.** Outside Plan and Chat, Octant offers
-    Claude Code's full built-in tool preset with no Octant deny list.
+    Claude Code's full built-in tool preset with no Octant deny list. Built
+    outside Strict; a feature the person turned off in their own Claude
+    setup (subagents, web tools, skills) stays out as their choice.
   - **OpenCode's `task` subagents** are always allowed outside Plan, instead
     of following the level; Plan still denies them.
 
@@ -15094,7 +15119,7 @@ approval-gated` command that undoes it. The terminal shows no one-time
   they change per provider as the next rule says.
 
   **Providers run in their own sandbox** (maintainer decision, 2026-11-15;
-  designed, not built). Octant's sandbox becomes the opt-in and the fallback:
+  built for Claude Code, designed and not built for the others). Octant's sandbox becomes the opt-in and the fallback:
   - **The provider's own sandbox by default.** Below Full access, every
     provider that has a sandbox of its own runs in it, as it does on its own.
     Octant configures that sandbox, Claude Code excepted (below), rather
@@ -15128,9 +15153,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     its Project and Settings as they are now; a launch that does not carry
     the resolved value is Strict. A device the host's own person paired
     turns it on or off as a local window does; a hub-introduced device and
-    an agent grant may turn it on, never off. Not built yet: the provider's
-    own sandbox outside Strict, so today every provider still runs in the
-    sandbox the table below shows whether Strict is on or off.
+    an agent grant may turn it on, never off. Built for Claude Code: outside
+    Strict Claude's own sandbox runs as the person's settings configure it.
+    Not built yet for the other providers, which still run in the sandbox
+    the table below shows whether Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -15149,7 +15175,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     the Project's folders, network per Network limits, and
     `autoAllowBashIfSandboxed: false`, and Claude's own request to run one
     command outside it still asks every time, as today (maintainer decision,
-    2026-11-16). Gemini CLI and Qwen Code use their
+    2026-11-16). Built for Claude Code (`claudeOctantConfiguresSandbox`):
+    outside Strict a Work or Code launch outside Plan carries no `sandbox`
+    option, so Claude's own settings decide, and a Full access thread that
+    kept its sandbox keeps Octant's configuration. Gemini CLI and Qwen Code use their
     native sandboxes. Copilot CLI and Cursor follow once their ACP releases
     are checked for a sandbox Octant can configure, and Grok Build once it is
     known why its launch sets `GROK_SANDBOX=off`; until then each keeps

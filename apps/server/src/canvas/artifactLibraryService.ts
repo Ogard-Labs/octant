@@ -10,9 +10,13 @@ import {
 import type { CanvasId, CanvasTagName, ProjectId, UtcTimestamp } from "@octant/contracts";
 import {
   artifactKindForBlocks,
+  artifactLibraryQueryListsCanvas,
   artifactTagRoster,
+  foldClaudePublishes,
   selectArtifactLibraryEntries,
+  selectClaudeLibraryEntries,
   selectSyncedArtifactLibraryEntries,
+  type ClaudePublishRecord,
 } from "@octant/domain";
 import type { ClientPrincipal } from "../clientPrincipal";
 import type { CanvasProjection, CanvasProjectionEntry } from "./canvasProjection";
@@ -58,6 +62,13 @@ export interface ArtifactLibraryServiceDependencies {
    * host that cannot judge the thread from listing what it cannot open.
    */
   readonly threadHoldsCanvas?: (entry: CanvasLibrarySnapshotEntry) => boolean;
+  /**
+   * Every page a Work or Code thread published to claude.ai, read from each
+   * thread's journal. Optional: a host without it lists no Claude pages.
+   */
+  readonly claudePublishes?: () => ReadonlyArray<Omit<ClaudePublishRecord, "projectName">>;
+  /** A Claude account's display name, while the host still holds the account. */
+  readonly claudeAccountName?: (account: string) => string | undefined;
   readonly clock: () => UtcTimestamp;
 }
 
@@ -141,7 +152,9 @@ export class ArtifactLibraryService {
       });
     }
 
-    const matched = selectArtifactLibraryEntries(all, query);
+    const matched = artifactLibraryQueryListsCanvas(query)
+      ? selectArtifactLibraryEntries(all, query)
+      : [];
     const page = matched.slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES).map((entry) => {
       const version = snapshot.get(entry.canvasId)?.currentVersion;
       const markup = version === undefined ? "" : renderArtifactThumbnail(version.definition);
@@ -162,16 +175,46 @@ export class ArtifactLibraryService {
     // Synced artifacts belong to no Project here, so only a window on this
     // host, which already sees every Project's artifacts, sees them.
     const synced =
-      principal.kind === "local-window"
+      principal.kind === "local-window" && artifactLibraryQueryListsCanvas(query)
         ? selectSyncedArtifactLibraryEntries(
             (this.#dependencies.synced?.() ?? []).filter((entry) => !snapshot.has(entry.canvasId)),
             query,
           ).slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES)
         : [];
 
+    // A Claude page is scoped as a Canvas is: by the Project its thread is
+    // in, so a paired device sees only the Projects it may.
+    const claudePages = foldClaudePublishes(
+      (this.#dependencies.claudePublishes?.() ?? []).flatMap((record) => {
+        const project = projects.get(String(record.projectId));
+        return project === undefined ? [] : [{ ...record, projectName: project.name }];
+      }),
+      this.#dependencies.claudeAccountName,
+    );
+    const claudeMatched = selectClaudeLibraryEntries(claudePages, query);
+    const claude = claudeMatched.slice(0, MAX_ARTIFACT_LIBRARY_ENTRIES);
+    const claudeAccounts = new Map<string, number>();
+    for (const page of claudePages) {
+      if (page.account === undefined) continue;
+      claudeAccounts.set(page.account, (claudeAccounts.get(page.account) ?? 0) + 1);
+    }
+    const claudeTypes = [...new Set(claudePages.map((page) => page.artifactType))].sort(
+      (left, right) => left.localeCompare(right, "en-US"),
+    );
+
     return decodeArtifactLibraryListing({
       kind: "artifact-library-listing",
       entries: page,
+      ...(claude.length === 0 ? {} : { claude, claudeMatchCount: claudeMatched.length }),
+      ...(claudeAccounts.size === 0
+        ? {}
+        : {
+            claudeAccounts: [...claudeAccounts].map(([account, pageCount]) => {
+              const name = this.#dependencies.claudeAccountName?.(account);
+              return { account, pageCount, ...(name === undefined ? {} : { name }) };
+            }),
+          }),
+      ...(claudeTypes.length === 0 ? {} : { claudeTypes }),
       ...(synced.length === 0 ? {} : { synced }),
       projects: [...projects.values()]
         .map((project) => ({

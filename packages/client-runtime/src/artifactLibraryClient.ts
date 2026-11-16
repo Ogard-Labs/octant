@@ -1,4 +1,6 @@
 import {
+  ArtifactLibraryClaudeSnapshotResult,
+  type ArtifactLibraryClaudeSnapshotRequest,
   ArtifactLibraryListing,
   type ArtifactLibraryQuery,
   type ArtifactSyncedCommand,
@@ -158,4 +160,47 @@ function readString(body: unknown, key: string): string | undefined {
   if (typeof body !== "object" || body === null || !(key in body)) return undefined;
   const value = (body as Record<string, unknown>)[key];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * Reads the copy Octant kept of a Claude page's published file, through the
+ * publishing thread's own read check. `unavailable` for a page published from
+ * a type with no local file, a thread this window cannot read, or a paired
+ * device, which opens the page on claude.ai instead.
+ */
+export async function loadClaudePageSnapshot(
+  options: ArtifactLibraryClientOptions,
+  request: ArtifactLibraryClaudeSnapshotRequest,
+): Promise<ArtifactLibraryClaudeSnapshotResult> {
+  let url: URL;
+  try {
+    url = new URL("/api/artifacts/claude-snapshot", options.baseUrl);
+  } catch {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL is invalid.", 0);
+  }
+  if (!["127.0.0.1", "localhost", "::1"].includes(url.hostname)) {
+    throw new ArtifactLibraryClientFailure("Artifact library base URL must be loopback.", 0);
+  }
+  const fetch = bindFetchPort(options.fetch);
+  let response: Response;
+  try {
+    response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(request),
+    });
+  } catch {
+    throw new ArtifactLibraryClientFailure("The page's snapshot is unavailable.", 0);
+  }
+  const body: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ArtifactLibraryClientFailure(
+      readString(body, "error") ?? "The page's snapshot is unavailable.",
+      response.status,
+    );
+  }
+  return decodeHostAnswer(ArtifactLibraryClaudeSnapshotResult)(body);
 }

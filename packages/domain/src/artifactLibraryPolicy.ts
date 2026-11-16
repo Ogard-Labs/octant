@@ -8,11 +8,13 @@
  */
 
 import type { CanvasBlock } from "@octant/contracts/canvas";
-import type {
-  ArtifactKind,
-  ArtifactLibraryEntry,
-  ArtifactLibraryQuery,
-  ArtifactLibrarySyncedEntry,
+import {
+  CLAUDE_PLAIN_PAGE_TYPE,
+  type ArtifactKind,
+  type ArtifactLibraryClaudeEntry,
+  type ArtifactLibraryEntry,
+  type ArtifactLibraryQuery,
+  type ArtifactLibrarySyncedEntry,
 } from "@octant/contracts/artifact-library";
 
 /**
@@ -181,4 +183,122 @@ export function artifactEditedAgo(updatedAt: string, observedAt: string): string
   if (months < 12) return `Edited ${String(months)} month${months === 1 ? "" : "s"} ago`;
   const years = Math.floor(months / 12);
   return `Edited ${String(years)} year${years === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * One publish a thread's journal holds: a tool call's page, with the facts
+ * the publish recorded. Several publishes to one address are one page.
+ */
+export interface ClaudePublishRecord {
+  readonly url: string;
+  readonly title?: string | undefined;
+  readonly artifactType?: string | undefined;
+  readonly account?: string | undefined;
+  readonly projectId: ArtifactLibraryClaudeEntry["projectId"];
+  readonly projectName: string;
+  readonly mode: ArtifactLibraryClaudeEntry["mode"];
+  readonly threadId: string;
+  readonly threadTitle?: string | undefined;
+  readonly toolCallId: string;
+  readonly publishedAt: ArtifactLibraryClaudeEntry["publishedAt"];
+  readonly snapshot?: "html" | "markdown" | undefined;
+}
+
+/**
+ * The library's Claude pages from every publish the caller may see: one
+ * entry per page address, showing its newest publish, with each publish to
+ * that address counted as a version. A later update that names no type or
+ * title keeps the ones an earlier publish gave the page.
+ */
+export function foldClaudePublishes(
+  records: ReadonlyArray<ClaudePublishRecord>,
+  accountName: (account: string) => string | undefined = () => undefined,
+): ReadonlyArray<ArtifactLibraryClaudeEntry> {
+  const byUrl = new Map<string, ClaudePublishRecord[]>();
+  for (const record of records) {
+    const versions = byUrl.get(record.url);
+    if (versions === undefined) byUrl.set(record.url, [record]);
+    else versions.push(record);
+  }
+  return [...byUrl.values()].flatMap((versions) => {
+    const ordered = versions.toSorted((left, right) =>
+      left.publishedAt === right.publishedAt
+        ? left.toolCallId.localeCompare(right.toolCallId)
+        : left.publishedAt < right.publishedAt
+          ? -1
+          : 1,
+    );
+    const newest = ordered.at(-1);
+    if (newest === undefined) return [];
+    const title = ordered.findLast((version) => version.title !== undefined)?.title;
+    const artifactType =
+      ordered.findLast((version) => version.artifactType !== undefined)?.artifactType ??
+      CLAUDE_PLAIN_PAGE_TYPE;
+    const name = newest.account === undefined ? undefined : accountName(newest.account);
+    return [
+      {
+        url: newest.url,
+        title: title ?? "Published page",
+        artifactType,
+        ...(newest.account === undefined ? {} : { account: newest.account }),
+        ...(name === undefined ? {} : { accountName: name }),
+        projectId: newest.projectId,
+        projectName: newest.projectName,
+        mode: newest.mode,
+        threadId: newest.threadId,
+        ...(newest.threadTitle === undefined ? {} : { threadTitle: newest.threadTitle }),
+        toolCallId: newest.toolCallId,
+        versionCount: ordered.length,
+        publishedAt: newest.publishedAt,
+        ...(newest.snapshot === undefined ? {} : { snapshot: newest.snapshot }),
+      },
+    ];
+  });
+}
+
+/**
+ * The Claude pages one query asks for, newest first. They carry no tag and
+ * no share, so the tag and shared views and a tag or Canvas kind filter
+ * match none; a Claude type or account filter matches only Claude pages.
+ */
+export function selectClaudeLibraryEntries(
+  entries: ReadonlyArray<ArtifactLibraryClaudeEntry>,
+  query: ArtifactLibraryQuery,
+): ReadonlyArray<ArtifactLibraryClaudeEntry> {
+  if (
+    query.source === "canvas" ||
+    query.tab === "shared" ||
+    query.tab === "by-tag" ||
+    query.tag !== undefined ||
+    query.kind !== undefined
+  ) {
+    return [];
+  }
+  const needle = query.query?.toLocaleLowerCase("en-US");
+  return entries
+    .filter((entry) => {
+      if (query.projectId !== undefined && String(entry.projectId) !== String(query.projectId)) {
+        return false;
+      }
+      if (query.mode !== undefined && entry.mode !== query.mode) return false;
+      if (query.claudeType !== undefined && entry.artifactType !== query.claudeType) return false;
+      if (query.account !== undefined && entry.account !== query.account) return false;
+      if (needle === undefined) return true;
+      return (
+        entry.title.toLocaleLowerCase("en-US").includes(needle) ||
+        entry.projectName.toLocaleLowerCase("en-US").includes(needle)
+      );
+    })
+    .toSorted((left, right) =>
+      left.publishedAt === right.publishedAt
+        ? left.url.localeCompare(right.url)
+        : left.publishedAt < right.publishedAt
+          ? 1
+          : -1,
+    );
+}
+
+/** Whether a query asks for Canvas documents at all. */
+export function artifactLibraryQueryListsCanvas(query: ArtifactLibraryQuery): boolean {
+  return query.source !== "claude" && query.claudeType === undefined && query.account === undefined;
 }

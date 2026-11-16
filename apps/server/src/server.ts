@@ -26,6 +26,7 @@ import {
   decodeThreadRetentionThreadId,
   decodeWorkTurnRequestId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   decodeCodeOperationId,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "@octant/contracts";
@@ -46,6 +47,7 @@ import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { makePublishedSnapshotSource } from "./publishedSnapshotSource";
+import { makeClaudeLibraryPublishes } from "./claudeLibraryPublishes";
 import { assertReadableChatThread } from "./chat/chatService";
 import { createThreadReadAuthority } from "./threadReadAuthority";
 import type { PublishedSnapshotRunRequest, WindowId } from "@octant/contracts";
@@ -765,6 +767,25 @@ export function startOctantServer(
       resolveCanvasWorkspace,
       snapshotCanvas,
     } = wireCanvas({
+      claudePublishes: makeClaudeLibraryPublishes({
+        workThreads: () =>
+          workThreadProjection.list().map((thread) => ({
+            id: String(thread.id),
+            projectId: thread.projectId,
+            title: thread.title,
+          })),
+        workTurns: (threadId) => workTurnProjection.listForThread(decodeWorkThreadId(threadId)),
+        codeThreads: () =>
+          persistence.readCodeThreads().map((thread) => ({
+            id: String(thread.id),
+            projectId: thread.projectId,
+            title: thread.title,
+          })),
+        codeSummary: (threadId) => {
+          const summary = codeBoardEventStore.summaryForThread(decodeCodeThreadId(threadId));
+          return summary.status === "ok" ? summary.frames : undefined;
+        },
+      }),
       // Work and Code are wired below; a request only arrives after startup.
       findPublishedSnapshot: (windowId: WindowId, request: PublishedSnapshotRunRequest) =>
         makePublishedSnapshotSource({

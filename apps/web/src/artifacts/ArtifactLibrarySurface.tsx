@@ -23,7 +23,10 @@ import { useArtifactTags } from "./useArtifactTags";
 import { useArtifactMirror } from "./useArtifactMirror";
 import { SyncedArtifactDialog } from "./SyncedArtifactDialog";
 import { useSyncedArtifacts } from "./useSyncedArtifacts";
-import type { executeSyncedArtifactCommand } from "@octant/client-runtime/artifact-library-client";
+import {
+  loadClaudePageSnapshot,
+  type executeSyncedArtifactCommand,
+} from "@octant/client-runtime/artifact-library-client";
 
 export interface ArtifactLibrarySurfaceProps {
   readonly serverUrl?: string;
@@ -34,6 +37,8 @@ export interface ArtifactLibrarySurfaceProps {
   readonly onCreate?: () => void;
   /** Injected in tests; the host's synced-artifact commands otherwise. */
   readonly execute?: typeof executeSyncedArtifactCommand;
+  /** Injected in tests; the host's Claude page snapshot read otherwise. */
+  readonly loadSnapshot?: typeof loadClaudePageSnapshot;
   /** Injected in tests; the renderer's local storage otherwise. */
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
 }
@@ -158,6 +163,17 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
                 void tags.change(tagCommand("canvas-tag-add")(canvasId, tag)),
               onTagRemove: (canvasId, tag) =>
                 void tags.change(tagCommand("canvas-tag-remove")(canvasId, tag)),
+              claudePageActions: {
+                onLoadSnapshot: (entry) =>
+                  (props.loadSnapshot ?? loadClaudePageSnapshot)(
+                    {
+                      baseUrl: props.serverUrl ?? "",
+                      fetch,
+                      windowCapability: props.windowCapability ?? "",
+                    },
+                    { mode: entry.mode, threadId: entry.threadId, toolCallId: entry.toolCallId },
+                  ),
+              },
             })}
       />
       <ArtifactMirrorSettings

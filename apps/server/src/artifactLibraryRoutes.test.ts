@@ -236,3 +236,52 @@ describe("changing an artifact's tags over the wire", () => {
     expect(change).not.toHaveBeenCalled();
   });
 });
+
+describe("reading a Claude page's snapshot from the library", () => {
+  const snapshotUrl = "http://127.0.0.1/api/artifacts/claude-snapshot";
+  const request = {
+    mode: "work",
+    threadId: "22222222-2222-4222-8222-222222222222",
+    toolCallId: "call-1",
+  };
+
+  it("reads the kept copy through the publishing thread's own read check for this window", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const findPublishedSnapshot = vi.fn(async () => ({
+      format: "html" as const,
+      content: "<h1>Hero</h1>",
+    }));
+    const handler = createArtifactLibraryRouteHandler({
+      library: {} as unknown as ArtifactLibraryService,
+      windowAuthorityStore: store,
+      findPublishedSnapshot,
+      now: () => 1,
+    });
+    const response = await handler(post(request, {}, snapshotUrl));
+    expect(await response?.json()).toEqual({
+      kind: "claude-snapshot",
+      snapshot: { format: "html", content: "<h1>Hero</h1>" },
+    });
+    expect(findPublishedSnapshot).toHaveBeenCalledWith(windowId, request);
+  });
+
+  it("answers unavailable where the thread's read check finds nothing, and refuses a window without the capability", async () => {
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const handler = createArtifactLibraryRouteHandler({
+      library: {} as unknown as ArtifactLibraryService,
+      windowAuthorityStore: store,
+      findPublishedSnapshot: async () => undefined,
+      now: () => 1,
+    });
+    expect(await (await handler(post(request, {}, snapshotUrl)))?.json()).toEqual({
+      kind: "unavailable",
+    });
+    const refused = await handler(
+      post(request, { "x-octant-window-capability": "B".repeat(43) }, snapshotUrl),
+    );
+    expect(refused?.status).toBe(401);
+    expect((await handler(post({ ...request, mode: "chat" }, {}, snapshotUrl)))?.status).toBe(400);
+  });
+});

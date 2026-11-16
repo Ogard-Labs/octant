@@ -102,6 +102,7 @@ function ObservedChildSteering(props: {
         <form
           aria-label={`Message subagent: ${label}`}
           className="composer-subagents__message"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             void send();
