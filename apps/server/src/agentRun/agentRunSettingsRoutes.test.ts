@@ -16,6 +16,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { AGENT_RUN_SETTINGS_UPDATED, AgentRunSettingsStore } from "./agentRunSettingsStore";
 import { createAgentRunSettingsRouteHandler } from "./agentRunSettingsRoutes";
@@ -75,11 +76,37 @@ function createHandler() {
       reason: "cpu-pressure",
     }),
   });
-  return { handler, store, token };
+  return { handler, store, token, journal };
+}
+
+const deviceId = "55000000-0000-4000-8000-000000000001";
+
+/** A request the remote dispatch forwarded, with the device session it authenticated. */
+function deviceRequest(
+  admittedBy: "host-person" | "hub-roster" | undefined,
+  path: string,
+  init?: RequestInit,
+): Request {
+  const request = new Request(`http://127.0.0.1${path}`, init);
+  bindPrincipalRouteContext(request, {
+    principal: {
+      kind: "remote-device",
+      hostId: "11111111-1111-4111-8111-111111111111",
+      deviceId,
+      credentialGeneration: 1,
+      origin: "https://remote.example",
+      protocolVersion: 1,
+      capabilityDigest: "a".repeat(64),
+      sessionId: "55000000-0000-4000-8000-0000000000aa",
+      ...(admittedBy === undefined ? {} : { admittedBy }),
+    } as never,
+    scopeId: deviceId as never,
+  });
+  return request;
 }
 
 describe("agentRunSettingsRoutes", () => {
-  it("exposes resource pressure only to an authenticated local window", async () => {
+  it("exposes resource pressure only to an authenticated caller", async () => {
     const { handler, token } = createHandler();
     const path = "http://127.0.0.1/api/agent-run-settings/resources";
     expect((await handler(new Request(path)))?.status).toBe(401);
@@ -99,6 +126,49 @@ describe("agentRunSettingsRoutes", () => {
         )
       )?.status,
     ).toBe(405);
+  });
+
+  it("lets a device the host's own person paired read the resources and change the settings, journaled with the device as actor", async () => {
+    const { handler, store, journal } = createHandler();
+    expect(
+      (await handler(deviceRequest("host-person", "/api/agent-run-settings/resources")))?.status,
+    ).toBe(200);
+    const changed = await handler(
+      deviceRequest("host-person", "/api/agent-run-settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ creationPosture: "off", expectedVersion: 0 }),
+      }),
+    );
+    expect(changed?.status).toBe(200);
+    expect(store.current().creationPosture).toBe("off");
+    const [event] = journal.replayAggregateType({
+      aggregateType: "agent-run-settings",
+      afterSequence: 0,
+      limit: 10,
+    });
+    expect(event?.actor).toEqual({ kind: "remote-device", actorId: deviceId, deviceId });
+  });
+
+  it("refuses the settings to a device the hub's roster introduced and an unproved pairing", async () => {
+    const { handler, store } = createHandler();
+    for (const admittedBy of ["hub-roster", undefined] as const) {
+      expect(
+        (await handler(deviceRequest(admittedBy, "/api/agent-run-settings/resources")))?.status,
+      ).toBe(403);
+      expect(
+        (
+          await handler(
+            deviceRequest(admittedBy, "/api/agent-run-settings", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ creationPosture: "off", expectedVersion: 0 }),
+            }),
+          )
+        )?.status,
+      ).toBe(403);
+    }
+    expect(store.current().version).toBe(0);
   });
 
   it("returns the current settings for an authenticated window", async () => {

@@ -185,8 +185,8 @@ the open set where packages already live.
 
 ### Admission lifecycle
 
-One **Install and trust** flow, at a local window or a paired device
-(maintainer decision, 2026-11-12; not built yet: today a local window only), covers inspect, install,
+One **Install and trust** flow, at a local window or a device the host's own
+person paired (maintainer decision, 2026-11-12; built), covers inspect, install,
 trust and enable: the person reads one review and confirms once, and the host
 then runs steps 1 to 4 in order, each journaled through the existing extension
 lifecycle, stopping at the first that refuses. Digest-bound trust and the
@@ -651,9 +651,10 @@ implementation; each takes the fail-closed option.
   and whether it goes as `Bearer`. A brokered request that asks for the key
   anywhere else, or on a provider that sends none, is refused before the key
   is read.
-- **Local window only.** The route refuses adding a provider from an outside
-  driver, and Verify tools, from a paired device, in addition to remote
-  forwarding never admitting provider commands.
+- **The host's own person only.** The route takes adding a provider from an
+  outside driver, and Verify tools, from a local window or a device the host's
+  own person paired, journaled with the device as the actor, and refuses them
+  from every other device session.
 - **When the process runs.** Nothing starts when a provider is added or
   turned on, when the catalog opens, or when the host starts (the warm pass
   skips outside instances). The first connection check, Verify tools, or turn
@@ -849,8 +850,8 @@ raw key>` that the host sets and a document that states it is refused, so
   pinned key, the selected key, and the hold). Trusting the source refuses
   and does not lift it.
 - **Re-trusting a new publisher.** `trust-new-publisher` is its own command,
-  local window only (the lifecycle route refuses it from a paired device, and
-  remote forwarding never admits it). Settings shows the pinned and the new
+  the host's own person's, at a local window or a device they paired (the
+  lifecycle route refuses it from every other device session). Settings shows the pinned and the new
   key fingerprints side by side, and the command carries the new key the
   person saw; the host refuses any other key, a version that is not held,
   and an unsigned one. It journals `publisher-replaced` (old and new key),
@@ -999,14 +1000,14 @@ takes the fail-closed option.
   [Admission rules](#admission-rules)). Until then every component reports
   `quarantined`, so no structured reference or mention can select one and no
   process exists.
-- **Local window only, today.** A paired device sends lifecycle commands and
-  inspects a driver folder as a local window does (maintainer decision,
-  2026-11-12); the folder itself is still picked on the host computer. Not built
-  yet: today the lifecycle route refuses every command from a
-  paired device, in addition to remote forwarding never admitting it, and a
-  paired device cannot inspect or preview a registered driver folder, since
-  an inspection is what an install consumes. Registering a folder was already
-  local-window only.
+- **The host's own person, at a window or a paired device.** A device the
+  host's own person paired sends lifecycle commands and inspects or previews a
+  registered driver folder as a local window does (maintainer decision,
+  2026-11-12; built); the folder itself is still picked on the host computer,
+  so registering one stays local-window only. A device the hub's roster
+  introduced, and an agent grant, are refused every lifecycle command and the
+  inspection of a driver folder, since an inspection is what an install
+  consumes.
 
 ### Conformance
 
@@ -1129,20 +1130,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                                                         |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin                          |
-| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment             |
-| Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                               |
-| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux runs it unconfined, labelled |
-| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                                         |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                                     |
-| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                                         |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin                        |
-| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                                 |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                              |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from a local window; structured references stay inert; install stays held until trusted                 |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                              |
+| Threat                                                           | Control                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                              | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin                             |
+| Steals or replays a credential                                   | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment                |
+| Uses another instance's or provider's credential                 | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                                  |
+| Escapes to the host (files, processes, other extensions)         | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; no read under `/System`; of `/etc`, only the zone link; Linux runs it unconfined, labelled    |
+| Over-claims capabilities (tools, approvals, resume)              | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                                            |
+| Fabricates tool calls or injects instructions in output          | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                                        |
+| Puts attacker text in Settings or diagnostics                    | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                                            |
+| Swaps code under a trusted name (update, mirror, typosquat)      | New, built: digest-bound trust and records; held updates and rollbacks that move an instance only on trust and clear its verification; publisher key pin                           |
+| Points the key at an internal service or attacker host           | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                                    |
+| Exhausts the host (floods, hangs, crash loops)                   | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls, per-instance crash limit and journaled hold                                 |
+| An agent, mention, routine, or hub device installs or trusts one | Existing and new, built: lifecycle, add-provider, and Verify tools only from the host's own person, at a window or a device they paired; references stay inert; held until trusted |
+| Impersonates a bundled provider                                  | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                                 |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,

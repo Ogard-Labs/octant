@@ -816,8 +816,11 @@ adjustment; Pause holds new managed commands and helper agents. Running processe
 are not suspended or killed. Existing per-operation Stop controls remain available.
 
 The host journals the policy with its managed-agent settings aggregate and checks
-its version on writes. Only an authenticated local window can change it or read
-`/api/agent-run-settings/resources`. Old journals without a policy use Automatic.
+its version on writes. Only the host's own person changes it or reads
+`/api/agent-run-settings/resources`: at an authenticated local window, or on a
+device that person paired, whose change is journaled with the device as the
+actor (maintainer decision, 2026-11-16; built). A device the hub's roster
+introduced is refused. Old journals without a policy use Automatic.
 The panel shows hardware, last sampled load, effective ceilings and waiting/running
 command counts, with an explicit Refresh; it does not poll while closed.
 
@@ -11315,8 +11318,10 @@ places and, at Auto, Octant Shield may allow an unlisted host for one call
 ([harness tool egress rules](#harness-tool-egress-rules)). For commands, on
 is the wider setting. The switch is journaled whole as
 `safe-networks.limits-set@1` (on its own fixed aggregate id under
-`safe-networks`), changes from a local window or a paired device (maintainer
-decision, 2026-11-12; not built yet: today only from a local window), and replays at startup.
+`safe-networks`), changes from a local window or a device the host's own
+person paired, which the event's actor names (maintainer decision,
+2026-11-12; built; a device the hub's roster introduced is refused), and
+replays at startup.
 `ProviderRuntimeNetwork.start` reads it at each launch: off, it answers
 `open` for every runtime (open network as before, and Claude's sandbox without
 the proxy port); on, it does what follows. A Full access launch answers
@@ -12126,11 +12131,14 @@ that is not yet effective for the thread is refused and never reaches the model.
     host-owned turn (a routine, a goal loop, a usage-limit resume, a child-run
     delivery) can create one. A host-owned turn in the Project may use one,
     but the prompt it raises covers that one call and records nothing, even
-    when a person answers it: nobody chose to send that turn. Only an answer
-    to a prompt raised by the own turn of the local window, or of a device the
-    host's own person paired, is kept; any other device's turn may use a
-    grant, and its prompt covers one call and records nothing, whether the
-    device or a local window answers.
+    when a person answers it: nobody chose to send that turn. An answer is
+    kept from the local window whose own turn raised the prompt, and from a
+    device the host's own person paired, which is that person: it lists and
+    answers any prompt whose thread still stands in the recorded Project,
+    whichever window's turn raised it, and its answer is journaled as the
+    device (maintainer decision, 2026-11-16; built). A hub-introduced device's
+    turn may use a grant, and its prompt covers one call and records nothing,
+    whoever answers; that device answers only its own turn's prompts, once.
   - A package update signed by the same key keeps the package's trust and its
     remembered tool approvals; a new or missing signing key asks again
     (maintainer decision, 2026-11-12). Built for a package whose signature the
@@ -13546,8 +13554,8 @@ their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
 configured origin only), the confined process per instance that carries that
-protocol on macOS, and admission (trust at a digest, a provider added off from
-a local window (or, not built yet, a paired device), host-run Verify tools, and the process stopped whenever the
+protocol on macOS (on Linux without confinement, labelled), and admission (trust at a digest, a provider added off from
+a local window or a device the host's own person paired, host-run Verify tools, and the process stopped whenever the
 driver stops being effective) are built, as is moving an instance to a newly
 trusted digest of its driver with its records cleared, and a crash-limit hold
 journaled at the digest that crashed, which a restart does not lift. Publisher
@@ -14408,15 +14416,17 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   ([Computer use plugin](#extensions-and-skills)); the Project switches for
   agents writing Project memory, pushing to the default branch and commenting
   on pull requests; a thread's wake-ups
-  ([wake-ups](#modes-chat-work-and-code)); and Full access, built earlier.
-  Each is journaled with the device as the actor. Not built yet: a Project
-  terminal and Project browser, the Browser's Take over and Hand back,
-  `sign-in`, profile pages and saved flows, connector sign-in, growing an MCP
-  grant, Safe networks and Network limits, creating an agent grant, approving
-  a coordinator proposal, Canvas HTML import, provider cloud sessions, server
-  Projects, local work resource limits and extension install. Each owning
-  section keeps its own "not built yet" line until it is built. A device the
-  host knows only through the hub's roster is unchanged.
+  ([wake-ups](#modes-chat-work-and-code)); Safe networks and Network limits;
+  local work resource limits; growing an MCP grant by answering any prompt
+  whose thread still stands in its Project; and Full access and extension
+  install, built earlier. Each is journaled with the device as the actor. Not
+  built yet: a Project terminal and Project browser, the Browser's Take over
+  and Hand back, `sign-in`, profile pages and saved flows, finishing a
+  connector sign-in, creating an agent grant, approving a coordinator proposal
+  from the paired clients, Canvas HTML import, provider cloud sessions and
+  server Projects. Each owning section keeps its own "not built yet" line
+  until it is built. A device the host knows only through the hub's roster is
+  unchanged.
 
   **Provider reach Octant no longer narrows** (maintainer decision,
   2026-11-16; designed, not built):
@@ -18451,8 +18461,11 @@ link-local address is refused. Each list is journaled whole, journal first, as
 fixed id, or the Project's), and `safe-networks.project-override-cleared@1`
 returns a Project to the default, and `safe-networks.limits-set@1` records the
 Network limits switch; startup replays them. Only the person changes them, at a
-local window or, not built yet, a paired device (`GET`/`POST
-/api/access/safe-networks`). A harness
+local window or on a device the host's own person paired (`GET`/`POST
+/api/access/safe-networks`, forwarded for that device; built): the payload's
+`principal` reads `local-window` or `person-paired-device` and the event's
+actor names the device. A device the hub's roster introduced is refused
+(`needs-local-window`). A harness
 command's proxy falls back to the places of its thread's Project after the
 thread's and Project's rules refuse, and a private answer passes for it only
 through a place, as for a runtime. Taint suspends places for a command as it
