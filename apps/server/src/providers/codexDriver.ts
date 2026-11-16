@@ -82,6 +82,7 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodeReviewStartResult,
   decodeSkillsListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
@@ -95,6 +96,7 @@ import {
   type CodexModelListResult,
   type CodexRpcId,
   type CodexRateLimitsReadResult,
+  type CodexReviewStartResult,
   type CodexServerMessage,
   type CodexSkillsListResult,
   type CodexThreadResult,
@@ -136,7 +138,35 @@ export interface CodexThreadStartInput {
   /** An empty list gives the thread no execution environment (Chat). */
   readonly environments?: readonly [];
   readonly dynamicTools?: readonly CodexDynamicToolSpec[];
+  /** Kept out of Codex's saved threads; the thread a review runs on. */
+  readonly ephemeral?: true;
 }
+
+/** What Codex's own review looks at (`ReviewTarget` in codex-rs `v2/review.rs`). */
+export type CodexReviewTarget =
+  | { readonly type: "uncommittedChanges" }
+  | { readonly type: "custom"; readonly instructions: string };
+
+/**
+ * The review a prompt asks for, when it is Codex's `/review` command: with no
+ * text after the name, the working tree's uncommitted changes, as Codex's own
+ * default; otherwise the text as the review's instructions.
+ */
+export function codexReviewRequest(prompt: string): CodexReviewTarget | undefined {
+  const match = /^\/review(?:\s+([\s\S]*))?$/u.exec(prompt.trim());
+  if (match === null) return undefined;
+  const instructions = match[1]?.trim() ?? "";
+  return instructions.length === 0
+    ? { type: "uncommittedChanges" }
+    : { type: "custom", instructions };
+}
+
+/** Codex's `/review`, listed among the provider's commands in every composer. */
+const CODEX_REVIEW_COMMAND = {
+  name: "review",
+  description: "Codex reviews this checkout read-only and reports its findings (Work and Code)",
+  argumentHint: "[what to review]",
+} as const;
 
 export interface CodexThreadConfig {
   readonly model_reasoning_effort?: string;
@@ -474,6 +504,12 @@ export interface CodexClientPort {
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
   /** Queues a compaction of the thread, which then runs as a turn of its own. */
   threadCompactStart?(input: { readonly threadId: string }): Promise<void>;
+  /** Starts Codex's own review on the thread it names, inline. */
+  reviewStart?(input: {
+    readonly threadId: string;
+    readonly target: CodexReviewTarget;
+    readonly delivery: "inline";
+  }): Promise<CodexReviewStartResult>;
   respondApproval(input: CodexApprovalResponse): Promise<void>;
   respondTool(input: CodexApprovalResponse): Promise<void>;
   subscribe(listener: (message: CodexServerMessage) => void): () => void;
@@ -533,6 +569,10 @@ interface SessionState {
    * Undefined when a resumed cursor predates the record.
    */
   readonly carriedTools: ReadonlySet<string> | undefined;
+  /** The thread's own config overrides, restated on the thread a review runs on. */
+  readonly threadConfig: CodexThreadConfig;
+  /** The thread Codex's own review is running on, until that run ends. */
+  reviewThreadId?: string | undefined;
   activeTurnId?: string;
   outputAccepted: boolean;
   terminal: boolean;
@@ -1162,6 +1202,7 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
     threadCompactStart: async (input) => {
       await rpc.request("thread/compact/start", input, decodeThreadCompactStartResult);
     },
+    reviewStart: (input) => rpc.request("review/start", input, decodeReviewStartResult),
     respondApproval: async ({ providerRequestId, result }) => {
       await rpc.respond(providerRequestId, result);
     },
@@ -1661,6 +1702,7 @@ function normalizeProbe(
     detectedVersion: version,
     models,
     capabilities: codexChatCapabilities(models, version),
+    commands: [CODEX_REVIEW_COMMAND],
     ...(ready
       ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp }
       : {
@@ -1814,6 +1856,88 @@ function makeConnection(
         ? { kind: "native", writableRoots: [projectRoot, ...extraFolders] }
         : OCTANT_SANDBOX;
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
+    /** Forgets the thread a review ran on once its run ends, so nothing more is read from it. */
+    const endReview = (state: SessionState) => {
+      const reviewThreadId = state.reviewThreadId;
+      if (reviewThreadId === undefined) return;
+      state.reviewThreadId = undefined;
+      if (sessionsByThread.get(reviewThreadId) === state) sessionsByThread.delete(reviewThreadId);
+    };
+    /**
+     * Codex's own review of the thread's checkout. It runs on a thread of
+     * its own started read-only with no approvals, because the review Codex
+     * runs inline takes the sandbox of the thread it runs on, and the
+     * session's thread may write. Codex's read-only sandbox is real only on a
+     * process outside Octant's profile, where Codex's own Seatbelt can start:
+     * a Work or Code thread outside Strict below Full access, or Full access
+     * without the sandbox. Elsewhere the review is refused rather than run
+     * with writes. Plan and Chat never start one.
+     */
+    const startReview = (
+      state: SessionState,
+      target: CodexReviewTarget,
+    ): Effect.Effect<void, ProviderFailure> =>
+      Effect.gen(function* () {
+        if (mode === "chat" || state.executionPolicy === "plan") {
+          return yield* Effect.fail(
+            failure("unsupported", "Codex's review runs in Work and Code, outside Plan."),
+          );
+        }
+        const readOnlyHolds =
+          state.sandbox.kind === "native" ||
+          (state.executionPolicy === "full-access" && state.fullAccessSandbox !== true);
+        if (!readOnlyHolds) {
+          return yield* Effect.fail(
+            failure(
+              "unsupported",
+              "Codex's review needs its own read-only sandbox, which cannot start inside Octant's sandbox. Turn Strict off for this thread, or run it at Full access without the sandbox.",
+            ),
+          );
+        }
+        const reviewStart = client.reviewStart;
+        if (reviewStart === undefined) {
+          return yield* Effect.fail(failure("unsupported", "This Codex runtime cannot review."));
+        }
+        ensureSubscribed();
+        const reviewThread = yield* request(() =>
+          client.threadStart({
+            cwd: projectRoot,
+            model: state.modelId,
+            approvalPolicy: "never",
+            sandbox: "read-only",
+            approvalsReviewer: "user",
+            config: state.threadConfig,
+            ephemeral: true,
+          }),
+        );
+        if (reviewThread.cwd !== projectRoot) {
+          return yield* Effect.fail(
+            failure("unauthorized", "Codex review thread belongs to a different Project root."),
+          );
+        }
+        state.reviewThreadId = reviewThread.thread.id;
+        sessionsByThread.set(reviewThread.thread.id, state);
+        const started = yield* Effect.tryPromise({
+          try: () => reviewStart({ threadId: reviewThread.thread.id, target, delivery: "inline" }),
+          catch: (error) =>
+            error instanceof CodexRpcClientFailure &&
+            error.kind === "remote" &&
+            error.remoteCode === -32601
+              ? failure("unsupported", "This Codex release cannot start a review.")
+              : providerFailure(error),
+        }).pipe(Effect.tapError(() => Effect.sync(() => endReview(state))));
+        if (
+          started.reviewThreadId !== reviewThread.thread.id ||
+          (state.activeTurnId !== undefined && state.activeTurnId !== started.turn.id)
+        ) {
+          endReview(state);
+          return yield* Effect.fail(
+            failure("protocol", "Codex review response did not match its thread."),
+          );
+        }
+        state.activeTurnId = started.turn.id;
+        state.context ??= makeEventContext(state, factories);
+      });
     const activate = (state: SessionState) => {
       if (state.active) return;
       state.active = true;
@@ -1823,6 +1947,7 @@ function makeConnection(
       );
     };
     const deactivate = (state: SessionState) => {
+      endReview(state);
       if (!state.active) return;
       state.active = false;
       options.runtimeRegistry.setActiveSessionCount(
@@ -2319,6 +2444,7 @@ function makeConnection(
       thread: CodexThreadResult,
       modelId: string,
       carriedTools: ReadonlySet<string> | undefined,
+      threadConfig: CodexThreadConfig,
       turnOverrides?: Pick<CodexTurnStartInput, "model" | "effort">,
     ) => {
       const previous = sessions.get(input.sessionId);
@@ -2347,6 +2473,7 @@ function makeConnection(
         ...(turnOverrides === undefined ? {} : { turnOverrides }),
         ...(collaborationMode === undefined ? {} : { collaborationMode }),
         carriedTools,
+        threadConfig,
         correlationId: factories.makeCorrelation() as CorrelationId,
         outputAccepted: false,
         terminal: false,
@@ -2424,7 +2551,7 @@ function makeConnection(
               );
             }
             const toolNames = (input.tools ?? []).map((tool) => tool.name);
-            register(input, thread, input.modelId, new Set(toolNames));
+            register(input, thread, input.modelId, new Set(toolNames), modeConfig);
             return {
               sessionId: input.sessionId,
               resumeCursor: {
@@ -2549,7 +2676,7 @@ function makeConnection(
             // so the new model and its reasoning ride on every turn instead.
             const modelId = input.modelId === undefined ? thread.model : String(input.modelId);
             if (modelId === thread.model) {
-              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor));
+              register(input, thread, thread.model, carriedToolsOf(input.resumeCursor), modeConfig);
               return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
             }
             const switchedModel = options.runtimeRegistry
@@ -2568,7 +2695,7 @@ function makeConnection(
                 ? undefined
                 : codexModelOptionSettings(switchedModel, input.modelOptionValues).config
                     ?.model_reasoning_effort;
-            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), {
+            register(input, thread, modelId, carriedToolsOf(input.resumeCursor), modeConfig, {
               model: modelId,
               ...(effort === undefined ? {} : { effort }),
             });
@@ -2595,6 +2722,8 @@ function makeConnection(
             if (state.compaction !== undefined) {
               return Effect.fail(failure("unavailable", "Codex is compacting this session."));
             }
+            const review = codexReviewRequest(input.prompt);
+            if (review !== undefined) return startReview(state, review);
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {
@@ -2659,6 +2788,7 @@ function makeConnection(
               state.terminal ||
               expectedTurnId === undefined ||
               turnSteer === undefined ||
+              state.reviewThreadId !== undefined ||
               message.trim().length === 0 ||
               message.length > 4096
             )
@@ -2738,7 +2868,10 @@ function makeConnection(
             state.activeTurnId === undefined
               ? Effect.fail(failure("protocol", "Codex session has no active turn."))
               : request(() =>
-                  client.turnInterrupt({ threadId: state.threadId, turnId: state.activeTurnId! }),
+                  client.turnInterrupt({
+                    threadId: state.reviewThreadId ?? state.threadId,
+                    turnId: state.activeTurnId!,
+                  }),
                 ),
           ),
         ),
@@ -3035,7 +3168,8 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     correlationId: state.correlationId,
     occurredAt: factories.clock() as UtcTimestamp,
     projectRoot: state.projectRoot,
-    threadId: state.threadId,
+    threadId: state.reviewThreadId ?? state.threadId,
+    ...(state.reviewThreadId === undefined ? {} : { sessionThreadId: state.threadId }),
     turnId: state.activeTurnId!,
     sequence: state.context?.sequence ?? 1,
     terminal: false,

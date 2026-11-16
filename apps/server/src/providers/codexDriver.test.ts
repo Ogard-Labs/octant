@@ -43,6 +43,7 @@ import type {
 import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
+  codexReviewRequest,
   codexTurnExecutionSettings,
   makeCodexClient,
   makeCodexDriver,
@@ -244,6 +245,10 @@ function fixture(
     threadCompactStart: async (value) => {
       calls.push({ method: "thread/compact/start", input: value });
       await input.threadCompactStart?.(value);
+    },
+    reviewStart: async (value) => {
+      calls.push({ method: "review/start", input: value });
+      return { turn: { id: "review-turn", status: "inProgress" }, reviewThreadId: value.threadId };
     },
     respondApproval: async (value) => {
       calls.push({ method: "approval/respond", input: value });
@@ -3239,6 +3244,106 @@ describe("Codex execution authority and approvals", () => {
     await first.close();
     await second.close();
   });
+
+  it("runs Codex's own review read-only on a thread of its own and shows its findings as a review result", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const threadStarts = f.calls.filter(({ method }) => method === "thread/start");
+    expect(threadStarts[1]?.input).toMatchObject({
+      cwd: projectRoot,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      ephemeral: true,
+    });
+    expect(f.calls.find(({ method }) => method === "review/start")?.input).toEqual({
+      threadId: "thread-2",
+      target: { type: "uncommittedChanges" },
+      delivery: "inline",
+    });
+    expect(f.calls.some(({ method }) => method === "turn/start")).toBe(false);
+    const events = takeEvents(acquired.connection, 2);
+    f.emit(
+      notification("item/completed", {
+        threadId: "thread-2",
+        turnId: "review-turn",
+        item: {
+          type: "exitedReviewMode",
+          id: "review-1",
+          review: "- src/auth.ts: token is logged",
+        },
+        completedAtMs: 20,
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-2",
+        turn: { id: "review-turn", status: "completed" },
+      }),
+    );
+    const [findings, completed] = await events;
+    expect(findings).toMatchObject({ kind: "text-delta" });
+    expect(findings?.kind === "text-delta" ? findings.text : "").toContain(
+      "**Codex review**\n\n- src/auth.ts: token is logged",
+    );
+    // The session's own thread stays the one a later turn resumes.
+    expect(completed).toMatchObject({
+      kind: "completed",
+      resumeCursor: { driverKind: "codex", value: "thread-1" },
+    });
+    expect(completed).not.toHaveProperty("nativeAnchor");
+    await acquired.close();
+  });
+
+  it("passes the text after /review to Codex as the review's instructions", () => {
+    expect(codexReviewRequest("/review  the auth changes ")).toEqual({
+      type: "custom",
+      instructions: "the auth changes",
+    });
+    expect(codexReviewRequest("/reviewer")).toBeUndefined();
+    expect(codexReviewRequest("please /review")).toBeUndefined();
+  });
+
+  it.each([
+    ["under Strict", "code", "approval-gated", undefined, "Strict"],
+    ["at Full access that keeps the sandbox", "code", "full-access", false, "sandbox"],
+    ["in Plan", "code", "plan", false, "outside Plan"],
+    ["in Chat", "chat", "approval-gated", false, "outside Plan"],
+  ] as const)(
+    "refuses Codex's review %s rather than run it where it could write",
+    async (_name, mode, executionPolicy, strict, message) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy,
+          ...(strict === undefined ? {} : { strict }),
+          ...(executionPolicy === "full-access" ? { fullAccessSandbox: true } : {}),
+        }),
+      );
+      const refused = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+        ),
+      );
+      expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+      expect(refused._tag === "Left" ? refused.left.message : "").toContain(message);
+      expect(f.calls.some(({ method }) => method === "review/start")).toBe(false);
+      await acquired.close();
+    },
+  );
 
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();

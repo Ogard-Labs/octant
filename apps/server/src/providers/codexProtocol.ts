@@ -177,6 +177,18 @@ const TurnStartResult = Schema.Struct({ turn: TurnReference });
 export type CodexTurnResult = typeof TurnStartResult.Type;
 export const decodeTurnStartResult = decode(TurnStartResult);
 
+/**
+ * `review/start` answers the review's turn and the thread it runs on, which is
+ * the one it was given for an inline review (`ReviewStartResponse` in codex-rs
+ * `app-server-protocol` `v2/review.rs`, rust-v0.169.0).
+ */
+const ReviewStartResult = Schema.Struct({
+  turn: TurnReference,
+  reviewThreadId: Schema.NonEmptyString,
+});
+export type CodexReviewStartResult = typeof ReviewStartResult.Type;
+export const decodeReviewStartResult = decode(ReviewStartResult);
+
 const TurnSteerResult = Schema.Struct({ turnId: Schema.NonEmptyString });
 export type CodexTurnSteerResult = typeof TurnSteerResult.Type;
 export const decodeTurnSteerResult = decode(TurnSteerResult);
@@ -244,6 +256,8 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
   "contextCompaction",
   "agentMessage",
   "plan",
+  "enteredReviewMode",
+  "exitedReviewMode",
   "reasoning",
   "commandExecution",
   "fileChange",
@@ -254,7 +268,7 @@ const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Codex adds item kinds over time (image views, review markers, ...). Anything
+ * Codex adds item kinds over time (image views, ...). Anything
  * Octant does not model decodes to this opaque item so one new kind cannot take
  * down the whole connection; the mapper ignores it. Modeled kinds keep their
  * strict shapes because the filter excludes their names.
@@ -292,6 +306,13 @@ const ThreadItem = Schema.Union(
     type: Schema.Literal("plan"),
     id: Schema.String,
     text: Schema.String,
+  }),
+  // A review run's markers: `review` is the hint shown on entering, and on
+  // leaving the review's findings as Codex renders them (`review_output_text`).
+  Schema.Struct({
+    type: Schema.Literal("enteredReviewMode", "exitedReviewMode"),
+    id: Schema.String,
+    review: Schema.String,
   }),
   Schema.Struct({
     type: Schema.Literal("reasoning"),

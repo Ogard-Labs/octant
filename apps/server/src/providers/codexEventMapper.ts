@@ -43,6 +43,12 @@ export interface CodexEventContext {
   readonly projectRoot: string;
   readonly threadId: string;
   readonly turnId: string;
+  /**
+   * Set while Codex's own review runs on a thread of its own: the session's
+   * thread, which a completed turn names in its resume cursor in place of the
+   * review's. The review's turn is no anchor in the session's thread.
+   */
+  readonly sessionThreadId?: string;
   sequence: number;
   terminal: boolean;
   usage?: {
@@ -309,6 +315,28 @@ function mapProposedPlan(
   }
   const text = proposedPlanText(item.text);
   if (text === undefined) return [{ kind: "ignored" }];
+  const separator = agentMessageSeparator(context, item.id);
+  context.agentMessages.set(item.id, { lifecycle: "terminal", text });
+  return streamedEvents(context, "text-delta", `${separator}${text}`);
+}
+
+/** The heading a Codex review's findings read under in the thread. */
+export const CODEX_REVIEW_HEADING = "**Codex review**";
+
+/**
+ * The findings Codex's own review reports when it leaves review mode, as the
+ * reply's own paragraph under the review heading: a review result, not edits
+ * or a plan. A review that found nothing still says so.
+ */
+function mapReviewFindings(
+  context: CodexEventContext,
+  item: Extract<ThreadItem, { readonly review: string }>,
+): ReadonlyArray<CodexMappedMessage> {
+  if (context.agentMessages.get(item.id)?.lifecycle === "terminal") {
+    return protocolFailure("Provider completed a review more than once.");
+  }
+  const findings = item.review.trim();
+  const text = `${CODEX_REVIEW_HEADING}\n\n${findings.length === 0 ? "No findings." : findings}\n`;
   const separator = agentMessageSeparator(context, item.id);
   context.agentMessages.set(item.id, { lifecycle: "terminal", text });
   return streamedEvents(context, "text-delta", `${separator}${text}`);
@@ -740,6 +768,12 @@ function mapLifecycle(
       return message.method === "item/completed"
         ? mapProposedPlan(context, item)
         : [{ kind: "ignored" }];
+    case "enteredReviewMode":
+      return [{ kind: "ignored" }];
+    case "exitedReviewMode":
+      return message.method === "item/completed"
+        ? mapReviewFindings(context, item)
+        : [{ kind: "ignored" }];
     case "userMessage":
     case "reasoning":
       return [{ kind: "ignored" }];
@@ -1046,9 +1080,11 @@ function mapTerminal(
   return [
     event(context, {
       kind: "completed",
-      resumeCursor: { driverKind: "codex", value: context.threadId },
+      resumeCursor: { driverKind: "codex", value: context.sessionThreadId ?? context.threadId },
       // `thread/fork` takes it as `lastTurnId` (app-server v2, rust-v0.162.1).
-      ...(turn.id.trim().length === 0 ? {} : { nativeAnchor: turn.id }),
+      ...(turn.id.trim().length === 0 || context.sessionThreadId !== undefined
+        ? {}
+        : { nativeAnchor: turn.id }),
     }),
   ];
 }
