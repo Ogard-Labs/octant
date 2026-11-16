@@ -193,6 +193,27 @@ describe("shared Seatbelt profile builder", () => {
       }
     });
 
+    it("keeps credential folders denied after granting the home folder as an extra folder", () => {
+      const { main, temporaryDirectory } = folders();
+      const home = join(temporaryRoot(), "home");
+      mkdirSync(join(home, ".aws"), { recursive: true });
+      const lines = buildDenyDefaultSeatbeltProfile({
+        boundRoot: main,
+        extraBoundRoots: [home],
+        homeDirectory: home,
+        temporaryDirectory,
+        networkEgress: "none",
+        privateHomeAllowPaths: [],
+      }).split("\n");
+      const granted = lines.lastIndexOf(seatbeltAllowRule("file-write*", home));
+      const denied = lines.findLastIndex(
+        (line) =>
+          line.startsWith("(deny file-read* file-write*") && line.includes(join(home, ".aws")),
+      );
+      expect(granted).toBeGreaterThan(-1);
+      expect(denied).toBeGreaterThan(granted);
+    });
+
     it("refuses an extra folder that is relative or an ancestor of a denied system path", () => {
       const { main, temporaryDirectory } = folders();
       const build = (extra: string) =>

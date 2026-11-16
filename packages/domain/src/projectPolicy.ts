@@ -1017,6 +1017,20 @@ export interface ExtraFolderJudgement {
   readonly candidate: string;
   /** The host user's home folder, canonical. */
   readonly homeDirectory: string;
+  /**
+   * The person confirmed adding the home folder itself after the warning.
+   * Strict is to refuse the home folder whatever this says.
+   */
+  readonly homeFolderConfirmed?: boolean;
+}
+
+/** The warning a person confirms before their home folder becomes an extra folder. */
+export const HOME_EXTRA_FOLDER_WARNING =
+  "Adding your home folder lets this Project's threads read and change every file in it below Full access, beyond this Project's own folders. Folders that hold keys and credentials (.ssh, .aws, .gnupg, Library/Keychains and the rest) stay protected.";
+
+/** Whether this folder is the host user's home folder, which needs the person's confirmation. */
+export function extraFolderIsHome(candidate: string, homeDirectory: string): boolean {
+  return candidate === homeDirectory;
 }
 
 /**
@@ -1029,8 +1043,12 @@ export function extraFolderRefusal(input: ExtraFolderJudgement): string | undefi
   if (!candidate.startsWith("/") || candidate === "/") {
     return "Choose a folder, not the whole disk.";
   }
-  if (candidate === homeDirectory || folderContainsPath(candidate, homeDirectory)) {
-    return "Choose a folder inside your home folder, not the home folder itself.";
+  if (candidate !== homeDirectory && folderContainsPath(candidate, homeDirectory)) {
+    return "Choose your home folder or a folder inside it, not one above it.";
+  }
+  const home = extraFolderIsHome(candidate, homeDirectory);
+  if (home && input.homeFolderConfirmed !== true) {
+    return "Adding your home folder needs your confirmation.";
   }
   if (SYSTEM_FOLDERS.some((folder) => folder === candidate)) {
     return "A system folder cannot be added to a Project.";
@@ -1038,17 +1056,24 @@ export function extraFolderRefusal(input: ExtraFolderJudgement): string | undefi
   if (SYSTEM_OWNED_TREES.some((tree) => folderContainsPath(tree, candidate))) {
     return "A folder the system owns cannot be added to a Project.";
   }
+  // The home folder holds the credential folders below; they stay protected
+  // because every confined launch denies them after its folder grants.
   if (
+    !home &&
     HOME_SECRET_FOLDERS.some((secret) => foldersOverlap(`${homeDirectory}/${secret}`, candidate))
   ) {
     return "A folder that holds keys or credentials cannot be added to a Project.";
   }
-  if (foldersOverlap(input.mainRoot, candidate)) {
+  // The confirmed home folder may hold the main folder and the other extra
+  // folders: it is the one folder a person asks for knowing it holds them all.
+  if (candidate === input.mainRoot || (!home && foldersOverlap(input.mainRoot, candidate))) {
     return candidate === input.mainRoot
       ? "That folder is already the Project's main folder."
       : "That folder overlaps the Project's main folder.";
   }
-  const existing = input.extraFolders.find((folder) => foldersOverlap(folder, candidate));
+  const existing = input.extraFolders.find((folder) =>
+    home ? folder === candidate : foldersOverlap(folder, candidate),
+  );
   if (existing !== undefined) {
     return existing === candidate
       ? "That folder is already in the Project."
@@ -1065,6 +1090,7 @@ export interface AddProjectExtraFolderInput {
   readonly actor: ProjectActor;
   readonly addedAt: UtcTimestamp;
   readonly homeDirectory: string;
+  readonly homeFolderConfirmed?: boolean;
 }
 
 /** Adds a folder a person picked to a bound Project beside its main folder. */
@@ -1084,6 +1110,7 @@ export function addProjectExtraFolder(
     extraFolders: existing.map((folder) => folder.canonicalRoot),
     candidate: input.canonicalRoot,
     homeDirectory: input.homeDirectory,
+    ...(input.homeFolderConfirmed === true ? { homeFolderConfirmed: true } : {}),
   });
   if (refusal !== undefined) reject("extra-folder-refused", refusal);
   const folder: ProjectExtraFolder = {
