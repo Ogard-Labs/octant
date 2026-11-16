@@ -83,7 +83,6 @@ export function CodeWhereControl(props: CodeWhereControlProps) {
       onOpenChange={setOpen}
       open={open}
       side="top"
-      sideOffset={6}
       titledBy={headingId}
       trigger={
         <>

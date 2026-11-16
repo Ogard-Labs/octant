@@ -1586,7 +1586,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__glyph {
   display: inline-flex;
   /* The icon column is 16px wide, so the label starts at the rows' label x
-     whatever the glyph (a 14px folder or a colour dot) draws inside it. */
+     whatever the glyph (a folder or a colour dot) draws inside it. */
   width: var(--oct-icon-md);
   flex-shrink: 0;
   align-items: center;
@@ -2968,7 +2968,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
     var(--oct-menu-row-inset) + var(--oct-icon-md) + var(--oct-menu-row-gap)
   );
   padding-inline-end: var(--oct-menu-row-inset);
-  --oct-disabled-opacity: 0.5;
 }
 
 .code-where__line {

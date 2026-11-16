@@ -271,7 +271,7 @@ export function WorkListRepositoryMenu(props: {
         <ChevronDown aria-hidden="true" size={14} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+        <OctantMenuPositioner align="end">
           <OctantMenuPopup aria-label="Repository" className="work-list__repository-popup">
             <OctantMenuCheckboxItem
               checked={selected.length === 0}

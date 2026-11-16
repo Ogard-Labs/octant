@@ -231,10 +231,8 @@ export function HostSelector(props: HostSelectorProps) {
             return {
               id: String(option.host.hostId),
               label: `${option.host.displayName}${suffix}`,
+              // The reason is already in the label, so the option adds no second line.
               ...(!option.selectable ? { disabled: true } : {}),
-              ...(option.disabledReason === undefined
-                ? {}
-                : { disabledReason: option.disabledReason }),
             };
           })}
           value={String(selectedHostId)}

@@ -28,6 +28,7 @@ import {
   OctantMenuPortal,
   OctantMenuPositioner,
   OctantMenuRoot,
+  OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 import type { SidebarAppMenuDescriptorId } from "./navigationModel";
@@ -109,6 +110,10 @@ export function SidebarProfile(props: SidebarProfileProps) {
                     />
                   ))}
                 </OctantMenuGroup>
+              )}
+              {props.secondaryActions === undefined ||
+              props.secondaryActions.length === 0 ? null : (
+                <OctantMenuSeparator />
               )}
               <OctantMenuGroup aria-label="Octant">
                 <OctantMenuGroupLabel>Octant</OctantMenuGroupLabel>

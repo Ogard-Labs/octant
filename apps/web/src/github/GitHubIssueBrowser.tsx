@@ -438,7 +438,6 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
       onOpenChange={setRepositoryPickerOpen}
       open={repositoryPickerOpen}
       side="bottom"
-      sideOffset={6}
       title="Choose a repository"
       trigger={
         <>

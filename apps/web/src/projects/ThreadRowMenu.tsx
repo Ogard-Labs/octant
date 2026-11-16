@@ -507,7 +507,8 @@ export function ThreadRowMenu(props: {
         <>
           <OctantContextMenuSeparator />
           <OctantContextMenuItem
-            className="thread-row-context-menu__item thread-row-context-menu__item--danger"
+            className="thread-row-context-menu__item"
+            destructive
             label="Archive"
             onClick={() => props.actions.onArchiveThread?.(threadId)}
           >

@@ -438,6 +438,24 @@ function resolvedSelector(headers: ReadonlyArray<string>): string {
   return resolved;
 }
 
+// A menu, popover, select, combobox or disclosure is the one float,
+// and its corner is the large radius. Only the rule whose subject is the popup
+// counts: a descendant of one keeps its own corner.
+const FLOAT_SUBJECT =
+  /\[data-slot=["'](?:dropdown-menu|context-menu|popover|select|combobox)-content["']\]|\.(?:window-chrome__disclosure|workspace-disclosure)(?![\w-])/;
+const FLOAT_RADIUS = /^var\(\s*--oct-radius-lg\s*\)$/;
+
+function isFloatSubject(header: string): boolean {
+  return header.split(",").some((selector) => {
+    const compound =
+      selector
+        .trim()
+        .split(/[\s>+~]+/)
+        .pop() ?? "";
+    return FLOAT_SUBJECT.test(compound);
+  });
+}
+
 function repaintedPrimitive(
   header: string,
   primitiveClasses: ReadonlyMap<string, string>,
@@ -611,6 +629,14 @@ export function findStylesheetFindings(
       }
       if (!isToken && RADIUS_PROPERTY.test(name) && !radiusOnScale(value)) {
         push("radius-token", `${property} ${value} is not a radius token`);
+      }
+      if (
+        !isToken &&
+        name === "border-radius" &&
+        !FLOAT_RADIUS.test(value.trim()) &&
+        isFloatSubject(resolvedSelector(headers))
+      ) {
+        push("radius-token", `${property} ${value} on a floating surface is not --oct-radius-lg`);
       }
       if (!isToken && !exempt && SPACING_PROPERTY.test(name) && !spacingOnScale(value)) {
         push("spacing-scale", `${property} ${value} is off the 4px spacing scale`);

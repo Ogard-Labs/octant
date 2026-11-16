@@ -56,7 +56,6 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
       }}
       open={open}
       side="top"
-      sideOffset={6}
       title="Choose base branch"
       trigger={
         <>

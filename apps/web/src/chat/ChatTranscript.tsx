@@ -774,6 +774,7 @@ function chatTurnActions(input: {
         ...(checkpointDisabled ? { disabled: true } : {}),
       });
       actions.push({
+        destructive: true,
         label: "Forget",
         value: "checkpoint-forget",
         ...(checkpointDisabled ? { disabled: true } : {}),

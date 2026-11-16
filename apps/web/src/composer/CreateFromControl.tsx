@@ -174,7 +174,6 @@ export function CreateFromControl(
           }}
           open={props.open}
           side="top"
-          sideOffset={6}
           title={
             showGithub || showLinear ? "Create from an issue or session" : "Create from a session"
           }

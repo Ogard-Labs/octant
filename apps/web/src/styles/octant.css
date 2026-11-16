@@ -596,7 +596,6 @@ svg :focus-visible {
 /* A container that takes focus only to hold the keyboard shows no edge of its
    own; the item inside it that the user is on shows one. */
 .octant-menu__positioner:focus-visible,
-.octant-menu__popup:focus-visible,
 .octant-dialog__popup:focus-visible,
 .octant-preview-card:focus-visible,
 .model-picker__listbox:focus-visible,
@@ -2228,100 +2227,6 @@ input.switch:checked::after {
 }
 .empty .icon-mark {
   color: var(--oct-muted);
-}
-
-/* ─── menu ────────────────────────────────────────────────────────────
-   Positioning is the caller's job — .menu only styles the surface, so it
-   works inside a popover, a details, or an absolutely placed wrapper. */
-.menu {
-  min-width: 200px;
-  padding: var(--oct-space-2);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
-  z-index: var(--oct-z-overlay);
-}
-.menu-label {
-  display: block;
-  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-1);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--oct-meta);
-}
-.menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--oct-space-4);
-  width: 100%;
-  min-height: var(--oct-control-height-sm);
-  padding-inline: var(--oct-space-3);
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  background: none;
-  color: var(--oct-fg-2);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
-  text-align: left;
-}
-.menu-item:hover,
-.menu-item:focus-visible {
-  background: var(--oct-fg-soft);
-  color: var(--oct-fg);
-}
-.menu-item:active:not(:has(:is(button, a, [role="button"]):active)) {
-  background: var(--oct-wash-pressed);
-}
-
-.menu-item[aria-disabled="true"] {
-  opacity: var(--oct-disabled-opacity);
-  pointer-events: none;
-}
-.menu-item .kbd {
-  pointer-events: none;
-}
-.menu-item-danger {
-  color: var(--oct-danger-fg);
-}
-/* a menu row that has to explain itself. Reserved for menus where the
-   labels are product nouns rather than verbs — "Work" and "Code" do not
-   tell a first-run user which one they want, and a menu is the one
-   presentation with room to say. The check sits in its own column at
-   full height so the row has a single obvious right edge. */
-.menu-item-rich {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0 var(--oct-space-4);
-  min-height: 0;
-  padding-block: var(--oct-space-2);
-}
-/* muted, not meta: this line is the reason the rich row exists — it is
-   read to make a choice, so it is text and holds 4.5:1, the same call
-   .mopt-sub makes for the same job in the mobile sheet */
-.menu-item-desc {
-  grid-column: 1;
-  font-size: var(--oct-text-xs);
-  color: var(--oct-muted);
-  white-space: normal;
-}
-.menu-item-rich > .icon {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  visibility: hidden;
-  color: var(--oct-accent-fg);
-}
-.menu-item-rich[aria-current="true"] > .icon {
-  visibility: visible;
-}
-.menu-sep {
-  height: 1px;
-  margin: var(--oct-space-2) 0;
-  background: var(--oct-border);
-  border: 0;
 }
 
 .octant-tooltip__positioner {

@@ -143,7 +143,7 @@ export function ThreadNativeSetupControl(props: {
         <ChevronDown aria-hidden="true" size={12} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="start" side="top" sideOffset={8}>
+        <OctantMenuPositioner align="start" side="top">
           <OctantMenuPopup>
             <OctantMenuRadioGroup
               value={choice}
@@ -164,12 +164,11 @@ export function ThreadNativeSetupControl(props: {
                   key={option.id}
                   value={option.id}
                 >
-                  <span className="flex min-w-0 flex-col">
-                    <span id={`${idPrefix}-${option.id}-label`}>{option.label}</span>
-                    <span
-                      className="text-xs text-muted-foreground"
-                      id={`${idPrefix}-${option.id}-note`}
-                    >
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate" id={`${idPrefix}-${option.id}-label`}>
+                      {option.label}
+                    </span>
+                    <span className="oct-menu-detail" id={`${idPrefix}-${option.id}-note`}>
                       {option.detail}
                     </span>
                   </span>

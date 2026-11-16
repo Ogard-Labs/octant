@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   Select as AuthoredSelect,
   SelectGroup,
@@ -105,6 +105,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
   const initialValue = props.defaultValue ?? props.value ?? props.options[0]?.id ?? "";
   const [uncontrolledValue, setUncontrolledValue] = useState(initialValue);
   const rootRef = useRef<HTMLSpanElement>(null);
+  const reasonIdPrefix = useId();
   const selectedId = props.value ?? uncontrolledValue;
   const selectedOption = props.options.find((option) => option.id === selectedId);
 
@@ -164,12 +165,32 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
                   <SelectItem
                     disabled={option.disabled}
                     key={encodeSelectValue(option.id)}
+                    value={encodeSelectValue(option.id)}
+                    // The option is still named by its label alone; the reason
+                    // is its description, not part of its name.
                     {...(option.disabledReason === undefined
                       ? {}
-                      : { title: option.disabledReason })}
-                    value={encodeSelectValue(option.id)}
+                      : {
+                          "aria-label": option.label,
+                          "aria-describedby": `${reasonIdPrefix}-${encodeSelectValue(option.id)}`,
+                        })}
                   >
-                    {option.label}
+                    {/* A disabled option says why on a second line, where a
+                        pointer-less reader sees it too; a native title showed
+                        only on hover. */}
+                    {option.disabledReason !== undefined ? (
+                      <>
+                        <span className="block truncate">{option.label}</span>
+                        <span
+                          className="block whitespace-normal oct-menu-detail"
+                          id={`${reasonIdPrefix}-${encodeSelectValue(option.id)}`}
+                        >
+                          {option.disabledReason}
+                        </span>
+                      </>
+                    ) : (
+                      option.label
+                    )}
                   </SelectItem>
                 ));
                 if (segment.group === undefined) {

@@ -859,15 +859,12 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
 .window-chrome__disclosure {
   position: absolute;
   z-index: var(--oct-z-popup);
-  top: calc(100% + 7px);
+  top: calc(100% + var(--oct-space-1));
   right: 0;
   display: grid;
   width: 180px;
-  padding: var(--oct-space-1);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--oct-elev-raised);
+  padding: var(--oct-menu-inset);
+  /* Fill, radius and shadow are the shared float's, from components.css. */
 }
 
 .window-chrome__disclosure-action {
@@ -2298,19 +2295,15 @@ html[data-octant-density="compact"]
    message arr..." once checked). The positioner's available width keeps a
    submenu on screen when neither side of its parent has room. */
 .thread-row-context-menu {
-  display: grid;
   width: max-content;
   min-width: min(224px, calc(100vw - 24px));
   max-width: min(320px, var(--available-width, 100vw), calc(100vw - 24px));
-  gap: 0;
-  padding: var(--oct-space-1);
-  overflow: hidden;
-  border-radius: var(--oct-radius-md);
 }
 
-/* Its rows and separators are the shared menu recipe: 28px rows and the Menu
-   option type. The icon stands in the same 16px column every menu uses; only
-   its ink is this menu's own. */
+/* Its popup, rows and separators are the shared menu recipe: padding, radius,
+   scroll at the window's edge, 28px rows and the Menu option type. The icon
+   stands in the same 16px column every menu uses; only its ink is this menu's
+   own (a destructive row's svg takes the danger ink over it). */
 .thread-row-context-menu__icon {
   display: inline-flex;
   width: var(--oct-icon-md);
@@ -3161,58 +3154,33 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-/* The menu opens on the side of the trigger with more room (the selector
-   measures it) and is capped to that room. Hung always below, it ran past the
-   window's bottom edge where the composer docks at the page foot and showed
-   one Project and a half. Inside that cap only the saved Projects scroll: the
-   ways to add one stay pinned under them, where a long list once pushed
-   "New Project from GitHub repository…" past the menu's bottom edge. The face
-   is the shared popover recipe (fill, overlay shadow, 12px radius). */
+/* The Project menu is the shared popover float: its face, shadow, motion and
+   4px offset come from the popover recipe, and Base UI opens it on the side of
+   the trigger with room. Only its size is written here: the popup's body is
+   capped to the room on that side (--available-height) and is as tall as its
+   content when it opens (the component freezes that height so typing in the
+   search never resizes it); only the Project list scrolls, and the ways to
+   add one stay pinned under it. */
 .composer-folder-selector__menu {
-  position: absolute;
-  z-index: var(--oct-z-popup);
-  inset-block-end: calc(100% + 6px);
-  inset-inline-start: 0;
+  width: min(28rem, calc(100vw - 2rem));
+  padding: var(--oct-menu-inset);
+}
+
+.composer-folder-selector__body {
   display: flex;
   flex-direction: column;
-  width: min(28rem, calc(100vw - 2rem));
-  max-height: min(28rem, 64vh);
   gap: var(--oct-space-1);
-  padding: calc(var(--oct-space-1) + 2px);
+  max-height: min(28rem, calc(var(--available-height, 28rem) - 2 * var(--oct-menu-inset)));
   overflow: hidden;
-  color: var(--popover-foreground);
-  background: var(--popover);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
-  animation: octant-popover-enter var(--oct-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 }
 
-.composer-folder-selector__menu--below {
-  inset-block-start: calc(100% + 6px);
-  inset-block-end: auto;
-}
-
-@keyframes octant-popover-enter {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .composer-folder-selector__menu {
-    animation: none;
-  }
-}
-
-/* The GitHub flow carries a picker and a confirmation card, so the same
-   menu opens wider for it and scrolls as one. */
-.composer-folder-selector__menu--github {
+/* The GitHub flow carries a picker and a confirmation card, so it keeps a
+   floor of its own and scrolls as one. The Project list has no floor: a
+   fixed 240px left a blank band under one Project and a big empty box over
+   none (maintainer request, 2026-11-16). */
+.composer-folder-selector__body--github {
+  /* Its floor yields where the window leaves less room than that. */
+  min-height: min(240px, var(--available-height, 240px));
   overflow: auto;
 }
 
@@ -3230,27 +3198,44 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   font-weight: var(--oct-weight-medium);
 }
 
-.composer-folder-selector__menu [role="listbox"] {
+.composer-folder-selector__list {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
+  gap: var(--oct-space-1);
   min-height: 0;
+  outline: none;
 }
 
-.composer-folder-selector__saved {
+.composer-folder-selector__scroll {
   display: grid;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-content: start;
   gap: 1px;
   min-height: 0;
   overflow-y: auto;
 }
 
+.composer-folder-selector__group {
+  display: grid;
+  gap: 1px;
+}
+
+/* One 28px line: the quiet "No Projects yet", sitting over the actions like
+   the first row of a short menu. */
+.composer-folder-selector__empty {
+  display: flex;
+  align-items: center;
+  min-height: var(--oct-menu-row-h);
+  padding-block: 0;
+  padding-inline: var(--oct-menu-row-inset);
+}
+
 .composer-folder-selector__actions {
   display: grid;
   flex: 0 0 auto;
   gap: 1px;
-  margin-top: var(--oct-space-1);
+  margin-top: auto;
   padding-top: var(--oct-space-1);
   border-top: 1px solid var(--oct-hairline);
 }
@@ -3288,7 +3273,32 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-.composer-folder-selector__option--active {
+/* A refused row is the 44px two-line row: its name, and under it the whole
+   reason, wrapping rather than cut (the reason was the only explanation and
+   was truncated to "Change it in…"). Dimmed like every disabled menu row. */
+.composer-folder-selector__option--two-line {
+  min-height: var(--oct-menu-row-two-h);
+  opacity: var(--oct-disabled-opacity);
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-copy {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-name {
+  max-width: none;
+}
+
+.composer-folder-selector__option--two-line .composer-folder-selector__option-reason {
+  overflow: visible;
+  white-space: normal;
+}
+
+/* Keyboard highlight is the float's hover fill, the same as a row under the
+   pointer; a chosen Project is only the check at its end. */
+.composer-folder-selector__option[data-active="true"] {
   background: var(--octant-control-hover);
 }
 
@@ -3650,10 +3660,6 @@ form > .work-composer-adapter__attachments {
     width: 100%;
     max-width: none;
   }
-
-  .composer-folder-selector__menu {
-    width: min(100%, calc(100vw - 2rem));
-  }
 }
 
 .code-composer-adapter__context-picker {
@@ -3682,12 +3688,12 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   gap: var(--oct-space-1);
   width: min(320px, calc(100vw - 32px));
-  padding: calc(var(--oct-space-1) + 2px);
+  /* A list of rows: the menu inset, so its rows stand on the menu rows' edges.
+     Fill, edge and radius come from the popover recipe and the float rules in
+     components.css; setting a workspace fill and a strong border here made this
+     the one popup with a darker face and a 2px edge. */
+  padding: var(--oct-menu-inset);
   overflow: hidden;
-  /* Fill and edge come from the popover recipe. Setting a workspace fill and a
-     strong border here on top of the overlay's own ring made this the one
-     popup with a darker face and a 2px edge. */
-  border-radius: var(--oct-radius-md);
 }
 
 /* The list is a fixed six rows tall: the loading shape, the rows and "no refs"

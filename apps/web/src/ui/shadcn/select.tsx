@@ -36,7 +36,7 @@ export function SelectPopup({ className, ...props }: ComponentProps<typeof Selec
   return (
     <SelectPrimitive.Popup
       className={cn(
-        "z-[var(--oct-z-popup)] max-h-[18rem] min-w-[var(--anchor-width)] overflow-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
+        "z-[var(--oct-z-popup)] max-h-[18rem] max-w-[max(var(--anchor-width),var(--oct-menu-max-w))] min-w-[var(--anchor-width)] overflow-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
         className,
       )}
       data-slot="select-content"
@@ -74,7 +74,9 @@ export function SelectItem({
       data-slot="select-item"
       {...props}
     >
-      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+      {/* The text takes the row's room and no more, so a long second line
+          wraps inside the popup instead of widening it. */}
+      <SelectPrimitive.ItemText className="min-w-0 flex-1">{children}</SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator className="absolute right-(--oct-menu-row-inset) flex size-(--oct-icon-md) items-center justify-center">
         <Check aria-hidden="true" className="size-(--oct-icon-sm)" />
       </SelectPrimitive.ItemIndicator>

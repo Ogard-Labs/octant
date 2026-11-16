@@ -83,7 +83,6 @@
 [data-slot="popover-content"],
 [data-slot="select-content"],
 [data-slot="combobox-content"],
-.octant-menu__popup,
 .octant-dialog__popup,
 .octant-sheet__popup,
 .octant-preview-card,
@@ -98,7 +97,6 @@
 .chat-composer__command-typeahead,
 .code-board__view-popover,
 .code-board__filters-panel,
-.menu,
 .palette,
 .toast {
   /* A surface that paints the card colour paints the float here, and an
@@ -121,10 +119,10 @@
    also set a border or a ring drew two lines on one edge: the border is gone.
    The frost is for content behind the window's own page; it is not asked to
    blur the desktop. */
-.octant-menu__popup,
 .octant-dialog__popup,
 .octant-sheet__popup,
 .window-chrome__disclosure,
+.workspace-disclosure,
 .project-dialog,
 .folder-picker,
 [data-slot="dropdown-menu-content"],
@@ -157,10 +155,10 @@
 
 html[data-octant-reduced-transparency="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -176,10 +174,10 @@ html[data-octant-reduced-transparency="true"]
   ),
 html[data-octant-increased-contrast="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -200,10 +198,10 @@ html[data-octant-increased-contrast="true"]
 
 @media (prefers-reduced-transparency: reduce) {
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -289,10 +287,10 @@ html[data-octant-theme-mode="light"] .turn-user .bubble {
    that is pressed is told from one at rest by the system highlight. */
 @media (forced-colors: active) {
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -325,10 +323,10 @@ html[data-octant-theme-mode="light"] .turn-user .bubble {
 
 html[data-octant-increased-contrast="true"]
   :is(
-    .octant-menu__popup,
     .octant-dialog__popup,
     .octant-sheet__popup,
     .window-chrome__disclosure,
+    .workspace-disclosure,
     .project-dialog,
     .folder-picker,
     [data-slot="dropdown-menu-content"],
@@ -837,7 +835,6 @@ html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-co
 
 html[data-octant-increased-contrast="true"] .octant-glass,
 html[data-octant-increased-contrast="true"] .octant-chip,
-html[data-octant-increased-contrast="true"] .octant-menu__popup,
 html[data-octant-increased-contrast="true"] .octant-dialog__popup,
 html[data-octant-increased-contrast="true"] .window-chrome__disclosure,
 html[data-octant-increased-contrast="true"] .composer-folder-selector__menu,

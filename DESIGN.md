@@ -107,26 +107,26 @@ The theme roles live in `packages/theme/src/tokens.ts`; the renderer fallback in
 `apps/web/src/styles.css` mirrors them exactly. Text is three greys and never a
 fourth.
 
-| Role                   | CSS variable                 | Dark      | Light     | Use                                                          |
-| ---------------------- | ---------------------------- | --------- | --------- | ------------------------------------------------------------ |
-| Application background | `--octant-app-background`    | `#151515` | `#fafaf9` | Page ground for start screens and standalone pages           |
-| Sidebar                | `--octant-sidebar(-opaque)`  | `#101010` | `#fafaf9` | The window frame's ground (dark); sidebar role               |
-| Workspace              | `--octant-workspace`         | `#1a1a1a` | `#ffffff` | Reading surface; the source of the pane tone                 |
-| Floating               | `--octant-floating`          | `#232323` | `#fdfdfc` | Source of the float tone                                     |
-| Control                | `--octant-control`           | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary button                         |
-| Control hover          | `--octant-control-hover`     | `#333333` | `#e2e2e1` | Pointed-at control                                           |
-| Control pressed        | `--octant-control-pressed`   | `#3b3b3b` | `#d3d3d2` | Pressed control                                              |
-| Border                 | `--octant-border`            | `#303030` | `#e0e0de` | Theme border (opaque); dividers prefer the ink hairline      |
-| Strong border          | `--octant-border-strong`     | `#4d4d4d` | `#bdbdbb` | Field and outline-button edges; increased-contrast lines     |
-| Strong divider         | `--octant-divider-strong`    | `#8a8a8a` | `#6f6f6d` | Off switch edge, unchecked checkbox, slider track            |
-| Primary text           | `--octant-text-primary`      | `#f5f5f7` | `#141414` | Body and control text; the ink every wash is mixed from      |
-| Secondary text         | `--octant-text-secondary`    | `#bcbcc2` | `#45454a` | Supporting copy, section labels                              |
-| Muted text             | `--octant-text-muted`        | `#a8a8ad` | `#666666` | Meta, hints, counts                                          |
-| Accent                 | `--octant-accent`            | `#5b9cf5` | `#1f5fc7` | One primary action or active mark                            |
-| Accent text            | `--octant-accent-text`       | `#5b9cf5` | `#1f5fc7` | Accent as text, held to 4.5:1                                |
-| Accent foreground      | `--octant-accent-foreground` | `#141414` | `#ffffff` | Text on the accent fill                                      |
-| Selection              | `--octant-selection`         | `#2c2c2c` | `#ebebea` | Chosen row in a scrolling picker (opaque so it never shifts) |
-| Scrim                  | `--octant-scrim`             | `#000000` | `#000000` | Opaque by contract; mixed to a wash where used               |
+| Role                   | CSS variable                 | Dark      | Light     | Use                                                                                                                               |
+| ---------------------- | ---------------------------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Application background | `--octant-app-background`    | `#151515` | `#fafaf9` | Page ground for start screens and standalone pages                                                                                |
+| Sidebar                | `--octant-sidebar(-opaque)`  | `#101010` | `#fafaf9` | The window frame's ground (dark); sidebar role                                                                                    |
+| Workspace              | `--octant-workspace`         | `#1a1a1a` | `#ffffff` | Reading surface; the source of the pane tone                                                                                      |
+| Floating               | `--octant-floating`          | `#232323` | `#fdfdfc` | Source of the float tone                                                                                                          |
+| Control                | `--octant-control`           | `#2b2b2b` | `#f0f0ef` | Quiet control fill, secondary button                                                                                              |
+| Control hover          | `--octant-control-hover`     | `#333333` | `#e2e2e1` | Pointed-at control                                                                                                                |
+| Control pressed        | `--octant-control-pressed`   | `#3b3b3b` | `#d3d3d2` | Pressed control                                                                                                                   |
+| Border                 | `--octant-border`            | `#303030` | `#e0e0de` | Theme border (opaque); dividers prefer the ink hairline                                                                           |
+| Strong border          | `--octant-border-strong`     | `#4d4d4d` | `#bdbdbb` | Field and outline-button edges; increased-contrast lines                                                                          |
+| Strong divider         | `--octant-divider-strong`    | `#8a8a8a` | `#6f6f6d` | Off switch edge, unchecked checkbox, slider track                                                                                 |
+| Primary text           | `--octant-text-primary`      | `#f5f5f7` | `#141414` | Body and control text; the ink every wash is mixed from                                                                           |
+| Secondary text         | `--octant-text-secondary`    | `#bcbcc2` | `#45454a` | Supporting copy, section labels                                                                                                   |
+| Muted text             | `--octant-text-muted`        | `#a8a8ad` | `#666666` | Meta, hints, counts                                                                                                               |
+| Accent                 | `--octant-accent`            | `#5b9cf5` | `#1f5fc7` | One primary action or active mark                                                                                                 |
+| Accent text            | `--octant-accent-text`       | `#5b9cf5` | `#1f5fc7` | Accent as text, held to 4.5:1                                                                                                     |
+| Accent foreground      | `--octant-accent-foreground` | `#141414` | `#ffffff` | Text on the accent fill                                                                                                           |
+| Selection              | `--octant-selection`         | `#2c2c2c` | `#ebebea` | The row the pointer or keyboard is on in a scrolling picker (opaque so it never shifts); a chosen row is a check, never this fill |
+| Scrim                  | `--octant-scrim`             | `#000000` | `#000000` | Opaque by contract; mixed to a wash where used                                                                                    |
 
 **Pull-request roles.** `--oct-pr-open`, `--oct-pr-merged`, `--oct-pr-closed`,
 `--oct-pr-draft` and `--oct-link` are defined once in `octant.css` as the
@@ -1152,9 +1152,12 @@ is costly to render mounts only while open.
   GroupLabel, Item, CheckboxItem, RadioGroup, RadioItem, Separator, Sub,
   SubPopup, SubTrigger.
 - **Tokens.** At least 12rem wide, `--oct-radius-lg`, 4px padding, the float and
-  `--octant-shadow-pop`, 4px below its trigger, at `--oct-z-popup`; group label
-  24px in the navigation group role; separator one hairline with 4px around;
-  check 14px.
+  `--octant-shadow-pop`, 4px below its trigger, at `--oct-z-popup`; at most
+  `--oct-menu-max-w` (360px) wide and no taller than the room the window leaves
+  it, scrolling its rows past that; group label 24px in the navigation group
+  role; separator one hairline with 4px around; check 14px at the row's end.
+  An item or action marked `destructive` draws its label and icon in the danger
+  ink (see Menus).
 - **States.** Highlighted row `--octant-float-hover`; a chosen radio carries a
   check, never a fill; disabled 0.75. Glass: dense float.
 - **Accessibility.** Opens on the current choice; a pick closes the menu and
@@ -1218,8 +1221,10 @@ is costly to render mounts only while open.
   width, `--oct-radius-lg`, 4px padding, the float and `--octant-shadow-pop`,
   4px from the trigger; rows leave room for a 14px check.
 - **Accessibility.** Base UI select; opens beside the trigger; `name` writes a
-  hidden input. In the desktop app it is an `OctantMenu` radio list behind a
-  field-painted trigger. **Do** use `OctantToggleGroup` for 2 to 7 visible
+  hidden input. `OctantSelectField` is this Base UI select in the desktop app,
+  a browser and on the phone alike; no platform draws it as a menu. A disabled
+  option says why on a second line in the option (`oct-menu-detail`), never in
+  a native title alone. **Do** use `OctantToggleGroup` for 2 to 7 visible
   choices.
 
 ### OctantSeparator
@@ -1428,6 +1433,27 @@ the navigation group role (12px, sentence case, muted, never mono), and the row
 the keyboard is on takes `--oct-fill-4` with no border; the Enter hint says
 what it will do.
 
+**Scroll, width and gap.** A menu or context menu is no taller than the room
+the window leaves it and scrolls its rows past that, as a select and a combobox
+do; it is at most `--oct-menu-max-w` (360px) wide, and its sub-menus the same
+(maintainer request, 2026-11-16). Every popup that opens from a control (menu,
+popover, select, combobox) stands 4px from its trigger; a caller passes no
+offset of its own. A context menu opens at the pointer, as a native one does. A popover is padded 8px; one that is a list of rows (branch, Create
+from…, Where) takes the menu inset (`--oct-menu-inset`, 4px) so its rows stand
+on the menu rows' edges.
+
+**Groups.** A menu of several kinds of row names each group with the shared
+group label and puts one separator between groups (the Account menu, the Mode
+menu's switches). A short list with one trailing action, as More destinations,
+is one plain list and one separator, no labels. A switch that is not one of the
+modes above it (Strict, Keep the sandbox) stands under a separator so it does
+not read as another mode.
+
+**Destructive row.** A row that discards, archives or deletes is set
+`destructive`: label and icon in the danger ink at rest and when highlighted,
+and the same hover fill as every row, never a red fill (maintainer request,
+2026-11-16). It changes how the row looks and nothing it does.
+
 **Native menus.** Every menu, dropdown, select and right-click menu is
 Octant's own, in the desktop app as in a browser and on the phone, so a row
 keeps its description, icon and colour mark everywhere and there is one menu to
@@ -1443,6 +1469,12 @@ are the 28px menu row with trailing detail in meta ink; group headings
 (`.octant-popover-group`) 12px medium meta; status lines
 `.octant-popover-empty`. A popup is capped to the room on its side and only its
 list scrolls; add actions stay pinned under the list.
+The Project popup is built on the popover and is as tall as its content, with no
+reserved room (the GitHub view alone keeps a floor). Its search field appears only
+with more than seven Projects; with none it is one quiet "No Projects yet" line over
+the actions. A chosen Project is a check at the row's end, never a fill, and a refused
+row ("No Project" in Code) is a dimmed two-line row that gives its whole reason, never
+cut (maintainer request, 2026-11-16).
 
 ### Title band
 

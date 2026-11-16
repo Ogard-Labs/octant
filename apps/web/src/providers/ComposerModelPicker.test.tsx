@@ -1087,6 +1087,71 @@ describe("ComposerModelPicker shortcuts and long lists", () => {
     });
   });
 
+  it("marks the chosen model with a check and no selected fill, before its digit hint", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-2")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const list = await screen.findByRole("listbox", { name: "Models" });
+    const chosen = within(list).getByRole("option", { name: "Model 2" });
+    expect(chosen.querySelector(".composer-model-picker__model-check")).not.toBeNull();
+    expect(chosen.querySelector("kbd")?.previousElementSibling).toBe(
+      chosen.querySelector(".composer-model-picker__model-check"),
+    );
+    expect(list.querySelectorAll(".composer-model-picker__model-check")).toHaveLength(1);
+    expect(list.querySelector('[class*="--selected"]')).toBeNull();
+    expect(container.ownerDocument.querySelector('[class*="row--selected"]')).toBeNull();
+  });
+
+  it("draws the model search as the shared filled field", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={longGroups(12)}
+        onSelect={vi.fn()}
+        selectedModelId={decodeProviderModelId("long-1")}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const search = await screen.findByRole("searchbox", { name: "Search models" });
+    expect(search.closest("label")).toHaveClass("octant-popover-search");
+  });
+
+  it("shows all six reasoning levels in full", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelPicker
+        groups={groups()}
+        modelOptions={[
+          {
+            id: "effort",
+            displayName: "Effort",
+            values: ["low", "medium", "high", "xhigh", "max", "ultra"],
+            value: "high",
+          },
+        ]}
+        onModelOptionChange={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const levels = await screen.findByRole("group", { name: "Effort level" });
+    expect(
+      within(levels)
+        .getAllByRole("button")
+        .map((segment) => segment.textContent),
+    ).toEqual(["Low", "Medium", "High", "Extra high", "Max", "Ultra"]);
+  });
+
   it("sends a typed letter to the search field from anywhere in the picker", async () => {
     const user = userEvent.setup();
     render(

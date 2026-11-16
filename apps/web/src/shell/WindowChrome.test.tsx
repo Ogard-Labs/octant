@@ -662,7 +662,6 @@ describe("WindowChrome", () => {
       expect(overlay).toMatch(/^0 0 0 1px rgb\(/);
       expect(overlay).not.toContain("--octant-border-strong");
     }
-    expect(cssRule(".octant-menu__popup")).not.toMatch(/border:\s*1px/);
     // A sheet's loading state is on the sheet's own fill and in its own box:
     // the page colour at the window's height was a black panel in Settings'
     // sheet while it loaded.

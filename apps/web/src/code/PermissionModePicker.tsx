@@ -31,6 +31,7 @@ import {
   OctantMenuRadioGroup,
   OctantMenuRadioItem,
   OctantMenuRoot,
+  OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 
@@ -284,13 +285,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           ) : null}
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          {/* Above the button, 8px clear of it, and never over it: a menu that
+          {/* Above the button, 4px clear of it, and never over it: a menu that
               cannot fit above shifts sideways rather than cover its trigger. */}
           <OctantMenuPositioner
             align="start"
             collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
             side="top"
-            sideOffset={8}
           >
             <OctantMenuPopup>
               <OctantMenuRadioGroup
@@ -334,6 +334,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                   );
                 })}
               </OctantMenuRadioGroup>
+              {/* The switches are not modes: one rule between the radio choices
+                  and them, so Strict does not read as another mode. */}
+              {(props.value === "full-access" && props.onFullAccessSandboxChange !== undefined) ||
+              props.onStrictChange !== undefined ? (
+                <OctantMenuSeparator />
+              ) : null}
               {props.value === "full-access" && props.onFullAccessSandboxChange !== undefined ? (
                 <OctantMenuGroup>
                   <OctantMenuCheckboxItem
@@ -385,9 +391,12 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
                 </OctantMenuGroup>
               )}
               {props.profileName === undefined ? null : (
-                <OctantMenuGroup>
-                  <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
-                </OctantMenuGroup>
+                <>
+                  <OctantMenuSeparator />
+                  <OctantMenuGroup>
+                    <OctantMenuGroupLabel>Started under {props.profileName}</OctantMenuGroupLabel>
+                  </OctantMenuGroup>
+                </>
               )}
             </OctantMenuPopup>
           </OctantMenuPositioner>

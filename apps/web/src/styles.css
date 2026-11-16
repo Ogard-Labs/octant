@@ -812,65 +812,10 @@ strong {
   outline: 0;
 }
 
-.octant-menu__popup {
-  width: max-content;
-  min-width: min(248px, calc(100vw - 16px));
-  max-width: min(320px, calc(100vw - 16px));
-  padding: 4px;
-  color: var(--octant-text-primary);
-  background: var(--octant-float);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
-  outline: 0;
-}
-
-.octant-menu__item {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 18px;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-height: 42px;
-  padding: var(--oct-space-1) var(--oct-space-2);
-  color: var(--octant-text-secondary);
-  border-radius: var(--oct-radius-sm);
-  cursor: default;
-  outline: 0;
-  user-select: none;
-}
-
-.octant-menu__item[data-highlighted] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.octant-menu__item:active {
-  background: var(--octant-control-pressed);
-}
-
-.octant-menu__item-icon,
 .octant-menu__indicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-.octant-menu__item-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.octant-menu__item-label {
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
-}
-
-.octant-menu__item-description {
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.35;
-  white-space: normal;
 }
 
 /* A check mark says which item is chosen; it is not a focus cue, and the
@@ -1898,17 +1843,15 @@ html[data-octant-native-host="true"]
   white-space: nowrap;
 }
 
+/* Fill, radius and shadow are the shared float's, from components.css; it
+   stands above the dock like any menu, at the popup layer. */
 .workspace-disclosure {
   position: absolute;
-  z-index: 20;
+  z-index: var(--oct-z-popup);
   display: grid;
   width: max-content;
   min-width: 196px;
-  padding: 4px;
-  background: var(--octant-float);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
+  padding: var(--oct-menu-inset);
 }
 
 .workspace-tab-launcher {
@@ -4978,10 +4921,6 @@ html[data-octant-increased-contrast="true"] .workspace-pane__header {
   border-color: var(--octant-border-strong);
 }
 
-html[data-octant-increased-contrast="true"] .octant-menu__popup,
-html[data-octant-increased-contrast="true"] .octant-menu__item[data-highlighted] {
-  border-color: var(--octant-border-strong);
-}
 html[data-octant-increased-contrast="true"] .workspace-pane[data-active="true"] {
   box-shadow: none;
   background: var(--octant-control-hover);
@@ -5076,9 +5015,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: min(360px, calc(100vw - 24px));
   /* One frame for every tab: the list scrolls inside it, and a short or empty
      list leaves it as it is, so choosing a provider never moves the popup or
-     its trigger edge. Only a window too short for 440px shortens it, once,
-     at open. */
-  height: min(440px, calc(100dvh - 24px), var(--available-height, 440px));
+     its trigger edge. 376px holds the rail (44), the search (36), five 28px
+     rows with "Show more" and the list's padding (176) and the two controls
+     at the foot (114) with 6px to spare, so the common case shows no blank
+     band; a longer list scrolls (maintainer request, 2026-11-16). Only a
+     window too short for it shortens it, once, at open. */
+  height: min(376px, calc(100dvh - 24px), var(--available-height, 376px));
   padding: 0;
   overflow: hidden;
   /* Size and place only. The popover recipe paints the fill, the edge, and the
@@ -5105,7 +5047,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__extras {
   display: grid;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-menu-inset);
 }
 
 .composer-model-picker__setting {
@@ -5121,20 +5063,25 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: 100%;
 }
 
+/* The two controls stand on the rows' box edge (the popup's 4px inset) and
+   share 8px above and below, so the gap between the blocks is the same on
+   both sides of the hairline. */
 .composer-model-picker__reasoning,
 .composer-model-picker__tier {
   display: grid;
   gap: var(--oct-space-1);
-  padding: var(--oct-space-2) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-menu-inset);
 }
 
-/* "Reasoning" on the left, the model it applies to on the right. */
+/* "Reasoning" on the left, the model it applies to on the right, on the rows'
+   text edge (4px popup inset plus the row's 8px). */
 .composer-model-picker__setting-head {
   display: flex;
   min-height: 20px;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-2);
+  padding-inline: var(--oct-menu-row-inset);
   font-size: var(--oct-text-xs);
 }
 
@@ -5157,17 +5104,22 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__segments.segmented {
   display: flex;
   width: 100%;
+  /* A window narrower than the six labels (a phone under about 363px) scrolls
+     the track sideways; cutting the last level off would hide a choice. */
+  overflow-x: auto;
 }
 
+/* Segments size to their words and share the rest equally, so no label is
+   ever clipped: six levels (Low to Ultra) read in full at the popup's width,
+   where equal-width segments cut "Extra high" to "Extra higl". The track is
+   always the row's width, so choosing a level moves nothing. */
 .composer-model-picker__segments > .segment {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: auto;
   height: var(--oct-tray-segment-h);
   min-height: var(--oct-tray-segment-h);
-  overflow: hidden;
-  padding-inline: var(--oct-space-1);
+  padding-inline: var(--oct-space-2);
   font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -5380,20 +5332,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   flex-direction: column;
 }
 
-/* The field is the shared popover search; here it keeps its inset under the
-   catalog rail. */
+/* The field is the shared filled 32px popover search, with no edge of its own;
+   this rule only stands it on the rows' box edge (the popup's 4px inset) and
+   leaves 4px to the list (maintainer request, 2026-11-16). */
 .composer-model-picker__pane .composer-model-picker__search {
   flex: 0 0 auto;
-  min-height: 36px;
-  margin: 0 var(--oct-space-3) var(--oct-space-1);
-  padding: 0;
-  background: transparent;
-  border-bottom: 1px solid var(--octant-accent);
-  border-radius: 0;
-}
-
-.composer-model-picker__pane .composer-model-picker__search:focus-within {
-  background: transparent;
+  margin: 0 var(--oct-menu-inset) var(--oct-space-1);
 }
 
 /* Catalogs wrap onto as many short rows as they need, so every one is on
@@ -5476,10 +5420,16 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
      shrink gives up height before the list scrolls, and its two lines then
      stand taller than the fill painted behind them. */
   flex: 0 0 auto;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  min-height: 40px;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  min-height: var(--oct-menu-row-h);
   align-items: stretch;
   border-radius: var(--oct-radius-sm);
+}
+
+/* A row with a second line (the account under a model in a mixed list) is the
+   menu's two-line row. */
+.composer-model-picker__row:has(.composer-model-picker__model-detail) {
+  min-height: var(--oct-menu-row-two-h);
 }
 
 .composer-model-picker__row > .composer-model-picker__star {
@@ -5492,11 +5442,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 }
 .composer-model-picker__row:active:not(:has(:is(button, a, [role="button"]):active)) {
   background: var(--octant-control-pressed);
-}
-
-/* The chosen model carries the selected wash and a check after its name. */
-.composer-model-picker__row--selected {
-  background: var(--octant-selection);
 }
 
 .composer-model-picker__model {
@@ -5547,18 +5492,16 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   gap: var(--oct-space-1);
 }
 
-/* The ⌘ digit that chooses the row while the picker is open. */
+/* The ⌘ digit that chooses the row while the picker is open: quiet meta text,
+   right-aligned in a fixed 24px column so every row's digit and the chosen
+   row's check (just before it) stand on one trailing edge. */
 .composer-model-picker__hint {
-  display: grid;
-  flex: 0 0 auto;
-  min-height: 20px;
-  place-items: center;
-  padding: 0 var(--oct-space-2);
-  color: var(--octant-text-muted);
-  background: var(--octant-control);
-  border-radius: var(--oct-radius-sm);
+  flex: 0 0 24px;
+  width: 24px;
+  color: var(--oct-meta);
   font: inherit;
   font-size: var(--oct-text-xs);
+  text-align: end;
 }
 
 /* "Show more" is the quiet last line of a long list, under the model names. */
@@ -5566,7 +5509,7 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   display: flex;
   flex: 0 0 auto;
   width: 100%;
-  min-height: 32px;
+  min-height: var(--oct-menu-row-h);
   align-items: center;
   justify-content: flex-start;
   padding: 0 var(--oct-menu-row-inset) 0
@@ -6608,10 +6551,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   max-height: 320px;
   overflow: auto;
   padding: var(--oct-space-3);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .composer-pool-control__options {
@@ -7174,15 +7113,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .code-board__view-popover {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--oct-space-1));
   right: 0;
   left: auto;
   max-width: 100%;
   z-index: 6;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel {
@@ -7193,10 +7128,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   max-height: calc(100vh - 220px);
   padding: var(--oct-space-3);
   overflow-y: auto;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel legend,

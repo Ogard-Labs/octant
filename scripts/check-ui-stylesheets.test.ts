@@ -499,6 +499,27 @@ describe("UI stylesheet check", () => {
     });
   });
 
+  it("flags a floating surface whose corner is not the large radius, and leaves its descendants alone", () => {
+    const radii = (css: string) =>
+      findStylesheetFindings({ [CSS]: css }).map((finding) => finding.rule);
+    expect(radii('[data-slot="popover-content"] { border-radius: var(--oct-radius-md); }')).toEqual(
+      ["radius-token"],
+    );
+    expect(radii(".workspace-disclosure { border-radius: var(--oct-radius-sm); }")).toEqual([
+      "radius-token",
+    ]);
+    // A slot that only ends in "-content" is not a float.
+    expect(radii('[data-slot="card-content"] { border-radius: var(--oct-radius-md); }')).toEqual(
+      [],
+    );
+    expect(radii('[data-slot="popover-content"] { border-radius: var(--oct-radius-lg); }')).toEqual(
+      [],
+    );
+    expect(
+      radii('[data-slot="menu-content"] .row { border-radius: var(--oct-radius-sm); }'),
+    ).toEqual([]);
+  });
+
   it("flags a corner that is not a radius token, and keeps the allowed shapes", () => {
     const findings = findStylesheetFindings({
       [CSS]: [

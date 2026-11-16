@@ -1813,7 +1813,7 @@ function CodeProjectViewSwitcher(props: {
       ? []
       : [
           { label: "Edit view", value: "edit" },
-          { label: "Delete view", value: "delete" },
+          { destructive: true, label: "Delete view", value: "delete" },
         ]),
   ];
   const onContextValue = (view: Pick<CodeProjectView, "id" | "name">, value: string): void => {
@@ -1921,7 +1921,7 @@ function CodeProjectViewChip(props: {
           ? []
           : [
               { label: "Edit view", value: "edit" },
-              { label: "Delete view", value: "delete" },
+              { destructive: true, label: "Delete view", value: "delete" },
             ]),
       ]}
       onValueChange={(value) => {
@@ -2046,10 +2046,7 @@ function ProjectViewFilterMenu(props: {
         </OctantMenuTrigger>
         <OctantMenuPortal>
           <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
-            <OctantMenuPopup
-              aria-label="Project view filters"
-              className="min-w-[14rem] max-w-[calc(100vw-24px)]"
-            >
+            <OctantMenuPopup aria-label="Project view filters" className="min-w-[14rem]">
               {props.arrangement === undefined || props.onArrangementChange === undefined ? null : (
                 <>
                   <ThreadListViewGroup

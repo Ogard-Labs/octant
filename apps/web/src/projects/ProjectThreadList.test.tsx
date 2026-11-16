@@ -345,6 +345,26 @@ describe("ProjectThreadRows", () => {
     expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
   });
 
+  it("draws Archive in the danger ink in a thread's right-click menu and no other row", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onArchiveThread: vi.fn(), onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "Archive" })).toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menuitem", { name: "Pin" })).not.toHaveAttribute("data-destructive");
+  });
+
   it("places a thread in a new split pane from its own right-click menu", async () => {
     const onPinInPane = vi.fn();
     render(

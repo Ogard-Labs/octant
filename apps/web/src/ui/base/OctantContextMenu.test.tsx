@@ -60,4 +60,27 @@ describe("OctantContextMenu", () => {
       Object.defineProperty(window, "octantHost", { configurable: true, value: undefined });
     }
   });
+
+  it("marks a destructive item for the danger ink, and its popup carries the scroll cap", async () => {
+    const user = userEvent.setup();
+    render(
+      <OctantContextMenu
+        items={[
+          { label: "Rename", value: "rename" },
+          { destructive: true, label: "Archive", value: "archive" },
+        ]}
+        onValueChange={vi.fn()}
+      >
+        <span>Row</span>
+      </OctantContextMenu>,
+    );
+    await user.pointer({ target: screen.getByText("Row"), keys: "[MouseRight]" });
+    expect(await screen.findByRole("menuitem", { name: "Archive" })).toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menuitem", { name: "Rename" })).not.toHaveAttribute(
+      "data-destructive",
+    );
+    expect(screen.getByRole("menu").className).toContain("overflow-y-auto");
+  });
 });

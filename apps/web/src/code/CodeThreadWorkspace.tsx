@@ -3279,6 +3279,7 @@ function codeTurnActions(input: {
         ...(input.checkpointBusy ? { disabled: true } : {}),
       });
       actions.push({
+        destructive: true,
         label: "Forget",
         value: "checkpoint-forget",
         ...(input.checkpointBusy ? { disabled: true } : {}),

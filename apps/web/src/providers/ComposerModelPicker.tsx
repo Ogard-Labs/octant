@@ -596,16 +596,13 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       picker.toolsVerifiable === true &&
       (unavailable || selected || verifyNote !== undefined);
     return (
-      <div
-        className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
-        key={rowKeyOf(row)}
-      >
+      <div className="composer-model-picker__row" key={rowKeyOf(row)}>
         <OctantButton
           aria-label={presentedModelName(picker.model)}
           aria-description={detail === "" ? undefined : detail}
           aria-keyshortcuts={shortcutIndex < 0 ? undefined : `Meta+${shortcutIndex + 1}`}
           aria-selected={selected}
-          className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
+          className={`composer-model-picker__model${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
           disabled={unavailable || controlsDisabled}
           onClick={() => chooseRow(row)}
           role="option"
@@ -627,18 +624,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               <span className="oct-menu-option composer-model-picker__model-name">
                 {presentedModelName(picker.model)}
               </span>
-              {selected && !unavailable ? (
-                <Check
-                  aria-hidden="true"
-                  className="composer-model-picker__model-check"
-                  size={16}
-                />
-              ) : null}
             </span>
             {detail === "" ? null : (
               <span className="composer-model-picker__model-detail">{detail}</span>
             )}
           </span>
+          {/* The chosen model carries a check, never a fill; it stands just before
+              the ⌘ digit so both keep the row's trailing edge. */}
+          {selected && !unavailable ? (
+            <Check aria-hidden="true" className="composer-model-picker__model-check" size={16} />
+          ) : null}
           {/* A Chat-only model that can be verified says so once, in the
               "Chat only · Verify tools" line under it. */}
           {unavailable &&
@@ -814,7 +809,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         }}
         open={open}
         side={props.menuSide ?? "top"}
-        sideOffset={8}
+        sideOffset={4}
         title="Choose provider and model"
         trigger={
           <>

@@ -169,7 +169,6 @@ export function ComposerPoolControl(props: ComposerPoolControlProps) {
         onOpenChange={handleOpenChange}
         open={open}
         side="top"
-        sideOffset={6}
         title="Multi-model pool editor"
         trigger={
           <>

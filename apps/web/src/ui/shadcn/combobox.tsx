@@ -60,6 +60,7 @@ export function ComboboxPositioner({
 }: ComponentProps<typeof ComboboxPrimitive.Positioner>) {
   return (
     <ComboboxPrimitive.Positioner
+      sideOffset={4}
       className={cn(
         "z-[var(--oct-z-popup)] w-[var(--anchor-width)] outline-none window-no-drag",
         className,
@@ -124,7 +125,7 @@ export function ComboboxItemIndicator({
   return (
     <ComboboxPrimitive.ItemIndicator
       className={cn(
-        "ml-auto inline-flex size-(--oct-icon-md) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-md)",
+        "ml-auto inline-flex size-(--oct-icon-sm) shrink-0 items-center justify-center text-foreground [&_svg]:size-(--oct-icon-sm)",
         className,
       )}
       data-slot="combobox-item-indicator"

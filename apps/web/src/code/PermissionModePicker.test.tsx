@@ -296,4 +296,29 @@ describe("Strict in the mode picker", () => {
     await userEvent.click(strict);
     expect(onStrictChange).toHaveBeenCalledWith(true);
   });
+
+  it("sets the switches apart from the modes with one separator, so Strict does not read as another mode", async () => {
+    render(
+      <PermissionModePicker
+        autoSupported
+        onChange={() => undefined}
+        onStrictChange={() => undefined}
+        strict={false}
+        value="ask-first"
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^Mode:/ }));
+    const strict = await screen.findByRole("menuitemcheckbox", { name: /^Strict/ });
+    const menu = screen.getByRole("menu");
+    const separator = menu.querySelector('[role="separator"]');
+    expect(separator).not.toBeNull();
+    const lastMode = menu.querySelectorAll('[role="menuitemradio"]');
+    expect(
+      separator!.compareDocumentPosition(lastMode[lastMode.length - 1]!) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+    expect(
+      separator!.compareDocumentPosition(strict) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
 });

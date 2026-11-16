@@ -72,6 +72,7 @@ export function OctantContextMenu(props: OctantContextMenuProps) {
               closeOnClick
               key={item.value}
               label={item.label}
+              {...(item.destructive === true ? { destructive: true } : {})}
               {...(item.disabled === true ? { disabled: true } : {})}
               onClick={() => {
                 if (item.disabled === true) return;

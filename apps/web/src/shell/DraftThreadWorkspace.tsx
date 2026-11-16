@@ -677,7 +677,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ...(props.mode === "code" && props.codeDefaultFolderThreads !== true
             ? {
                 disabled: true,
-                disabledReason: "Code needs a Git repository. Change it in Code settings",
+                disabledReason:
+                  "Code needs a Git repository. You can change that in Code settings.",
               }
             : {}),
         } satisfies ComposerProjectEntry)

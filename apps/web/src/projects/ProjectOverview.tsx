@@ -214,7 +214,11 @@ export function ProjectOverview(props: ProjectOverviewProps) {
   const overflowItems: ReadonlyArray<OctantMenuItem> = [
     ...iconItems,
     ...(canRelink && !unavailable ? [{ label: "Relink folder", value: "relink" }] : []),
-    { label: props.project.type === "chat" ? "Archive" : "Archive Project", value: "archive" },
+    {
+      destructive: true,
+      label: props.project.type === "chat" ? "Archive" : "Archive Project",
+      value: "archive",
+    },
   ];
   // A base URL the client refuses (a remote host over plain HTTP) leaves the
   // recipe editor unable to ask, which it says, rather than broken.

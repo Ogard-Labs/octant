@@ -472,7 +472,7 @@ function TodoRow(props: TodoRowProps) {
     todo.state === "dropped"
       ? { label: "Bring back", value: "restore" }
       : { label: "Drop", value: "drop" },
-    { label: "Delete…", value: "delete" },
+    { destructive: true, label: "Delete…", value: "delete" },
   ];
   return (
     <li

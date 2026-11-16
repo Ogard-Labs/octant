@@ -30,7 +30,7 @@ export function ContextMenuContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-[12rem] max-w-(--oct-menu-max-w) rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
+            "window-no-drag max-h-(--available-height) min-w-[12rem] max-w-(--oct-menu-max-w) overflow-y-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
             className,
           )}
           {...props}
@@ -61,12 +61,14 @@ const contextMenuItemClassName = cn(menuRow, "window-no-drag");
 export function ContextMenuItem({
   className,
   closeOnClick = true,
+  destructive = false,
   ...props
-}: ComponentProps<typeof ContextMenuPrimitive.Item>) {
+}: ComponentProps<typeof ContextMenuPrimitive.Item> & { readonly destructive?: boolean }) {
   return (
     <ContextMenuPrimitive.Item
       className={cn(contextMenuItemClassName, className)}
       closeOnClick={closeOnClick}
+      {...(destructive ? { "data-destructive": "" } : {})}
       {...props}
     />
   );
@@ -85,7 +87,7 @@ export function ContextMenuCheckboxItem({
       {...props}
     >
       {children}
-      <ContextMenuPrimitive.CheckboxItemIndicator className="ml-auto pl-2 text-foreground">
+      <ContextMenuPrimitive.CheckboxItemIndicator className="ml-auto text-foreground">
         <Check aria-hidden="true" size={14} />
       </ContextMenuPrimitive.CheckboxItemIndicator>
     </ContextMenuPrimitive.CheckboxItem>
@@ -128,7 +130,7 @@ export function ContextMenuSubContent({
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"
           className={cn(
-            "window-no-drag min-w-[12rem] max-w-(--oct-menu-max-w) rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
+            "window-no-drag max-h-(--available-height) min-w-[12rem] max-w-(--oct-menu-max-w) overflow-y-auto rounded-(--oct-radius-lg) bg-popover p-(--oct-menu-inset) text-popover-foreground shadow-[var(--octant-shadow-pop)] outline-none",
             className,
           )}
           {...props}

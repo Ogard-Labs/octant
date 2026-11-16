@@ -423,7 +423,7 @@ describe("the public-block visual language", () => {
     // A floating surface's edge is a shadow, so each one that has no border gets
     // one back here, and a chip that is pressed is told by the system highlight.
     for (const selector of [
-      ".octant-menu__popup",
+      ".window-chrome__disclosure",
       ".octant-dialog__popup",
       ".palette",
       ".toast",
@@ -736,9 +736,10 @@ describe("the public-block visual language", () => {
     // them, and text fields set inside a frame that is itself the field.
     const mayReset = new Set([
       ".octant-menu__positioner",
-      ".octant-menu__popup",
-      ".octant-menu__item",
       ".model-picker__listbox",
+      // The Project picker's list holds the keyboard when it shows no search
+      // field; the row the keyboard is on carries the highlight.
+      ".composer-folder-selector__list",
       ".settings-search-results",
       ".review-page__body",
       ".zen-surface",

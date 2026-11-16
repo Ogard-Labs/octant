@@ -535,6 +535,7 @@ export function ThreadRowActionsGutter(props: {
       ? []
       : [
           {
+            destructive: true,
             icon: <Archive aria-hidden="true" size={14} />,
             label: "Archive thread",
             value: "archive",

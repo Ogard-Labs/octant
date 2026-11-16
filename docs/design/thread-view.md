@@ -473,7 +473,7 @@ the frame.
 The compact model picker is one float with 12px corners. From the top: a row
 of icon tabs (Favorites, Recent, then one tab per provider showing its mark;
 the current tab has a quiet filled square behind its icon, and a tooltip names
-each); a borderless search field with a 1px accent underline; the model rows;
+each); the shared filled 32px search field, with no edge of its own; the model rows;
 a hairline and the Reasoning row; a hairline and the service-tier row. Sub-provider
 grouping stays as catalog chips under the search where a provider fronts several
 catalogs. The picker of a thread whose model can no longer
@@ -483,9 +483,11 @@ unpressable by its dimmed chevron, default cursor and absent hover; a picker
 disabled for any other reason, such as a running turn or no ready provider,
 keeps the ordinary disabled look.
 
-A row is about 40px: the provider's mark, the model name, a small check right
-after the name for the current model, and a hint chip at the right edge. The
-current row carries the selected wash; a row's star shows on hover, on focus,
+A row is the menu's 28px row (44px with the account under the model): the
+provider's mark, the model name, and at the end the ⌘ digit as quiet meta text
+in a fixed right-aligned column, with the current model's check just before
+it. The current row carries a check, never a fill (maintainer request,
+2026-11-16); a row's star shows on hover, on focus,
 or once it is on. A mixed list (Favorites, Recent, a search) names the account
 under the model, since two accounts of one provider share a mark. The first
 nine choosable rows show "⌘1" to "⌘9", and while the picker is open that chord
@@ -497,13 +499,16 @@ shows every match, and the chosen model is never left behind the fold); the
 list scrolls inside the frame.
 
 The popup is one fixed frame, 360px wide
-and 440px tall (shorter only when the window is), opening 8px above its
+and 376px tall (shorter only when the window is; it holds the rail, the search,
+five rows with "Show more" and the two controls with no blank band, and a
+longer list scrolls), opening 4px above its
 trigger with its edge aligned to the trigger's end: switching Favorites,
 Recent or a provider, an empty or short list, Show more, a search, and
 choosing a model or a setting never resize or move it or its trigger. The
 Reasoning and service-tier rows are always there for a picker whose caller can
 set model options, so the frame does not depend on the model. Reasoning is a
-segmented control of the levels the model declares, least to most, with the
+segmented control of the levels the model declares, least to most, whose
+segments size to their words so six levels (Low to Ultra) all read in full, with the
 chosen level in accent ink on a raised segment, "Reasoning" on the left and
 the model's name on the right; pressing the chosen level again returns to the
 provider's default, and a chosen level shows at once and never snaps back
@@ -511,7 +516,7 @@ while it saves. A model with no levels keeps the row, disabled, with one line
 saying so. The tier row is a segmented "Standard | Fast" (the provider's own
 names, with a bolt on the fast one); a model with no faster tier keeps the row
 disabled with its reason. The mode menu and
-the other composer-row menus open 8px above their button and never over it.
+the other composer-row menus open above their button and never over it.
 Choosing a model keeps the menu open, since the
 reasoning level beneath is often the next choice. Explicit model and reasoning choices are remembered
 locally for new threads; model settings are keyed by provider/model and restored only

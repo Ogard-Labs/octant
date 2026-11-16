@@ -304,7 +304,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                     <ChevronDown aria-hidden="true" size={14} />
                   </OctantMenuTrigger>
                   <OctantMenuPortal>
-                    <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+                    <OctantMenuPositioner align="end">
                       <OctantMenuPopup aria-label="Merge method" className="min-w-[13rem]">
                         <OctantMenuRadioGroup
                           onValueChange={(value) => {
@@ -342,7 +342,7 @@ export function ProjectPullRequestPage(props: ProjectPullRequestPageProps) {
                   </OctantMenuTrigger>
                 </OctantTooltip>
                 <OctantMenuPortal>
-                  <OctantMenuPositioner align="end" className="z-50 outline-none window-no-drag">
+                  <OctantMenuPositioner align="end">
                     <OctantMenuPopup aria-label="More actions" className="min-w-[13rem]">
                       <OctantMenuItem disabled={closing} onClick={() => void closeOrReopen()}>
                         {closed ? "Reopen pull request" : "Close pull request"}

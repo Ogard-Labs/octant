@@ -793,6 +793,7 @@ function AutomationListBody(props: {
                                 Run now
                               </OctantMenuItem>
                               <OctantMenuItem
+                                destructive
                                 onClick={() =>
                                   void props.onRunCommand(
                                     summary,
