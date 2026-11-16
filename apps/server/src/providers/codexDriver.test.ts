@@ -10,7 +10,7 @@ import {
   decodeProviderModelId,
   decodeProviderSessionId,
   type ProviderExecutionPolicy,
-  type ProviderProbeResult,
+  type ProviderFailure,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
@@ -22,6 +22,7 @@ import {
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   codexAppServerArgs,
+  codexRunsNativeSandbox,
   makeCodexProcessLive,
   type CodexAppServerConnection,
   type CodexProcessPort,
@@ -41,6 +42,7 @@ import type {
 import {
   approvalRequestIsProjectConfined,
   codexExecutionSettings,
+  codexReviewRequest,
   codexTurnExecutionSettings,
   makeCodexClient,
   makeCodexDriver,
@@ -164,6 +166,7 @@ function fixture(
     }>;
     readonly version?: string;
     readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
+    readonly threadInjectItems?: (input: unknown) => Promise<void>;
   } = {},
 ): Fixture {
   const calls: Array<{ method: string; input?: unknown }> = [];
@@ -242,6 +245,14 @@ function fixture(
     threadCompactStart: async (value) => {
       calls.push({ method: "thread/compact/start", input: value });
       await input.threadCompactStart?.(value);
+    },
+    threadInjectItems: async (value) => {
+      calls.push({ method: "thread/inject_items", input: value });
+      await input.threadInjectItems?.(value);
+    },
+    reviewStart: async (value) => {
+      calls.push({ method: "review/start", input: value });
+      return { turn: { id: "review-turn", status: "inProgress" }, reviewThreadId: value.threadId };
     },
     respondApproval: async (value) => {
       calls.push({ method: "approval/respond", input: value });
@@ -812,7 +823,7 @@ describe("Codex driver probe and runtime lifecycle", () => {
     expect(bounded.calls.filter(({ method }) => method === "model/list")).toHaveLength(10);
   });
 
-  it("refuses a Bedrock sign-in that reaches the AWS profile or shared config and admits an instance-scoped one", async () => {
+  it("refuses a Strict session a Bedrock sign-in that reaches the AWS profile or shared config, and admits it outside Strict", async () => {
     const bedrock = (usesCodexManagedCredentials = false) => ({
       account: { type: "amazonBedrock" as const, usesCodexManagedCredentials },
       requiresOpenaiAuth: false,
@@ -828,15 +839,41 @@ describe("Codex driver probe and runtime lifecycle", () => {
         },
       },
     });
-    const probe = async (
+    // Starts one session and reports how it ended: started, or the refusal.
+    const start = async (
       input: Parameters<typeof fixture>[0],
       environment: NodeJS.ProcessEnv,
-    ): Promise<ProviderProbeResult> =>
-      Effect.runPromise(
-        Effect.scoped(
-          makeCodexDriver(fixture(input).options({ environment })).probe({ instanceId }),
+      strict?: false,
+    ): Promise<
+      | { readonly outcome: "started" }
+      | { readonly outcome: "refused"; readonly failure: ProviderFailure }
+    > => {
+      const f = fixture(input);
+      const scope = await Effect.runPromise(Scope.make());
+      const started = await Effect.runPromise(
+        Effect.either(
+          makeCodexDriver(f.options({ environment }))
+            .acquire({ instanceId, projectRoot })
+            .pipe(
+              Effect.flatMap((connection) =>
+                connection.start({
+                  sessionId,
+                  modelId: "gpt-5.4" as never,
+                  executionPolicy: "approval-gated",
+                  ...(strict === false ? { strict } : {}),
+                }),
+              ),
+              Effect.provideService(Scope.Scope, scope),
+            ),
         ),
       );
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      if (started._tag === "Right") return { outcome: "started" };
+      expect(f.calls.some(({ method }) => method === "thread/start")).toBe(false);
+      return { outcome: "refused", failure: started.left };
+    };
+    const refusal = (result: Awaited<ReturnType<typeof start>>): ProviderFailure | undefined =>
+      result.outcome === "refused" ? result.failure : undefined;
     const bearer = { AWS_BEARER_TOKEN_BEDROCK: "bedrock-token", AWS_REGION: "us-east-1" };
 
     // With no Codex-managed key and no bearer token, Codex falls through to
@@ -849,99 +886,101 @@ describe("Codex driver probe and runtime lifecycle", () => {
       { AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret-sentinel" },
       { AWS_BEARER_TOKEN_BEDROCK: " " },
     ]) {
-      const refused = await probe(
-        { account: bedrock(), configRead: async () => effectiveConfig() },
-        environment,
+      const refused = refusal(
+        await start({ account: bedrock(), configRead: async () => effectiveConfig() }, environment),
       );
-      expect(refused.readiness, JSON.stringify(environment)).toBe("incompatible");
-      expect(refused.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
-      expect(refused.message).not.toContain("secret-sentinel");
+      expect(refused?.category, JSON.stringify(environment)).toBe("incompatible");
+      expect(refused?.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
+      expect(refused?.message).toContain("Turn Strict off");
+      expect(refused?.message).not.toContain("secret-sentinel");
     }
 
     // A profile or a credential export in the config outranks the bearer
     // token in Codex's own order, so exporting the token does not help.
-    const profile = await probe(
-      { account: bedrock(), configRead: async () => effectiveConfig({ profile: "work" }) },
-      bearer,
+    const profile = refusal(
+      await start(
+        { account: bedrock(), configRead: async () => effectiveConfig({ profile: "work" }) },
+        bearer,
+      ),
     );
-    expect(profile.readiness).toBe("incompatible");
-    expect(profile.message).toContain("aws.profile");
-    const credentialExport = await probe(
-      {
-        account: bedrock(),
-        configRead: async () =>
-          effectiveConfig({ credential_export: { command: "aws", args: ["configure"] } }),
-      },
-      bearer,
+    expect(profile?.message).toContain("aws.profile");
+    const credentialExport = refusal(
+      await start(
+        {
+          account: bedrock(),
+          configRead: async () =>
+            effectiveConfig({ credential_export: { command: "aws", args: ["configure"] } }),
+        },
+        bearer,
+      ),
     );
-    expect(credentialExport.readiness).toBe("incompatible");
-    expect(credentialExport.message).toContain("aws.credential_export");
+    expect(credentialExport?.message).toContain("aws.credential_export");
 
     // What the person configured for this account alone still works.
     expect(
-      (await probe({ account: bedrock(), configRead: async () => effectiveConfig() }, bearer))
-        .readiness,
-    ).toBe("ready");
+      await start({ account: bedrock(), configRead: async () => effectiveConfig() }, bearer),
+    ).toEqual({ outcome: "started" });
     expect(
-      (await probe({ account: bedrock(true), configRead: async () => effectiveConfig() }, {}))
-        .readiness,
-    ).toBe("ready");
+      await start({ account: bedrock(true), configRead: async () => effectiveConfig() }, {}),
+    ).toEqual({ outcome: "started" });
     expect(
-      (
-        await probe(
-          {
-            account: bedrock(),
-            configRead: async () =>
-              effectiveConfig({ region: "us-east-1" }, { command: "bedrock-token" }),
-          },
-          {},
-        )
-      ).readiness,
-    ).toBe("ready");
+      await start(
+        {
+          account: bedrock(),
+          configRead: async () =>
+            effectiveConfig({ region: "us-east-1" }, { command: "bedrock-token" }),
+        },
+        {},
+      ),
+    ).toEqual({ outcome: "started" });
+
+    // Outside Strict Codex signs in as it does on its own: an AWS profile,
+    // exported keys and a credential export all start.
+    expect(
+      await start(
+        { account: bedrock(), configRead: async () => effectiveConfig({ profile: "work" }) },
+        { AWS_PROFILE: "work" },
+        false,
+      ),
+    ).toEqual({ outcome: "started" });
+    expect(
+      await start(
+        { account: bedrock(), configRead: async () => effectiveConfig() },
+        { AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret-sentinel" },
+        false,
+      ),
+    ).toEqual({ outcome: "started" });
 
     // A runtime older than the Bedrock account report is recognised from its
-    // config and held to the same rule.
+    // config and held to the same rule under Strict.
     const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
     try {
       writeFileSync(join(codexHome, "config.toml"), 'model_provider = "amazon-bedrock"\n');
       const older = {
         account: { account: { type: "apiKey" as const }, requiresOpenaiAuth: false },
       };
-      expect((await probe(older, { CODEX_HOME: codexHome, AWS_PROFILE: "work" })).readiness).toBe(
-        "incompatible",
+      expect((await start(older, { CODEX_HOME: codexHome, AWS_PROFILE: "work" })).outcome).toBe(
+        "refused",
       );
-      expect((await probe(older, { CODEX_HOME: codexHome, ...bearer })).readiness).toBe("ready");
+      expect((await start(older, { CODEX_HOME: codexHome, ...bearer })).outcome).toBe("started");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
 
-    // Every session acquisition holds the same line, so a caller that never
-    // probed cannot start a thread on a refused sign-in either.
-    const unprobed = fixture({
-      account: bedrock(),
-      configRead: async () => effectiveConfig({ profile: "work" }),
-    });
-    const scope = await Effect.runPromise(Scope.make());
-    const acquired = await Effect.runPromise(
-      Effect.either(
-        makeCodexDriver(unprobed.options({ environment: bearer }))
-          .acquire({ instanceId, projectRoot })
-          .pipe(
-            Effect.flatMap((connection) =>
-              connection.start({
-                sessionId,
-                modelId: "gpt-5.4" as never,
-                executionPolicy: "approval-gated",
-              }),
-            ),
-            Effect.provideService(Scope.Scope, scope),
-          ),
+    // The account itself stays ready: only a Strict session is refused.
+    const probed = await Effect.runPromise(
+      Effect.scoped(
+        makeCodexDriver(
+          fixture({
+            account: bedrock(),
+            configRead: async () => effectiveConfig({ profile: "work" }),
+          }).options({
+            environment: { AWS_PROFILE: "work" },
+          }),
+        ).probe({ instanceId }),
       ),
     );
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    expect(acquired._tag).toBe("Left");
-    if (acquired._tag === "Left") expect(acquired.left.category).toBe("incompatible");
-    expect(unprobed.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    expect(probed.readiness).toBe("ready");
   });
 
   it("shares one process per root and posture, separates postures and instances, and idles for 30 seconds", async () => {
@@ -3069,6 +3108,395 @@ describe("Codex execution authority and approvals", () => {
     },
   );
 
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "runs %s in Codex's own workspace-write sandbox outside Strict and in Octant's profile under Strict",
+    async (policy) => {
+      const extra = "/tmp/octant-codex-extra";
+      const turnFor = async (strict: boolean | undefined) => {
+        const f = fixture();
+        const acquired = await acquireConnection(makeCodexDriver(f.options()), "code", [extra]);
+        await Effect.runPromise(
+          acquired.connection.start({
+            sessionId,
+            modelId: "gpt-5.4" as never,
+            executionPolicy: policy,
+            ...(strict === undefined ? {} : { strict }),
+          }),
+        );
+        await Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt: "go", attachments: [], tools: [] }),
+        );
+        await acquired.close();
+        return {
+          authority: f.authorities()[0],
+          thread: f.calls.find(({ method }) => method === "thread/start")?.input,
+          turn: f.calls.find(({ method }) => method === "turn/start")?.input,
+        };
+      };
+      const open = await turnFor(false);
+      expect(open.authority).toMatchObject({ kind: "thread", strict: false });
+      expect(open.thread).toMatchObject({
+        sandbox: "workspace-write",
+        approvalPolicy: "untrusted",
+      });
+      expect(open.turn).toMatchObject({
+        approvalPolicy: "untrusted",
+        sandboxPolicy: {
+          type: "workspaceWrite",
+          writableRoots: [projectRoot, extra],
+          // The fixture's process takes the egress proxy, so commands have no
+          // network unless one is approved to leave the sandbox.
+          networkAccess: false,
+        },
+      });
+      for (const strict of [true, undefined]) {
+        const held = await turnFor(strict);
+        expect(held.authority).not.toHaveProperty("strict");
+        expect(held.thread).toMatchObject({ sandbox: "read-only" });
+        expect(held.turn).toMatchObject({
+          sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+        });
+      }
+    },
+  );
+
+  it("keeps Plan and Chat in Octant's read-only profile outside Strict", () => {
+    expect(codexRunsNativeSandbox({ mode: "code", executionPolicy: "plan", strict: false })).toBe(
+      false,
+    );
+    expect(
+      codexRunsNativeSandbox({ mode: "chat", executionPolicy: "approval-gated", strict: false }),
+    ).toBe(false);
+    expect(
+      codexRunsNativeSandbox({ mode: "work", executionPolicy: "approval-gated", strict: false }),
+    ).toBe(true);
+    expect(
+      codexRunsNativeSandbox({ mode: "work", executionPolicy: "full-access", strict: false }),
+    ).toBe(false);
+  });
+
+  it("runs Reviewed's escalation past Codex's reviewer in its own sandbox outside Strict", () => {
+    const native = { kind: "native", writableRoots: [projectRoot] } as const;
+    expect(codexTurnExecutionSettings("approval-gated", true, false, true, native)).toEqual({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "auto_review",
+      sandboxPolicy: { type: "workspaceWrite", writableRoots: [projectRoot], networkAccess: true },
+    });
+  });
+
+  it("approves an escalation from Codex's own sandbox for that one command, never for the session", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ permissionPersistence: () => "current-session" })),
+      "code",
+    );
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "approval", attachments: [], tools: [] }),
+    );
+    const event = takeEvents(acquired.connection, 1);
+    f.emit(commandApproval());
+    await expect(event).resolves.toMatchObject([{ kind: "approval-request" }]);
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    expect(f.calls.at(-1)?.input).toMatchObject({ result: { decision: "accept" } });
+    await acquired.close();
+  });
+
+  it("never shares one Codex process between a Strict and a non-Strict session", async () => {
+    const registry = new ProviderRuntimeRegistry();
+    const f = fixture();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    const first = await acquireConnection(driver, "code");
+    const second = await acquireConnection(driver, "code");
+    await Effect.runPromise(
+      first.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+      }),
+    );
+    await Effect.runPromise(
+      second.connection.start({
+        sessionId: secondSessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "full-access",
+        strict: false,
+      }),
+    );
+    expect(f.startCount()).toBe(2);
+    // A connection leased for one cannot then serve the other.
+    const refused = await Effect.runPromise(
+      Effect.either(
+        first.connection.start({
+          sessionId: decodeProviderSessionId("90000000-0000-4000-8000-000000000063"),
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "full-access",
+          strict: false,
+        }),
+      ),
+    );
+    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unauthorized");
+    await first.close();
+    await second.close();
+  });
+
+  it("runs Codex's own review read-only on a thread of its own and shows its findings as a review result", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const threadStarts = f.calls.filter(({ method }) => method === "thread/start");
+    expect(threadStarts[1]?.input).toMatchObject({
+      cwd: projectRoot,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      ephemeral: true,
+    });
+    expect(f.calls.find(({ method }) => method === "review/start")?.input).toEqual({
+      threadId: "thread-2",
+      target: { type: "uncommittedChanges" },
+      delivery: "inline",
+    });
+    expect(f.calls.some(({ method }) => method === "turn/start")).toBe(false);
+    const events = takeEvents(acquired.connection, 2);
+    f.emit(
+      notification("item/completed", {
+        threadId: "thread-2",
+        turnId: "review-turn",
+        item: {
+          type: "exitedReviewMode",
+          id: "review-1",
+          review: "- src/auth.ts: token is logged",
+        },
+        completedAtMs: 20,
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-2",
+        turn: { id: "review-turn", status: "completed" },
+      }),
+    );
+    const [findings, completed] = await events;
+    expect(findings).toMatchObject({ kind: "text-delta" });
+    expect(findings?.kind === "text-delta" ? findings.text : "").toContain(
+      "**Codex review**\n\n- src/auth.ts: token is logged",
+    );
+    // The session's own thread stays the one a later turn resumes.
+    expect(completed).toMatchObject({
+      kind: "completed",
+      resumeCursor: { driverKind: "codex", value: "thread-1" },
+    });
+    expect(completed).not.toHaveProperty("nativeAnchor");
+    await acquired.close();
+  });
+
+  const startOutsideStrict = async (f: ReturnType<typeof fixture>) => {
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    return acquired;
+  };
+  const finishReview = (f: ReturnType<typeof fixture>, review: string) => {
+    f.emit(
+      notification("item/completed", {
+        threadId: "thread-2",
+        turnId: "review-turn",
+        item: { type: "exitedReviewMode", id: "review-1", review },
+        completedAtMs: 20,
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-2",
+        turn: { id: "review-turn", status: "completed" },
+      }),
+    );
+  };
+
+  it("puts what a /review turn carries into the session's own thread before the review starts", async () => {
+    const f = fixture();
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review",
+        context: [{ kind: "user-message", text: "From the planner: check the parser too." }],
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const methods = f.calls.map(({ method }) => method);
+    const injected = f.calls.find(({ method }) => method === "thread/inject_items");
+    expect(injected?.input).toMatchObject({ threadId: "thread-1" });
+    expect(JSON.stringify(injected?.input)).toContain("From the planner: check the parser too.");
+    expect(methods.indexOf("thread/inject_items")).toBeLessThan(methods.indexOf("review/start"));
+    await acquired.close();
+  });
+
+  it("refuses a /review that carries an attachment before anything reaches Codex", async () => {
+    // A model that takes images, so only the review's own rule refuses it.
+    const f = fixture({
+      modelPages: [{ data: [model("gpt-5.4", ["text", "image"])], nextCursor: null }],
+    });
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        strict: false,
+      }),
+    );
+    const before = f.calls.length;
+    const refused = await Effect.runPromise(
+      Effect.either(
+        acquired.connection.send({
+          sessionId,
+          prompt: "/review",
+          context: [{ kind: "user-message", text: "pending message" }],
+          attachments: [
+            {
+              attachmentId: "attachment-1",
+              displayName: "diagram.png",
+              mediaType: "image/png",
+              bytes: new Uint8Array([1, 2, 3]),
+            },
+          ],
+          tools: [],
+        }),
+      ),
+    );
+    expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+    expect(refused._tag === "Left" ? refused.left.message : "").toContain("attachments");
+    // Nothing was sent, so the turn's pending messages stay pending.
+    expect(
+      f.calls
+        .slice(before)
+        .filter(({ method }) =>
+          ["thread/inject_items", "thread/start", "review/start"].includes(method),
+        ),
+    ).toEqual([]);
+    await acquired.close();
+  });
+
+  it("records the review's request and findings in the session's thread before the turn completes", async () => {
+    const f = fixture();
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({
+        sessionId,
+        prompt: "/review the auth changes",
+        attachments: [],
+        tools: [],
+      }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    finishReview(f, "- src/auth.ts: token is logged");
+    const [, completed] = await events;
+    expect(completed).toMatchObject({ kind: "completed" });
+    const recorded = f.calls.filter(({ method }) => method === "thread/inject_items");
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.input).toMatchObject({
+      threadId: "thread-1",
+      items: [
+        { type: "message", role: "user" },
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "- src/auth.ts: token is logged" }],
+        },
+      ],
+    });
+    expect(JSON.stringify(recorded[0]?.input)).toContain("the auth changes");
+    await acquired.close();
+  });
+
+  it("fails the review turn with a sentence when its findings cannot reach the session's thread", async () => {
+    const f = fixture({
+      threadInjectItems: async () => {
+        throw new CodexRpcClientFailure("remote", "refused", { remoteCode: -32600 });
+      },
+    });
+    const acquired = await startOutsideStrict(f);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    finishReview(f, "- a finding");
+    const [, ended] = await events;
+    expect(ended).toMatchObject({ kind: "failed", failure: { category: "provider-failed" } });
+    expect(ended?.kind === "failed" ? ended.failure.message : "").toContain("follow-up");
+    await acquired.close();
+  });
+
+  it("passes the text after /review to Codex as the review's instructions", () => {
+    expect(codexReviewRequest("/review  the auth changes ")).toEqual({
+      type: "custom",
+      instructions: "the auth changes",
+    });
+    expect(codexReviewRequest("/reviewer")).toBeUndefined();
+    expect(codexReviewRequest("please /review")).toBeUndefined();
+  });
+
+  it.each([
+    ["under Strict", "code", "approval-gated", undefined, "Strict"],
+    ["at Full access that keeps the sandbox", "code", "full-access", false, "sandbox"],
+    ["in Plan", "code", "plan", false, "outside Plan"],
+    ["in Chat", "chat", "approval-gated", false, "outside Plan"],
+  ] as const)(
+    "refuses Codex's review %s rather than run it where it could write",
+    async (_name, mode, executionPolicy, strict, message) => {
+      const f = fixture();
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy,
+          ...(strict === undefined ? {} : { strict }),
+          ...(executionPolicy === "full-access" ? { fullAccessSandbox: true } : {}),
+        }),
+      );
+      const refused = await Effect.runPromise(
+        Effect.either(
+          acquired.connection.send({ sessionId, prompt: "/review", attachments: [], tools: [] }),
+        ),
+      );
+      expect(refused._tag === "Left" ? refused.left.category : undefined).toBe("unsupported");
+      expect(refused._tag === "Left" ? refused.left.message : "").toContain(message);
+      expect(f.calls.some(({ method }) => method === "review/start")).toBe(false);
+      await acquired.close();
+    },
+  );
+
   it("defaults approval persistence to the current session", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
@@ -4028,6 +4456,65 @@ describe("Codex running as itself", () => {
       config: { "features.plugins": false, mcp_servers: { node_repl: { enabled: false } } },
     });
     await lockedDown.close();
+  });
+
+  it("starts in Plan only the account's servers the person marked, switching every other one off by name", async () => {
+    const f = fixture({
+      configRead: async () => ({
+        config: { mcp_servers: { "docs-search": { url: "https://docs" }, writer: {} } },
+      }),
+    });
+    const planSetup = { ...ownSetup, toolServers: false } as const;
+    const plan = await acquireConnection(
+      makeCodexDriver({ ...f.options(), planMcpServers: () => ["docs-search"] }),
+      "code",
+    );
+    await Effect.runPromise(
+      plan.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "plan",
+        nativeSetup: planSetup,
+      }),
+    );
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      config: { mcp_servers: { writer: { enabled: false } } },
+    });
+    expect(f.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
+      "config",
+      "mcp_servers",
+      "docs-search",
+    ]);
+    await plan.close();
+
+    // An unmarked server stays withheld, and so does every server of an
+    // account that runs nothing of its own.
+    for (const [marked, nativeSetup] of [
+      [[], planSetup],
+      [["docs-search"], undefined],
+    ] as const) {
+      const withheld = fixture({
+        configRead: async () => ({
+          config: { mcp_servers: { "docs-search": { url: "https://docs" } } },
+        }),
+      });
+      const session = await acquireConnection(
+        makeCodexDriver({ ...withheld.options(), planMcpServers: () => marked }),
+        "code",
+      );
+      await Effect.runPromise(
+        session.connection.start({
+          sessionId,
+          modelId: "gpt-5.4" as never,
+          executionPolicy: "plan",
+          ...(nativeSetup === undefined ? {} : { nativeSetup }),
+        }),
+      );
+      expect(withheld.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+        config: { mcp_servers: { "docs-search": { enabled: false } } },
+      });
+      await session.close();
+    }
   });
 
   it("switches Codex's own web search off on start and every resume unless the setup has web tools on", async () => {

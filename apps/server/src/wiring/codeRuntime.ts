@@ -95,7 +95,7 @@ import { createCoordinatorCountStore } from "../coordinator/coordinatorCountStor
 import { coordinatorCandidateFacts } from "../coordinator/coordinatorWorkerFacts";
 import { describeTurnImages, type ImageDescriber } from "../harness/imageDescription";
 import { lookToolForThread } from "../image/lookTool";
-import { supportsConversationInput } from "./conversationInputs";
+import { providerTakesFileNatively, supportsConversationInput } from "./conversationInputs";
 import { modelLabelOf } from "./imageDescriber";
 import { createThreadsTools } from "../siblingThreads/siblingThreadTools";
 import {
@@ -1284,6 +1284,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               model.inputModalities.includes("image"),
           );
         },
+        takesFileNatively: (thread, mediaType) =>
+          providerTakesFileNatively(
+            persistence.readProviderInstance(thread.providerInstanceId)?.driverKind,
+            providerRuntimeRegistry.observedState(thread.providerInstanceId),
+            String(thread.modelId),
+            mediaType,
+          ),
         routineBrowserTools: ({ thread, readThread, routineRun }) =>
           routineBrowserTools({
             routineRun,

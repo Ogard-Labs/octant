@@ -1,3 +1,4 @@
+import { AnyAttachmentMediaType, NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES } from "./attachmentMediaType";
 import {
   ConversationInputReceipt,
   ConversationInputPolicy,
@@ -75,18 +76,14 @@ export const WorkAttachmentId = brandedUuid("WorkAttachmentId");
 export type WorkAttachmentId = typeof WorkAttachmentId.Type;
 
 /**
- * Work attachments are images only. Everything the confined folder already
- * holds reaches a Work turn through the Project root, so the one thing a
- * path cannot carry is a picture the user is looking at — a screenshot, a
- * mockup, a photographed whiteboard.
+ * Work attachments are files of any type (maintainer decision, 2026-11-16). An
+ * image in {@link WORK_ATTACHMENT_MEDIA_TYPES} goes to a model that reads images
+ * as a picture; any other file stays in the thread's attachments folder, which
+ * the session reads at every level and never writes, and the turn names its
+ * path for the agent to open with its own tools.
  */
-export const WORK_ATTACHMENT_MEDIA_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-] as const;
-export const WorkAttachmentMediaType = Schema.Literal(...WORK_ATTACHMENT_MEDIA_TYPES);
+export const WORK_ATTACHMENT_MEDIA_TYPES = NATIVE_IMAGE_ATTACHMENT_MEDIA_TYPES;
+export const WorkAttachmentMediaType = AnyAttachmentMediaType;
 export type WorkAttachmentMediaType = typeof WorkAttachmentMediaType.Type;
 export const MAX_WORK_ATTACHMENT_BYTES = 10_485_760;
 export const MAX_WORK_TURN_ATTACHMENTS = 8;
