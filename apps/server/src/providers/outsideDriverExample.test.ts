@@ -29,9 +29,9 @@ import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 /**
  * The example loopback driver that ships with the author kit, run through the
  * host's own proxy against a local OpenAI-compatible model server on loopback.
- * A Linux host never starts a driver process (`host-prohibited`), so the
- * driver's modules run in process over the in-memory channel the proxy tests
- * use; its folder is still read exactly as the host inspects one.
+ * The driver's modules run in process over the in-memory channel the proxy
+ * tests use, so no driver process starts on any host; its folder is still read
+ * exactly as the host inspects one.
  */
 
 const exampleRoot = fileURLToPath(

@@ -2020,19 +2020,28 @@ export function wireWork(deps: WorkDependencies) {
       windowAuthorityStore,
     });
     // A wake-up is read and cancelled where its thread can be opened: a
-    // window holding the Work Project, or reaching the Code Project.
+    // window holding the Work Project, or reaching the Code Project. A device
+    // the host's own person paired holds no workspace and reaches a thread as
+    // its own send would: any Work Project's, any active Code Project's.
     const threadWakeupRoutes = createThreadWakeupRouteHandler({
       service: () => threadWakeups.service,
       windowAuthorityStore,
       canOpenThread: (windowId, mode, threadId) => {
-        if (isPairedDeviceScope(windowId)) return false;
+        const device = isPairedDeviceScope(windowId);
+        if (device && isRestrictedDeviceScope(windowId)) return false;
         try {
           if (mode === "work") {
             const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
-            return thread !== undefined && windowHoldsProject(windowId, thread.projectId, "work");
+            if (thread === undefined) return false;
+            return device
+              ? persistence.readProject(thread.projectId)?.type === "work"
+              : windowHoldsProject(windowId, thread.projectId, "work");
           }
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          return thread !== undefined && canAccessCodeProject(windowId, thread.projectId);
+          if (thread === undefined) return false;
+          return device
+            ? codeProjectAccess.hasActiveCodeProject(thread.projectId)
+            : canAccessCodeProject(windowId, thread.projectId);
         } catch {
           return false;
         }

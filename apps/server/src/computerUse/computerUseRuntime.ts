@@ -93,6 +93,13 @@ export interface ComputerUseEvidenceEvent {
 
 export type ComputerUseStartResult = ComputerUseRuntimeView | ComputerUseDestinationRefusal;
 
+/** A session named by a device the host's own person paired, without an owner window. */
+export interface ComputerUseHostPersonScope {
+  readonly threadId: string;
+  readonly authority: ToolActionAuthority;
+  readonly sessionId: string;
+}
+
 export interface ComputerUseRuntime {
   readonly destination: () => ComputerUseDestinationReport;
   readonly start: (input: {
@@ -124,6 +131,20 @@ export interface ComputerUseRuntime {
     readonly sessionId: string;
   }) => ComputerUseRuntimeView | undefined;
   readonly list: (ownerWindowId: WindowId) => ReadonlyArray<ComputerUseRuntimeView>;
+  /**
+   * A device the host's own person paired is that person, so it reaches every
+   * session on this host, whichever window's turn started it: the person away
+   * from the Mac must be able to stop what drives its desktop. These never
+   * answer an approval; that stays with the owner window's own `decide`.
+   */
+  readonly listForHostPerson: () => ReadonlyArray<ComputerUseRuntimeView>;
+  readonly inspectForHostPerson: (
+    input: ComputerUseHostPersonScope,
+  ) => ComputerUseRuntimeView | undefined;
+  readonly stopForHostPerson: (
+    input: ComputerUseHostPersonScope,
+    device: { readonly deviceId: string },
+  ) => Promise<ComputerUseRuntimeView>;
   readonly revokeWindow: (windowId: WindowId) => Promise<void>;
   readonly close: () => Promise<void>;
 }
@@ -222,9 +243,15 @@ export function createComputerUseRuntime(_options: {
     readonly authority: ToolActionAuthority;
     readonly sessionId: string;
   }): RuntimeSession | undefined => {
+    const session = scopedForHostPerson(input);
+    return session?.ownerWindowId === input.ownerWindowId ? session : undefined;
+  };
+
+  // The thread and authority still have to match exactly, so a paired device
+  // names a session it was shown rather than any id it can guess.
+  const scopedForHostPerson = (input: ComputerUseHostPersonScope): RuntimeSession | undefined => {
     const session = sessions.get(input.sessionId);
     return session !== undefined &&
-      session.ownerWindowId === input.ownerWindowId &&
       session.threadId === input.threadId &&
       sameToolActionAuthority(session.authority, input.authority)
       ? session
@@ -558,8 +585,21 @@ export function createComputerUseRuntime(_options: {
     return await session.execution;
   };
 
-  const stop: ComputerUseRuntime["stop"] = async (input) => {
-    const session = scoped(input);
+  const stop: ComputerUseRuntime["stop"] = async (input) =>
+    await stopSession(scoped(input), "User requested an immediate stop.");
+
+  // The stop keeps the session's original requester and names the paired
+  // device in the stop event itself, so the journal says which device asked.
+  const stopForHostPerson: ComputerUseRuntime["stopForHostPerson"] = async (input, device) =>
+    await stopSession(
+      scopedForHostPerson(input),
+      `The person requested an immediate stop from paired device ${device.deviceId}.`,
+    );
+
+  const stopSession = async (
+    session: RuntimeSession | undefined,
+    detail: string,
+  ): Promise<ComputerUseRuntimeView> => {
     if (session === undefined) {
       throw new ComputerUseRuntimeError(
         "unauthorized",
@@ -569,7 +609,7 @@ export function createComputerUseRuntime(_options: {
     if (isTerminal(session.state)) return view(session);
     session.pendingApproval = undefined;
     session.state = "stopping";
-    await append(session, "stop-requested", "User requested an immediate stop.");
+    await append(session, "stop-requested", detail);
     session.abortReason = "user-requested";
     session.controller.abort();
     if (session.execution !== undefined) return await session.execution;
@@ -662,6 +702,23 @@ export function createComputerUseRuntime(_options: {
     return view(session);
   };
 
+  /** Every session still kept, dropping terminal ones past their retention. */
+  const retained = (): ReadonlyArray<RuntimeSession> => {
+    const now = Date.parse(options.clock());
+    const kept: RuntimeSession[] = [];
+    for (const [sessionId, session] of sessions) {
+      if (
+        isTerminal(session.state) &&
+        now - Date.parse(session.lastEventAttemptAt) > TERMINAL_SESSION_RETENTION_MS
+      ) {
+        sessions.delete(sessionId);
+        continue;
+      }
+      kept.push(session);
+    }
+    return kept;
+  };
+
   return {
     destination,
     start,
@@ -671,21 +728,16 @@ export function createComputerUseRuntime(_options: {
       const session = scoped(input);
       return session === undefined ? undefined : view(session);
     },
-    list: (ownerWindowId) => {
-      const now = Date.parse(options.clock());
-      const owned: ComputerUseRuntimeView[] = [];
-      for (const [sessionId, session] of sessions) {
-        if (
-          isTerminal(session.state) &&
-          now - Date.parse(session.lastEventAttemptAt) > TERMINAL_SESSION_RETENTION_MS
-        ) {
-          sessions.delete(sessionId);
-          continue;
-        }
-        if (session.ownerWindowId === ownerWindowId) owned.push(view(session));
-      }
-      return owned;
+    list: (ownerWindowId) =>
+      retained()
+        .filter((session) => session.ownerWindowId === ownerWindowId)
+        .map(view),
+    listForHostPerson: () => retained().map(view),
+    inspectForHostPerson: (input) => {
+      const session = scopedForHostPerson(input);
+      return session === undefined ? undefined : view(session);
     },
+    stopForHostPerson,
     revokeWindow,
     close,
   };

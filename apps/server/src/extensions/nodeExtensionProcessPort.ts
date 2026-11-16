@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { outsideDriverHostLaunch } from "@octant/plugin-host/activation";
 import { constants } from "node:fs";
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -526,7 +527,11 @@ function isInsideOrEqual(path: string, root: string): boolean {
  * deny-default Seatbelt profile, stricter than an MCP server's: no network, no
  * exec but the runtime itself, no fork, the package read-only, and writes only
  * into the process's own temporary folder. Extension processes have no Linux
- * confinement, so any other platform refuses before a process exists.
+ * confinement: an outside driver runs there without one, from its package
+ * folder with the same fixed environment and its own temporary folder, as the
+ * person admitted it and its provider row says (maintainer decision,
+ * 2026-11-16). A Canvas export target, and any driver on another platform,
+ * refuses before a process exists.
  */
 async function prepareOutsideDriverLaunch(
   input: ExtensionProcessStartInput,
@@ -535,11 +540,15 @@ async function prepareOutsideDriverLaunch(
   sandboxPath: string,
   homeDirectory: string | undefined,
 ): Promise<{ readonly command: string; readonly args: string[] }> {
-  if (platform !== "darwin") {
-    throw new Error("Extension process sandbox is unavailable on this host.");
-  }
   if (!isAbsolute(sandbox.packageRoot) || !isAbsolute(sandbox.temporaryDirectory)) {
     throw new Error("Extension sandbox paths must be absolute.");
+  }
+  if (sandbox.kind === "outside-driver" && outsideDriverHostLaunch(platform) === "unconfined") {
+    await assertOwnTemporaryFolder(sandbox, homeDirectory);
+    return { command: input.command, args: [...input.args] };
+  }
+  if (platform !== "darwin") {
+    throw new Error("Extension process sandbox is unavailable on this host.");
   }
   await assertOwnTemporaryFolder(sandbox, homeDirectory);
   let args = input.args;
