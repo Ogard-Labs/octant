@@ -1465,6 +1465,14 @@ html[data-octant-native-host="true"] .shell-frame__title-band-drag {
   padding-inline-end: 28px;
 }
 
+/* On touch and in a narrow window the row's action is always shown, 40px in
+   from the right, so the top line still stops before it there. */
+@media (pointer: coarse), (max-width: 560px) {
+  .sidebar-navigation__thread-context {
+    padding-inline-end: 28px;
+  }
+}
+
 @media not ((pointer: coarse) or (max-width: 560px)) {
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):has(
       .sidebar-navigation__thread-context

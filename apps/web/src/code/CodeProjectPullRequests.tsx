@@ -427,9 +427,12 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       });
   // Before the first refresh nothing is known, so the page says that once, with
   // the one thing to do, instead of a status line, a hint, a note and a count.
+  // A refresh that failed is not this state: its message and the list's own
+  // controls (the repository settings among them) must stay in reach.
   const firstLoad =
     !dock &&
     ready &&
+    workspace.status !== "error" &&
     !showGroups &&
     scopedRows.length === 0 &&
     neverRefreshed.length === connectedProjects.length;
@@ -581,11 +584,15 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
               type="button"
               variant="outline"
             >
-              Refresh
+              {workspace.status === "refreshing" ? "Refreshing…" : "Refresh"}
             </OctantButton>
           }
           icon={<GitPullRequest size={20} />}
-          title="Refresh to load pull requests"
+          title={
+            workspace.status === "refreshing"
+              ? "Loading pull requests"
+              : "Refresh to load pull requests"
+          }
         />
       ) : (
         <>

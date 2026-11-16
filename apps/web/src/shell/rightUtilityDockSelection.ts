@@ -879,54 +879,6 @@ export function updateUtilityTabBrowserContext(
   return changed ? { ...state, tabs } : state;
 }
 
-/**
- * A Browser page lives in the host's memory and keeps no address across a
- * restart, so a thread that had two pages comes back with two tabs bound to
- * contexts the host no longer has: both "New tab", both blank. Given the
- * contexts the host still lists, the tabs bound to a missing one collapse to a
- * single blank Browser tab (or to none, where a live page or a blank tab
- * already stands). Pages that exist are never touched.
- */
-export function withoutVanishedBrowserPages(
-  state: ThreadUtilityDockState,
-  contextsHeld: ReadonlySet<string>,
-): ThreadUtilityDockState {
-  const vanished = state.tabs.filter(
-    (tab) =>
-      tab.surface === "browser" &&
-      tab.browserContextId !== undefined &&
-      !contextsHeld.has(tab.browserContextId),
-  );
-  if (vanished.length === 0) return state;
-  const blankKept = state.tabs.some(
-    (tab) =>
-      tab.surface === "browser" &&
-      (tab.browserContextId === undefined || contextsHeld.has(tab.browserContextId)),
-  );
-  const [first, ...rest] = vanished;
-  const gone = blankKept || first === undefined ? vanished : rest;
-  let next = state;
-  for (const tab of gone) next = closeUtilityTabState(next, tab.id);
-  if (blankKept || first === undefined) return next;
-  return {
-    ...next,
-    tabs: next.tabs.map((tab) => {
-      if (tab.id !== first.id) return tab;
-      return { id: tab.id, surface: tab.surface };
-    }),
-  };
-}
-
-export function withoutVanishedThreadBrowserPages(
-  states: ThreadUtilityDockStates,
-  key: ThreadUtilityDockKey,
-  contextsHeld: ReadonlySet<string>,
-): ThreadUtilityDockStates {
-  const current = threadUtilityDockState(states, key);
-  const next = withoutVanishedBrowserPages(current, contextsHeld);
-  return next === current ? states : replace(states, key, next);
-}
-
 function layoutTabIds(layout: DockTileLayout): ReadonlyArray<string> {
   return layout.columns.flatMap((column) => column.tiles.map((tile) => tile.tabId));
 }

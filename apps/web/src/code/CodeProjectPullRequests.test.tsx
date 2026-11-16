@@ -777,6 +777,32 @@ describe("CodeProjectPullRequests", () => {
     expect(document.querySelector(".pr-page")).toHaveAttribute("data-empty", "true");
   });
 
+  it("shows a first refresh that failed, and gives the list's controls back", async () => {
+    const user = userEvent.setup();
+    const neverRefreshed = view({
+      rows: [],
+      freshness: { status: "empty" },
+      projectFreshness: [{ projectId: projectA, freshness: { status: "empty" } }],
+    });
+    render(
+      <CodeProjectPullRequests
+        load={async () => neverRefreshed}
+        refresh={async () => {
+          throw new Error("GitHub is offline");
+        }}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    // The failure is said, and the page is the list again: its Refresh and its
+    // repository settings are not left behind the one-sentence state.
+    expect(await screen.findByRole("button", { name: "Refresh all" })).toBeVisible();
+    expect(document.querySelector(".pr-page")).not.toHaveAttribute("data-empty");
+    expect(screen.getByRole("searchbox", { name: "Search pull requests" })).toBeVisible();
+    expect(document.querySelector(".code-project-pull-requests__status")).not.toBeNull();
+  });
+
   it("selects a pull request row without refreshing GitHub", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();

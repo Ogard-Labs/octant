@@ -18,7 +18,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { buildModelPickerGroups } from "@octant/domain";
 import type { SideChatSidecar } from "@octant/contracts";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useMemo } from "react";
 import { useMinuteTick } from "../polling/useMinuteTick";
 import type { AgentRunViewRequest } from "../agents/AgentRunHierarchy";
 import type { createChatReadCursorStore } from "../chat/useChatController";
@@ -51,7 +51,6 @@ import {
   minimisedUtilityTabIds,
   updateThreadUtilityTabBrowserContext,
   updateUtilityTabBrowserContext,
-  withoutVanishedThreadBrowserPages,
   type ThreadUtilityDockKey,
   type ThreadUtilityDockState,
   type ThreadUtilityDockTab,
@@ -609,29 +608,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     picture: false,
     threadId: decodeBrowserThreadId(dockThread?.threadId ?? NO_THREAD),
   });
-  // After a restart the host holds none of the pages the thread's tabs were
-  // bound to. The first read of the thread's pages settles that once per
-  // thread: later reads can lag behind a page the person has just opened.
-  const settledBrowserThread = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (dockThreadKey === undefined || dockThread === undefined) return;
-    if (settledBrowserThread.current === dockThreadKey) return;
-    if (
-      pageIconSnapshot === undefined ||
-      pageIconSnapshot.failure !== undefined ||
-      String(pageIconSnapshot.threadId) !== dockThread.threadId
-    ) {
-      return;
-    }
-    settledBrowserThread.current = dockThreadKey;
-    const held = new Set<string>();
-    if (pageIconSnapshot.context !== undefined)
-      held.add(String(pageIconSnapshot.context.contextId));
-    for (const entry of pageIconSnapshot.contexts ?? []) held.add(String(entry.context.contextId));
-    actions.setDockStatesByThread((current) =>
-      withoutVanishedThreadBrowserPages(current, dockThreadKey, held),
-    );
-  }, [actions, dockThread, dockThreadKey, pageIconSnapshot]);
   const pageObservation = (tabId: string) => {
     const contextId = displayedDockState.tabs.find((tab) => tab.id === tabId)?.browserContextId;
     if (contextId === undefined) return pageIconSnapshot?.observation;
