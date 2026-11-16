@@ -99,7 +99,7 @@ static int private_directory(const char *path) {
 }
 /* Freeze the complete kernel scope before killing it. Repeated census finds
  * children created during the first pass; stopped processes cannot fork. */
-static int revoke(uint64_t scope, pid_t except) {
+static int revoke_scope(uint64_t scope, pid_t except) {
   if (!scope || (scope == coalition(getpid()) && except != getpid())) return -1;
   double deadline = now() + 5;
   unsigned quiet = 0;
@@ -211,7 +211,9 @@ static int serve(const char *path) {
   if (child < 0) return 125;
   if (!child) {
     for (int i = 0; i < 3; ++i) if (dup2(stdio[i], i) < 0) _exit(125);
-    closefrom(3);
+    int maximum_fd = getdtablesize();
+    if (maximum_fd < 3) _exit(125);
+    for (int fd = 3; fd < maximum_fd; ++fd) close(fd);
     execve(args[0], args, environment);
     _exit(125);
   }
@@ -223,7 +225,7 @@ static int serve(const char *path) {
     if (poll(&pollfd, 1, 50) < 0 && errno != EINTR) break;
     if (pollfd.revents) break;
   }
-  if (revoke(coalition(getpid()), getpid())) return 125;
+  if (revoke_scope(coalition(getpid()), getpid())) return 125;
   int result = WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
   (void)full_write(fd, &result, sizeof(result));
   close(fd);
@@ -328,7 +330,7 @@ static int run(const char *root, const char *epoch, char **args) {
   }
 cleanup:
   if (control_fd >= 0) close(control_fd);
-  if (record.coalition && revoke(record.coalition, 0)) result = 125;
+  if (record.coalition && revoke_scope(record.coalition, 0)) result = 125;
   else if (receipt_written) { unlinkat(directory, receipt_name, 0); fsync(directory); }
   if (registered) {
     char *bootout[] = {"launchctl", "bootout", service, NULL};
@@ -365,7 +367,7 @@ static int reap(const char *root, const char *epoch, pid_t client) {
     if (!strcmp(epoch, "--stale")) {
       if (record.owner > 1 && unique(record.owner) == record.owner_unique) continue;
     } else if (strcmp(record.epoch, epoch)) continue;
-    if (!strcmp(boot, record.boot) && revoke(record.coalition, 0)) { result = 125; continue; }
+    if (!strcmp(boot, record.boot) && revoke_scope(record.coalition, 0)) { result = 125; continue; }
     if (!strcmp(boot, record.boot)) {
       char service[256];
       snprintf(service, sizeof(service), "gui/%u/%s", getuid(), record.label);
