@@ -4401,9 +4401,10 @@ was launched under the level's tool rules, which decide what the command may
 then do, so a command in Plan still cannot write and one in Chat still has no
 folder or shell. An ACP agent with a reviewed command inventory (Kimi Code)
 keeps its probe check and, in every mode, runs only a reviewed command its
-session listed. Codex lists none: its app-server
-(rust-v0.162.1) lists skills, which are invoked by `$name`, and no prompts,
-and its slash commands are its terminal client's own. OpenCode 1.x lists
+session listed. Codex lists only `/review`, which starts Codex's own review
+run ([Provider runtimes: Codex](design/provider-runtimes.md#codex)): its
+app-server (rust-v0.162.1) lists skills, which are invoked by `$name`, and no
+prompts, and its other slash commands are its terminal client's own. OpenCode 1.x lists
 none: its command route answers only once the whole run has ended. Side Chat is a Chat-mode sidecar about
 exactly one source thread: ordinary Chat with no inherited Work or Code
 authority and no agent path that messages, approves, steers, or appends to the
@@ -14269,9 +14270,12 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   | Plan         | `plan`                           | Guarded, read-only | `plan`                                                  | `read-only` + `never`                                               |
   | Full access  | `full-access`                    | Full access        | `bypassPermissions`, no sandbox                         | `danger-full-access` + `never`                                      |
 
-  The Claude Code and Codex columns are today's; their sandboxes change per
-  [Providers run in their own sandbox](#security-and-authority) (designed,
-  not built). Today Claude Code's Accept edits runs Claude's `default` mode
+  The Codex column is Strict's. Outside Strict, Codex's Auto, Ask first and
+  Accept edits in Work and Code run its own `workspace-write` sandbox in place
+  of the external one, with the same approval policies (built;
+  [Providers run in their own sandbox](#security-and-authority)). The Claude
+  Code column is today's; its sandbox changes per that rule (designed, not
+  built). Today Claude Code's Accept edits runs Claude's `default` mode
   and Octant waives in-root edits itself, and Octant's gate judges each call
   before Claude's own rules see the ones it would ask about
   ([Provider runtimes: Full built-in tool set](design/provider-runtimes.md#full-built-in-tool-set)).
@@ -14313,10 +14317,11 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     routing, `GH_TOKEN` and the rest), less Octant's own secrets and other
     providers' keys. Strict keeps each runtime's fixed list. Built for
     Claude Code, Pi and the ACP agents, read at each launch; OpenCode already
-    received the host's environment. Not built yet for Codex: its
-    environment is fixed per account and shared by every lease, and opening
-    it would hand Codex the host's AWS credentials, which the Codex sign-ins
-    item below decides.
+    received the host's environment. Built for Codex: each account has a
+    Strict and an open launch environment, and a lease takes the one its
+    session's Strict value names (the lease is keyed on Strict, so the two
+    never share a process); an extra account still loses the host's Codex
+    keys either way.
   - **Outside content.** Reading outside content still marks the thread
     and shows it, but no longer withdraws the provider's own web search or
     turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
@@ -14332,11 +14337,14 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     at Full access. Strict refuses them for every tool. Built for Claude
     Code's own file tools (its gate refuses only another provider's sign-in
     outside Strict) and for the confinement of Pi and the ACP agents
-    (`protectedFiles: "provider-sign-ins"`), read at each launch. Not built
-    yet for Codex and OpenCode, whose processes are shared per posture and do
-    not yet key on Strict. Until
-    [Providers run in their own sandbox](#security-and-authority) is built, a
-    wrapped runtime's wall still keeps files outside the Project's folders
+    (`protectedFiles: "provider-sign-ins"`), read at each launch. Built for
+    Codex: outside Strict a Work or Code thread below Full access runs in
+    Codex's own sandbox, which reads them as Codex on its own does, and a
+    Plan or Chat lease keeps Octant's profile with only other providers'
+    sign-ins refused. Not built yet for OpenCode, whose processes are shared
+    per posture and do not yet key on Strict. Until
+    [Providers run in their own sandbox](#security-and-authority) is built for
+    a runtime, its wall still keeps files outside the Project's folders
     unreadable, so outside Strict the narrowing reaches the protected files
     inside them (a home folder opened as a Project).
   - **Denials.** A denied request goes back to the model, which adjusts, as
@@ -14359,7 +14367,9 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     still sends nothing. Built for Claude Code, Pi, Mistral Vibe, Grok Build
     and Kimi Code; Codex and OpenCode set no channel guard of Octant's.
   - **Codex sign-ins.** Codex may use Amazon Bedrock through an AWS profile
-    or exported credentials. Strict refuses them, as today.
+    or exported credentials. Strict refuses them, as today (built: only a
+    Strict session's lease refuses such a sign-in, with a sentence naming
+    Strict, and the account's probe stays ready for every other thread).
   - **Slash commands.** A provider's own slash commands run in every mode
     and level, Chat and Plan included; the level's tool rules decide what a
     command may then do, so Plan stays read-only. Built: the host and the
@@ -15310,9 +15320,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
     its Project and Settings as they are now; a launch that does not carry
     the resolved value is Strict. A device the host's own person paired
     turns it on or off as a local window does; a hub-introduced device and
-    an agent grant may turn it on, never off. Not built yet: the provider's
-    own sandbox outside Strict, so today every provider still runs in the
-    sandbox the table below shows whether Strict is on or off.
+    an agent grant may turn it on, never off. Built for Codex: the provider's
+    own sandbox outside Strict (per runtime, below). Not built yet for the
+    other providers, which still run in the sandbox the table below shows
+    whether Strict is on or off.
   - **Octant's sandbox stays the default** for providers with no sandbox of
     their own: OpenCode, Mistral Vibe and Pi.
   - **Per provider.** Codex runs its native workspace-write sandbox and its
@@ -15359,12 +15370,12 @@ approval-gated` command that undoes it. The terminal shows no one-time
   credentials included, as the provider on its own does; a person who wants
   those reads closed turns Strict on.
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
-  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped                                             | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                                                     | OS egress below Full access                  | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                                                               | `proxied` on macOS; `allow` on Linux         | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only                                   | `allow` on Plan; commands `proxied` on macOS | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Wrapped                         | Wrapped under Strict; outside Strict unwrapped in Codex's own workspace-write sandbox | `proxied` on macOS; `allow` on Linux         | Octant sandbox: root read-only; writes only the account home (not its configuration) and a private temporary directory; Codex's own sandbox set to external                                                                                |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Account-read wrapper            | Account-read wrapper                                                                  | No network                                   | No turn runs; only its isolated account and private temporary state are available                                                                                                                                                          |
 
   Wherever a row names the root or the checkout, a Project's extra folders
   get the same rule ([Projects with several folders](#projects-with-several-folders)).
@@ -15395,8 +15406,10 @@ approval-gated` command that undoes it. The terminal shows no one-time
   - **Claude Agent SDK:** unwrapped as in Code's approval-gated posture; the
     runtime's own sandbox holds commands to the Project root, and its
     permission prompts carry each command to the person at Guarded.
-  - **Codex app-server:** wrapped at Guarded and Reviewed as in Code, with
-    the lease keyed by root, mode, and posture (below); the shell runs inside
+  - **Codex app-server:** outside Strict, unwrapped at Guarded and Reviewed in
+    Codex's own workspace-write sandbox (below); under Strict, and in Plan and
+    Chat at every Strict value, wrapped as in Code, with the lease keyed by
+    root, mode, posture and Strict (below); a wrapped shell runs inside
     Octant's profile, so `~/.ssh` is reachable only through the person's SSH
     agent or a server registered with Octant Shield. At Full access unwrapped.
   - **Octant Harness:** gives the Work thread the shell port a Code harness
@@ -15423,11 +15436,23 @@ approval-gated` command that undoes it. The terminal shows no one-time
   cannot ask to leave Octant's wall under an external sandbox, so a command
   that needs to fails there (not built yet: carrying that ask; see
   [Provider runtimes: Codex](design/provider-runtimes.md#codex)). Under
-  [Providers run in their own sandbox](#security-and-authority) (designed,
-  not built) Codex leaves Octant's profile below Full access for its native
-  workspace-write sandbox, whose escalation carries that ask, and stays in
-  Octant's profile, as described here, only under Strict. Approving a command no
-  longer lifts any sandbox: it runs inside Octant's profile. Under that
+  [Providers run in their own sandbox](#security-and-authority) (built for
+  Codex) a Work or Code thread outside Strict leaves Octant's profile below
+  Full access for Codex's native workspace-write sandbox, whose escalation
+  carries that ask: the process runs unwrapped, each turn sends
+  `sandboxPolicy: { type: "workspaceWrite" }` with the Project's folders as
+  `writableRoots` and `networkAccess` true unless the launch took the egress
+  proxy (Network limits on), which the runtime's own traffic keeps, and an
+  approved command is answered `accept`, never `acceptForSession`, so it runs
+  that one command and nothing is remembered. The thread starts
+  `workspace-write`, with the approval policies above. That lease is keyed on
+  Strict as well as root, mode and posture, so it never serves a Strict
+  session. Plan and Chat stay in Octant's read-only profile at every Strict
+  value, and Strict keeps Octant's profile as described here. The
+  workspace-write policy a turn sends takes no deny rules, so Octant's
+  protected paths are not Codex deny rules (not built yet: a named Codex
+  permissions profile could carry them). Inside Octant's profile approving a
+  command no longer lifts any sandbox: it runs inside Octant's profile. Under that
   profile a Codex command cannot read `HOME` outside the root and the account
   home, and cannot write the account home's configuration, `.env`, rules,
   skills, hooks, plugins, prompts, or instructions. The runtime's own reach is
