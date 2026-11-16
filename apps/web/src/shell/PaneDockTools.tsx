@@ -98,6 +98,9 @@ export function restingDockToolButtons(
 /** The gap between the items of a pane's header (`.workspace-pane__header`). */
 const PANE_HEADER_GAP = 4;
 
+/** How long after a press began its click may still arrive. */
+const REST_PRESS_WINDOW_MS = 1_000;
+
 /**
  * A thread pane's tool buttons, at the end of its header's lead. In the focused
  * pane they are the dock's own row. In another pane of a split they stand at
@@ -111,7 +114,8 @@ export function PaneDockToolGroup(props: {
 }) {
   const tools = useContext(PaneDockToolsContext);
   const group = useRef<HTMLDivElement>(null);
-  const fromRest = useRef(false);
+  // When the last press on the row began in a pane at rest, or 0.
+  const restPressAt = useRef(0);
   const [collapsed, setCollapsed] = useState(false);
   const restMode = props.thread?.mode;
   const restThreadId = props.thread?.threadId;
@@ -163,10 +167,10 @@ export function PaneDockToolGroup(props: {
       // click arrives; what the press does is decided by how the pane stood
       // when it began.
       onKeyDownCapture={() => {
-        fromRest.current = !props.active;
+        restPressAt.current = props.active ? 0 : performance.now();
       }}
       onPointerDownCapture={() => {
-        fromRest.current = !props.active;
+        restPressAt.current = props.active ? 0 : performance.now();
       }}
       ref={group}
     >
@@ -176,8 +180,14 @@ export function PaneDockToolGroup(props: {
         model={model}
         onMenuAction={tools.onMenuAction}
         onPress={(surface, opener) => {
-          const rest = fromRest.current || !props.active;
-          fromRest.current = false;
+          // The mark only speaks for the click of its own press. A press that
+          // never became a click (a right click, a drag off the button) left it
+          // set, and a later press with no pointer or key event of its own (an
+          // assistive press) was then read as coming from rest and refused to
+          // close its tool.
+          const rest =
+            !props.active || performance.now() - restPressAt.current < REST_PRESS_WINDOW_MS;
+          restPressAt.current = 0;
           tools.onPress(paneId, surface, opener, rest);
         }}
         {...(props.active && tools.references !== undefined

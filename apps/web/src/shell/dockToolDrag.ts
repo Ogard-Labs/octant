@@ -38,6 +38,8 @@ export const DOCK_DRAG_THRESHOLD = 6;
 
 let dragged: DockToolDrag | undefined;
 let cancelActive: (() => void) | undefined;
+/** Ends the drag in flight for a new press: its button is known to be up. */
+let supersedeActive: (() => void) | undefined;
 const listeners = new Set<() => void>();
 const targets = new Set<DockDropTarget>();
 
@@ -89,7 +91,10 @@ export function pressDockToolDrag(
 ): void {
   if (event.button !== 0) return;
   // A press whose release never reached the window must not hold the next one.
-  cancelActive?.();
+  // It ends with nothing swallowed: ending it as held armed the click swallower
+  // until the next release, which was this new press's own, so the first click
+  // after a lost release did nothing.
+  supersedeActive?.();
   const element = event.currentTarget;
   const pointerId = event.pointerId;
   const start = { x: event.clientX, y: event.clientY };
@@ -97,14 +102,19 @@ export function pressDockToolDrag(
   let started = false;
   let ghost: HTMLElement | undefined;
 
-  /** `held`: the drag was given up while the button may still be down. */
-  const end = (point: DockDragPoint | undefined, held = false) => {
+  /**
+   * `held`: the drag was given up while the button may still be down.
+   * `superseded`: a new press ended it, so its own release will never come and
+   * no click is left to swallow.
+   */
+  const end = (point: DockDragPoint | undefined, held = false, superseded = false) => {
     window.removeEventListener("pointermove", onMove, true);
     window.removeEventListener("pointerup", onUp, true);
     window.removeEventListener("pointercancel", onCancel, true);
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("blur", onAbandon);
     cancelActive = undefined;
+    supersedeActive = undefined;
     if (!started) return;
     ghost?.remove();
     try {
@@ -119,6 +129,7 @@ export function pressDockToolDrag(
     }
     for (const target of Array.from(targets)) target.over(drag, undefined);
     publish(undefined);
+    if (superseded) return;
     // The release that ends a drag is not a click on whatever it began on: a
     // tool's button would close its tool, a tab would be chosen. A drag given
     // up with the button still down (Escape, a window that lost focus) has its
@@ -178,6 +189,7 @@ export function pressDockToolDrag(
     end(undefined, true);
   };
   cancelActive = onAbandon;
+  supersedeActive = () => end(undefined, false, true);
   window.addEventListener("pointermove", onMove, true);
   window.addEventListener("pointerup", onUp, true);
   window.addEventListener("pointercancel", onCancel, true);

@@ -6111,9 +6111,14 @@ function LaunchedShell(
       else toggleDockTool(surface, opener);
       return;
     }
-    pendingPaneTool.current = { paneId: String(paneId), surface, opener, at: performance.now() };
+    const pending = { paneId: String(paneId), surface, opener, at: performance.now() };
+    pendingPaneTool.current = pending;
     setPendingPaneToolRevision((revision) => revision + 1);
-    void controller.activatePane(paneId);
+    // A focus the host refused leaves nothing waiting: the tool must not open
+    // later because the person focused that pane some other way.
+    void Promise.resolve(controller.activatePane(paneId)).catch(() => {
+      if (pendingPaneTool.current === pending) pendingPaneTool.current = undefined;
+    });
   }
   useEffect(() => {
     const pending = pendingPaneTool.current;

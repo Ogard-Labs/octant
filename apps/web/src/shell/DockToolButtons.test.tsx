@@ -255,6 +255,38 @@ describe("the title band's tool buttons", () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
+  it("lets the next plain click through after a drag whose release never arrived", () => {
+    const onPress = vi.fn();
+    render(
+      <DockToolButtons
+        model={model({
+          buttons: [button("files", "Files", { tabId: "files", tabIds: ["files"] })],
+        })}
+        onPress={onPress}
+      />,
+    );
+    const files = screen.getByRole("button", { name: "Files" });
+    const at = (kind: "pointerDown" | "pointerMove" | "pointerUp", target: Element, x: number) => {
+      const event = createEvent[kind](target, { button: 0 });
+      Object.defineProperties(event, {
+        clientX: { value: x },
+        clientY: { value: 10 },
+        pointerId: { value: 1 },
+      });
+      fireEvent(target, event);
+    };
+    // A drag begins and its release is lost (it landed on a native overlay).
+    at("pointerDown", files, 10);
+    at("pointerMove", document.body, 80);
+    expect(document.querySelector(".workspace-drag-preview")).not.toBeNull();
+    // The next press ends the abandoned drag; its own click is the button's.
+    at("pointerDown", files, 10);
+    expect(document.querySelector(".workspace-drag-preview")).toBeNull();
+    at("pointerUp", files, 10);
+    fireEvent.click(files);
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
   it("does not drag a tool that has no tab, or any tool when the dock has no drop zones", () => {
     const { rerender } = render(<DockToolButtons model={model()} onPress={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Terminal" })).not.toHaveAttribute("data-pane-drag");

@@ -398,13 +398,6 @@ export function minimiseUtilityTool(
 }
 
 /**
- * Whether an agent's new Browser session leaves a minimised Browser as it is:
- * only where the shelf is drawn, since its card or the dock toggle's dot is the
- * sign that the session is live. The modal dock draws neither, so there the
- * session opens the Browser like any other tab (which also clears the
- * minimised flag, as choosing any tab of a minimised tool does).
- */
-/**
  * Whether every Browser session an offer announces is already a page of this
  * dock's Browser: each one is the context some Browser tab is bound to. A page
  * the person opens from a Browser tab is announced like an agent's session,
@@ -424,6 +417,13 @@ export function announcedBrowserSessionsHeld(
   return sessionIds.every((id) => bound.has(id));
 }
 
+/**
+ * Whether an agent's new Browser session leaves a minimised Browser as it is:
+ * only where the shelf is drawn, since its card or the dock toggle's dot is the
+ * sign that the session is live. The modal dock draws neither, so there the
+ * session opens the Browser like any other tab (which also clears the
+ * minimised flag, as choosing any tab of a minimised tool does).
+ */
 export function offeredBrowserStaysMinimised(
   state: ThreadUtilityDockState,
   options: { readonly offered: boolean; readonly shelfDrawn: boolean },
