@@ -1438,7 +1438,11 @@ the window leaves it and scrolls its rows past that, as a select and a combobox
 do; it is at most `--oct-menu-max-w` (360px) wide, and its sub-menus the same
 (maintainer request, 2026-11-16). Every popup that opens from a control (menu,
 popover, select, combobox) stands 4px from its trigger; a caller passes no
-offset of its own. A context menu opens at the pointer, as a native one does. A popover is padded 8px; one that is a list of rows (branch, Create
+offset of its own. A context menu opens at the pointer, as a native one does.
+A popup that prefers to open upward (the composer's, whose button usually
+stands at the foot of a thread) opens downward when its button stands in the
+upper half of the window, as on a start screen; the side is settled when it
+opens and does not change while it is open (`sideWithRoom`). A popover is padded 8px; one that is a list of rows (branch, Create
 from…, Where) takes the menu inset (`--oct-menu-inset`, 4px) so its rows stand
 on the menu rows' edges.
 

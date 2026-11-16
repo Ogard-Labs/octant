@@ -34,6 +34,7 @@ import {
   OctantMenuSeparator,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import { useSideWithRoom } from "../ui/base/popupSide";
 
 const PROVIDER_REVIEW_DETAIL = "The provider's own reviewer approves each action.";
 const SHIELD_REVIEW_DETAIL = "Octant Shield approves each action and asks you when unsure.";
@@ -189,6 +190,7 @@ const SANDBOX_UNSUPPORTED_DETAIL =
  */
 export function PermissionModePicker(props: PermissionModePickerProps) {
   const idPrefix = useId();
+  const popupSide = useSideWithRoom<HTMLButtonElement>("top");
   const autoSupported =
     props.autoReview === undefined ? props.autoSupported : props.autoReview.status === "reviewer";
   const unsupportedReason =
@@ -258,10 +260,11 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
       <ComposerOutsideContentMark fullAccess={props.value === "full-access"} />
       {/* A composer popup is Octant's float, never the system's menu: each mode
           carries a line of detail that a system menu cannot show. */}
-      <OctantMenuRoot>
+      <OctantMenuRoot onOpenChange={popupSide.settle}>
         {/* An icon per mode in the composer's row; its name and tooltip state the
             mode. Only Full access adds its words, in the warning ink. */}
         <OctantMenuTrigger
+          ref={popupSide.trigger}
           aria-label={`Mode: ${triggerLabel}`}
           aria-description={triggerDetail}
           className="code-composer-choice__trigger"
@@ -285,12 +288,13 @@ export function PermissionModePicker(props: PermissionModePickerProps) {
           ) : null}
         </OctantMenuTrigger>
         <OctantMenuPortal>
-          {/* Above the button, 4px clear of it, and never over it: a menu that
-              cannot fit above shifts sideways rather than cover its trigger. */}
+          {/* Above the button at the foot of a thread, below it on a start
+              screen, 4px clear of it and never over it: a menu that cannot fit
+              shifts sideways rather than cover its trigger. */}
           <OctantMenuPositioner
             align="start"
             collisionAvoidance={{ side: "flip", align: "shift", fallbackAxisSide: "none" }}
-            side="top"
+            side={popupSide.side}
           >
             <OctantMenuPopup>
               <OctantMenuRadioGroup

@@ -1,4 +1,4 @@
-import { useCallback, type ComponentProps, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, type ComponentProps, type ReactNode } from "react";
 import { buttonVariants } from "../shadcn/button";
 import { cn } from "../shadcn/utils";
 import {
@@ -10,6 +10,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "../shadcn/popover";
+import { useSideWithRoom } from "./popupSide";
 import { OctantTooltip } from "./OctantTooltip";
 
 export interface OctantPopoverProps {
@@ -70,7 +71,19 @@ export function OctantPopover(props: OctantPopoverProps) {
   // argument; a stable wrapper keeps the adapter's `(open: boolean) => void`
   // contract honest without giving Base UI a new function identity on every
   // render, which previously reset its own mount-transition tracking.
-  const handleOpenChange = useCallback((open: boolean) => onOpenChange(open), [onOpenChange]);
+  const { side, trigger, settle } = useSideWithRoom<HTMLButtonElement>(props.side ?? "bottom");
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      settle(open);
+      onOpenChange(open);
+    },
+    [onOpenChange, settle],
+  );
+  // An owner can also open the popover itself, without a press on the trigger.
+  const isOpen = props.open;
+  useLayoutEffect(() => {
+    settle(isOpen);
+  }, [isOpen, settle]);
 
   const variantClassName =
     props.triggerVariant === undefined
@@ -87,6 +100,7 @@ export function OctantPopover(props: OctantPopoverProps) {
     <PopoverTrigger
       aria-label={props.triggerLabel}
       className={cn("window-no-drag", variantClassName, props.triggerClassName)}
+      ref={trigger}
       {...(props.triggerVariant === undefined
         ? {}
         : {
@@ -120,7 +134,7 @@ export function OctantPopover(props: OctantPopoverProps) {
           {...(props.collisionAvoidance === undefined
             ? {}
             : { collisionAvoidance: props.collisionAvoidance })}
-          side={props.side ?? "bottom"}
+          side={side}
           sideOffset={props.sideOffset ?? 4}
         >
           <PopoverPopup

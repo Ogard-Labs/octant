@@ -20,6 +20,7 @@ import {
   OctantMenuRoot,
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
+import { useSideWithRoom } from "../ui/base/popupSide";
 
 /** What the control needs from the host: the choice per thread, and the accounts that can have one. */
 export interface ThreadNativeSetupServices {
@@ -106,6 +107,7 @@ export function ThreadNativeSetupControl(props: {
 }) {
   const services = useContext(ThreadNativeSetupContext);
   const idPrefix = useId();
+  const popupSide = useSideWithRoom<HTMLButtonElement>("top");
   const [choice, setChoice] = useState<ThreadNativeSetupChoice>("inherit");
   const eligible =
     services?.instances.some(
@@ -129,8 +131,9 @@ export function ThreadNativeSetupControl(props: {
   if (services === undefined || !eligible) return null;
   const selected = OPTIONS.find((option) => option.id === choice) ?? DEFAULT_OPTION;
   return (
-    <OctantMenuRoot>
+    <OctantMenuRoot onOpenChange={popupSide.settle}>
       <OctantMenuTrigger
+        ref={popupSide.trigger}
         aria-label="Provider’s own setup"
         aria-description={selected.detail}
         className="code-composer-choice__trigger"
@@ -143,7 +146,7 @@ export function ThreadNativeSetupControl(props: {
         <ChevronDown aria-hidden="true" size={12} />
       </OctantMenuTrigger>
       <OctantMenuPortal>
-        <OctantMenuPositioner align="start" side="top">
+        <OctantMenuPositioner align="start" side={popupSide.side}>
           <OctantMenuPopup>
             <OctantMenuRadioGroup
               value={choice}
