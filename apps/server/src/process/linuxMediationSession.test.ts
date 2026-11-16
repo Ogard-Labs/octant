@@ -158,11 +158,37 @@ describe("owned mediation session admission and input", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(fixture.spawn).not.toHaveBeenCalled();
   });
+  it("refuses a worker entry that could be interpreted as runtime options before spawning", async () => {
+    fixture.spawn.mockReturnValue(worker((done) => done()));
+    const prepared = await prepareLinuxMediationSession({
+      ...input(new AbortController().signal),
+      brokerScript: "--eval",
+    });
+    try {
+      expect(prepared).toEqual({
+        status: "unavailable",
+        reason: "invalid-configuration",
+        cleanup: "confirmed",
+      });
+      expect(fixture.spawn).not.toHaveBeenCalled();
+    } finally {
+      if (prepared.status === "ready") await prepared.session.close();
+    }
+  });
   it("refuses input after EOF without dispatching another write", async () => {
     const write = vi.fn((done: (error?: Error | null) => void) => done());
     fixture.spawn.mockReturnValue(worker(write));
-    const prepared = await prepareLinuxMediationSession(input(new AbortController().signal));
+    const prepared = await prepareLinuxMediationSession({
+      ...input(new AbortController().signal),
+      brokerExecutable: "/fixed-node",
+      brokerScript: "/fixed-worker.mjs",
+    });
     expect(prepared.status).toBe("ready");
+    expect(fixture.spawn).toHaveBeenCalledWith(
+      "/fixed-node",
+      ["/fixed-worker.mjs", "--linux-mediation-worker"],
+      expect.any(Object),
+    );
     if (prepared.status !== "ready") throw new Error("Session unavailable");
     try {
       expect(await prepared.session.launch()).toEqual({ status: "released" });

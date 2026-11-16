@@ -89,6 +89,8 @@ export async function prepareLinuxMediationSession(input: {
   readonly maximumMs: number;
   readonly receiptDirectory: string;
   readonly brokerExecutable: string;
+  /** Fixed server-owned worker module when its runtime is a separate executable. */
+  readonly brokerScript?: string;
   readonly nativeExecutable: string;
   readonly launch: ProcessConfinementPrepareInput;
   readonly policy: SecretGuardMediationPolicy;
@@ -108,7 +110,8 @@ export async function prepareLinuxMediationSession(input: {
     input.maximumMs > 180_000 ||
     input.ownerId.length < 1 ||
     input.ownerId.length > 256 ||
-    ![input.receiptDirectory, input.brokerExecutable, input.nativeExecutable].every(isAbsolute)
+    ![input.receiptDirectory, input.brokerExecutable, input.nativeExecutable].every(isAbsolute) ||
+    (input.brokerScript !== undefined && !isAbsolute(input.brokerScript))
   )
     return { status: "unavailable", reason: "invalid-configuration", cleanup: "confirmed" };
   const deadline = entered + input.maximumMs;
@@ -173,17 +176,21 @@ export async function prepareLinuxMediationSession(input: {
       cleanup: "confirmed",
     };
   const config = prepared.config;
-  const child = spawn(input.brokerExecutable, ["--linux-mediation-worker"], {
-    detached: true,
-    stdio: ["pipe", "pipe", "pipe", "ipc"],
-    serialization: "json",
-    env: {
-      PATH: "/usr/bin:/bin",
-      HOME: homedir(),
-      LANG: "C",
-      TMPDIR: input.launch.temporaryDirectory,
+  const child = spawn(
+    input.brokerExecutable,
+    [...(input.brokerScript === undefined ? [] : [input.brokerScript]), "--linux-mediation-worker"],
+    {
+      detached: true,
+      stdio: ["pipe", "pipe", "pipe", "ipc"],
+      serialization: "json",
+      env: {
+        PATH: "/usr/bin:/bin",
+        HOME: homedir(),
+        LANG: "C",
+        TMPDIR: input.launch.temporaryDirectory,
+      },
     },
-  });
+  );
   const stdout = new PassThrough({ highWaterMark: IO_BYTES });
   const stderr = new PassThrough({ highWaterMark: IO_BYTES });
   child.stdout?.pipe(stdout);

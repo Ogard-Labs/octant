@@ -1143,7 +1143,7 @@ static int policy_measure(const char *mode)
     !strcmp(mode, "--overlay-actor");
   pid_t child = fork();
   if (!child) {
-    char *arguments[] = {"/policy-broker", (char *)mode, NULL};
+    char *arguments[] = {"/policy-broker", "/policy-broker.mjs", (char *)mode, NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     if (capture && !bind_core_target(arguments[0], 1)) {
       dprintf(STDOUT_FILENO, "OCTANT_CORE_TARGET {\"pid\":%ld,\"role\":1,\"bound\":false,\"errno\":%d}\n", (long)getpid(), errno);
@@ -1193,7 +1193,7 @@ static int session_measure(void)
   pid_t child = fork();
   if (!child) {
     if (!bind_core_target("/session-cases", 3)) _exit(63);
-    char *arguments[] = {"/session-cases", NULL};
+    char *arguments[] = {"/session-cases", "/session-cases.mjs", NULL};
     char *environment[] = {"HOME=/tmp", "PATH=/", "LANG=C", NULL};
     execve(arguments[0], arguments, environment);
     _exit(31);

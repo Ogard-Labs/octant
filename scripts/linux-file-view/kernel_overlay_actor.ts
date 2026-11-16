@@ -69,6 +69,8 @@ export async function measureOverlayActor(): Promise<void> {
       unmounted,
       cleaned,
       controllerJitDefaults: true,
+      controllerRuntime: "node",
+      controllerVersion: process.versions.node,
       actualBubblewrapBuilder: false,
       productionReady: false,
     }),

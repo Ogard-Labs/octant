@@ -158,6 +158,8 @@ def main():
     workload = root / "policy-workload"
     policy = root / "policy-broker"
     session_cases = root / "session-cases"
+    policy_module = root / "policy-broker.mjs"
+    session_module = root / "session-cases.mjs"
     core_notes_binary = root / "core-notes"
     core_probe = root / "core-probe"
     fileattr_workload = root / "fileattr-workload"
@@ -176,15 +178,19 @@ def main():
     run("gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-DOCTANT_CORE_NOTES_TEST=1",
         str(repository / "scripts/linux-file-view/kernel_core_notes.c"), "-o", str(core_check), timeout=30)
     run(str(core_check), timeout=5, cwd=root)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_policy.ts"),
-        "--outfile", str(policy), timeout=120, cwd=repository)
-    run("bun", "build", "--compile", str(repository / "scripts/linux-file-view/kernel_session.ts"),
-        "--outfile", str(session_cases), timeout=120, cwd=repository)
-    controller_image(policy)
-    controller_image(session_cases)
-    # Same compiled classifier, default JIT, no device/enrollment on the stock
-    # runner. Keep this independent control before any guest mitigation.
-    run(str(policy), "--metadata-control", timeout=15, cwd=root)
+    node_path = shutil.which("node")
+    if not node_path:
+        raise SystemExit("The owned controller requires the existing Node runtime.")
+    # Fixed, separate interpreter images preserve the role-specific executable
+    # identities in the kernel-owned core collector. No shell or runtime flags.
+    for executable in (policy, session_cases):
+        shutil.copyfile(Path(node_path).resolve(strict=True), executable)
+        executable.chmod(0o700)
+        controller_image(executable)
+    for source, target in (("kernel_policy.ts", policy_module), ("kernel_session.ts", session_module)):
+        run("bun", "build", "--target=node", "--format=esm",
+            str(repository / "scripts/linux-file-view" / source), "--outfile", str(target), timeout=120, cwd=repository)
+    run(str(policy), str(policy_module), "--metadata-control", timeout=15, cwd=root)
     # Copy only this task-owned public executable's dynamic loader/libraries
     # into the disposable initramfs. Nothing is mounted from the runner home.
     runtime_files = {}
@@ -206,7 +212,9 @@ def main():
                    "overlayfs-fixture": overlayfs_fixture,
                    "overlayfs-actor-workload": overlayfs_actor,
                    "core-probe": core_probe,
-                   "policy-broker": policy, "session-cases": session_cases, "usr/bin/bwrap": Path("/usr/bin/bwrap"),
+                   "policy-broker": policy, "session-cases": session_cases,
+                   "policy-broker.mjs": policy_module, "session-cases.mjs": session_module,
+                   "usr/bin/bwrap": Path("/usr/bin/bwrap"),
                    "kernel-runtime.mjs": repository / "scripts/linux-file-view/kernel_runtime.mjs",
                    **runtime_files}
     module_names = {"policy-broker", "session-cases", "core-probe"}
@@ -264,6 +272,7 @@ def main():
     # not hide the earlier security counterexample and its positive controls.
     print(log)
     cases = []
+    classifier_controls = []
     ordered = []
     runtime_receipts = []
     runtime_joins = []
@@ -276,6 +285,8 @@ def main():
             value = json.loads(line)
             if value.get("status") == "measured-original-policy-broker":
                 cases.append(value)
+            elif value.get("status") == "measured-unconfined-classifier":
+                classifier_controls.append(value)
             elif value.get("status") == "overlayfs-actor-workload":
                 overlay_actor_workloads.append(value)
             elif value.get("status") == "overlayfs-actor-owner":
@@ -338,7 +349,7 @@ def main():
                          "caller-cancellation-joins", "deadline-joins", "bounded-duplex-pressure-and-private-receipt-mask",
                          "owner-loss-EOF-admission-and-command-stop"}
     if (len(sessions) != 1 or set(sessions[0].get("outcomes", [])) != expected_sessions or
-            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("productionReady") is not False or
+            sessions[0].get("actualBubblewrapBuilder") is not True or sessions[0].get("controllerJitDefaults") is not True or sessions[0].get("controllerRuntime") != "node" or sessions[0].get("productionReady") is not False or
             len(session_joins) != 1 or any(session_joins[0].get(key) != value for key, value in {"controllerJoined": True, "controllerCode": 0, "orphansJoined": 1, "remaining": False}.items())):
         raise SystemExit("The actual owned session needs all lifecycle/stdio/private-root controls and exact orphan joins.")
     expected_modes = ["--metadata-control", "direct", *(["--bubblewrap"] * 12),
@@ -367,6 +378,7 @@ def main():
             overlay_actors[0].get("ended") != {"status": "exited", "code": 0} or
             overlay_actors[0].get("actualBubblewrapBuilder") is not False or
             overlay_actors[0].get("productionReady") is not False or
+            overlay_actors[0].get("controllerRuntime") != "node" or
             any(overlay_actors[0].get(field) is not True for field in
                 ("inspected", "unmounted", "cleaned", "controllerJitDefaults")) or
             any(overlay_actor_workloads[0].get(field) is not True for field in
@@ -397,7 +409,10 @@ def main():
                     ("mutationSucceeded", "epochAdvanced", "staleRefused", "freshAllowed",
                      "childrenJoined", "cleaned", "passed")) for case in outside)):
         raise SystemExit("Every outside-mutation epoch case requires actual stale/fresh/cleanup proof on two CPUs.")
-    if '"status":"measured-unconfined-classifier","snapshots":256,"jitDefaults":true,"enrolled":false,"cleaned":true' not in log:
+    if (len(classifier_controls) != 1 or classifier_controls[0].get("snapshots") != 256 or
+            classifier_controls[0].get("controllerRuntime") != "node" or
+            classifier_controls[0].get("enrolled") is not False or
+            any(classifier_controls[0].get(field) is not True for field in ("jitDefaults", "cleaned"))):
         raise SystemExit("The guest default-JIT classifier control requires an actual cleanup receipt.")
     capsules = [case for case in cases if case.get("actualBubblewrapBuilder") is True and
                 case.get("runtime") == "native"]
@@ -406,7 +421,8 @@ def main():
     if len(capsules) != 12 or len(direct) != 1 or len(runtime_cases) != 2 or any(
             case.get("ended") != {"status": "exited", "code": 0} or
             case.get("ownedCommandJoined") is not True or case.get("cleaned") is not True or
-            case.get("lateCompanion") is not True or case.get("controllerJitDefaults") is not True for case in cases):
+            case.get("lateCompanion") is not True or case.get("controllerJitDefaults") is not True or
+            case.get("controllerRuntime") != "node" for case in cases):
         raise SystemExit("Every original-policy case needs an actual exit/join/cleanup receipt.")
     if any(case.get("metadataUnchanged") is not True for case in [*capsules, *direct]):
         raise SystemExit("The independent owner must verify private xattrs and mode unchanged.")

@@ -22,6 +22,11 @@ import {
   readLinuxMediationPolicy,
 } from "../../apps/server/src/process/linuxMediationPolicy";
 
+// A runtime comparison, with the actual controller and worker at default JIT.
+assert.equal(process.versions.bun, undefined);
+assert.equal(process.env.NODE_OPTIONS, undefined);
+assert.deepEqual(process.execArgv, []);
+
 if (process.argv[2] === "--metadata-control") {
   const control = await mkdtemp("/tmp/octant-classifier-control-");
   const started = performance.now();
@@ -71,6 +76,8 @@ if (process.argv[2] === "--metadata-control") {
       status: "measured-unconfined-classifier",
       snapshots,
       jitDefaults: true,
+      controllerRuntime: "node",
+      controllerVersion: process.versions.node,
       enrolled: false,
       cleaned,
     }),
@@ -319,6 +326,8 @@ console.log(
     ended,
     productionReady: false,
     controllerJitDefaults: true,
+    controllerRuntime: "node",
+    controllerVersion: process.versions.node,
     lateCompanion: ready,
     actualBubblewrapBuilder: capsule || fileattr,
     runtime: runtime ?? "native",

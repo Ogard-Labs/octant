@@ -13,6 +13,11 @@ import {
 } from "../../apps/server/src/process/nodeOwnedProcessReceipt";
 import { spawn } from "node:child_process";
 
+// A runtime comparison, with the actual controller and worker at default JIT.
+assert.equal(process.versions.bun, undefined);
+assert.equal(process.env.NODE_OPTIONS, undefined);
+assert.deepEqual(process.execArgv, []);
+
 if (process.argv[2] === "--linux-mediation-worker") {
   const { runLinuxMediationWorker } =
     await import("../../apps/server/src/process/linuxMediationWorker");
@@ -37,6 +42,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
       maximumMs,
       receiptDirectory: receipts,
       brokerExecutable: "/session-cases",
+      brokerScript: "/session-cases.mjs",
       nativeExecutable: "/octant-mediation",
       launch: {
         executable: "/policy-workload",
@@ -208,7 +214,7 @@ if (process.argv[2] === "--linux-mediation-worker") {
       assert.equal(errors, 1_048_576);
       outcomes.push("bounded-duplex-pressure-and-private-receipt-mask");
       await rm(`${root}/session-stage`, { force: true });
-      const child = spawn("/session-cases", ["--owner-child", root], {
+      const child = spawn("/session-cases", ["/session-cases.mjs", "--owner-child", root], {
         stdio: ["ignore", "pipe", "inherit"],
         env: { HOME: "/tmp", PATH: "/", LANG: "C" },
       });
@@ -287,6 +293,8 @@ if (process.argv[2] === "--linux-mediation-worker") {
           actualBubblewrapBuilder: true,
           defaultPayloadEnvironment: true,
           controllerJitDefaults: true,
+          controllerRuntime: "node",
+          controllerVersion: process.versions.node,
           orphanJoinPending: true,
         }),
       );

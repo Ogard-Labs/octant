@@ -134,7 +134,11 @@ static struct octant_cred *octant_cred(const struct cred *cred)
  * The current task pins its real credentials throughout this kernel entry. */
 static struct octant_context *current_context(void)
 {
-	return octant_cred(current_real_cred())->context;
+	struct octant_context *actor = octant_cred(current_real_cred())->context;
+	/* An unconfined kernel worker using an enrolled caller's credentials must
+	 * retain that original scope as well. Filesystem overrides may not replace
+	 * a real enrolled actor's own scope with the mounter's different one. */
+	return actor ? actor : octant_cred(current_cred())->context;
 }
 
 bool octant_mediation_restricted(void)

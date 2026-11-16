@@ -55,8 +55,9 @@ copy-up, capsule, runtime and lifetime cases remain mandatory.
 
 The baseline native run denied the direct private read but allowed its
 OverlayFS alias, with the ordinary overlay read successful and independent
-unchanged-state/unmount receipts. Restriction lookup now follows the current
-task's real credentials; broker ownership still additionally checks its exact
+unchanged-state/unmount receipts. Restriction lookup now prefers the current
+task's real credentials, retaining a scoped subjective credential when the
+real actor is unconfined; broker ownership still additionally checks its exact
 subjective credential identity and held process identity. Credential copying
 and native filesystem access credentials are unchanged. The fixed native case
 must pass before this correction is credited; it does not prove internal
@@ -177,13 +178,26 @@ The bounded metadata scan now runs synchronously in its separately owned worker,
 with asynchronous namespace reads before and after the scan. It still requires
 the kernel's final atomic epoch check; synchronous I/O alone is not admission.
 
-Every guest controller, session worker and Bun/Node payload now keeps the
-runtime's default JIT settings. No `BUN_JSC_*` override is accepted. Twelve
-independent ordinary capsule runs exercise the previously intermittent path,
-alongside the default-JIT metadata control, session lifecycle and runtime cases.
-Actual untraced exit, join and cleanup receipts remain mandatory. This removes
-the diagnostic FTL suppression; it does not claim an upstream runtime fix or
-production eligibility without the required native results.
+The synchronous scan did not establish Bun controller reliability: subsequent
+untraced standalone-controller runs crashed after seven and eight successful
+capsule launches, including a null-address fault while draining next ticks.
+The controller and private worker now use the existing Node executable with
+bundled modules and no runtime options; this is a runtime comparison pending
+native acceptance, not a claim that the Bun defect is fixed. The session port
+accepts one fixed absolute server-owned module path beside its runtime, never
+a runtime-options string or workload command overload. Relative/option-like
+entries refuse before spawn.
+
+All controllers, private workers and Bun/Node payloads retain default JIT
+settings. Node controller receipts include their actual version, reject
+`NODE_OPTIONS` and runtime arguments, and the original Bun workload remains
+mandatory. Twelve independent ordinary capsule runs, the metadata control,
+private session lifecycle, both runtime workloads and unchanged-state/cleanup
+receipts are still required. Core capture continues to bind each role's real
+copied interpreter image, retained PID and init namespace before exec. The
+public modules are fixed guest files; they are not added to the ELF core
+inventory. No production integration or reliability pass follows from this
+source change alone.
 
 The guest-only crash collector retains fixed policy-controller, session-controller
 and probe images, pidfd identity checks, three-second and 128-KiB bounds. A
