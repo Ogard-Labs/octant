@@ -178,14 +178,25 @@ time.sleep(12)
       // The durable receipt binds the kernel coalition across orphaning.
       rmSync(beat, { force: true });
       const lost = spawn(
-        executable,
-        ["--run-native", root, "lost-owners:epoch", "--", "/usr/bin/python3", script],
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `
+import {spawn} from 'node:child_process';
+const child=spawn(process.argv[1],["--run-native",process.argv[2],"lost-owners:epoch","--","/usr/bin/python3",process.argv[3]],{cwd:process.argv[2],stdio:["pipe","ignore","ignore"]});
+child.stdin.end("restart recovery\\n");
+setTimeout(()=>process.exit(0),15000);
+`,
+          executable,
+          root,
+          script,
+        ],
         { cwd: root },
       );
       child = lost;
       lost.stdout?.resume();
       lost.stderr?.resume();
-      lost.stdin?.end("restart recovery\n");
       const lostExit = new Promise<void>((resolve) => lost.once("exit", () => resolve()));
       await expect
         .poll(() => readdirSync(root).filter((name) => name.endsWith(".scope")).length, {
@@ -196,10 +207,19 @@ time.sleep(12)
       const receiptName = readdirSync(root).find((name) => name.endsWith(".scope"));
       if (receiptName === undefined) throw new Error("Missing durable scope receipt");
       const receipt = readFileSync(join(root, receiptName));
-      const owner = receipt.readInt32LE(24);
-      expect(owner).toBeGreaterThan(1);
-      expect(owner).not.toBe(process.pid);
-      process.kill(owner, "SIGKILL");
+      const owner = receipt.readInt32LE(24),
+        client = receipt.readInt32LE(28);
+      expect(owner).toBe(lost.pid);
+      const label = receipt.subarray(232, 392).toString("utf8").split("\0")[0];
+      const job = execFileSync("/bin/launchctl", ["print", `gui/${process.getuid?.()}/${label}`], {
+        encoding: "utf8",
+        timeout: 3000,
+      });
+      const service = Number(job.match(/\bpid = (\d+)/)?.[1]);
+      expect(service).toBeGreaterThan(1);
+      expect(service).not.toBe(process.pid);
+      process.kill(service, "SIGKILL");
+      process.kill(client, "SIGKILL");
       lost.kill("SIGKILL");
       await lostExit;
       execFileSync(executable, ["--reap", root, "--stale"], { timeout: 10000 });
@@ -443,6 +463,8 @@ raise SystemExit(os.waitstatus_to_exitcode(status))
         for (const ownedEpoch of [
           epoch,
           "host-death:epoch",
+          "lost-owners:epoch",
+          "native-provider:epoch",
           "terminal:epoch",
           "loader:epoch",
           "escape:epoch",
