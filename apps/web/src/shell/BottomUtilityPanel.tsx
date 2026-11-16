@@ -86,7 +86,12 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
             toolLabel={props.activeSurface.label}
           />
         </div>
-        <IconButton icon={X} label="Hide bottom panel" onClick={() => props.onClose()} />
+        <IconButton
+          className="dock-tile__control text-muted-foreground"
+          icon={X}
+          label="Hide bottom panel"
+          onClick={() => props.onClose()}
+        />
       </header>
       <DockBarContext.Provider value={host}>
         <div className="bottom-utility-panel__content">{props.content}</div>

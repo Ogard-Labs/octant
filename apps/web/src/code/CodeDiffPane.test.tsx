@@ -152,6 +152,27 @@ describe("CodeDiffPane", () => {
     sessionStorage.clear();
   });
 
+  it("shows one state with the host's reason and Try again when the changes cannot be read", async () => {
+    const user = userEvent.setup();
+    const onRefresh = vi.fn();
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={{ state: "unavailable", message: "The checkout folder is missing." }}
+        loadRuntime={runtime().loadRuntime}
+        onRefresh={onRefresh}
+      />,
+    );
+    const state = screen.getByRole("alert");
+    expect(state).toHaveTextContent("Changes can't be read");
+    expect(state).toHaveTextContent("The checkout folder is missing.");
+    // The one state is the whole pane: no file list and no second notice.
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).toBeNull();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    await user.click(within(state).getByRole("button", { name: "Try again" }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it("stacks every changed file with its numbered lines by default", async () => {
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,

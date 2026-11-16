@@ -845,6 +845,14 @@
   min-width: 0;
 }
 
+/* Under a bar the row is a pane's secondary row: the bar's own text size and
+   weight, not a second, larger title. */
+.right-utility-dock__tool .side-chat[data-bar-hosted="true"] .side-chat__title {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-detail);
+  font-weight: var(--oct-weight-regular);
+}
+
 .right-utility-dock__tool .side-chat__title > span {
   overflow: hidden;
   min-width: 0;
@@ -899,13 +907,17 @@
   background: var(--oct-meta);
 }
 
+/* The same bar a dock pane has: the title band's height, 24px controls 4px
+   apart, the last one 8px from the edge, everything centred on the row. It was
+   44px with 28px tabs a pixel low between 24px and 28px controls. */
 .bottom-utility-panel__toolbar {
   display: flex;
   min-width: 0;
+  height: var(--oct-title-rail-h);
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-1);
-  padding: 4px var(--oct-space-2) var(--oct-rail-pad-end) 8px;
+  padding: 0 var(--oct-space-2);
   background: transparent;
   border-bottom: 0;
 }

@@ -14,6 +14,7 @@ import type {
 import { Bug, Play, Plus, RotateCw } from "../ui/icons";
 import { useDockBarControls } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { OctantEmpty } from "../ui/base/OctantEmpty";
 import { codeEditorRevealKey, requestCodeEditorReveal } from "../code/codeEditorReveal";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -468,16 +469,12 @@ function EndedLine(props: { readonly text: string }) {
   );
 }
 
+/**
+ * Why the pane has nothing to run: the one centred state every pane uses (a
+ * line, then the reason), not a card of its own.
+ */
 function Refusal(props: { readonly title: string; readonly text: string }) {
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className="run-debug__card">
-      <h3 className="run-debug__card-title" id={headingId}>
-        {props.title}
-      </h3>
-      <p className="run-debug__card-lede">{props.text}</p>
-    </section>
-  );
+  return <OctantEmpty message={props.text} state="neutral" title={props.title} />;
 }
 
 function Configurations(props: {

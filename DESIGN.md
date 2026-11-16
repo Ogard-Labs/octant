@@ -1425,6 +1425,8 @@ fold to a named control, then actions into one More menu; status text and
 must-read cues never fold. A tool alone used to have a 36px tab row inset 8px,
 a 32px control row or no bar, and a tiled one a 32px bar inset 12px, so a
 second tool moved every tab and control of the first (measured 2026-11-15).
+The bottom panel's toolbar is the same bar: the same height, its tabs 28px and
+every control 24px (Add tool and Hide included), centred on the row.
 The folding order is in [Workspace: Tool tiles](docs/design/workspace.md#tool-tiles).
 
 Panel tabs (the tool strip, the Browser's pages, a Code thread's open files)
