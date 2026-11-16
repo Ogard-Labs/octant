@@ -677,6 +677,24 @@ describe("Claude Agent SDK port", () => {
     expect(harness.invocation).toBeUndefined();
   });
 
+  test("refuses to leave the decision to Claude's own permissions in a launch that reads none of the person's settings", async () => {
+    const harness = makeHarness();
+    const { sandbox: _sandbox, ...withoutSandbox } = openInput;
+    const failed = await failureOf(
+      Effect.scoped(
+        harness.port.openQuery({
+          ...withoutSandbox,
+          ownPermissions: true,
+        } as unknown as typeof openInput),
+      ),
+    );
+    expect(failed).toEqual({
+      category: "invalid-configuration",
+      message: "Claude's own permissions need the person's Claude settings.",
+    });
+    expect(harness.invocation).toBeUndefined();
+  });
+
   test("uses the pinned permission mapping and allows controlled mode changes", async () => {
     const fullAccess = makeHarness([
       { ...safeRuntimeInitialization, permissionMode: "bypassPermissions" },

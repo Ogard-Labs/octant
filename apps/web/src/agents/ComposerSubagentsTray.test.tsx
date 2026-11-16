@@ -95,6 +95,45 @@ describe("SubagentsTray", () => {
     expect(screen.getByRole("button", { name: /Opens it in Agents/ })).toHaveTextContent("Working");
   });
 
+  it("sends a running observed child to the background and messages it where the running turn offers both", async () => {
+    const user = userEvent.setup();
+    const backgroundObserved = vi.fn(async () => ({ status: "backgrounded" as const }));
+    const messageObserved = vi.fn(async () => ({ status: "queued" as const }));
+    renderTray([], {
+      observations: [
+        observedChildFixture({
+          lifecycleStatus: "running",
+          control: "stop",
+          steering: ["background", "message"],
+        }),
+      ],
+      stopClient: { backgroundObserved, messageObserved },
+    });
+    await user.click(
+      screen.getByRole("button", { name: /Send subagent to the background: Inspect parser/ }),
+    );
+    expect(backgroundObserved).toHaveBeenCalledWith(
+      expect.objectContaining({ observationId: observedChildFixture().observationId }),
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Running in the background.");
+    await user.type(screen.getByRole("textbox", { name: /Message for Inspect parser/ }), "Skip it");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(messageObserved).toHaveBeenCalledWith(expect.objectContaining({ message: "Skip it" }));
+    expect(screen.getByRole("status")).toHaveTextContent("next tool call");
+  });
+
+  it("offers no background or message control for a child the running turn cannot steer", () => {
+    renderTray([], {
+      observations: [observedChildFixture({ lifecycleStatus: "running", control: "stop" })],
+      stopClient: {
+        backgroundObserved: vi.fn(),
+        messageObserved: vi.fn(),
+      },
+    });
+    expect(screen.queryByRole("button", { name: /background/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /Message for/ })).not.toBeInTheDocument();
+  });
+
   it("previews a finished observed child's closing report and reported usage, never inventing zeros", () => {
     renderTray([], {
       observations: [

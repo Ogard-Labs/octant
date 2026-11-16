@@ -14,6 +14,7 @@ import { CANVAS_MAX_TAGS_PER_CANVAS, CanvasTagName } from "./canvasTags";
 import { UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
+import { ThreadPublishedSnapshot } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -208,6 +209,54 @@ export const ArtifactLibrarySyncedEntry = Schema.Struct({
 }).annotations(strict);
 export type ArtifactLibrarySyncedEntry = typeof ArtifactLibrarySyncedEntry.Type;
 
+/** Where a library entry came from: a Canvas document, or a page Claude published. */
+export const ArtifactLibrarySource = Schema.Literal("canvas", "claude");
+export type ArtifactLibrarySource = typeof ArtifactLibrarySource.Type;
+
+/** The kind a Claude page reads as when its publish named no Claude artifact type. */
+export const CLAUDE_PLAIN_PAGE_TYPE = "Page";
+
+const ClaudeArtifactType = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+const ClaudeAccountId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128));
+
+/**
+ * A page a Work or Code thread published to claude.ai through Claude's
+ * `Artifact` tool, read from that thread's journal alone: Octant never
+ * fetches claude.ai, so only pages published from Octant are listed. One
+ * entry per page address; each later publish to the same address is a
+ * version of it, and the entry shows the newest.
+ */
+export const ArtifactLibraryClaudeEntry = Schema.Struct({
+  url: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  /** The Claude artifact type its newest publish named; `Page` for a plain page. */
+  artifactType: ClaudeArtifactType,
+  /** The Claude account that published the newest version, when journaled. */
+  account: Schema.optional(ClaudeAccountId),
+  /** The account's display name, when the host still holds the account. */
+  accountName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  projectId: ProjectId,
+  projectName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+  mode: Schema.Literal("work", "code"),
+  threadId: Schema.UUID,
+  threadTitle: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  /** The tool call that published the newest version, which names its snapshot. */
+  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
+  versionCount: Schema.Int.pipe(Schema.positive()),
+  publishedAt: UtcTimestamp,
+  /** Present when the newest publish named a local file Octant kept a copy of. */
+  snapshot: Schema.optional(Schema.Literal("html", "markdown")),
+}).annotations(strict);
+export type ArtifactLibraryClaudeEntry = typeof ArtifactLibraryClaudeEntry.Type;
+
+/** One Claude account the library's Claude pages came from, for its filter. */
+export const ArtifactLibraryClaudeAccount = Schema.Struct({
+  account: ClaudeAccountId,
+  name: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256))),
+  pageCount: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ArtifactLibraryClaudeAccount = typeof ArtifactLibraryClaudeAccount.Type;
+
 /** One Project, as the library's filter offers it. */
 export const ArtifactLibraryProject = Schema.Struct({
   projectId: ProjectId,
@@ -242,6 +291,12 @@ export const ArtifactLibraryQuery = Schema.Struct({
   kind: Schema.optional(ArtifactKind),
   /** One tag, matched exactly: the folder view of the person's own filing. */
   tag: Schema.optional(CanvasTagName),
+  /** Canvas documents or Claude pages only; absent lists both. */
+  source: Schema.optional(ArtifactLibrarySource),
+  /** One Claude artifact type, matched exactly; only Claude pages match it. */
+  claudeType: Schema.optional(ClaudeArtifactType),
+  /** One Claude account; only Claude pages it published match it. */
+  account: Schema.optional(ClaudeAccountId),
 }).annotations(strict);
 export type ArtifactLibraryQuery = typeof ArtifactLibraryQuery.Type;
 
@@ -274,6 +329,18 @@ export const ArtifactLibraryListing = Schema.Struct({
   synced: Schema.optional(
     Schema.Array(ArtifactLibrarySyncedEntry).pipe(Schema.maxItems(MAX_ARTIFACT_LIBRARY_ENTRIES)),
   ),
+  /**
+   * Pages this caller's threads published to claude.ai, newest first, under
+   * the same Project scoping as the entries. Absent when none match.
+   */
+  claude: Schema.optional(
+    Schema.Array(ArtifactLibraryClaudeEntry).pipe(Schema.maxItems(MAX_ARTIFACT_LIBRARY_ENTRIES)),
+  ),
+  /** How many Claude pages matched before the page ceiling. */
+  claudeMatchCount: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** Every Claude account and artifact type this caller's Claude pages carry, whether or not filtered. */
+  claudeAccounts: Schema.optional(Schema.Array(ArtifactLibraryClaudeAccount)),
+  claudeTypes: Schema.optional(Schema.Array(ClaudeArtifactType)),
   /** How many artifacts matched before the page ceiling, so a cut list says so. */
   matchCount: Schema.Int.pipe(Schema.nonNegative()),
   truncated: Schema.Boolean,
@@ -475,3 +542,27 @@ export const decodeArtifactSyncedResult = Schema.decodeUnknownSync(ArtifactSynce
 export const decodeArtifactLibraryQuery = Schema.decodeUnknownSync(ArtifactLibraryQuery);
 export const decodeArtifactLibraryEntry = Schema.decodeUnknownSync(ArtifactLibraryEntry);
 export const decodeArtifactLibraryListing = Schema.decodeUnknownSync(ArtifactLibraryListing);
+
+/** Asks for the copy Octant kept of a Claude page's published file. */
+export const ArtifactLibraryClaudeSnapshotRequest = Schema.Struct({
+  mode: Schema.Literal("work", "code"),
+  threadId: Schema.UUID,
+  toolCallId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255)),
+}).annotations(strict);
+export type ArtifactLibraryClaudeSnapshotRequest = typeof ArtifactLibraryClaudeSnapshotRequest.Type;
+export const decodeArtifactLibraryClaudeSnapshotRequest = Schema.decodeUnknownSync(
+  ArtifactLibraryClaudeSnapshotRequest,
+);
+
+/** The kept copy, or why there is none this caller may read. */
+export const ArtifactLibraryClaudeSnapshotResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("claude-snapshot"),
+    snapshot: ThreadPublishedSnapshot,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unavailable") }).annotations(strict),
+);
+export type ArtifactLibraryClaudeSnapshotResult = typeof ArtifactLibraryClaudeSnapshotResult.Type;
+export const decodeArtifactLibraryClaudeSnapshotResult = Schema.decodeUnknownSync(
+  ArtifactLibraryClaudeSnapshotResult,
+);

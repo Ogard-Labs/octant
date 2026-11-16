@@ -1419,12 +1419,31 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         String(live.sessionId) === String(child.sessionId)
       );
     };
+  // The same live turn alone may send one of its children to the background
+  // or carry a person's message to it, where its runtime offers either.
+  const steeringByLiveTurn =
+    (threadId: string) =>
+    (child: ProviderChildObservation): ReadonlyArray<"background" | "message"> => {
+      const live = liveTurns.connection(threadId);
+      if (
+        live === undefined ||
+        String(live.providerInstanceId) !== String(child.providerInstanceId) ||
+        String(live.sessionId) !== String(child.sessionId)
+      ) {
+        return [];
+      }
+      return [
+        ...(live.connection.backgroundChildAgent === undefined ? [] : (["background"] as const)),
+        ...(live.connection.messageChildAgent === undefined ? [] : (["message"] as const)),
+      ];
+    };
   // The routes are built where they are dispatched, with the Canvas snapshot
   // the Canvas area provides.
   const agentRunRouteDependencies: Omit<AgentRunRouteDependencies, "snapshotCanvas"> = {
     liveTurnConnection: (threadId) => liveTurns.connection(threadId),
     readObservations: ({ parentThreadId }) => {
       const stoppable = stoppableByLiveTurn(String(parentThreadId));
+      const steering = steeringByLiveTurn(String(parentThreadId));
       const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
       const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
       const code = persistence.readCodeThread(decodeCodeThreadId(String(parentThreadId)));
@@ -1436,6 +1455,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return observedChildren({
           parentThreadId,
           stoppable,
+          steering,
           mode: "chat",
           states:
             view?.turns
@@ -1453,6 +1473,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return observedChildren({
           parentThreadId,
           stoppable,
+          steering,
           mode: "work",
           states: turns
             .slice(-64)
@@ -1468,6 +1489,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       return observedChildren({
         parentThreadId,
         stoppable,
+        steering,
         mode: "code",
         truncated: history.status !== "ok",
         events:
