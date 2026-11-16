@@ -19,6 +19,38 @@ function chooseProjectTree(modes: ReadonlyArray<string> = ["chat", "work", "code
   }
 }
 
+type Arrangement = "Status" | "Project tree" | "Activity feed";
+
+// The arrangement is the first group of the list's filter menu; with no
+// Project views to filter, the same group sits behind a lone glyph.
+async function openArrangementMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    screen.getByRole("button", { name: /^(Project view filters|Thread list view)/ }),
+  );
+  return screen.findByRole("group", { name: "Show threads as" });
+}
+
+async function chooseArrangement(
+  user: ReturnType<typeof userEvent.setup>,
+  name: Arrangement,
+): Promise<void> {
+  const group = await openArrangementMenu(user);
+  await user.click(within(group).getByRole("menuitemradio", { name }));
+}
+
+async function expectArrangement(
+  user: ReturnType<typeof userEvent.setup>,
+  name: Arrangement,
+  chosen: boolean,
+): Promise<void> {
+  const group = await openArrangementMenu(user);
+  expect(within(group).getByRole("menuitemradio", { name })).toHaveAttribute(
+    "aria-checked",
+    chosen ? "true" : "false",
+  );
+  await user.keyboard("{Escape}");
+}
+
 const chatProjectA = {
   id: "11111111-1111-4111-8111-111111111111" as ProjectId,
   name: "Test",
@@ -856,7 +888,7 @@ describe("ProjectSidebarSection threads filed in no Project", () => {
 });
 
 describe("ProjectSidebarSection activity view", () => {
-  it("offers a Status row to the workspace as a drag, and does not open it on the click that ends one", () => {
+  it("offers a Status row to the workspace as a drag, and does not open it on the click that ends one", async () => {
     window.localStorage.clear();
     const onSelectThread = vi.fn();
     let suppressNextClick = false;
@@ -894,10 +926,7 @@ describe("ProjectSidebarSection activity view", () => {
         </SidebarThreadDragContext.Provider>,
       );
       // Status is the arrangement the sidebar opens on.
-      expect(screen.getByRole("button", { name: "Status" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      await expectArrangement(userEvent.setup(), "Status", true);
       const row = screen.getByRole("button", { name: /Estimate app rebrand effort/ });
 
       fireEvent.pointerDown(row, { button: 0, pointerId: 1 });
@@ -925,7 +954,7 @@ describe("ProjectSidebarSection activity view", () => {
     }
   });
 
-  it("opens on Status with threads grouped under counted headings when no arrangement is stored", () => {
+  it("opens on Status with threads grouped under counted headings when no arrangement is stored", async () => {
     window.localStorage.clear();
 
     try {
@@ -964,14 +993,8 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Status" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("button", { name: "Project tree" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      await expectArrangement(userEvent.setup(), "Status", true);
+      await expectArrangement(userEvent.setup(), "Project tree", false);
       expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
 
       const working = screen.getByRole("region", { name: /^Working/ });
@@ -1110,31 +1133,17 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      const listSwitch = screen.getByRole("group", { name: "Thread list" });
-      // The switch stays on the list's own row in every arrangement, so pressing
-      // it never moves it out from under the pointer.
-      expect(
-        within(screen.getByRole("region", { name: "Projects" })).queryByRole("group", {
-          name: "Thread list",
-        }),
-      ).toBeNull();
-      expect(within(listSwitch).getByRole("button", { name: "Project tree" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      // The old three-button switch is gone from the toolbar; the choice lives in the filter menu.
+      expect(screen.queryByRole("group", { name: "Thread list" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Activity feed" })).toBeNull();
+      await expectArrangement(userEvent.setup(), "Project tree", true);
+      await expectArrangement(userEvent.setup(), "Activity feed", false);
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Priority" })).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: "Activity feed" }));
+      await chooseArrangement(user, "Activity feed");
 
-      expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
+      await expectArrangement(userEvent.setup(), "Activity feed", true);
       expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("on");
       expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Priority" })).toBeVisible();
@@ -1169,7 +1178,7 @@ describe("ProjectSidebarSection activity view", () => {
       await user.click(screen.getByRole("button", { name: /Update AuroraDocs logos/ }));
       expect(onSelectThread).toHaveBeenCalledWith("thread-today");
 
-      await user.click(screen.getByRole("button", { name: "Project tree" }));
+      await chooseArrangement(user, "Project tree");
       expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("off");
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Priority" })).not.toBeInTheDocument();
@@ -1208,7 +1217,7 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      await user.click(screen.getByRole("button", { name: "Activity feed" }));
+      await chooseArrangement(user, "Activity feed");
       expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
       expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("on");
       expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.code")).toBe("off");
@@ -1238,10 +1247,7 @@ describe("ProjectSidebarSection activity view", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
+      await expectArrangement(userEvent.setup(), "Activity feed", false);
       expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
     } finally {
@@ -1413,7 +1419,7 @@ describe("ProjectSidebarSection code project views", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     expect(screen.getByRole("button", { name: /Octant task/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Aurora task/i })).not.toBeInTheDocument();
   });
@@ -1973,7 +1979,7 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
     // The filter that hid them is still there to undo it.
     expect(screen.getByRole("button", { name: /^Project view filters/ })).toBeVisible();
-    expect(screen.getByRole("group", { name: "Thread list" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Thread list" })).toBeNull();
   });
 
   it("tells a first run where its threads will appear and how to start one", () => {
@@ -2430,6 +2436,49 @@ describe("ProjectSidebarSection search", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the view choice out of the filter count and lets Reset filters clear only the filters", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={now}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-planning",
+            title: "Planning",
+            updatedAt: "2026-08-14T12:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    // Choosing another view of the list is not a filter, so no count appears.
+    await chooseArrangement(user, "Activity feed");
+    expect(screen.getByRole("button", { name: "Project view filters" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: "Thread list" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Project view filters" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Show empty Projects" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Project view filters, 1 active" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Project view filters, 1 active" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Reset filters" }));
+    expect(screen.getByRole("button", { name: "Project view filters" })).toBeVisible();
+    await expectArrangement(user, "Activity feed", true);
+  });
+
   it("hides activity-view groups with no matches and restores them when search clears", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
@@ -2437,7 +2486,7 @@ describe("ProjectSidebarSection search", () => {
 
     try {
       const { rerender } = render(<ProjectSidebarSection {...sharedProps} />);
-      await user.click(screen.getByRole("button", { name: "Activity feed" }));
+      await chooseArrangement(user, "Activity feed");
 
       expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
       expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
@@ -2474,7 +2523,7 @@ describe("ProjectSidebarSection search", () => {
 
     try {
       render(<ProjectSidebarSection {...sharedProps} searchQuery="test" />);
-      await user.click(screen.getByRole("button", { name: "Activity feed" }));
+      await chooseArrangement(user, "Activity feed");
 
       const today = screen.getByRole("region", { name: "Today" });
       expect(within(today).getByRole("button", { name: /Planning/i })).toHaveTextContent("Test");
@@ -2600,7 +2649,10 @@ describe("snoozed and completed shelves", () => {
     expect(onSelectThread).toHaveBeenCalledWith("thread-c");
   });
 
-  it("opens the Put away shelf, or the Activity feed, when a sidebar tile asks for it", () => {
+  it("opens the Put away shelf, or the Activity feed, when a sidebar tile asks for it", async () => {
+    // The shelf scrolls itself into view a frame after it opens, and this
+    // test now waits long enough for that frame; jsdom has no scrollIntoView.
+    Element.prototype.scrollIntoView = vi.fn();
     window.localStorage.clear();
     chooseProjectTree();
     const section = (listRequest?: { view: "activity" | "completed"; sequence: number }) => (
@@ -2632,16 +2684,10 @@ describe("snoozed and completed shelves", () => {
 
     rerender(section({ view: "completed", sequence: 1 }));
     expect(screen.getByText("Put away").closest("details")).toHaveAttribute("open");
-    expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    await expectArrangement(userEvent.setup(), "Activity feed", false);
 
     rerender(section({ view: "activity", sequence: 2 }));
-    expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expectArrangement(userEvent.setup(), "Activity feed", true);
     window.localStorage.clear();
     chooseProjectTree();
   });
@@ -2770,7 +2816,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     await user.hover(screen.getByRole("button", { name: /Alternate plan/ }));
     const details = await screen.findByRole("group", { name: "Thread details" });
     expect(details).toHaveTextContent("Forked from Planning");
@@ -2785,7 +2831,7 @@ describe("ProjectSidebarSection row property visibility", () => {
       activity: { project: true, branch: true, pullRequest: true, lastUpdated: true, status: true },
     });
     render(<ProjectSidebarSection {...props} threadActions={{ onOpenPullRequest }} />);
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     const row = screen.getByRole("button", { name: /Planning/ });
     expect(within(row).getByText("feature/sidebar")).toBeVisible();
     // The row names the request whether or not it can also open it. It used to
@@ -2823,7 +2869,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
 
     const fold = screen.getByRole("button", { name: /^Earlier/ });
     expect(fold).toHaveAttribute("aria-expanded", "false");
@@ -2849,7 +2895,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
 
     expect(screen.getByRole("button", { name: /^Earlier/ })).toHaveAttribute(
       "aria-expanded",
@@ -2872,7 +2918,7 @@ describe("ProjectSidebarSection row property visibility", () => {
         ]}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
 
     // Folded, the only match sat under a heading that showed a count and no row.
     expect(screen.getByRole("button", { name: /Old spike/ })).toBeVisible();
@@ -2888,7 +2934,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     const onArchiveThread = vi.fn();
     const props = sidebarProps();
     render(<ProjectSidebarSection {...props} threadActions={{ onPinThread, onArchiveThread }} />);
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     const pin = screen.getByRole("button", { name: "Pin thread" });
     await user.click(pin);
     expect(onPinThread).toHaveBeenCalledWith(codeThread.threadId, true);
@@ -2908,7 +2954,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     expect(within(treeRow).getByText("feature/sidebar")).toBeVisible();
     expect(within(treeRow).getByText("2h")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     const feedRow = screen.getByRole("button", { name: /Planning/ });
     expect(within(feedRow).getByText("octant")).toBeVisible();
     expect(within(feedRow).queryByText("#12 open")).toBeNull();
@@ -2935,7 +2981,7 @@ describe("ProjectSidebarSection row property visibility", () => {
     ).toBeVisible();
 
     // The feed never agreed to hide anything; its own defaults are untouched.
-    await user.click(screen.getByRole("button", { name: "Activity feed" }));
+    await chooseArrangement(user, "Activity feed");
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).getByText("octant"),
     ).toBeVisible();
@@ -2957,7 +3003,7 @@ describe("ProjectSidebarSection row property visibility", () => {
 
     // Back in the tree the pull request is still hidden: one view's choice
     // never rewrites the other's.
-    await user.click(screen.getByRole("button", { name: "Project tree" }));
+    await chooseArrangement(user, "Project tree");
     expect(
       within(screen.getByRole("button", { name: /Planning/ })).queryByText("#12 open"),
     ).toBeNull();

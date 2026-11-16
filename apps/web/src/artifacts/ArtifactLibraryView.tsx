@@ -10,7 +10,7 @@ import { Layers, LayoutGrid, List, Plus, Search } from "../ui/icons";
 import { SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSelectField } from "../ui/base/OctantSelect";
+import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
 import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { ArtifactCard } from "./ArtifactCard";
@@ -68,6 +68,13 @@ const KINDS: ReadonlyArray<ArtifactKind> = [
   "mixed",
 ];
 const MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
+/**
+ * The "no filter" radio item; a menu radio needs a value, and the filter key
+ * is removed instead. Empty, because no kind, mode, Project id or tag name can
+ * be: a tag someone named "any" would otherwise share the item's value and
+ * could never be chosen.
+ */
+const ANY = "";
 
 /** A Canvas a Chat thread owns outside every Project files under this label. */
 const NO_PROJECT = "No Project";
@@ -95,6 +102,9 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
     ...(props.onTagAdd === undefined ? {} : { onTagAdd: props.onTagAdd }),
     ...(props.onTagRemove === undefined ? {} : { onTagRemove: props.onTagRemove }),
   };
+  const filterCount = [filters.kind, filters.projectId, filters.mode, filters.tag].filter(
+    (choice) => choice !== undefined,
+  ).length;
   const hasActiveFilters =
     filters.query.trim() !== "" ||
     filters.kind !== undefined ||
@@ -118,6 +128,11 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
   // host decodes has no room for an explicitly absent field.
   const clear = (key: "kind" | "projectId" | "mode" | "tag") => {
     const { [key]: _removed, ...rest } = filters;
+    props.onFiltersChange(rest);
+  };
+
+  const resetFilters = () => {
+    const { kind: _kind, projectId: _projectId, mode: _mode, tag: _tag, ...rest } = filters;
     props.onFiltersChange(rest);
   };
 
@@ -163,83 +178,67 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               />
             </div>
 
-            <label className="sr-only" htmlFor="artifact-library-kind">
-              Filter by kind
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-kind"
-              onValueChange={(value) =>
-                value === "" ? clear("kind") : change({ kind: value as ArtifactKind })
-              }
-              options={[
-                { id: "", label: "Any kind" },
-                ...KINDS.map((kind) => ({
-                  id: kind,
-                  label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
-                })),
-              ]}
-              value={filters.kind ?? ""}
-            />
-
-            <label className="sr-only" htmlFor="artifact-library-project">
-              Filter by Project
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-project"
-              onValueChange={(value) =>
-                value === "" ? clear("projectId") : change({ projectId: value as ProjectId })
-              }
-              options={[
-                { id: "", label: "Any Project" },
-                ...(listing?.projects ?? []).map((project) => ({
-                  id: String(project.projectId),
-                  label: `${project.name} (${String(project.artifactCount)})`,
-                })),
-              ]}
-              value={filters.projectId === undefined ? "" : String(filters.projectId)}
-            />
-
-            <label className="sr-only" htmlFor="artifact-library-mode">
-              Filter by mode
-            </label>
-            <OctantSelectField
-              className="artifact-library__select select"
-              id="artifact-library-mode"
-              onValueChange={(value) =>
-                value === "" ? clear("mode") : change({ mode: value as OctantMode })
-              }
-              options={[
-                { id: "", label: "Any mode" },
-                ...MODES.map((mode) => ({
-                  id: mode,
-                  label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
-                })),
-              ]}
-              value={filters.mode ?? ""}
-            />
-
-            {(listing?.tags ?? []).length === 0 ? null : (
-              <>
-                <label className="sr-only" htmlFor="artifact-library-tag">
-                  Filter by tag
-                </label>
-                <OctantSelectField
-                  className="artifact-library__select select"
-                  id="artifact-library-tag"
-                  onValueChange={(value) => (value === "" ? clear("tag") : change({ tag: value }))}
+            <FilterMenu count={filterCount} onReset={resetFilters}>
+              <FilterMenuGroup<string>
+                label="Kind"
+                onChange={(value) =>
+                  value === ANY ? clear("kind") : change({ kind: value as ArtifactKind })
+                }
+                options={[
+                  { value: ANY, label: "Any kind" },
+                  ...KINDS.map((kind) => ({
+                    value: kind as string,
+                    label: `${kind[0]?.toUpperCase()}${kind.slice(1)}`,
+                  })),
+                ]}
+                value={filters.kind ?? ANY}
+              />
+              <FilterMenuGroup<string>
+                label="Project"
+                onChange={(value) =>
+                  value === ANY ? clear("projectId") : change({ projectId: value as ProjectId })
+                }
+                options={[
+                  { value: ANY, label: "Any Project" },
+                  ...(listing?.projects ?? []).map((project) => ({
+                    value: String(project.projectId),
+                    label: `${project.name} (${String(project.artifactCount)})`,
+                  })),
+                ]}
+                separated
+                value={filters.projectId === undefined ? ANY : String(filters.projectId)}
+              />
+              <FilterMenuGroup<string>
+                label="Mode"
+                onChange={(value) =>
+                  value === ANY ? clear("mode") : change({ mode: value as OctantMode })
+                }
+                options={[
+                  { value: ANY, label: "Any mode" },
+                  ...MODES.map((mode) => ({
+                    value: mode as string,
+                    label: `${mode[0]?.toUpperCase()}${mode.slice(1)}`,
+                  })),
+                ]}
+                separated
+                value={filters.mode ?? ANY}
+              />
+              {(listing?.tags ?? []).length === 0 ? null : (
+                <FilterMenuGroup<string>
+                  label="Tag"
+                  onChange={(value) => (value === ANY ? clear("tag") : change({ tag: value }))}
                   options={[
-                    { id: "", label: "Any tag" },
+                    { value: ANY, label: "Any tag" },
                     ...(listing?.tags ?? []).map((tag) => ({
-                      id: tag.name,
+                      value: tag.name,
                       label: `${tag.name} (${String(tag.artifactCount)})`,
                     })),
                   ]}
-                  value={filters.tag ?? ""}
+                  separated
+                  value={filters.tag ?? ANY}
                 />
-              </>
-            )}
+              )}
+            </FilterMenu>
 
             <OctantToggleGroup<LibraryViewMode>
               aria-label="Artifact view"

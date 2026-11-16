@@ -1451,3 +1451,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 .shell--app-backdrop.shell-frame .code-terminal-pane {
   background: var(--octant-workspace);
 }
+
+/* The Filter menu's button: a count after the word, drawn as text so it needs
+   no extra box. Its room is always kept, so the button and the controls beside
+   it stay where they are when the first filter goes on. */
+.filter-menu__count {
+  min-width: 1ch;
+  color: var(--oct-accent);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.filter-menu__count[data-empty="true"] {
+  visibility: hidden;
+}

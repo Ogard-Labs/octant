@@ -58,60 +58,16 @@
   min-height: 0;
 }
 
-/* The creation paths and suggestions are independently actionable objects,
-   so they keep their lift: each is a button drawn as a card, the suggestion
-   card with its one hairline. Without it, in light, the card fill is the
+/* The suggestions are independently actionable objects, so they keep their
+   lift: each is a button drawn as a card with its one hairline. Without it, in light, the card fill is the
    page's own white and the card read as loose text. The sections around them
    are open. */
-.automation-center__creation-paths {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-  margin-top: 0.75rem;
-}
-
-.automation-center__creation-path {
-  display: grid;
-  min-height: 5.5rem;
-  grid-template-columns: 1.75rem minmax(0, 1fr);
-  align-items: start;
-  justify-content: stretch;
-  gap: 0.65rem;
-  padding: 0.85rem;
-  color: var(--oct-fg-2);
-  border: 0;
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  outline: 1px solid var(--oct-border);
-  outline-offset: -1px;
-  text-align: left;
-  white-space: normal;
-}
-
-.automation-center__creation-path > svg {
-  margin-top: 2px;
-  color: var(--oct-muted);
-}
-
-.automation-center__creation-path--featured > svg {
-  color: var(--oct-accent-fg);
-}
-
-.automation-center__creation-path > span,
-.automation-center__suggestion {
-  display: grid;
-  min-width: 0;
-  gap: 0.25rem;
-}
-
-.automation-center__creation-path strong,
 .automation-center__suggestion strong {
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-medium);
 }
 
-.automation-center__creation-path small,
 .automation-center__suggestion span {
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
@@ -129,6 +85,9 @@
 }
 
 .automation-center__suggestion {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
   height: auto;
   min-height: 4.5rem;
   align-content: start;
@@ -155,31 +114,24 @@
   min-width: 0;
 }
 
-/* The view and mode filters ride the .segmented/.segment recipe; the
-   rules here only translate its button idiom (aria-pressed) to this
-   markup's radio-in-label idiom. */
-.automation-center__filter,
+/* The view switch rides the .segmented/.segment recipe; the rules here only
+   translate its button idiom (aria-pressed) to this markup's radio-in-label
+   idiom. */
 .automation-center__view {
   cursor: default;
 }
 
-.automation-center__filter:has(input:checked),
 .automation-center__view:has(input:checked) {
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
 
-.automation-center__filter input,
 .automation-center__view input {
   position: absolute;
   width: 1px;
   height: 1px;
   overflow: hidden;
   clip-path: inset(50%);
-}
-
-.automation-center__create {
-  margin-inline-start: auto;
 }
 
 .automation-center__rows {
@@ -272,11 +224,6 @@
 .routine-composer__draft-work {
   margin: 0;
   color: var(--oct-muted);
-}
-
-.automation-center__completed {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
 }
 
 .automation-row__state[data-lifecycle="paused"],
@@ -501,7 +448,6 @@
 }
 
 @media (max-width: 720px) {
-  .automation-center__creation-paths,
   .automation-center__suggestion-grid,
   .automation-center__body[data-detail-open="true"] {
     grid-template-columns: minmax(0, 1fr);

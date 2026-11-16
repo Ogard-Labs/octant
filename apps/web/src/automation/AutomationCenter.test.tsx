@@ -104,17 +104,27 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Opens the one Filter menu, picks a radio choice inside the named group, and closes the menu. */
+async function chooseFilter(group: string, choice: string): Promise<void> {
+  await userEvent.click(screen.getByRole("button", { name: /^Filter/ }));
+  const groupElement = await screen.findByRole("group", { name: group });
+  await userEvent.click(within(groupElement).getByRole("menuitemradio", { name: choice }));
+  await userEvent.keyboard("{Escape}");
+}
+
 describe("AutomationCenter default surface", () => {
-  it("shows search, mode filters, compact rows, and one primary create action", async () => {
+  it("shows search, the view switch, one Filter menu, compact rows, and one create control", async () => {
     renderCenter();
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading automations.");
     const rows = await screen.findByRole("list", { name: "Automations" });
     expect(screen.getByLabelText("Search automations")).toBeVisible();
-    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Work" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Code" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New automation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "List" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Show completed")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Create an automation" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New automation" })).toHaveLength(1);
 
     const workRow = within(rows).getByRole("listitem", { name: "Weekly summary" });
     expect(within(workRow).getByText("Docs Project")).toBeVisible();
@@ -139,7 +149,7 @@ describe("AutomationCenter default surface", () => {
     const { client } = renderCenter();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.click(screen.getByRole("button", { name: "Work" }));
+    await chooseFilter("Mode", "Work");
     await waitFor(() =>
       expect(client.list).toHaveBeenLastCalledWith(
         expect.objectContaining({ mode: "work" }),
@@ -191,16 +201,15 @@ describe("AutomationCenter default surface", () => {
     expect(screen.queryByText("No automations match the current filters.")).not.toBeInTheDocument();
   });
 
-  it("turns an empty list into creation paths and working suggestions", async () => {
+  it("turns an empty list into suggestions beside the one create control", async () => {
     const client = fakeClient({
       list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),
     });
     renderCenter({ client });
 
-    expect(await screen.findByRole("heading", { name: "Create an automation" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Describe with Octant/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /Create manually/ })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Suggested automations" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Suggested automations" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Create an automation" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "New automation" })).toHaveLength(1);
     expect(screen.queryByText("No automations match the current filters.")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Every weekday morning/ }));
@@ -482,6 +491,7 @@ describe("AutomationCenter creation and editing", () => {
     const listCalls = (client.list as ReturnType<typeof vi.fn>).mock.calls.length;
 
     await userEvent.click(screen.getByRole("button", { name: "New automation" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Create manually" }));
     const form = await screen.findByRole("form", { name: "New automation" });
 
     await userEvent.type(within(form).getByLabelText("Name"), "Weekly summary");
@@ -554,7 +564,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
   it("uses one full-height detail view on narrow layouts and preserves list state", async () => {
     renderCenter({ narrow: true });
     await screen.findByRole("list", { name: "Automations" });
-    await userEvent.click(screen.getByRole("button", { name: "Work" }));
+    await chooseFilter("Mode", "Work");
     await userEvent.type(screen.getByLabelText("Search automations"), "weekly");
     const rows = await screen.findByRole("list", { name: "Automations" });
 
@@ -565,7 +575,7 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Back to list" }));
     expect(await screen.findByRole("list", { name: "Automations" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Work" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Filter, 1 active" })).toBeVisible();
     expect(screen.getByLabelText("Search automations")).toHaveValue("weekly");
     expect(screen.getByRole("button", { name: "Weekly summary" })).toHaveFocus();
   });
@@ -602,6 +612,32 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     expect(stylesheet).not.toMatch(/(?<!m(?:in|ax)-)height:\s*(?!1px)\d+px/);
     // The full-surface layer scrolls instead of clipping at high zoom.
     expect(stylesheet).toMatch(/\.automation-center-layer\s*\{[^}]*overflow:\s*auto;/s);
+  });
+});
+
+describe("AutomationCenter Filter menu", () => {
+  it("counts non-default choices, shows completed routines from the menu, and resets them all", async () => {
+    renderCenter();
+    await screen.findByRole("list", { name: "Automations" });
+
+    await chooseFilter("Sort", "Name");
+    expect(screen.getByRole("button", { name: "Filter, 1 active" })).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "Filter, 1 active" }));
+    await userEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Show completed" }));
+    expect(screen.getByRole("button", { name: "Filter, 2 active" })).toBeVisible();
+
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Reset filters" }));
+    expect(screen.getByRole("button", { name: "Filter" })).toBeVisible();
+  });
+
+  it("offers describing and creating manually as the two items of the one create menu", async () => {
+    renderCenter();
+    await screen.findByRole("list", { name: "Automations" });
+
+    await userEvent.click(screen.getByRole("button", { name: "New automation" }));
+    expect(await screen.findByRole("menuitem", { name: "Describe with Octant" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Create manually" })).toBeVisible();
   });
 });
 
@@ -676,8 +712,7 @@ describe("AutomationCenter arranging", () => {
     renderWithRemote();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.click(screen.getByLabelText("Status"));
-    await userEvent.click(await screen.findByRole("option", { name: "Needs attention" }));
+    await chooseFilter("Status", "Needs attention");
 
     const rows = screen.getByRole("list", { name: "Automations" });
     expect(within(rows).getAllByRole("listitem")).toHaveLength(1);
@@ -688,8 +723,7 @@ describe("AutomationCenter arranging", () => {
     renderWithRemote();
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.click(screen.getByLabelText("Group"));
-    await userEvent.click(await screen.findByRole("option", { name: "By environment" }));
+    await chooseFilter("Group", "By environment");
 
     const local = screen.getByRole("list", { name: "Automations in Local" });
     const devbox = screen.getByRole("list", { name: "Automations in Devbox" });
@@ -717,8 +751,7 @@ describe("AutomationCenter arranging", () => {
     });
     await screen.findByRole("list", { name: "Automations" });
 
-    await userEvent.click(screen.getByLabelText("Status"));
-    await userEvent.click(await screen.findByRole("option", { name: "Needs attention" }));
+    await chooseFilter("Status", "Needs attention");
 
     expect(screen.queryByRole("list", { name: /Automations/ })).toBeNull();
     const empty = screen.getByRole("status");

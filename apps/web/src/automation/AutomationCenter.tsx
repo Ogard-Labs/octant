@@ -15,9 +15,15 @@ import { environmentLabel as sharedEnvironmentLabel } from "@octant/client-runti
 import {
   arrangeItems,
   DEFAULT_LIST_ARRANGEMENT,
+  LIST_GROUPING_LABELS,
+  LIST_SORT_LABELS,
+  LIST_STATUS_LABELS,
   matchesListStatus,
   type ArrangeableItem,
   type ListArrangement,
+  type ListGrouping,
+  type ListSort,
+  type ListStatusFilter,
 } from "@octant/client-runtime/list-arrangement";
 import { CalendarClock, ChevronDown, Pencil, Plus, Search, Sparkles } from "../ui/icons";
 import { RoutineCalendar } from "./RoutineCalendar";
@@ -30,11 +36,14 @@ import {
   routineScheduleLine,
 } from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
-import { ListArrangementMenu } from "../shell/ListArrangementMenu";
+import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
 import { Surface, SurfaceHeader, SurfaceSection } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
 import {
+  OctantMenu,
+  OctantMenuCheckboxItem,
+  OctantMenuSeparator,
   OctantMenuRoot,
   OctantMenuTrigger,
   OctantMenuPortal,
@@ -42,7 +51,6 @@ import {
   OctantMenuPopup,
   OctantMenuItem,
 } from "../ui/base/OctantMenu";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AutomationFileSourceStatus } from "./AutomationFileSourceStatus";
@@ -117,6 +125,21 @@ const ACTIVE_RUN_LIFECYCLES = new Set([
   "waiting",
 ]);
 
+const STATUS_OPTIONS = (
+  [
+    "any",
+    "active",
+    "needs-attention",
+    "finished",
+  ] as const satisfies ReadonlyArray<ListStatusFilter>
+).map((value) => ({ value, label: LIST_STATUS_LABELS[value] }));
+const GROUPING_OPTIONS = (
+  ["none", "environment", "project"] as const satisfies ReadonlyArray<ListGrouping>
+).map((value) => ({ value, label: LIST_GROUPING_LABELS[value] }));
+const SORT_OPTIONS = (["recent", "name"] as const satisfies ReadonlyArray<ListSort>).map(
+  (value) => ({ value, label: LIST_SORT_LABELS[value] }),
+);
+
 const FILTERS: readonly { readonly value: AutomationCenterFilter; readonly label: string }[] = [
   { value: "all", label: "All" },
   { value: "chat", label: "Chat" },
@@ -151,6 +174,17 @@ export function AutomationCenter(props: AutomationCenterProps) {
   const [view, setView] = useState<"list" | "calendar">("list");
   const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
   const [arrangement, setArrangement] = useState<ListArrangement>(DEFAULT_LIST_ARRANGEMENT);
+  const filterCount =
+    (arrangement.status === DEFAULT_LIST_ARRANGEMENT.status ? 0 : 1) +
+    (arrangement.grouping === DEFAULT_LIST_ARRANGEMENT.grouping ? 0 : 1) +
+    (arrangement.sort === DEFAULT_LIST_ARRANGEMENT.sort ? 0 : 1) +
+    (controller.filter === "all" ? 0 : 1) +
+    (includeCompleted ? 1 : 0);
+  const resetFilters = () => {
+    setArrangement(DEFAULT_LIST_ARRANGEMENT);
+    controller.setFilter("all");
+    setIncludeCompleted(false);
+  };
   const generateId = props.generateId ?? (() => crypto.randomUUID());
   const format: AutomationFormatOptions =
     props.displayTimeZone === undefined ? {} : { timeZone: props.displayTimeZone };
@@ -283,6 +317,42 @@ export function AutomationCenter(props: AutomationCenterProps) {
   return (
     <Surface ariaLabel="Automations" className="automation-center" measure="wide">
       <SurfaceHeader
+        actions={
+          <OctantMenu
+            items={[
+              {
+                value: "describe",
+                label: "Describe with Octant",
+                description: "Start with the work and schedule in your own words.",
+                icon: <Sparkles aria-hidden="true" size={14} />,
+              },
+              {
+                value: "manual",
+                label: "Create manually",
+                description: "Configure the trigger, task, environment, and approval policy.",
+                icon: <Pencil aria-hidden="true" size={14} />,
+              },
+            ]}
+            onValueChange={(value) => {
+              if (value === "describe") {
+                setDescribeRequest("");
+                return;
+              }
+              controller.select(undefined);
+              setEditor({ kind: "create" });
+            }}
+            selectionMode="action"
+            trigger={
+              <>
+                <Plus aria-hidden="true" size={12} />
+                New automation
+              </>
+            }
+            triggerClassName={octantButtonClassName({ variant: "secondary", size: "sm" })}
+            triggerLabel="New automation"
+            value=""
+          />
+        }
         title="Automations"
         {...(props.onClose === undefined ? {} : { onBack: props.onClose })}
       />
@@ -303,41 +373,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
       >
         {hideListForNarrow ? null : (
           <div className="automation-center__list-pane">
-            <SurfaceSection
-              label="Create an automation"
-              note="Describe a recurring task or configure its trigger and authority directly."
-            >
-              <div className="automation-center__creation-paths">
-                <OctantButton
-                  className="automation-center__creation-path automation-center__creation-path--featured"
-                  onClick={() => setDescribeRequest("")}
-                  type="button"
-                  variant="bare"
-                >
-                  <Sparkles aria-hidden="true" size={16} />
-                  <span>
-                    <strong>Describe with Octant</strong>
-                    <small>Start with the work and schedule in your own words.</small>
-                  </span>
-                </OctantButton>
-                <OctantButton
-                  className="automation-center__creation-path"
-                  onClick={() => {
-                    controller.select(undefined);
-                    setEditor({ kind: "create" });
-                  }}
-                  type="button"
-                  variant="bare"
-                >
-                  <Pencil aria-hidden="true" size={16} />
-                  <span>
-                    <strong>Create manually</strong>
-                    <small>Configure the trigger, task, environment, and approval policy.</small>
-                  </span>
-                </OctantButton>
-              </div>
-            </SurfaceSection>
-
             {describeRequest === undefined ? null : (
               <RoutineComposer
                 initialRequest={describeRequest}
@@ -384,7 +419,6 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     value={controller.search}
                   />
                 </label>
-                <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
                 <OctantToggleGroup<typeof view>
                   aria-label="Choose a view"
                   className="automation-center__views segmented"
@@ -404,44 +438,44 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     Calendar
                   </OctantToggleGroupItem>
                 </OctantToggleGroup>
-                <label className="automation-center__completed check">
-                  <OctantCheckbox
-                    checked={includeCompleted}
-                    onChange={(event) => setIncludeCompleted(event.target.checked)}
+                <FilterMenu count={filterCount} onReset={resetFilters}>
+                  <FilterMenuGroup<ListStatusFilter>
+                    label="Status"
+                    onChange={(status) => setArrangement({ ...arrangement, status })}
+                    options={STATUS_OPTIONS}
+                    value={arrangement.status}
                   />
-                  <span>Show completed</span>
-                </label>
-                <OctantToggleGroup<AutomationCenterFilter>
-                  aria-label="Filter by mode"
-                  className="automation-center__filters segmented"
-                  onValueChange={(value) => {
-                    const next = value[0];
-                    if (next !== undefined) controller.setFilter(next);
-                  }}
-                  value={[controller.filter]}
-                >
-                  {FILTERS.map((filter) => (
-                    <OctantToggleGroupItem
-                      className="automation-center__filter segment"
-                      key={filter.value}
-                      value={filter.value}
-                    >
-                      {filter.label}
-                    </OctantToggleGroupItem>
-                  ))}
-                </OctantToggleGroup>
-                <OctantButton
-                  className="automation-center__create"
-                  onClick={() => {
-                    controller.select(undefined);
-                    setEditor({ kind: "create" });
-                  }}
-                  type="button"
-                  variant="default"
-                >
-                  <Plus aria-hidden="true" size={14} />
-                  <span>New automation</span>
-                </OctantButton>
+                  <FilterMenuGroup<ListGrouping>
+                    label="Group"
+                    onChange={(grouping) => setArrangement({ ...arrangement, grouping })}
+                    options={GROUPING_OPTIONS}
+                    separated
+                    value={arrangement.grouping}
+                  />
+                  <FilterMenuGroup<ListSort>
+                    label="Sort"
+                    onChange={(sort) => setArrangement({ ...arrangement, sort })}
+                    options={SORT_OPTIONS}
+                    separated
+                    value={arrangement.sort}
+                  />
+                  <FilterMenuGroup<AutomationCenterFilter>
+                    label="Mode"
+                    onChange={controller.setFilter}
+                    options={FILTERS}
+                    separated
+                    value={controller.filter}
+                  />
+                  <OctantMenuSeparator />
+                  <OctantMenuCheckboxItem
+                    checked={includeCompleted}
+                    closeOnClick={false}
+                    label="Show completed"
+                    onCheckedChange={setIncludeCompleted}
+                  >
+                    Show completed
+                  </OctantMenuCheckboxItem>
+                </FilterMenu>
               </div>
             )}
 

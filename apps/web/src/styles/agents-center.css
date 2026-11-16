@@ -88,12 +88,6 @@
   color: var(--oct-muted);
 }
 
-/* The mode menu is as wide as its longest word, so the toolbar stays one row. */
-.agents-center__mode.agents-center__mode {
-  width: 9.5rem;
-  flex: none;
-}
-
 .agents-center__search input {
   flex: 1;
   min-width: 0;
@@ -143,6 +137,24 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+/* "Open thread" shows while the pointer is on the row or focus is inside it,
+   and always on touch. It keeps its space (opacity, not display) so nothing
+   moves, and stays focusable so keyboard focus is what reveals it. */
+.agents-center-row__open-thread {
+  opacity: 0;
+}
+
+.agents-center-row:hover .agents-center-row__open-thread,
+.agents-center-row:focus-within .agents-center-row__open-thread {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .agents-center-row__open-thread {
+    opacity: 1;
+  }
 }
 
 .agents-center-graph {

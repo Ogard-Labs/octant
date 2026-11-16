@@ -56,7 +56,6 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   OctantMenu,
   OctantMenuCheckboxItem,
@@ -753,12 +752,18 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ).length
             }
             state={projectViewState}
+            {...(showListSwitch ? { arrangement, onArrangementChange: showArrangement } : {})}
             rangeOpen={filterRangeOpen}
             onRangeOpenChange={setFilterRangeOpen}
           />
         ) : null}
-        {showListSwitch ? (
-          <ThreadListViewSwitch arrangement={arrangement} onChange={showArrangement} />
+        {showListSwitch &&
+        !(
+          props.projectViewsEnabled === true &&
+          projectViewState !== undefined &&
+          props.projects.length > 0
+        ) ? (
+          <ThreadListViewMenu arrangement={arrangement} onChange={showArrangement} />
         ) : null}
       </div>
     ) : undefined;
@@ -1430,35 +1435,72 @@ function sortProjects(
   );
 }
 
+const THREAD_ARRANGEMENT_OPTIONS = [
+  { id: "status", label: "Status", Icon: ListChecks },
+  { id: "projects", label: "Project tree", Icon: FolderTree },
+  { id: "activity", label: "Activity feed", Icon: History },
+] as const;
+
 /**
- * The list's three arrangements as one visible switch. It used to be a bell in
- * the sidebar header that toggled the feed, which people read as
- * notifications and rarely found; named choices say what each one does.
+ * The list's three arrangements as the first group of the filter menu. They
+ * used to be a three-button switch beside it, which put a second control in a
+ * 28px-per-button row for a choice made rarely; the choice is the same, one
+ * menu further in. Choosing one closes the menu, since it replaces the list.
  */
-function ThreadListViewSwitch(props: {
+function ThreadListViewGroup(props: {
   readonly arrangement: SidebarThreadArrangement;
   readonly onChange: (arrangement: SidebarThreadArrangement) => void;
 }) {
   return (
-    <OctantToggleGroup<SidebarThreadArrangement>
-      aria-label="Thread list"
-      className="project-nav__list-switch"
-      onValueChange={(value) => {
-        const selected = value[0];
-        if (selected !== undefined) props.onChange(selected);
-      }}
-      value={[props.arrangement]}
-    >
-      <OctantToggleGroupItem aria-label="Status" title="Status" value="status">
-        <ListChecks aria-hidden="true" size={16} />
-      </OctantToggleGroupItem>
-      <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
-        <FolderTree aria-hidden="true" size={16} />
-      </OctantToggleGroupItem>
-      <OctantToggleGroupItem aria-label="Activity feed" title="Activity feed" value="activity">
-        <History aria-hidden="true" size={16} />
-      </OctantToggleGroupItem>
-    </OctantToggleGroup>
+    <OctantMenuGroup>
+      <OctantMenuGroupLabel>Show threads as</OctantMenuGroupLabel>
+      <OctantMenuRadioGroup
+        onValueChange={(value) => {
+          const next = THREAD_ARRANGEMENT_OPTIONS.find((option) => option.id === value);
+          if (next !== undefined) props.onChange(next.id);
+        }}
+        value={props.arrangement}
+      >
+        {THREAD_ARRANGEMENT_OPTIONS.map((option) => (
+          <OctantMenuRadioItem closeOnClick key={option.id} label={option.label} value={option.id}>
+            <option.Icon aria-hidden="true" size={14} />
+            {option.label}
+          </OctantMenuRadioItem>
+        ))}
+      </OctantMenuRadioGroup>
+    </OctantMenuGroup>
+  );
+}
+
+/**
+ * The same choice where there is no filter menu to hold it (a list with no
+ * Project views yet): a single glyph for the current arrangement, so the way
+ * to the feed or the Project tree is never what went missing.
+ */
+function ThreadListViewMenu(props: {
+  readonly arrangement: SidebarThreadArrangement;
+  readonly onChange: (arrangement: SidebarThreadArrangement) => void;
+}) {
+  const current =
+    THREAD_ARRANGEMENT_OPTIONS.find((option) => option.id === props.arrangement) ??
+    THREAD_ARRANGEMENT_OPTIONS[0];
+  return (
+    <OctantMenuRoot>
+      <OctantMenuTrigger
+        aria-label="Thread list view"
+        className="code-project-views__filter project-nav__list-switch window-no-drag"
+        title="Thread list view"
+      >
+        <current.Icon aria-hidden="true" size={16} />
+      </OctantMenuTrigger>
+      <OctantMenuPortal>
+        <OctantMenuPositioner align="end" className="outline-none window-no-drag" side="bottom">
+          <OctantMenuPopup aria-label="Thread list view" className="min-w-[14rem]">
+            <ThreadListViewGroup arrangement={props.arrangement} onChange={props.onChange} />
+          </OctantMenuPopup>
+        </OctantMenuPositioner>
+      </OctantMenuPortal>
+    </OctantMenuRoot>
   );
 }
 
@@ -1727,6 +1769,9 @@ function CodeProjectViewSwitcher(props: {
   readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
+  /** How the thread list is arranged; absent where the list has nothing to arrange. */
+  readonly arrangement?: SidebarThreadArrangement;
+  readonly onArrangementChange?: (arrangement: SidebarThreadArrangement) => void;
   /** Whether the custom activity range dialog is open; held by the sidebar. */
   readonly rangeOpen: boolean;
   readonly onRangeOpenChange: (open: boolean) => void;
@@ -1833,6 +1878,9 @@ function CodeProjectViewSwitcher(props: {
         {...(props.onPresentationChange === undefined
           ? {}
           : { onPresentationChange: props.onPresentationChange })}
+        {...(props.arrangement === undefined || props.onArrangementChange === undefined
+          ? {}
+          : { arrangement: props.arrangement, onArrangementChange: props.onArrangementChange })}
         onRowPropertiesChange={props.onRowPropertiesChange}
         rangeOpen={props.rangeOpen}
         onRangeOpenChange={props.onRangeOpenChange}
@@ -1935,6 +1983,8 @@ function ProjectViewFilterMenu(props: {
   readonly onChange: (filters: ProjectViewFilters) => void;
   readonly presentation: ProjectViewSwitcherPresentation;
   readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
+  readonly arrangement?: SidebarThreadArrangement;
+  readonly onArrangementChange?: (arrangement: SidebarThreadArrangement) => void;
   readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
@@ -2000,6 +2050,15 @@ function ProjectViewFilterMenu(props: {
               aria-label="Project view filters"
               className="min-w-[14rem] max-w-[calc(100vw-24px)]"
             >
+              {props.arrangement === undefined || props.onArrangementChange === undefined ? null : (
+                <>
+                  <ThreadListViewGroup
+                    arrangement={props.arrangement}
+                    onChange={props.onArrangementChange}
+                  />
+                  <OctantMenuSeparator />
+                </>
+              )}
               <OctantMenuGroup>
                 <OctantMenuGroupLabel>Filters</OctantMenuGroupLabel>
                 <FilterRadioSubmenu
@@ -2118,6 +2177,16 @@ function ProjectViewFilterMenu(props: {
                   </OctantMenuRadioGroup>
                 </OctantMenuSubPopup>
               </OctantMenuSub>
+              {activeCount === 0 ? null : (
+                <>
+                  <OctantMenuSeparator />
+                  <OctantMenuActionItem
+                    onClick={() => props.onChange(normalizeProjectViewFilters(undefined))}
+                  >
+                    Reset filters
+                  </OctantMenuActionItem>
+                </>
+              )}
             </OctantMenuPopup>
           </OctantMenuPositioner>
         </OctantMenuPortal>

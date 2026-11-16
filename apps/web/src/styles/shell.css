@@ -1387,14 +1387,6 @@ html[data-octant-native-host="true"] .sidebar__chrome {
   padding: 0;
 }
 
-.project-nav__list-switch > button {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding-inline: 0;
-}
-
 /* Every control in the toolbar row is a 28px hit area on the 4px grid, with
    4px between neighbours, so the filter and the view switches read as one set. */
 .project-nav__toolbar button {
@@ -4178,11 +4170,6 @@ form > .work-composer-adapter__attachments {
   height: 8px;
   border-radius: 50%;
   background: var(--oct-success);
-}
-
-.browser-workspace__local-note {
-  color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
 }
 
 /* Under Glass the Browser is clear wherever it shows Octant's own start page,

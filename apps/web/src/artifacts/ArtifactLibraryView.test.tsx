@@ -123,14 +123,18 @@ describe("the artifact gallery", () => {
     expect(onFiltersChange).toHaveBeenCalledWith({ tab: "shared", query: "" });
   });
 
-  it("sends every filter to the host, and clears one by removing it", async () => {
+  it("sends every filter from one Filter menu, and clears one by removing it", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({
       filters: { tab: "all", query: "", kind: "chart" } as ArtifactLibraryFilters,
     });
 
-    await user.click(screen.getByLabelText("Filter by mode"));
-    await user.click(await screen.findByRole("option", { name: "Code" }));
+    await user.click(screen.getByRole("button", { name: "Filter, 1 active" }));
+    await user.click(
+      within(await screen.findByRole("group", { name: "Mode" })).getByRole("menuitemradio", {
+        name: "Code",
+      }),
+    );
     expect(onFiltersChange).toHaveBeenCalledWith({
       tab: "all",
       query: "",
@@ -138,36 +142,50 @@ describe("the artifact gallery", () => {
       mode: "code",
     });
 
-    await user.click(screen.getByLabelText("Filter by kind"));
-    await user.click(await screen.findByRole("option", { name: "Any kind" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Any kind" }));
     // Cleared, not set to undefined: the query the host decodes has no room for
     // a field that is explicitly absent.
     expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
+  });
+
+  it("counts the active filters on the Filter button and resets them all, keeping search and tab", async () => {
+    const user = userEvent.setup();
+    const { onFiltersChange } = view({
+      filters: {
+        tab: "all",
+        query: "plan",
+        kind: "chart",
+        mode: "code",
+      } as ArtifactLibraryFilters,
+    });
+
+    expect(screen.getByRole("button", { name: "Filter, 2 active" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Filter, 2 active" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Reset filters" }));
+    expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "plan" });
   });
 
   it("filters by the person's tags and clears the choice the same way", async () => {
     const user = userEvent.setup();
     const { onFiltersChange } = view({ filters: { tab: "all", query: "" } });
 
-    await user.click(screen.getByLabelText("Filter by tag"));
-    await user.click(await screen.findByRole("option", { name: "Launch (1)" }));
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Launch (1)" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith({
       tab: "all",
       query: "",
       tag: "Launch",
     });
-
-    await user.click(screen.getByLabelText("Filter by tag"));
-    await user.click(await screen.findByRole("option", { name: "Any tag" }));
-    expect(onFiltersChange).toHaveBeenLastCalledWith({ tab: "all", query: "" });
   });
 
   it("offers each Project with how many artifacts it holds", async () => {
     const user = userEvent.setup();
     view();
 
-    await user.click(screen.getByLabelText("Filter by Project"));
-    expect(await screen.findByRole("option", { name: "Storefront (1)" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Storefront (1)" }),
+    ).toBeInTheDocument();
   });
 
   it("groups by Project only on the tab that asks for it", () => {

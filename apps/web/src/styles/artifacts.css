@@ -69,14 +69,6 @@
   outline: none;
 }
 
-/* .select paints the filters; the recipe's width: 100% is for form
-   columns, and here each filter shares one wrapping toolbar row. */
-.artifact-library__select {
-  width: auto;
-  min-height: var(--oct-control-height-sm);
-  font-size: var(--oct-text-sm);
-}
-
 /* The gallery/list choice sits at the end of the toolbar as a two-item
    toggle, sized to the toolbar's other controls. */
 .artifact-library__view {

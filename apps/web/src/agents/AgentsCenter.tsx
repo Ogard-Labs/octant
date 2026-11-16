@@ -12,15 +12,23 @@ import {
   type AgentRunClient,
 } from "@octant/client-runtime/agent-run-client";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
-import { Bot, Search } from "../ui/icons";
+import { Bot, Ellipsis, Search } from "../ui/icons";
 import { useCallback, useMemo, useState } from "react";
 import { SubagentProviderMark, useSubagentProviders } from "./subagentProviders";
 import { AgentMessagingFactsRow } from "./AgentMessagingFactsRow";
 import { Surface, SurfaceHeader } from "../surface/SurfaceHeader";
 import { OctantBadge } from "../ui/base/OctantBadge";
-import { OctantButton } from "../ui/base/OctantButton";
+import { OctantButton, octantButtonClassName } from "../ui/base/OctantButton";
+import { FilterMenu, FilterMenuGroup } from "../surface/FilterMenu";
+import {
+  OctantMenuItem,
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   agentRunAcknowledgementLabel,
@@ -225,6 +233,12 @@ function AgentsCenterToolbar(props: {
   readonly savingCanvas?: boolean;
 }) {
   const { controller } = props;
+  const filterCount =
+    (controller.statusFilter === "all" ? 0 : 1) + (controller.modeFilter === "all" ? 0 : 1);
+  const resetFilters = () => {
+    controller.setStatusFilter("all");
+    controller.setModeFilter("all");
+  };
   return (
     <div aria-label="Agents Center controls" className="surface-toolbar" role="group">
       <label className="surface-toolbar__search agents-center__search">
@@ -237,47 +251,42 @@ function AgentsCenterToolbar(props: {
           value={controller.search}
         />
       </label>
-      <OctantToggleGroup<(typeof STATUS_FILTERS)[number]["value"]>
-        aria-label="Filter by status"
-        className="agents-center__filters segmented"
-        onValueChange={(value) => {
-          const selected = value[0];
-          if (selected !== undefined) controller.setStatusFilter(selected);
-        }}
-        value={[controller.statusFilter]}
-      >
-        {STATUS_FILTERS.map((filter) => (
-          <OctantToggleGroupItem
-            className="agents-center__filter segment"
-            key={filter.value}
-            value={filter.value}
-          >
-            {filter.label}
-          </OctantToggleGroupItem>
-        ))}
-      </OctantToggleGroup>
-      <OctantSelectField
-        aria-label="Filter by mode"
-        className="agents-center__mode"
-        onValueChange={(value) => {
-          const selected = MODE_FILTERS.find((filter) => filter.value === value);
-          if (selected !== undefined) controller.setModeFilter(selected.value);
-        }}
-        options={MODE_FILTERS.map((filter) => ({ id: filter.value, label: filter.label }))}
-        value={controller.modeFilter}
-      />
+      <FilterMenu count={filterCount} onReset={resetFilters}>
+        <FilterMenuGroup<(typeof STATUS_FILTERS)[number]["value"]>
+          label="Status"
+          onChange={controller.setStatusFilter}
+          options={STATUS_FILTERS}
+          value={controller.statusFilter}
+        />
+        <FilterMenuGroup<(typeof MODE_FILTERS)[number]["value"]>
+          label="Mode"
+          onChange={controller.setModeFilter}
+          options={MODE_FILTERS}
+          separated
+          value={controller.modeFilter}
+        />
+      </FilterMenu>
       {props.view === undefined || props.onViewChange === undefined ? null : (
         <AgentsCenterViewToggle onViewChange={props.onViewChange} view={props.view} />
       )}
       {props.onSaveCanvas === undefined ? null : (
-        <OctantButton
-          disabled={props.savingCanvas === true}
-          onClick={props.onSaveCanvas}
-          type="button"
-          variant="ghost"
-        >
-          Save as Canvas
-        </OctantButton>
+        <OctantMenuRoot>
+          <OctantMenuTrigger
+            aria-label="More actions"
+            className={octantButtonClassName({ variant: "ghost", size: "icon" })}
+          >
+            <Ellipsis aria-hidden="true" size={16} />
+          </OctantMenuTrigger>
+          <OctantMenuPortal>
+            <OctantMenuPositioner align="end" className="outline-none window-no-drag">
+              <OctantMenuPopup aria-label="More actions" className="min-w-[12rem]">
+                <OctantMenuItem disabled={props.savingCanvas === true} onClick={props.onSaveCanvas}>
+                  Save as Canvas
+                </OctantMenuItem>
+              </OctantMenuPopup>
+            </OctantMenuPositioner>
+          </OctantMenuPortal>
+        </OctantMenuRoot>
       )}
     </div>
   );
@@ -438,6 +447,7 @@ function AgentsCenterListBody(props: {
           </div>
           <div className="agents-center-row__actions">
             <OctantButton
+              className="agents-center-row__open-thread"
               onClick={() => {
                 const target = agentRunCenterThreadTarget(summary);
                 props.onOpenThread?.({

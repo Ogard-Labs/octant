@@ -581,9 +581,9 @@ describe("ShellSidebar", () => {
     expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(2);
     fireEvent.click(create);
     expect(newChat).toHaveBeenCalledOnce();
-    const listSwitch = screen.getByRole("group", { name: "Thread list" });
-    expect(chrome).not.toContainElement(listSwitch);
-    expect(within(listSwitch).getByRole("button", { name: "Activity feed" })).toBeVisible();
+    // With no Project views to filter, the arrangement choice sits behind its own glyph.
+    const listView = screen.getByRole("button", { name: "Thread list view" });
+    expect(chrome).not.toContainElement(listView);
   });
 
   it("offers no Projects/Activity switch before there is a Project or thread to arrange", () => {
@@ -614,7 +614,7 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    expect(screen.queryByRole("group", { name: "Thread list" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thread list view" })).not.toBeInTheDocument();
   });
 
   it("moves Inbox and Board into count tiles, and brings the rows back when tiles are off", async () => {
