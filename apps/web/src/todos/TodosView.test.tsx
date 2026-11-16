@@ -306,17 +306,14 @@ describe("the To-dos page layout", () => {
     expect(screen.queryByText("No to-dos yet")).toBeNull();
   });
 
-  it("draws a state's count only when it is not zero, and still says it in the button's name", async () => {
+  it("says each state's count in the button's name and draws only the word, so the switch keeps its width", async () => {
     const host = fakeHost();
     host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "One" });
     host.apply({ kind: "add-todo", todoId: crypto.randomUUID(), title: "Two" });
     render(<Page client={host.client} />);
 
-    const open = await screen.findByRole("button", { name: "Open, 2" });
-    expect(within(open).getByText("2")).toBeVisible();
-    const done = screen.getByRole("button", { name: "Done, 0" });
-    expect(within(done).queryByText("0")).toBeNull();
-    expect(done).toHaveTextContent(/^Done$/);
+    expect(await screen.findByRole("button", { name: "Open, 2" })).toHaveTextContent(/^Open$/);
+    expect(screen.getByRole("button", { name: "Done, 0" })).toHaveTextContent(/^Done$/);
   });
 
   it("filters by Project, tag and Show dropped from one Filter menu, counts them and resets them but not the state", async () => {

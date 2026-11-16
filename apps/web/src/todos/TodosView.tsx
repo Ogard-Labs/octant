@@ -270,11 +270,10 @@ export function TodosView(props: TodosPageProps) {
                   key={entry.id}
                   value={entry.id}
                 >
+                  {/* The count is said in the name only. Drawn, it widened or
+                      narrowed the switch each time a to-do was ticked off, and
+                      the title's sentence already gives the open ones. */}
                   {entry.label}
-                  {/* A zero says nothing the empty switch does not; the name still carries it. */}
-                  {stateCounts[entry.id] === 0 ? null : (
-                    <span className="oct-meta todos-toolbar__count">{stateCounts[entry.id]}</span>
-                  )}
                 </OctantToggleGroupItem>
               ))}
             </OctantToggleGroup>

@@ -37,12 +37,6 @@
   margin-block-end: var(--oct-space-2);
 }
 
-/* Tabular digits keep a changing count from shifting its neighbours more than
-   text does. */
-.todos-toolbar__count {
-  font-variant-numeric: tabular-nums;
-}
-
 .todos-page__problem,
 .todos-page__note {
   margin: 0;
