@@ -42,6 +42,8 @@ import { defaultTerminalShell } from "./terminalShell";
 import type { WorktreePreparationService } from "./worktreePreparationService";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
+/** A paired client reads a shown shell's output every few seconds; a minute of nothing is gone. */
+const DEVICE_QUIET_MS = 60_000;
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -156,7 +158,25 @@ export interface ProjectTerminalServiceOptions {
    * holds. Absent for every local Project.
    */
   readonly serverProject?: (projectId: ProjectId) => ServerProjectTerminalTarget | undefined;
+  /**
+   * Whether a scope is a device the host's own person paired, read at each
+   * question so a revoke applies at once. Absent, no device owns a terminal.
+   */
+  readonly personPairedDevice?: (scopeId: WindowId) => boolean;
+  /** How long a device's terminal runs with no command from it; 60 seconds by default. */
+  readonly deviceQuietMs?: number;
+  readonly nowMs?: () => number;
 }
+
+/** What a device's shell commands are: its own shell, never a saved action or a server's. */
+const DEVICE_TERMINAL_COMMANDS: ReadonlySet<ProjectTerminalCommand["kind"]> = new Set([
+  "start",
+  "attach",
+  "read-output",
+  "write",
+  "resize",
+  "stop",
+]);
 
 /** Where a server Project's terminal logs in. Canonical: docs/design/server-projects.md § Threads. */
 export interface ServerProjectTerminalTarget {
@@ -185,6 +205,10 @@ interface Owner {
   readonly authorized?: () => boolean;
   readonly serverWorkShell?: true;
   uncertainty?: "server-transport-lost" | "server-stop-unconfirmed";
+  /** Who the journal names for this shell's start and end: the device that opened it, if one did. */
+  readonly actor?: EventActorValue;
+  /** Set for a shell a paired device owns: when that device last sent it a command. */
+  device?: { lastSeenMs: number };
 }
 
 type Authority =
@@ -240,6 +264,29 @@ export class ProjectTerminalService {
     const actor = decodeActor(options.actor);
     decodeActorId(actor.actorId);
     this.#actor = actor;
+    if (options.personPairedDevice !== undefined) {
+      const quiet = options.deviceQuietMs ?? DEVICE_QUIET_MS;
+      setInterval(() => void this.#sweepDeviceTerminals(), Math.min(quiet / 4, 15_000)).unref?.();
+    }
+  }
+
+  /**
+   * Ends each device-owned shell whose device stopped acting as the person
+   * (revoked, expired) or went quiet. A paired client reads a shell's output
+   * every few seconds while it shows it, so a device that sent nothing for
+   * the quiet period has disconnected or closed it, and its shell does not
+   * keep running on the host with nobody there.
+   */
+  async #sweepDeviceTerminals(): Promise<void> {
+    const now = this.#options.nowMs?.() ?? Date.now();
+    const quiet = this.#options.deviceQuietMs ?? DEVICE_QUIET_MS;
+    for (const owner of this.#owners.values()) {
+      if (owner.device === undefined || owner.ended) continue;
+      if (this.#options.personPairedDevice?.(owner.windowId) !== true)
+        await this.#end(owner.terminalId, owner, "authority-revoked").catch(() => undefined);
+      else if (now - owner.device.lastSeenMs > quiet)
+        await this.#end(owner.terminalId, owner, "transport-lost").catch(() => undefined);
+    }
   }
 
   /**
@@ -264,17 +311,34 @@ export class ProjectTerminalService {
     windowId: WindowId,
     caller: ProjectTerminalCaller,
     command: ProjectTerminalCommand,
+    /** Who the route resolved the caller as; a paired device's shell is journaled as that device. */
+    actor?: EventActorValue,
   ): Promise<ProjectTerminalResult> {
     // A remote Code terminal is gated as an agent and waits on an approval the
-    // thread holds. A Project terminal has no thread to hold one, so a paired
-    // device is refused here rather than given a shell with nothing gating it.
+    // thread holds. A Project terminal has no thread to hold one, so a device
+    // session that is not the host's person is refused here rather than given
+    // a shell with nothing gating it.
     if (caller !== "local-window") {
       return refused(
         "unauthorized",
-        "Project terminals open only from this computer's own window.",
+        "Project terminals open only from this computer's own window or a device its person paired.",
       );
     }
-    if (command.kind === "start") return this.#start(windowId, command);
+    // A device the host's own person paired opens its own shell in a Project
+    // it reaches, as that person (maintainer decision, 2026-11-12). Saved
+    // actions, worktree setup and a server Project's shell stay at a window.
+    const device = this.#options.personPairedDevice?.(windowId) === true;
+    if (device && !DEVICE_TERMINAL_COMMANDS.has(command.kind)) {
+      return refused("unauthorized", "Open this at a window on this computer.");
+    }
+    if (command.kind === "start")
+      return this.#start(
+        windowId,
+        command,
+        undefined,
+        undefined,
+        device ? { actor: actor ?? this.#actor } : undefined,
+      );
     if (command.kind === "preview-action") return this.#previewAction(windowId, command);
     if (command.kind === "start-action") return this.#startAction(windowId, command);
     if (command.kind === "child-worktree-source") return this.#childSource(windowId, command);
@@ -320,6 +384,7 @@ export class ProjectTerminalService {
     ) {
       return refused("unauthorized", "This terminal belongs to another window or Project.");
     }
+    if (owner.device !== undefined) owner.device.lastSeenMs = this.#options.nowMs?.() ?? Date.now();
     if (owner.authorized?.() === false) {
       await this.#end(command.terminalId, owner, "authority-revoked");
       return refused("authority-revoked", "This terminal's authority changed.");
@@ -688,14 +753,21 @@ export class ProjectTerminalService {
       readonly folder: string;
       readonly receipt: ActionReceipt;
     },
+    device?: { readonly actor: EventActorValue },
   ): Promise<ProjectTerminalResult> {
     const authority = this.#authority(windowId, command.projectId);
     if (authority.kind === "refused") return refused(authority.reason, authority.message);
     if (this.#owners.has(String(command.terminalId))) {
       return refused("unavailable", "This terminal id is already in use.");
     }
-    if (authority.kind === "allowed-on-server")
+    if (authority.kind === "allowed-on-server") {
+      if (device !== undefined)
+        return refused(
+          "unauthorized",
+          "A server Project's terminal opens at a window on this computer.",
+        );
       return this.#startOnServer(windowId, command, authority);
+    }
     const root = await this.#options.resolveRoot(authority.project);
     if (root === undefined) {
       return refused("unavailable", "This Project's folder is unavailable. Relink the Project.");
@@ -846,6 +918,8 @@ export class ProjectTerminalService {
       placed?.receipt,
       action !== undefined,
       workThread?.active,
+      false,
+      device,
     );
   }
 
@@ -1015,7 +1089,14 @@ export class ProjectTerminalService {
     recorded = false,
     authorized?: () => boolean,
     serverWorkShell = false,
+    device?: { readonly actor: EventActorValue },
   ): Promise<ProjectTerminalResult> {
+    const personPairedDevice = this.#options.personPairedDevice;
+    // A device's shell holds only while that device still acts as the person.
+    const held =
+      device === undefined || personPairedDevice === undefined
+        ? authorized
+        : () => personPairedDevice(windowId) && authorized?.() !== false;
     const owner: Owner = {
       terminalId: command.terminalId,
       windowId,
@@ -1025,20 +1106,32 @@ export class ProjectTerminalService {
       stopObserving: undefined,
       ended: false,
       ...(action === undefined ? {} : { action }),
-      ...(authorized === undefined ? {} : { authorized }),
+      ...(held === undefined ? {} : { authorized: held }),
       ...(serverWorkShell ? { serverWorkShell: true } : {}),
+      ...(device === undefined
+        ? {}
+        : {
+            actor: device.actor,
+            device: { lastSeenMs: this.#options.nowMs?.() ?? Date.now() },
+          }),
     };
     try {
       if (!recorded)
-        this.#append(command.terminalId, 0, PROJECT_TERMINAL_EVENT_NAMES.started, {
-          kind: "project-terminal-started",
-          projectId: command.projectId,
-          terminalId: command.terminalId,
-          windowId,
-          bindingRevisionId,
-          posture,
-          startedAt: this.#options.clock(),
-        });
+        this.#append(
+          command.terminalId,
+          0,
+          PROJECT_TERMINAL_EVENT_NAMES.started,
+          {
+            kind: "project-terminal-started",
+            projectId: command.projectId,
+            terminalId: command.terminalId,
+            windowId,
+            bindingRevisionId,
+            posture,
+            startedAt: this.#options.clock(),
+          },
+          owner.actor,
+        );
     } catch {
       // A shell nobody can find in the journal is a shell nobody can account
       // for, so it does not keep running.
@@ -1062,6 +1155,7 @@ export class ProjectTerminalService {
           command.terminalId,
           owner.uncertainty === "server-transport-lost" ? "transport-lost" : "exited",
           emission.snapshot.exitCode,
+          owner.actor,
         );
       },
     );
@@ -1081,6 +1175,7 @@ export class ProjectTerminalService {
         command.terminalId,
         owner.uncertainty === "server-transport-lost" ? "transport-lost" : "exited",
         snapshot.exitCode,
+        owner.actor,
       );
     }
     if (owner.ended) owner.stopObserving?.();
@@ -1178,6 +1273,7 @@ export class ProjectTerminalService {
       terminalId,
       owner.uncertainty === "server-stop-unconfirmed" ? "server-stop-unconfirmed" : reason,
       snapshot?.exitCode,
+      owner.actor,
     );
   }
 
@@ -1186,9 +1282,10 @@ export class ProjectTerminalService {
     terminalId: CodeTerminalId,
     reason: ProjectTerminalEndReason,
     exitCode: number | undefined,
+    actor?: EventActorValue,
   ): void {
     try {
-      this.#journalEnded(projectId, terminalId, reason, exitCode);
+      this.#journalEnded(projectId, terminalId, reason, exitCode, actor);
     } catch {
       // The shell has ended either way. A running record left behind is ended
       // as host-restarted on the next start, which is the truth by then.
@@ -1200,15 +1297,22 @@ export class ProjectTerminalService {
     terminalId: CodeTerminalId,
     reason: ProjectTerminalEndReason,
     exitCode: number | undefined,
+    actor?: EventActorValue,
   ): void {
-    this.#append(terminalId, 1, PROJECT_TERMINAL_EVENT_NAMES.ended, {
-      kind: "project-terminal-ended",
-      projectId,
+    this.#append(
       terminalId,
-      reason,
-      ...(exitCode === undefined ? {} : { exitCode }),
-      endedAt: this.#options.clock(),
-    });
+      1,
+      PROJECT_TERMINAL_EVENT_NAMES.ended,
+      {
+        kind: "project-terminal-ended",
+        projectId,
+        terminalId,
+        reason,
+        ...(exitCode === undefined ? {} : { exitCode }),
+        endedAt: this.#options.clock(),
+      },
+      actor,
+    );
   }
 
   #append(
@@ -1216,6 +1320,8 @@ export class ProjectTerminalService {
     expectedVersion: number,
     eventName: string,
     payload: unknown,
+    /** The device that opened the shell, when one did; otherwise the person here. */
+    actor: EventActorValue = this.#actor,
   ): void {
     const decoded =
       eventName === PROJECT_TERMINAL_EVENT_NAMES.started
@@ -1233,7 +1339,7 @@ export class ProjectTerminalService {
           eventName: decodeEventName(eventName),
           eventVersion: 1,
           correlationId: decodeCorrelationId(this.#options.uuid()),
-          actor: this.#actor,
+          actor,
           occurredAt: decodeTimestamp(this.#options.clock()),
           payload: decoded,
         },

@@ -2,6 +2,7 @@ import {
   AgentAccessResult,
   AgentThreadAttributions,
   decodeHostAnswer,
+  type AgentAccessCommand,
   type AgentGrantRevokeRequest,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -23,13 +24,17 @@ export class AgentGrantClientFailure extends Error {
 
 /**
  * What a local window and a paired device both ask about outside agents: the
- * grants, ending one, and which threads each agent started. Making or changing
- * a grant is a local window's alone and goes through the desktop bridge.
+ * grants, ending one, and which threads each agent started. A device the
+ * host's own person paired also sends every grant command (make, change,
+ * connection codes, keys) through `command`; a local window sends those
+ * through the desktop bridge, and the host refuses `command` from it and from
+ * every other device session.
  */
 export interface AgentGrantClient {
   grants(signal?: AbortSignal): Promise<AgentAccessResult>;
   revoke(request: AgentGrantRevokeRequest): Promise<AgentAccessResult>;
   threads(signal?: AbortSignal): Promise<AgentThreadAttributions>;
+  command(command: AgentAccessCommand): Promise<AgentAccessResult>;
 }
 
 export function createAgentGrantClient(options: AgentGrantClientOptions): AgentGrantClient {
@@ -65,6 +70,25 @@ export function createAgentGrantClient(options: AgentGrantClientOptions): AgentG
         },
         // The host answers a refused revoke with 409 and the refusal, which
         // says why (the grant is gone or already revoked).
+        true,
+      );
+      return decodeHostAnswer(AgentAccessResult)(body);
+    },
+    async command(command) {
+      const body = await send(
+        fetch,
+        new URL("/api/agent-grants/commands", options.baseUrl).toString(),
+        {
+          method: "POST",
+          redirect: "error",
+          headers: {
+            "x-octant-window-capability": options.windowCapability,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(command),
+        },
+        // A refused command (stale, not found, invalid) is answered with 409
+        // and the refusal, which says why.
         true,
       );
       return decodeHostAnswer(AgentAccessResult)(body);
