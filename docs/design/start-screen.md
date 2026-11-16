@@ -203,18 +203,28 @@ draft; it does not send.
 
 #### Suggestions
 
-Code's four prompt suggestions are one line of label-only chips directly under
-the composer they fill in, above the list, at most four so they never wrap (a
-narrow window scrolls the row sideways). Work's Write, Learn, Plan, and Explore
-starters use the same chip (`StartSuggestionChip`: a borderless 28px chip with
-12px text, a resting ink fill of 4% and a deeper one, 8%, on hover and keyboard
-focus); the prompt rides as the chip's tooltip and description and fills the
-composer when chosen, nothing more.
+Code's four prompt suggestions are one line of cards directly under the composer
+they fill in, above the list, on the composer's edges: the suggestion card (the
+card fill, one hairline, `--oct-radius-md`, 12px padding) with a 16px glyph in
+the accent on top, the label (14/500, one line) and one line in the muted ink
+saying what the agent will do (two lines at most). As label-only chips they were
+four grey words, and what each would do was only in a tooltip (maintainer
+request, 2026-11-16). Four stand on one line; under 664px of column they stand
+two by two, never three and one, and the cards of a row share one height. The
+full prompt rides as the card's tooltip and description and fills the composer
+when chosen, nothing more. Once the person has typed, the cards go out of sight
+and out of reach but keep their room, so the list under them never moves
+(principle 7); cleared, they are back where they were.
+
+Work's Write, Learn, Plan, and Explore starters are chips
+(`StartSuggestionChip`: a borderless 28px chip with 12px text, a resting ink
+fill of 4% and a deeper one, 8%, on hover and keyboard focus); the prompt fills
+the composer when chosen, nothing more.
 
 ### Code agent home
 
 Under the Code composer the start screen is an agent home rather than a blank
-prompt: the suggested prompts as one line of chips (see
+prompt: the suggested prompts as one line of cards (see
 [Suggestions](#suggestions)), then [the list](#the-list). Code adds to it what is
 assigned to the person (review requests and assigned issues under Needs you, the
 person's own pull requests under Your pull requests when the Pull requests read

@@ -1715,8 +1715,9 @@ role (12px muted, the count at the right edge). A section's heading on a page
 or in a card (Settings, Inbox, Automations, a Project's Threads and its cards)
 is always the section label (14/600 secondary), never the primary ink or a
 lighter weight; Settings' own section heading is the exception (13/600 primary). An empty page or section is one line and at most one outline
-button. Chips above a composer are 24px; the start screens' suggestion chips
-are the one borderless 28px chip (see Start screen).
+button. Chips above a composer are 24px; Work's starter chips
+are the one borderless 28px chip, and Code Home's prompt suggestions are the
+suggestion card (see Start screen).
 
 Rows are hairline rails, never cards. They reserve stable gutters for marks;
 hover actions fade in over a slot already kept for them (a thread row's slot

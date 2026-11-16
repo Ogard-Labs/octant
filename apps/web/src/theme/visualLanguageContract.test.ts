@@ -1660,7 +1660,6 @@ describe("the public-block visual language", () => {
       // may hide a scrollbar in a named place and may never recolour or widen one.
       const hidden = [
         ".code-files-viewer__tabs",
-        ".code-home__suggestions",
         ".code-project-views__inline",
         ".dock-browser-pages",
         ".panel-tabs",

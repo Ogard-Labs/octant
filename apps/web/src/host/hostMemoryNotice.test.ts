@@ -69,7 +69,8 @@ describe("hostMemoryNotices", () => {
     });
     expect(notice?.id).toBe("stop:2026-10-31T09:00:00.000Z");
     expect(notice?.title).toBe("Octant stopped unexpectedly");
-    expect(notice?.detail).toContain("memory was very low");
+    expect(notice?.detail).toContain("It is running again.");
+    expect(notice?.detail).toContain("Memory was very low");
     expect(notice?.detail).toContain("4100 MB");
   });
 
@@ -83,7 +84,7 @@ describe("hostMemoryNotices", () => {
         processMegabytes: 500,
       },
     });
-    expect(notice?.detail).toContain("memory looked normal");
+    expect(notice?.detail).toContain("Memory looked normal");
     expect(notice?.detail).toContain("cause is not known");
   });
 
@@ -98,7 +99,8 @@ describe("hostMemoryNotices", () => {
         crashRecord: { recordedAt: "2026-10-31T09:01:00.000Z", exitReason: "signal SIGKILL" },
       },
     });
-    expect(notice?.detail).toContain("Octant kept a crash record on this device (signal SIGKILL");
+    expect(notice?.detail).toContain("A crash record is kept on this device (signal SIGKILL");
+    expect(notice?.detail).toContain("Save diagnostics");
     expect(notice?.detail).toContain("nothing was sent");
   });
 

@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
+import { BookOpen } from "../../ui/icons";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
@@ -171,7 +172,7 @@ describe("CodeComposerAdapter", () => {
     );
   });
 
-  it("offers prompt suggestions as label-only chips that fill the prompt only when chosen", async () => {
+  it("offers prompt suggestions as cards that say what they do and fill the prompt only when chosen", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
     render(
@@ -182,6 +183,8 @@ describe("CodeComposerAdapter", () => {
           {
             id: "explain",
             label: "Explain this codebase",
+            detail: "Entry points and how to run it.",
+            icon: BookOpen,
             prompt: "Explain the entry points and data flow.",
           },
         ]}
@@ -189,6 +192,7 @@ describe("CodeComposerAdapter", () => {
     );
     expect(screen.queryByRole("button", { name: /example details/i })).toBeNull();
     const chip = screen.getByRole("button", { name: "Explain this codebase" });
+    expect(chip).toHaveTextContent("Entry points and how to run it.");
     expect(chip).toHaveAccessibleDescription("Explain the entry points and data flow.");
     expect(chip).toHaveAttribute("title", "Explain the entry points and data flow.");
     await user.click(screen.getByRole("button", { name: "Explain this codebase" }));
@@ -197,6 +201,13 @@ describe("CodeComposerAdapter", () => {
     );
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveFocus();
     expect(onCreateThread).not.toHaveBeenCalled();
+    // With words in the box the cards are out of reach but still in the
+    // page, so nothing under them moves.
+    expect(screen.queryByRole("button", { name: "Explain this codebase" })).toBeNull();
+    const group = document.querySelector<HTMLElement>(".code-home__suggestions");
+    expect(group).toHaveAttribute("data-away", "true");
+    expect(group).toHaveAttribute("aria-hidden", "true");
+    expect(group?.querySelector("button")).toBeDisabled();
   });
 
   it("renders composer with project and branch context", () => {

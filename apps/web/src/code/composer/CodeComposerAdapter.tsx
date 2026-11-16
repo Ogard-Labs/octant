@@ -19,7 +19,6 @@ import {
 } from "../../composer/useComposerSlashCommands";
 import { ComposerAtTypeahead, useComposerAtMenu } from "../../composer/useComposerAtMenu";
 import { ComposerAttachButton } from "../../composer/ComposerAttachButton";
-import { StartSuggestionChip } from "../../composer/StartSuggestionChip";
 import type { CodeCheckoutId, CodeRepositoryId } from "@octant/contracts/code";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import {
@@ -49,7 +48,7 @@ import {
 } from "@octant/domain/code-worktree-source-policy";
 import { suggestCodeDeliveryOutcome } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { FolderOpen, Network } from "../../ui/icons";
+import { FolderOpen, Network, type IconComponent } from "../../ui/icons";
 import { serverCodeSelectionRefusal, serverCodeThreadProviderGroups } from "./serverCodeComposer";
 import {
   useCallback,
@@ -236,6 +235,10 @@ export interface CodeComposerAdapterProps {
 export interface CodeComposerSuggestion {
   readonly id: string;
   readonly label: string;
+  /** One short line under the label: what the agent will do. */
+  readonly detail: string;
+  /** The glyph that leads the card. */
+  readonly icon: IconComponent;
   readonly prompt: string;
 }
 
@@ -1195,29 +1198,42 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
             to the box itself, so they come before the suggestions and cards. */}
         {props.afterComposer}
         {/* The prompts sit directly under the composer they fill in, and the
-            cards follow. Under the cards they were a screen away from the
-            box they act on. A draft of only spaces is empty to submit, so it
-            is empty here too: the suggestions stay reachable instead of
-            disappearing behind a stray space. */}
-        {props.suggestions === undefined ||
-        props.suggestions.length === 0 ||
-        trimmed !== "" ? null : (
-          <div aria-label="Suggested prompts" className="code-home__suggestions" role="group">
-            {props.suggestions.map((suggestion) => (
-              <StartSuggestionChip
-                aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
-                aria-label={suggestion.label}
-                disabled={props.creating}
-                key={suggestion.id}
-                onClick={() => applySuggestion(suggestion)}
-                title={suggestion.prompt}
-              >
-                {suggestion.label}
-                <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
-                  {suggestion.prompt}
-                </span>
-              </StartSuggestionChip>
-            ))}
+            list follows. Under the list they were a screen away from the
+            box they act on. Each is a card: a glyph, what it is, and one line
+            on what the agent will do. A draft of only spaces is empty to
+            submit, so it is empty here too. Once the person has typed, the
+            cards step out of sight and out of reach but keep their place:
+            removed, the list under them jumped up on the first keystroke. */}
+        {props.suggestions === undefined || props.suggestions.length === 0 ? null : (
+          <div
+            aria-hidden={trimmed === "" ? undefined : true}
+            aria-label="Suggested prompts"
+            className="code-home__suggestions"
+            data-away={trimmed === "" ? undefined : "true"}
+            role="group"
+          >
+            {props.suggestions.map((suggestion) => {
+              const Icon = suggestion.icon;
+              return (
+                <OctantButton
+                  aria-describedby={`${suggestionDescriptionId}-${suggestion.id}`}
+                  aria-label={suggestion.label}
+                  disabled={props.creating === true || trimmed !== ""}
+                  key={suggestion.id}
+                  onClick={() => applySuggestion(suggestion)}
+                  title={suggestion.prompt}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Icon aria-hidden={true} className="code-home__suggestion-icon" size={16} />
+                  <span className="draft-thread__intent-label">{suggestion.label}</span>
+                  <span className="draft-thread__intent-description">{suggestion.detail}</span>
+                  <span className="sr-only" id={`${suggestionDescriptionId}-${suggestion.id}`}>
+                    {suggestion.prompt}
+                  </span>
+                </OctantButton>
+              );
+            })}
           </div>
         )}
         {/* Running now comes before what waits below: a running thread is what

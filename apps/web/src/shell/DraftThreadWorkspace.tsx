@@ -82,7 +82,17 @@ import {
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
-import { FolderOpen, GitBranch, Network, ShieldCheck, X } from "../ui/icons";
+import {
+  BookOpen,
+  Bug,
+  FlaskConical,
+  FolderOpen,
+  GitBranch,
+  GitCompare,
+  Network,
+  ShieldCheck,
+  X,
+} from "../ui/icons";
 import {
   useCallback,
   useContext,
@@ -340,32 +350,41 @@ function ignoreCardChoice(): void {}
 
 /**
  * Ready-made first prompts for a Code thread. Four, because they stand on one
- * line under the composer. Each is a complete instruction
+ * line of cards under the composer. Each is a complete instruction
  * the agent can act on in any repository, so choosing one is a real start
- * rather than a label to finish.
+ * rather than a label to finish; the card's second line says what the agent
+ * will do, so nobody has to choose one to find out.
  */
 const CODE_SUGGESTIONS: ReadonlyArray<CodeComposerSuggestion> = [
   {
     id: "fix-failing-test",
     label: "Fix a failing test",
+    detail: "Run the tests and fix what breaks.",
+    icon: Bug,
     prompt:
       "Run the test suite, find the failing test, and fix the root cause without weakening the test.",
   },
   {
     id: "add-tests",
     label: "Add missing tests",
+    detail: "Cover the code that matters most.",
+    icon: FlaskConical,
     prompt:
       "Find the least-tested module that matters most and add focused tests for its observable behavior.",
   },
   {
     id: "explain-codebase",
     label: "Explain this codebase",
+    detail: "How it is laid out and how to run it.",
+    icon: BookOpen,
     prompt:
       "Explain how this repository is organised: entry points, main modules, how data flows, and how to run it.",
   },
   {
     id: "review-changes",
     label: "Review my changes",
+    detail: "Bugs and gaps in what you changed.",
+    icon: GitCompare,
     prompt:
       "Review the uncommitted changes on this branch for bugs, missing tests, and unclear code, and list what to fix.",
   },

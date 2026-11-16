@@ -4370,29 +4370,61 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   gap: var(--oct-space-2);
 }
 
-/* The prompts are one compact row of chips, the same as Work's starters (both
-   are StartSuggestionChip, so the chip itself is not styled here): the
-   label says what it is, and the prompt it fills in rides as the chip's
-   tooltip and description. */
+/* Code's prompts are the suggestion card above with a glyph on top: four on
+   one line on the composer's edges. As label-only chips they were four grey
+   words, and what each would do was only in a tooltip. Under 664px of column
+   (four 160px cards and their gaps) they stand two by two, never three and
+   one: below that width the clamp's middle term is a huge length, so a card's
+   least width becomes half the row; above it the term is negative and the
+   least width is a quarter. */
 .code-home__suggestions {
-  display: flex;
-  /* One line, at most four chips: a row that wraps reads as a second list. A
-     narrow window scrolls it sideways instead of stacking it. */
+  display: grid;
   flex: 0 0 auto;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  justify-content: safe center;
   gap: var(--oct-space-2);
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      clamp(
+        (100% - 3 * var(--oct-space-2)) / 4,
+        (664px - 100%) * 999,
+        (100% - var(--oct-space-2)) / 2
+      ),
+      1fr
+    )
+  );
   width: 100%;
   margin: var(--oct-space-4) auto 0;
 }
 
-.code-home__suggestions > * {
-  flex: 0 0 auto;
+/* Typed into, the composer no longer takes a suggestion: the cards go out of
+   sight and keep their room, so the list under them stays where it is. */
+.code-home__suggestions[data-away="true"] {
+  visibility: hidden;
 }
 
-.draft-thread__intent-cards > button {
+.code-home__suggestion-icon {
+  margin-bottom: var(--oct-space-1);
+  color: var(--oct-accent);
+}
+
+.code-home__suggestions .draft-thread__intent-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two lines at most. The cards of one row are one height because the grid
+   stretches them, whatever their words. */
+.code-home__suggestions .draft-thread__intent-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.draft-thread__intent-cards > button,
+.code-home__suggestions > button {
   display: grid;
   height: auto;
   min-height: 0;
@@ -4412,9 +4444,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
     box-shadow var(--oct-motion-base) var(--oct-ease-standard);
 }
 
-.draft-thread__intent-cards > button:hover:not(:disabled) {
+.draft-thread__intent-cards > button:hover:not(:disabled),
+.code-home__suggestions > button:hover:not(:disabled) {
   border-color: var(--octant-border-strong);
   background: var(--octant-card);
+}
+
+/* After the shared card paint, whose wider side padding it replaces: four
+   cards share 800px, and a card may shrink to its column. */
+.code-home__suggestions > button {
+  min-width: 0;
+  padding: var(--oct-space-3);
 }
 
 .draft-thread__intent-label {
