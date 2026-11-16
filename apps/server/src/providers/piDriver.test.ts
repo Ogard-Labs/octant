@@ -71,6 +71,22 @@ class FakeClient implements PiClientPort {
     if (type === "set_model") {
       expect(fields).toEqual({ provider: "anthropic", modelId: "claude-sonnet" });
     }
+    if (type === "compact") {
+      return {
+        type: "response" as const,
+        command: type,
+        success: true,
+        data: { summary: "s", firstKeptEntryId: "e", tokensBefore: 150000, estimatedTokensAfter: 32000 },
+      };
+    }
+    if (type === "steer") {
+      return {
+        type: "response" as const,
+        command: type,
+        success: true,
+        data: { disposition: "queued" },
+      };
+    }
     return { type: "response" as const, command: type, success: true };
   });
   readonly respondToUi = vi.fn(async (id: string, response: Record<string, unknown>) => {
@@ -276,6 +292,77 @@ describe("Pi provider driver", () => {
       await Effect.runPromise(Scope.close(scope, Exit.void));
     },
   );
+
+  it("steers a running Pi turn with the person's note and refuses one when no turn runs", async () => {
+    const { driver, client } = fixture("1.1.0");
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const steer = connection.steer!;
+    expect(await Effect.runPromise(steer({ sessionId, message: "check the tests" }))).toBe(
+      "unsupported",
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    expect(await Effect.runPromise(steer({ sessionId, message: "check the tests" }))).toBe(
+      "steered",
+    );
+    expect(client.request).toHaveBeenCalledWith("steer", { message: "check the tests" });
+    client.emit({ type: "agent_settled" });
+    await collected;
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  it("compacts a Pi session between turns when asked and refuses while a turn runs", async () => {
+    const { driver, client } = fixture("1.1.0");
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const compact = connection.compact!;
+    const collected = Effect.runPromise(
+      Stream.runCollect(
+        Stream.unwrapScoped(connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "context-compacted"),
+          Stream.take(1),
+        ),
+      ),
+    );
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    expect(await Effect.runPromise(compact({ sessionId, compactionId: "c-1" }))).toEqual({
+      kind: "refused",
+      reason: "turn-running",
+    });
+    client.emit({ type: "agent_settled" });
+    expect(await Effect.runPromise(compact({ sessionId, compactionId: "c-2" }))).toEqual({
+      kind: "compacted",
+      tokensBefore: 150000,
+      tokensAfter: 32000,
+    });
+    expect(client.request).toHaveBeenCalledWith("compact", {}, { timeoutMs: 600_000 });
+    expect(Array.from(await collected)).toEqual([
+      expect.objectContaining({ kind: "context-compacted", trigger: "requested" }),
+    ]);
+    expect(
+      await Effect.runPromise(
+        compact({ sessionId: decodeProviderSessionId("80000000-0000-4000-8000-000000000799"), compactionId: "c-3" }),
+      ),
+    ).toEqual({ kind: "refused", reason: "no-session" });
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
 
   it("reports a run Pi settled because it was aborted as interrupted, not completed", async () => {
     const { driver, client } = fixture("1.1.0");
