@@ -472,7 +472,7 @@ function acpWallPolicy(input: {
 export function acpNativeSandboxApplies(input: {
   readonly profile: AcpProviderProfile;
   readonly platform: NodeJS.Platform;
-  readonly version: string | undefined;
+  readonly version?: string;
   readonly mode: AcpSessionMode;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly fullAccessSandbox?: boolean;

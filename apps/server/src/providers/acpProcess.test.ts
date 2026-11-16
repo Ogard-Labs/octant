@@ -2522,7 +2522,15 @@ describe("ACP agents running as themselves", () => {
 });
 
 describe("ACP agents' own sandboxes", () => {
-  const trusted = { projectCode: true } as const;
+  const untrusted = {
+    subagents: false,
+    webTools: false,
+    skills: false,
+    toolServers: false,
+    hooks: false,
+    projectCode: false,
+  } as const;
+  const trusted = { ...untrusted, projectCode: true } as const;
   const base = {
     platform: "darwin" as const,
     version: "0.68.0",
@@ -2543,7 +2551,9 @@ describe("ACP agents' own sandboxes", () => {
       expect(acpNativeSandboxApplies({ ...base, profile: gemini, executionPolicy })).toBe(false);
     }
     expect(acpNativeSandboxApplies({ ...base, profile: gemini, mode: "chat" })).toBe(false);
-    expect(acpNativeSandboxApplies({ ...base, profile: gemini, nativeSetup: {} })).toBe(false);
+    expect(acpNativeSandboxApplies({ ...base, profile: gemini, nativeSetup: untrusted })).toBe(
+      false,
+    );
     expect(acpNativeSandboxApplies({ ...base, profile: gemini, version: "0.67.9" })).toBe(false);
     expect(acpNativeSandboxApplies({ ...base, profile: gemini, purpose: "probe" })).toBe(false);
     expect(
