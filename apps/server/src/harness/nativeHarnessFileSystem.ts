@@ -373,7 +373,10 @@ export class NativeHarnessFileSystem {
     let expected: { readonly device: string; readonly inode: string } | undefined;
     let created = true;
     try {
-      const existing = await lstat(target);
+      // Read as bigint, as `liveWorkFilesystem` reads the identity it checks
+      // this against: a numeric inode past 2^53 loses digits, and the write
+      // then refuses an unchanged file as moved.
+      const existing = await lstat(target, { bigint: true });
       created = false;
       expected = { device: String(existing.dev), inode: String(existing.ino) };
       if (!existing.isFile()) return { kind: "refused", reason: "not-a-file" };
@@ -446,7 +449,8 @@ export class NativeHarnessFileSystem {
     if (mark === undefined) return { kind: "refused", reason: "not-read-first" };
     let info;
     try {
-      info = await stat(resolved);
+      // Bigint for the same reason as the write path's identity above.
+      info = await stat(resolved, { bigint: true });
     } catch {
       return { kind: "refused", reason: "path-not-found" };
     }

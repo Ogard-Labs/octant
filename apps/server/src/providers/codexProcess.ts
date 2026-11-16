@@ -1281,8 +1281,10 @@ export function makeCodexProcessLive(options: CodexProcessOptions = {}): CodexPr
             // so its network is held as Accept edits' is, as Claude's sandbox
             // asks for it; open Full access gets no proxy.
             const network =
-              (runtimePolicy === "full-access" && !keepsSandbox) ||
-              (authority.kind === "thread" && authority.strict === false)
+              // Network limits hold outside Strict too: Codex's own sandbox
+              // keeps the proxy for the runtime's traffic, and its commands
+              // get no network unless one is approved to leave.
+              runtimePolicy === "full-access" && !keepsSandbox
                 ? undefined
                 : yield* acquireProviderRuntimeNetwork(options.runtimeNetwork, {
                     ...(authority.kind === "thread" && authority.sandboxPolicy !== undefined

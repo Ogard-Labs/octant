@@ -465,7 +465,13 @@ export class SandboxRestrictionsService implements SandboxRestrictionsAuthority 
         command.duration === "session"
           ? { kind: "session", threadId: denial.threadId }
           : { kind: "project", projectId: denial.projectId };
-      const current = this.#effective(scope)?.policy;
+      // Strict with nothing saved runs under the default Strict policy, as a
+      // turn's admission and the status both resolve it; a grant widens that
+      // same policy rather than refusing as if none were selected.
+      const strictPolicy = this.#strictPolicy(scope);
+      const current =
+        this.#effective(scope)?.policy ??
+        (strictPolicy.enabled && !strictPolicy.legacy ? defaultStrictPolicy : undefined);
       if (current === undefined)
         return refused("not-grantable", "The sandbox policy is no longer selected.");
       if (denial.operation === "network" && denial.localService !== undefined) {

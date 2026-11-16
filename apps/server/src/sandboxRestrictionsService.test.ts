@@ -406,6 +406,36 @@ describe.skipIf(process.platform !== "linux")("trusted sandbox restrictions", ()
       f.create().snapshot({ kind: "session", threadId }).policy?.filesystem.readOnlyRoots,
     ).toEqual([]);
   });
+  it("grants a folder exception against the default Strict policy when no policy was saved", async () => {
+    const f = fixture();
+    f.service.deny({
+      threadId,
+      projectId: f.project.id,
+      code: "sandbox-read-denied",
+      ruleId: "filesystem.allowedFolders",
+      operation: "read",
+      resource: f.shared,
+      message: "Read blocked",
+      remedy: "Review this exact folder.",
+      grantable: true,
+    });
+    const blocked = f.service.snapshot({ kind: "session", threadId }).denials[0];
+    if (blocked === undefined) throw new Error("Missing denial");
+    const granted = f.save({
+      kind: "grant-denial",
+      denialId: blocked.id,
+      duration: "session",
+      expectedVersion: 0,
+    });
+    expect(granted).toMatchObject({
+      source: "session",
+      policy: { filesystem: { readOnlyRoots: [f.shared] } },
+    });
+    const next = f.start();
+    if (next.status !== "admitted") throw new Error(next.message);
+    expect(next.turn.selection?.policy.filesystem.readOnlyRoots).toEqual([f.shared]);
+    await next.turn.end();
+  });
   it("revokes a running turn before cleanup and prevents replacement admission until owned resources stop", async () => {
     const f = fixture();
     f.save({ kind: "set-policy", scope: f.settings, policy: f.policy, expectedVersion: 0 });
