@@ -2637,6 +2637,12 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-3);
 }
 
+/* In a pane, a list with nothing but its state shows the state in the pane's
+   middle, as every tool does; it stood at the top of the pane. */
+.code-project-pull-requests[data-presentation="dock"]:has(> .surface-empty) {
+  align-content: center;
+}
+
 .code-project-pull-requests__status {
   width: 100%;
   margin: -2px 0 0;

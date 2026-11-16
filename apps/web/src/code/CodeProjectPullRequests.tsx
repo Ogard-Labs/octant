@@ -352,8 +352,11 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
       : connectedProjects.filter(
           (project) => projectFreshnessFor(view, project.projectId).status === "stale",
         ).length;
+  // With no Project on GitHub there is nothing to count or refresh: the state
+  // says so, and "Refresh to load pull requests" in the bar above it pointed
+  // at a refresh the pane does not have.
   const countCopy =
-    view === undefined
+    view === undefined || !onGitHub
       ? undefined
       : pullRequestCountCopy(scopedFreshness ?? view.freshness, visibleRows.length);
 

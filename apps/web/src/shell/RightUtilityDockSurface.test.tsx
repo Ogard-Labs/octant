@@ -146,6 +146,13 @@ describe("the right sidebar surface", () => {
 
     expect(screen.queryByText("Previous thread Browser")).toBeNull();
     expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
+    // The dock's own state is drawn as a pane's state, in a tool's box, so the
+    // shared centred pattern applies to it.
+    expect(
+      screen
+        .getByRole("heading", { name: "Browser is unavailable" })
+        .closest('.right-utility-dock__tool[data-dock-state="true"]'),
+    ).not.toBeNull();
   });
 
   it("holds the chosen Project's terminal and browser while the new task waits for its thread", () => {

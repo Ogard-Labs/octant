@@ -685,18 +685,24 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       >
         {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
           quickToolsProjectId === undefined ? (
-            <OctantEmpty state="neutral" title="Tools open once the task starts" />
+            // The dock's own state is a pane's state: the mark and the line
+            // in the dock's middle, where it stood top-left under the band.
+            <div className="right-utility-dock__tool" data-dock-state="true">
+              <OctantEmpty state="neutral" title="Tools open once the task starts" />
+            </div>
           ) : (
             <StartQuickTools projectId={quickToolsProjectId} />
           )
         ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : !tiled && props.resolution.kind === "unavailable" ? (
-          <OctantEmpty
-            message={unavailableMessage()}
-            state="neutral"
-            title={`${activeSurface?.label ?? "Tool"} is unavailable`}
-          />
+          <div className="right-utility-dock__tool" data-dock-state="true">
+            <OctantEmpty
+              message={unavailableMessage()}
+              state="neutral"
+              title={`${activeSurface?.label ?? "Tool"} is unavailable`}
+            />
+          </div>
         ) : activeTab === undefined ? null : (
           // One tile is the single-tool view: the same tree as several, so a
           // tool that gains or loses a neighbour is never remounted.

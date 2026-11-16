@@ -1334,7 +1334,11 @@ is costly to render mounts only while open.
   cause shows: a thread whose folder the host can no longer open (moved,
   renamed, deleted, or no longer granted to the window) says so in Files,
   Review and the Terminal alike, where the host's own sentence spoke of its
-  "authority" in two wordings. A notice is for a pane that still has its content (part of a
+  "authority" in two wordings. The dock's own states are the same pattern in the
+  dock's middle: a new task whose tools open once it starts, and a tool the
+  pane cannot show. A bar never carries a status the state contradicts: Pull
+  requests for a Project that is not on GitHub has no "Refresh to load" in its
+  bar. A notice is for a pane that still has its content (part of a
   listing failed, a diff is truncated) and keeps the row layout above. A
   loading line is not a state: one quiet line at the pane's top inset, where
   the content it stands in for begins.

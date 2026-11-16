@@ -600,6 +600,14 @@
   height: 100%;
 }
 
+/* The dock's own state (a new task whose tools open later, a tool the pane
+   cannot show) is a pane's state: one mark and line in the dock's middle. It
+   was drawn at the dock's top-left, the one state not centred. */
+.right-utility-dock__tool[data-dock-state="true"] {
+  display: flex;
+  flex-direction: column;
+}
+
 /* The strip names the tool, so a tool's own head is the dock head's rail:
    one height, one ground, one hairline. Measured before this rule, seven
    heads stood 34–59px tall on three tints, and two hairline bars a few
