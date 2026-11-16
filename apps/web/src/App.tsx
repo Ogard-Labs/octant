@@ -2776,6 +2776,15 @@ function LaunchedShell(
         : `other-host:${String(todoListChoice.hostId)}`;
   const todoListOtherHostName =
     todoListChoice?.kind === "other-host" ? todoListChoice.name : undefined;
+  const todoRemoteSlot =
+    todoListChoice?.kind === "other-host"
+      ? hostFederationTransports?.get(String(todoListChoice.hostId))
+      : undefined;
+  const todoRemoteKnown = todoRemoteSlot !== undefined;
+  const todoRemoteBridge =
+    todoRemoteSlot?.kind === "remote" && todoRemoteSlot.state.kind === "ready"
+      ? todoRemoteSlot.bridge
+      : undefined;
   const todoListSource = useMemo((): {
     readonly client: TodoClient | undefined;
     readonly remote: boolean;
@@ -2796,28 +2805,20 @@ function LaunchedShell(
       };
     }
     if (!todoListChoiceKey.startsWith("other-host:")) return { client: undefined, remote: false };
-    const hostId = todoListChoiceKey.slice("other-host:".length);
     const name = todoListOtherHostName ?? "The computer that keeps the list";
-    const slot = hostFederationTransports?.get(hostId);
-    if (
-      slot === undefined ||
-      slot.kind !== "remote" ||
-      slot.bridge === undefined ||
-      slot.state.kind !== "ready"
-    ) {
+    if (todoRemoteBridge === undefined) {
       return {
         client: undefined,
         remote: true,
-        unreachable:
-          slot === undefined
-            ? `${name} keeps the list, and this window is not paired with it.`
-            : `${name} cannot be reached, so nothing can be changed.`,
+        unreachable: !todoRemoteKnown
+          ? `${name} keeps the list, and this window is not paired with it.`
+          : `${name} cannot be reached, so nothing can be changed.`,
       };
     }
     // The session owns the destination and strips the local window capability.
     const options = {
       baseUrl: "http://127.0.0.1",
-      fetch: createRemoteProductFetch({ bridge: slot.bridge }),
+      fetch: createRemoteProductFetch({ bridge: todoRemoteBridge }),
       windowCapability: "",
     };
     return {
@@ -2825,13 +2826,14 @@ function LaunchedShell(
       waitForChange: createTodoChangeClient(options),
       remote: true,
     };
-    // The transport slot changes in place; the revision says when to look again.
+    // Health snapshots mutate the slot in place. Keep a live wait on the same
+    // bridge while it remains ready, instead of replacing it on each snapshot.
   }, [
     todoListChoiceKey,
     todoListOtherHostName,
     launchedClients.todoClient,
-    hostFederationTransports,
-    federationRevision,
+    todoRemoteKnown,
+    todoRemoteBridge,
   ]);
   const todoList = useTodoList(
     todoListSource.client,

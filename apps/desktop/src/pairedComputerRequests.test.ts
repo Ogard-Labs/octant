@@ -138,6 +138,30 @@ describe("a window's request to a paired computer", () => {
     expect(raced.answer.status).toBe("refused");
   });
 
+  it("carries attachment metadata only on an attachment route", async () => {
+    const headers = {
+      "content-type": "image/png",
+      "x-octant-code-thread-id": "11111111-1111-4111-8111-111111111111",
+      "x-octant-code-attachment-id": "22222222-2222-4222-8222-222222222222",
+      "x-octant-code-display-name": "image.png",
+    };
+    const upload = await ask({
+      ...hello,
+      method: "PUT",
+      path: "/api/code/attachments",
+      headers,
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(upload.answer.status).toBe("answered");
+    expect(upload.sent).toHaveBeenCalledWith(
+      expect.stringContaining("/api/code/attachments"),
+      expect.objectContaining({ method: "PUT", headers: expect.objectContaining(headers) }),
+    );
+    const other = await ask({ ...hello, path: "/api/projects/bootstrap", headers });
+    expect(other.answer.status).toBe("refused");
+    expect(other.sent).not.toHaveBeenCalled();
+  });
+
   it("returns complete thread event frames and cancels the buffered batch", async () => {
     const cancelled = vi.fn();
     const path = "/api/chat/threads/11111111-1111-4111-8111-111111111111/events?afterSequence=0";
