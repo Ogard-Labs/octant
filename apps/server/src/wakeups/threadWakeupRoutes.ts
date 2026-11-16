@@ -6,17 +6,16 @@ import {
   type ThreadWakeupMode as ThreadWakeupModeType,
   type WindowId,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { principalActsAsHostPerson } from "../clientPrincipal";
+import { eventActorForPrincipal } from "../principalEventActor";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
-import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ThreadWakeupService } from "./threadWakeupService";
 
 const MAX_BODY_BYTES = 4_096;
 const decodeMode = Schema.decodeUnknownSync(ThreadWakeupMode);
 const THREAD_ID_PATTERN = /^[A-Za-z0-9-]{1,255}$/;
-/** A local window acts as the host's own person, as the message queue journals it. */
-const PERSON = { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID } as const;
 
 export interface ThreadWakeupRouteDependencies {
   /** Read at each request: the service exists once the host has started. */
@@ -25,8 +24,8 @@ export interface ThreadWakeupRouteDependencies {
     | undefined;
   readonly windowAuthorityStore: WindowAuthorityStore;
   /**
-   * Whether this window may open the thread, judged as it would be to read
-   * the thread itself. A paired device answers no until its routes are built.
+   * Whether this window, or this device the host's own person paired, may
+   * open the thread, judged as it would be to read the thread itself.
    */
   readonly canOpenThread: (
     windowId: WindowId,
@@ -39,7 +38,8 @@ export interface ThreadWakeupRouteDependencies {
 /**
  * `GET /api/thread-wakeups?mode=&threadId=` lists a thread's waiting
  * wake-ups; `POST /api/thread-wakeups/commands` cancels one or runs a missed
- * one, as the person at a window that can open its thread.
+ * one, as the person at a window that can open its thread or on a device they
+ * paired. The device is journaled as the actor.
  */
 export function createThreadWakeupRouteHandler(deps: ThreadWakeupRouteDependencies) {
   return async (request: Request): Promise<Response | undefined> => {
@@ -56,12 +56,15 @@ export function createThreadWakeupRouteHandler(deps: ThreadWakeupRouteDependenci
     if (!read && !command)
       return response({ error: "Wake-up method is not supported." }, 405, origin);
     let windowId: WindowId;
+    let person;
     try {
-      windowId = authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: deps.windowAuthorityStore,
         now: (deps.now ?? Date.now)(),
       });
+      windowId = context.scopeId;
+      person = context.principal;
     } catch (error) {
       return response(
         { error: "Wake-up request is unauthorized." },
@@ -69,6 +72,10 @@ export function createThreadWakeupRouteHandler(deps: ThreadWakeupRouteDependenci
         origin,
       );
     }
+    // A device the host's own person paired is that person; any other device
+    // session (one the hub's roster introduced, an agent grant) is not.
+    if (!principalActsAsHostPerson(person))
+      return response({ error: "Wake-ups are the host's own person's." }, 403, origin);
     const service = deps.service();
     if (service === undefined)
       return response({ error: "Wake-ups are not available yet." }, 503, origin);
@@ -104,10 +111,11 @@ export function createThreadWakeupRouteHandler(deps: ThreadWakeupRouteDependenci
         origin,
       );
     }
+    const actor = eventActorForPrincipal(person);
     const result =
       decoded.kind === "cancel-thread-wakeup"
-        ? service.cancel(String(decoded.wakeupId), PERSON)
-        : await service.runMissed(String(decoded.wakeupId), PERSON);
+        ? service.cancel(String(decoded.wakeupId), actor)
+        : await service.runMissed(String(decoded.wakeupId), actor);
     return response(result, 200, origin);
   };
 }

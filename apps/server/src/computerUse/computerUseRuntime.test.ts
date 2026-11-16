@@ -367,6 +367,35 @@ describe("ComputerUseRuntime", () => {
     expect(runtime.list(otherWindowId)).toEqual([]);
   });
 
+  it("lets the host's own person reach and stop a session any window started, but only by its exact thread and authority", async () => {
+    const { adapter, runtime } = fixture();
+    const waiting = await runtime.start({ ownerWindowId, threadId, requestedBy, request, policy });
+    expect(runtime.listForHostPerson()).toEqual([waiting]);
+    expect(
+      runtime.inspectForHostPerson({ threadId, authority, sessionId: request.sessionId }),
+    ).toEqual(waiting);
+    await expect(
+      runtime.stopForHostPerson({
+        threadId: "20000000-0000-4000-8000-000000000099",
+        authority,
+        sessionId: request.sessionId,
+      }),
+    ).rejects.toMatchObject({ category: "unauthorized" });
+
+    const stopped = await runtime.stopForHostPerson({
+      threadId,
+      authority,
+      sessionId: request.sessionId,
+    });
+    expect(stopped.state).toBe("stopped");
+    expect(stopped.pendingApproval).toBeUndefined();
+    expect(stopped.events.find(({ kind }) => kind === "stop-requested")?.detail).toBe(
+      "The person requested an immediate stop from a device they paired.",
+    );
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(adapter.cleanup).toHaveBeenCalledWith(request.sessionId);
+  });
+
   it("stops an in-flight action, aborts only its owned process, and records cleanup", async () => {
     let started!: () => void;
     const running = new Promise<void>((resolve) => (started = resolve));

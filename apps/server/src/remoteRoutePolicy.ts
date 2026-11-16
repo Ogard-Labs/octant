@@ -1193,6 +1193,23 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
   })),
+  // A thread's wake-ups, read and cancelled or run by a device the host's own
+  // person paired; the route refuses every other device session itself.
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups",
+    methods: ["GET"] as const,
+    // `?mode=&threadId=`; the route refuses every other query itself.
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/thread-wakeups/commands",
+    methods: ["POST"] as const,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
+  },
   {
     kind: "exact" as const,
     path: "/api/usage/host-health",
