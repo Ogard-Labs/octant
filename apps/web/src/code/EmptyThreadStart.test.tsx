@@ -63,9 +63,10 @@ describe("an empty thread's start block", () => {
       "oct-section-label",
     );
     expect(within(surface).queryByRole("heading", { name: "Start from a template" })).toBeNull();
+    // The one template in this fixture cannot run here, and the row says so.
     expect(
       within(surface).getByRole("button", { name: "Start from a template" }),
-    ).toHaveTextContent("Native Swift package");
+    ).toHaveTextContent("None can run on this machine yet.");
   });
 
   it("names a thread without a title as one to start", () => {
