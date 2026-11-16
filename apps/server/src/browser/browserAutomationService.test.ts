@@ -114,6 +114,7 @@ function harness(
     readonly captures?: ConstructorParameters<typeof BrowserAutomationService>[0]["captures"];
     readonly agentDownloadsEnabled?: boolean;
     readonly transferLimits?: { readonly maxFileBytes: number; readonly maxHeldDownloads: number };
+    readonly waitLimitMs?: number;
     readonly downloads?: ConstructorParameters<typeof BrowserAutomationService>[0]["downloads"];
     readonly observed?: Partial<Awaited<ReturnType<BrowserRuntimePort["act"]>>>;
     readonly unattended?: boolean;
@@ -204,6 +205,7 @@ function harness(
     ...(options.transferLimits === undefined
       ? {}
       : { transferLimits: () => options.transferLimits as never }),
+    ...(options.waitLimitMs === undefined ? {} : { waitLimitMs: () => options.waitLimitMs ?? 0 }),
     ...(options.downloads === undefined ? {} : { downloads: options.downloads }),
     ...(options.unattended === true ? { isUnattendedScope: () => true } : {}),
     ...(options.delegatedProfileIsCurrent === undefined
@@ -3075,6 +3077,33 @@ describe("BrowserAutomationService", () => {
       await vi.waitFor(() => expect(f.contexts.size).toBe(0));
       finish();
       expect((await waiting).failure?.category).toBe("context-expired");
+      await f.service.close();
+    });
+
+    it("refuses a wait longer than the limit set in Settings and lets one within it run", async () => {
+      const f = harness({ waitLimitMs: 120_000 });
+      await f.service.create({ windowId, threadId: threadOne, action: action(), policy });
+      const wait = (timeoutMs: number) =>
+        f.service.act({
+          windowId,
+          capturedBy: "agent",
+          request: request({
+            kind: "wait",
+            waitFor: {
+              conditions: [{ kind: "text", text: "Deployed", present: true }],
+              match: "all",
+              timeoutMs,
+            },
+          }),
+        });
+      const refused = await wait(120_001);
+      expect(refused.failure).toMatchObject({
+        category: "policy-denied",
+        message: "A wait may last at most 2 minutes, the limit set in Settings.",
+      });
+      expect(f.runtime.act).not.toHaveBeenCalled();
+      expect((await wait(120_000)).failure).toBeUndefined();
+      expect(f.runtime.act).toHaveBeenCalledOnce();
       await f.service.close();
     });
 

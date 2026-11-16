@@ -10,6 +10,7 @@ import type { ProviderRegistrySnapshot } from "@octant/contracts/providers";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
   isImageProfileDriverKind,
+  listEligibleImageProfiles,
   listImageSourceEligibleInstances,
   resolveImageCustomSources,
 } from "@octant/domain";
@@ -63,7 +64,9 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
   const atLimit = props.settings.customSources.length >= IMAGE_GENERATION_MAX_CUSTOM_SOURCES;
 
   const apply = (customSources: ReadonlyArray<ImageGenerationCustomSource>) =>
-    props.onSettingsChange({ imageGeneration: { customSources } });
+    props.onSettingsChange({ imageGeneration: { ...props.settings, customSources } });
+  const readyProfiles = listEligibleImageProfiles(instances, props.settings.customSources);
+  const firstReady = readyProfiles[0]?.displayName;
 
   const imageProviderSettings =
     props.providerController === undefined ? null : (
@@ -172,6 +175,51 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
               </SettingRow>
             </div>
           </SettingsSection>
+          {readyProfiles.length < 2 ? null : (
+            <SettingsSection title="At Full access">
+              <div className="setgroup">
+                <SettingRow
+                  description={`When a thread at Full access makes an image and its Project keeps no choice, it uses this profile's default model instead of asking. First ready profile is ${firstReady ?? "the first one listed"} now. Below Full access the thread still asks.`}
+                  label="Image profile at Full access"
+                  scope="host"
+                  settingId="image-profile-full-access"
+                >
+                  <OctantSelectField
+                    aria-label="Image profile at Full access"
+                    className="settings-view__select window-no-drag"
+                    onValueChange={(value) => {
+                      const { defaultProfileInstanceId: _previous, ...rest } = props.settings;
+                      props.onSettingsChange({
+                        imageGeneration:
+                          value === ""
+                            ? rest
+                            : {
+                                ...rest,
+                                defaultProfileInstanceId: value as ProviderInstanceId,
+                              },
+                      });
+                    }}
+                    options={[
+                      { id: "", label: "First ready profile" },
+                      ...readyProfiles.map((profile) => ({
+                        id: String(profile.instanceId),
+                        label: profile.displayName,
+                      })),
+                    ]}
+                    value={
+                      readyProfiles.some(
+                        (profile) =>
+                          String(profile.instanceId) ===
+                          String(props.settings.defaultProfileInstanceId),
+                      )
+                        ? String(props.settings.defaultProfileInstanceId)
+                        : ""
+                    }
+                  />
+                </SettingRow>
+              </div>
+            </SettingsSection>
+          )}
         </>
       )}
     </section>

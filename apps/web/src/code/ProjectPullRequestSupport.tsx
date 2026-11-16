@@ -204,11 +204,11 @@ export function PullRequestSwitches(props: {
       <div className="code-pr-review__switch">
         <div
           className="code-pr-review__switch-text"
-          title={autoFixCopy(switches.autoFix, autoFixThread?.title)}
+          title={autoFixCopy(switches.autoFix, autoFixThread?.title, switches.autoFixAttempts)}
         >
           <strong>Auto-fix</strong>
           <p id="code-pr-review-auto-fix-status" role="status">
-            {autoFixCopy(switches.autoFix, autoFixThread?.title)}
+            {autoFixCopy(switches.autoFix, autoFixThread?.title, switches.autoFixAttempts)}
           </p>
         </div>
         <OctantSwitch
@@ -264,14 +264,15 @@ export function mergeWhenReadyCopy(
 export function autoFixCopy(
   state: CodeProjectPullRequestSwitchesView["autoFix"],
   threadTitle: string | undefined,
+  attempts: number = CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
 ): string {
   const thread = threadTitle === undefined ? "the linked thread" : `“${threadTitle}”`;
   if (state.status === "off") {
-    return `Off. Turn on to let ${thread} fix failed checks, review comments, and merge conflicts, up to ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} tries each.`;
+    return `Off. Turn on to let ${thread} fix failed checks, review comments, and merge conflicts, up to ${attempts} tries each.`;
   }
   if (state.status === "stopped") {
     if (state.reason === "attempt-limit") {
-      return `Stopped after ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS} tries on the same failure. Look at the thread, then turn it on again.`;
+      return `Stopped after ${attempts} tries on the same failure. Look at the thread, then turn it on again.`;
     }
     if (state.reason === "merged") return "Stopped: the pull request merged.";
     if (state.reason === "closed") return "Stopped: the pull request was closed.";
@@ -291,7 +292,7 @@ export function autoFixCopy(
         : state.lastWake.result === "unmarked"
           ? "could not mark the thread as reading outside content, so it sent nothing"
           : "tried to wake the thread, which refused the turn";
-    return `On. Last ${result} ${formatUpdatedAt(state.lastWake.at)} (try ${state.lastWake.attempt} of ${CODE_PROJECT_PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS}).`;
+    return `On. Last ${result} ${formatUpdatedAt(state.lastWake.at)} (try ${state.lastWake.attempt} of ${attempts}).`;
   }
   return `On. Watching for failed checks, review comments, and merge conflicts for ${thread}.`;
 }

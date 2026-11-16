@@ -23,7 +23,7 @@ import {
   MAX_BROWSER_FLOW_NAME_LENGTH,
   type BrowserAuditKind,
   MAX_BROWSER_UPLOAD_FILE_COUNT_LIMIT,
-  MAX_BROWSER_WAIT_MS,
+  MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING,
   MAX_BROWSER_PAGE_TOOL_ARGUMENT_CHARACTERS,
   BrowserPageToolCall,
   type BrowserPageDeclaredTool,
@@ -46,6 +46,7 @@ const MAX_TEXT_RESULT_BYTES = 24 * 1024;
 const REF_PATTERN = /^e[1-9][0-9]{0,3}$/;
 const TAB_PATTERN = /^t[1-9][0-9]{0,3}$/;
 const DOWNLOAD_PATTERN = /^d[1-9][0-9]{0,5}$/;
+const MAX_BROWSER_WAIT_LIMIT_MS = MAX_BROWSER_WAIT_LIMIT_MINUTES_SETTING * 60_000;
 
 /** One element to act on: a CSS selector, or a ref from the latest snapshot. */
 export type BrowserToolTarget =
@@ -340,9 +341,8 @@ export function parseBrowserToolInput(
       return undefined;
     parsedSteps.push(one);
   }
-  // One call must answer inside the time a runtime allows an app-managed
-  // call, so a batch's waits share the limit one wait has instead of each
-  // step bringing its own ten minutes.
+  // A batch's waits share the most a wait may be set to, instead of each step
+  // bringing its own; the host holds each wait to the person's limit.
   const waitedMs = parsedSteps.reduce(
     (total, step) =>
       step.operation === "wait"
@@ -351,7 +351,7 @@ export function parseBrowserToolInput(
         : total,
     0,
   );
-  if (waitedMs > MAX_BROWSER_WAIT_MS) return undefined;
+  if (waitedMs > MAX_BROWSER_WAIT_LIMIT_MS) return undefined;
   return { operation: "steps", steps: parsedSteps, ...(recorded ? { record: true } : {}) };
 }
 
@@ -700,7 +700,7 @@ function parseWaitFor(record: Record<string, unknown>): BrowserWaitFor | undefin
     (typeof timeoutMs !== "number" ||
       !Number.isInteger(timeoutMs) ||
       timeoutMs < 1 ||
-      timeoutMs > MAX_BROWSER_WAIT_MS)
+      timeoutMs > MAX_BROWSER_WAIT_LIMIT_MS)
   )
     return null;
   if (match !== undefined && match !== "all" && match !== "any") return null;

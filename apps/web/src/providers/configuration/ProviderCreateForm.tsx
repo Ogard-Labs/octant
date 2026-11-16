@@ -505,8 +505,9 @@ export function ProviderCreateForm(
                   className="provider-settings__field-guidance"
                   id="ollama-create-endpoint-guidance"
                 >
-                  Connects to an existing user-managed Ollama service on literal loopback. Octant
-                  does not install, start, stop, update, or authenticate Ollama.
+                  Connects to an existing user-managed Ollama service on this computer or your
+                  network; a public address needs HTTPS. Octant does not install, start, stop,
+                  update, or authenticate Ollama.
                 </p>
               </>
             ) : providerType === "anthropic-compatible" ? (

@@ -804,6 +804,9 @@ export function wireBrowser(deps: BrowserDependencies) {
         (persistence.readShellSettings()?.settings ?? defaultShellSettings()).agentBrowserDownloads,
       transferLimits: () =>
         browserTransferLimits(persistence.readShellSettings()?.settings ?? defaultShellSettings()),
+      waitLimitMs: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings())
+          .browserWaitLimitMinutes * 60_000,
       downloads: createBrowserDownloadJournal({
         journal: persistence.journal,
         connection: persistence.connection,

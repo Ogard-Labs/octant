@@ -53,13 +53,15 @@ export interface RoutineProposalServiceOptions {
 }
 
 /**
- * Creates, paused, the routine a person asked a thread to set up. Bound at
+ * Creates the routine a person asked a thread to set up, paused unless
+ * `active` says the person's Settings let it start enabled. Bound at
  * composition to the Automation command service, which this service cannot
  * reach on its own.
  */
 export type RequestedRoutineCreator = (input: {
   readonly windowId: WindowId;
   readonly proposal: RoutineProposal;
+  readonly active?: boolean;
 }) => Extract<RoutineProposalOutcome, { readonly status: "created" | "not-created" }>;
 
 interface PendingProposal {
@@ -109,12 +111,15 @@ export class RoutineProposalService {
   createRequested(input: {
     readonly windowId: WindowId;
     readonly proposal: Omit<RoutineProposal, "proposalId" | "requestedAt">;
+    /** Start it enabled: the person's Settings choice at Full access. */
+    readonly active?: boolean;
   }): RoutineProposalOutcome {
     if (this.#createRequested === undefined) {
       return { status: "not-created", message: "Routines from a thread are unavailable here." };
     }
     return this.#createRequested({
       windowId: input.windowId,
+      ...(input.active === true ? { active: true } : {}),
       proposal: decodeRoutineProposal({
         ...input.proposal,
         proposalId: decodeRoutineProposalId(this.#options.uuid()),

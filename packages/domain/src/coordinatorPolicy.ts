@@ -20,11 +20,23 @@ import { ACCESS_POSTURE_RANK } from "./codePolicy";
  */
 
 /**
+ * The message-wake bounds Settings gives every thread whose coordinator set
+ * none of its own; absent is the former fixed 30 an hour and 10 rounds.
+ */
+export interface MessageWakeDefaults {
+  readonly wakesPerHour: number;
+  readonly rounds: number;
+}
+
+/**
  * The bounds that apply: each one the person set, else its default. A
  * coordinator journaled before the bounds were settable has none stored and
  * reads as the defaults; so does a thread no coordinator directs.
  */
-export function coordinatorBoundsFor(bounds: CoordinatorBounds | undefined): {
+export function coordinatorBoundsFor(
+  bounds: CoordinatorBounds | undefined,
+  defaults?: MessageWakeDefaults,
+): {
   /** At most this many wake turns per thread in any hour. */
   readonly wakesPerHour: number;
   /** A message or state notice at this many hops or more is carried but wakes nothing. */
@@ -32,10 +44,26 @@ export function coordinatorBoundsFor(bounds: CoordinatorBounds | undefined): {
   readonly startsPerHour: number;
 } {
   return {
-    wakesPerHour: bounds?.wakesPerHour ?? DEFAULT_COORDINATOR_WAKES_PER_HOUR,
-    rounds: bounds?.rounds ?? DEFAULT_COORDINATOR_ROUNDS,
+    wakesPerHour:
+      bounds?.wakesPerHour ?? defaults?.wakesPerHour ?? DEFAULT_COORDINATOR_WAKES_PER_HOUR,
+    rounds: bounds?.rounds ?? defaults?.rounds ?? DEFAULT_COORDINATOR_ROUNDS,
     startsPerHour: bounds?.startsPerHour ?? DEFAULT_COORDINATOR_STARTS_PER_HOUR,
   };
+}
+
+/**
+ * The posture a coordinator's own turn runs under, given the level its turn
+ * would otherwise take. Below Full access a coordinator reads and its workers
+ * write, so its file, shell and Git actions take Plan's read-only gate; at
+ * Full access they follow the level (maintainer decision, 2026-11-16), since
+ * the person chose to let the thread act without asking. The level stays on
+ * the thread as the ceiling for the workers it starts either way.
+ *
+ * Strict plugs in here: under Strict a coordinator keeps Plan's read-only
+ * gate at every level.
+ */
+export function coordinatorTurnPosture(level: ProviderExecutionPolicy): ProviderExecutionPolicy {
+  return level === "full-access" ? "full-access" : "plan";
 }
 
 export interface CoordinatorRoleFacts {
@@ -57,6 +85,8 @@ export function decideCoordinatorRole(input: {
   readonly make: boolean;
   /** Coordinators of the thread's Project now, this thread included if it is one. */
   readonly coordinatorsInProject: number;
+  /** How many a Code Project may hold, from Settings; absent is the default. */
+  readonly coordinatorLimit?: number;
 }): CoordinatorRoleDecision {
   if (input.make === input.thread.coordinator) return { status: "unchanged" };
   if (!input.make) return { status: "allowed" };
@@ -75,10 +105,11 @@ export function decideCoordinatorRole(input: {
       message: "A worker thread cannot become a coordinator; its coordinator directs it.",
     };
   }
-  if (input.coordinatorsInProject >= MAX_COORDINATORS_PER_PROJECT) {
+  const limit = input.coordinatorLimit ?? MAX_COORDINATORS_PER_PROJECT;
+  if (input.coordinatorsInProject >= limit) {
     return {
       status: "refused",
-      message: `A Code Project may have at most ${String(MAX_COORDINATORS_PER_PROJECT)} coordinators.`,
+      message: `A Code Project may have at most ${String(limit)} coordinators, the number set in Settings.`,
     };
   }
   return { status: "allowed" };
@@ -263,6 +294,8 @@ export function decideMessageWake(input: {
    * coordinates); absent is the defaults.
    */
   readonly bounds?: CoordinatorBounds | undefined;
+  /** The bounds from Settings for a thread no coordinator bounded. */
+  readonly defaults?: MessageWakeDefaults | undefined;
 }): MessageWakeDecision {
   const fromOwnCoordinator =
     input.recipient.coordinatorThreadId !== undefined &&
@@ -271,7 +304,7 @@ export function decideMessageWake(input: {
   if (!input.recipient.messageWake && !fromOwnCoordinator) {
     return { status: "carry", reason: "switch-off" };
   }
-  const { rounds, wakesPerHour } = coordinatorBoundsFor(input.bounds);
+  const { rounds, wakesPerHour } = coordinatorBoundsFor(input.bounds, input.defaults);
   if (input.hop >= rounds) return { status: "carry", reason: "hops" };
   if (input.wakeTurnRunning) return { status: "carry", reason: "running" };
   if (input.wakeTurnsInLastHour >= wakesPerHour) {
