@@ -175,6 +175,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess" | "runningWorkTurnSandbox"> &
   Pick<
     FoundationsWiring,
+    | "resolveThreadStrict"
     | "codeBoardEventStore"
     | "codeEvidence"
     | "isProjectPolicyTargetAllowed"
@@ -187,6 +188,7 @@ export type HarnessDependencies = Pick<ServerStart, "options" | "persistence"> &
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
+    resolveThreadStrict,
     safeNetworkStore,
     agentRunInteractions,
     cloudMachineServers,
@@ -1145,6 +1147,7 @@ export function wireHarness(deps: HarnessDependencies) {
     // A running turn keeps the sandbox it started with, so turning it off
     // never opens commands the turn has not run yet; turning it on applies
     // at once, since that only narrows.
+    readStrict: (threadId) => resolveThreadStrict(threadId),
     readFullAccessSandbox: (threadId) => {
       const code = persistence.readCodeThread(threadId as never);
       if (code !== undefined) {

@@ -17,6 +17,7 @@ function rules(sessionStatus: string | undefined): DelegationParentRules {
     authorizeCreation: () => WORK_PARENT,
     externalContentIngested: () => false,
     runsAtFullAccess: () => false,
+    strict: () => true,
     standingAnswerCovers: () => false,
     sessionStatus: () => sessionStatus,
   };
@@ -62,7 +63,15 @@ describe("what a parent thread must satisfy before it starts a child on another 
     });
   });
 
-  it("hands work to another spoke from a thread that read outside content once its person answered for the thread", () => {
+  it("outside Strict hands work to another spoke unasked from a thread that read outside content", () => {
+    const parent = markedParent("approval-gated");
+    expect(checkDelegationParent({ ...parent.rules, strict: () => false }, ASK)).toEqual({
+      status: "allowed",
+      ceiling: "approval-gated",
+    });
+  });
+
+  it("under Strict hands work to another spoke from a thread that read outside content once its person answered for the thread", () => {
     const parent = markedParent("approval-gated");
     expect(checkDelegationParent(parent.rules, ASK)).toEqual({
       status: "refused",

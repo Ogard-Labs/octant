@@ -1591,8 +1591,11 @@ export function createCodeOperationRuntime(
     ...(options.readThreadExternalContentTaint === undefined
       ? {}
       : {
+          // The mark adds the ask before a comment only under Strict; outside
+          // it the Project's switch and the level decide as before the mark.
           threadReadOutsideContent: (thread: CodeThread) =>
-            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false,
+            options.readThreadExternalContentTaint?.(thread.id).externalContentIngested !== false &&
+            (options.resolveStrict?.(thread.id) ?? true),
         }),
     ...(options.recordExternalContentIngestion === undefined
       ? {}
@@ -5759,9 +5762,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               this.#options.projectForgeChoices?.(current).comments === true
             );
           },
+          // Under Strict only, as for the operation service above.
           threadReadOutsideContent: () =>
             this.#options.readThreadExternalContentTaint?.(active.thread.id)
-              .externalContentIngested !== false,
+              .externalContentIngested !== false && this.#strict(active.thread.id),
           ...(pullRequestWatch === undefined
             ? {}
             : {

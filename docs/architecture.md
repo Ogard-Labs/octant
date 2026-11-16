@@ -3187,9 +3187,9 @@ hold for every action in it:
   pull requests" stands in for the per-post ask on a thread that has read no
   outside content; a thread that has read outside content still asks before
   posting, switch on or off (maintainer decision, 2026-11-12; outside Strict
-  the mark is to stop adding this ask under
+  the mark stops adding this ask under
   [Octant adds no restrictions of its own unless Strict is on](#security-and-authority),
-  designed, not built); with the switch off the agent
+  built); with the switch off the agent
   drafts the post by asking, and the approval shows the whole text
   (maintainer request, 2026-11-12). The level is the one the turn runs at, and
   a host that cannot tell whether the thread is marked asks. Built: the switch is `agentPullRequestComments`
@@ -12214,6 +12214,8 @@ that is not yet effective for the thread is refused and never reaches the model.
     server after the mark, then runs for the rest of that thread, because its
     arguments can carry out what the thread has read and one answer says the
     person accepts that for this server (maintainer decision, 2026-11-12).
+    That ask is Strict's: outside Strict the mark adds no question and the
+    remembered grants decide as before it (built).
     A Project's or the account's grant does not spare that question, and
     every MCP result marks its thread, so a network server asks once more
     after that thread's first tool result. The answer covers no other
@@ -14249,7 +14251,10 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
   - **Outside content.** Reading outside content still marks the thread
     and shows it, but no longer withdraws the provider's own web search or
     turns off Claude's `auto` or Codex's `auto_review` reviewer. Strict
-    keeps today's withdrawal.
+    keeps today's withdrawal. Built: Code's Auto keeps the provider's
+    reviewer (`harnessAutoReviewEffective`), and an Octant Harness turn
+    keeps its provider's own search for the whole turn
+    (`decideHarnessProviderSearch`).
   - **Protected files.** A provider's own tools may read and write the
     files Octant protects (`~/.aws`, kube, docker, npm and `gh`
     configuration, `.netrc`) at every level, as on its own, so `aws`,
@@ -14310,7 +14315,8 @@ settings sandbox on|off [--work]`. Only a window on this host or a device
     once, or a pull-request comment or review reply ask whatever the Project's
     "Agents may comment on pull requests" switch says; the remembered grants,
     the switch and the level decide as they did before the mark. Strict keeps
-    each of those asks, as today.
+    each of those asks, as today. Built for all four, each read at the call
+    from the effective Strict value.
   - **Image generation.** At Full access, with several image profiles ready
     and no kept choice, the card is skipped and the image is made on a default
     profile (the one the person names in Settings, else the first ready one)
