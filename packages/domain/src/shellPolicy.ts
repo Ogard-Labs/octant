@@ -1688,6 +1688,23 @@ function activatePane(
   return next;
 }
 
+/**
+ * Leaves one pane as the mode's whole layout. The other panes close; their
+ * threads stay where threads live, in the list. A zoom on one pane has
+ * nothing left to hide, so it ends with the split it was zooming.
+ */
+function keepOnlyPane(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+  paneId: PaneId,
+): WindowWorkspace {
+  const kept = requirePane(workspace.layouts[mode], paneId);
+  const alone = replaceLayout(workspace, mode, kept);
+  if (alone.focusedPaneId === undefined || mode !== alone.activeMode) return alone;
+  const { focusedPaneId: _focusedPaneId, ...unfocused } = alone;
+  return unfocused;
+}
+
 function nextVersion(workspace: WindowWorkspace): WindowWorkspace["version"] {
   return (workspace.version + 1) as WindowWorkspace["version"];
 }
@@ -1828,6 +1845,15 @@ function applyOperation(
   validate: boolean,
 ): WindowWorkspace {
   const finishOperation = (next: WindowWorkspace) => finishLayout(next, validate);
+  // An open that asks for the whole window leaves the pane it landed in as
+  // the mode's only pane, in the same step as the placement.
+  const finishPlacement = (next: WindowWorkspace, paneId: PaneId) =>
+    finishOperation(
+      (operation.kind === "open-surface" || operation.kind === "switch-project-surface") &&
+        operation.alone === true
+        ? keepOnlyPane(next, mode, paneId)
+        : next,
+    );
   validateWorkspace(workspace);
   const mode = operation.mode;
   const layout = workspace.layouts[mode];
@@ -1844,7 +1870,7 @@ function applyOperation(
       requirePane(layout, activePaneId);
       const visible = findSurfacePane(layout, operation.surface);
       if (visible !== undefined) {
-        return finishOperation(activatePane(workspace, mode, visible.paneId));
+        return finishPlacement(activatePane(workspace, mode, visible.paneId), visible.paneId);
       }
       if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
         reject("duplicate-id", "workspace surface ID already exists");
@@ -1853,8 +1879,9 @@ function applyOperation(
         ...pane,
         surface: operation.surface,
       }));
-      return finishOperation(
+      return finishPlacement(
         activatePane(replaceLayout(workspace, mode, mapped.layout), mode, activePaneId),
+        activePaneId,
       );
     }
 
@@ -1864,7 +1891,7 @@ function applyOperation(
       // is no path that mints a second view of the same surface.
       const visible = findSurfacePane(layout, operation.surface);
       if (visible !== undefined) {
-        return finishOperation(activatePane(workspace, mode, visible.paneId));
+        return finishPlacement(activatePane(workspace, mode, visible.paneId), visible.paneId);
       }
       requirePane(layout, operation.paneId);
       if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
@@ -1874,8 +1901,9 @@ function applyOperation(
         ...pane,
         surface: operation.surface,
       }));
-      return finishOperation(
+      return finishPlacement(
         activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.paneId),
+        operation.paneId,
       );
     }
 

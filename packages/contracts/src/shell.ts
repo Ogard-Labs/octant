@@ -1454,6 +1454,14 @@ export type ShellBootstrap = typeof ShellBootstrap.Type;
 
 const ModeOperationFields = { mode: OctantMode } as const;
 
+/**
+ * The surface takes the whole window: every other pane of the mode's layout
+ * closes in the same step. A new task asks for this, so a person who starts
+ * one from a split is not handed half a window and a thread they did not ask
+ * to keep beside it.
+ */
+const OpensAlone = Schema.optional(Schema.Literal(true));
+
 export const WorkspaceOperation = Schema.Union(
   /**
    * Open a surface: if the same surface is already visible in some pane, that
@@ -1466,11 +1474,13 @@ export const WorkspaceOperation = Schema.Union(
     ...ModeOperationFields,
     paneId: PaneId,
     surface: WorkspaceTab,
+    alone: OpensAlone,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("switch-project-surface"),
     ...ModeOperationFields,
     surface: WorkspaceTab,
+    alone: OpensAlone,
   }).annotations(strict),
   /**
    * A center drop: the named pane's surface is replaced outright. When the

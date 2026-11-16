@@ -1430,6 +1430,9 @@ function createWorkspaceMutation(
           message: `Draft mode ${intent.mode} does not match the active workspace.`,
         };
       }
+      // A new task takes the whole window. Started from a split, it would
+      // otherwise land in one half, beside a thread the person did not ask to
+      // keep in view; the threads that leave the panes stay in the list.
       const surface: WorkspaceTab = {
         kind: "draft-thread",
         id: newTabId(),
@@ -1443,7 +1446,7 @@ function createWorkspaceMutation(
         latest.workspace.contextByMode.chat.projectId !== null
       ) {
         return {
-          operation: { kind: "switch-project-surface", mode, surface },
+          operation: { kind: "switch-project-surface", mode, surface, alone: true },
           message: "New Chat thread draft opened without a Project.",
         };
       }
@@ -1454,7 +1457,7 @@ function createWorkspaceMutation(
       // is a refusal of something they had just asked for.
       if (isDifferentProject(latest.workspace, mode, intent.projectId)) {
         return {
-          operation: { kind: "switch-project-surface", mode, surface },
+          operation: { kind: "switch-project-surface", mode, surface, alone: true },
           message: `New ${modeLabel(mode)} thread draft opened.`,
         };
       }
@@ -1465,6 +1468,7 @@ function createWorkspaceMutation(
           mode,
           paneId: (existing ?? preferredPane(latest.workspace, mode)).paneId,
           surface,
+          alone: true,
         },
         message:
           existing === undefined
