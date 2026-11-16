@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { buildModelPickerGroups } from "@octant/domain";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -73,7 +73,7 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
         ? {}
         : { onSidecarOpened })}
       sourceThreadId={tab.sourceThreadId}
-      renderSidecar={(sidecarThreadId, sidecar) =>
+      renderSidecar={(sidecarThreadId, sidecar, notice) =>
         // A restored tab names the sidecar it was showing. When the host answers
         // with a different one, the recorded sidecar is gone and this lane's
         // conversation with it; say so rather than presenting a fresh, empty
@@ -93,6 +93,7 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
             {...(props.providerController === undefined
               ? {}
               : { providerController: props.providerController })}
+            notice={notice}
             sidecarThreadId={sidecarThreadId}
             sidecar={sidecar}
           />
@@ -118,6 +119,7 @@ function SideChatSidecarSurface(props: {
   readonly providerController?: SideChatProviderView;
   readonly sidecarThreadId: ChatThreadId;
   readonly sidecar: SideChatSidecar;
+  readonly notice: ReactNode;
   readonly threadMentionClient?: ThreadMentionClient;
 }) {
   const controller = useChatController({
@@ -172,6 +174,11 @@ function SideChatSidecarSurface(props: {
   }
   return (
     <>
+      {/* Shown once the thread has loaded with no turn in it, and gone for good
+          after the first message: loaded-then-hidden would flash on every open. */}
+      {controller.activeView !== undefined && controller.activeView.turns.length === 0
+        ? props.notice
+        : null}
       {returnNotice === undefined ? null : <OctantAlert tone="neutral">{returnNotice}</OctantAlert>}
       <ChatWorkspace
         controller={controller}

@@ -14,6 +14,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { CodeDiffPane, type CodeDiffProjection } from "./CodeDiffPane";
+import { chooseReviewView, reviewMenuRows, reviewViewIsOn } from "./reviewMenuTestHelpers";
 
 const DIFF = [
   "diff --git a/src/index.ts b/src/index.ts",
@@ -33,7 +34,7 @@ const DIFF = [
 
 /** The side-by-side layout is where the file list and the editor live. */
 async function chooseSideBySide() {
-  await userEvent.setup().click(await screen.findByRole("button", { name: "Side by side" }));
+  await chooseReviewView("Side by side");
 }
 
 describe("CodeDiffPane", () => {
@@ -322,7 +323,7 @@ describe("CodeDiffPane", () => {
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
     await screen.findByRole("region", { name: "src/index.ts" });
-    expect(screen.queryByRole("button", { name: "Ignore whitespace" })).not.toBeInTheDocument();
+    expect(await reviewMenuRows()).toEqual(["Unified", "Side by side"]);
 
     view.rerender(
       <CodeDiffPane
@@ -332,7 +333,8 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    await userEvent.setup().click(screen.getByRole("button", { name: "Ignore whitespace" }));
+    expect(await reviewMenuRows()).toEqual(["Unified", "Side by side", "Ignore whitespace"]);
+    await chooseReviewView("Ignore whitespace");
 
     expect(onChange).toHaveBeenCalledWith(true);
   });
@@ -355,9 +357,11 @@ describe("CodeDiffPane", () => {
       const pane = screen.getByRole("region", { name: "Review" });
       const toolbar = pane.querySelector(".code-diff-pane__toolbar") as HTMLElement;
       expect(toolbar).not.toBeNull();
-      for (const name of ["Unified", "Side by side", "Ignore whitespace", "Refresh review"]) {
+      // Layout and whitespace are one menu in the bar; Refresh stays on it.
+      for (const name of ["More review actions", "Refresh review"]) {
         expect(within(toolbar).getByRole("button", { name })).toBeInTheDocument();
       }
+      expect(within(toolbar).queryByRole("button", { name: "Unified" })).toBeNull();
       const status = pane.querySelector(".code-diff-pane__status") as HTMLElement;
       expect(status).toHaveTextContent("2 files changed");
     },
@@ -467,13 +471,10 @@ describe("CodeDiffPane", () => {
 
     expect(await screen.findByRole("region", { name: "src/index.ts" })).toBeVisible();
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Side by side" }));
+    await chooseReviewView("Side by side");
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await user.click(screen.getByRole("button", { name: "Unified" }));
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
+    await chooseReviewView("Unified");
     expect(await screen.findByRole("region", { name: "README.md" })).toBeVisible();
   });
 
@@ -714,10 +715,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeVisible();
   });
 
@@ -730,10 +728,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Unified")).toBe(true);
 
     rerender(
       <CodeDiffPane
@@ -743,10 +738,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
   });
 
   it("keeps a chosen layout when storage refuses the write and the Settings default later changes", async () => {
@@ -757,11 +749,8 @@ describe("CodeDiffPane", () => {
     const { rerender } = render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    await user.click(await screen.findByRole("button", { name: "Side by side" }));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await chooseReviewView("Side by side");
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
 
     rerender(
       <CodeDiffPane
@@ -771,10 +760,7 @@ describe("CodeDiffPane", () => {
         loadRuntime={runtime().loadRuntime}
       />,
     );
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     setItem.mockRestore();
   });
 
@@ -783,11 +769,8 @@ describe("CodeDiffPane", () => {
     const first = render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    await user.click(await screen.findByRole("button", { name: "Side by side" }));
-    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await chooseReviewView("Side by side");
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
     first.unmount();
 
     const otherThread = {
@@ -797,20 +780,14 @@ describe("CodeDiffPane", () => {
     const other = render(
       <CodeDiffPane client={client()} diff={otherThread} loadRuntime={runtime().loadRuntime} />,
     );
-    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Unified")).toBe(true);
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
     other.unmount();
 
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(await reviewViewIsOn("Side by side")).toBe(true);
   });
 });
 

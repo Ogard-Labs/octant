@@ -1454,6 +1454,24 @@
   background: var(--oct-fill-2);
 }
 
+/* A menu that holds a setting away from its default (Review's side-by-side
+   layout, ignored whitespace) wears a dot, so the choice is not invisible once
+   the menu is closed. */
+.dock-tile__control[data-active="true"] {
+  position: relative;
+}
+
+.dock-tile__control[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--oct-accent);
+}
+
 /* In a narrow bar a tab's label shrinks and ellipsizes, and its close mark
    stays whole and clear of the next tab and the New page button. The select
    was shrink-0, so the tab's box shrank around it and the close mark ran under

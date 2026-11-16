@@ -235,8 +235,16 @@ export function CodeTestPane(props: CodeTestPaneProps) {
               Starting…
             </OctantButton>
           ) : activeRun === undefined ? (
-            <OctantButton onClick={() => void run()} size="sm" type="button" variant="secondary">
-              Run {selected.name}
+            // The card's title already names the test, so the button says "Run"
+            // and carries the name only in its accessible name.
+            <OctantButton
+              aria-label={`Run ${selected.name}`}
+              onClick={() => void run()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Run
             </OctantButton>
           ) : (
             <OctantButton

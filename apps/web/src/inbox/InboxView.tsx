@@ -236,9 +236,11 @@ export function InboxView(props: InboxViewProps) {
   return (
     <Surface ariaLabel="Inbox" className="inbox-page">
       <SurfaceHeader
-        detail={inboxStateSentence(counts.all, counts.urgent, today.getTime())}
         onBack={props.onClose}
         title="Inbox"
+        {...(counts.all === 0
+          ? {}
+          : { detail: inboxStateSentence(counts.all, counts.urgent, today.getTime()) })}
         {...(externalSectionsPresent
           ? {
               actions: (
@@ -552,7 +554,9 @@ function InboxCard(props: {
 
 /**
  * The page's state in one line beside the title: today's date in the person's
- * locale and what waits. No greeting by time of day.
+ * locale and what waits. No greeting by time of day. An empty page has no such
+ * line: the card below already says nothing is there, so the header would say
+ * it twice.
  */
 export function inboxStateSentence(waiting: number, urgent: number, now: number): string {
   const date = new Intl.DateTimeFormat(undefined, {
@@ -561,11 +565,7 @@ export function inboxStateSentence(waiting: number, urgent: number, now: number)
     month: "long",
   }).format(now);
   const state =
-    waiting === 0
-      ? "Nothing is waiting on you."
-      : waiting === 1
-        ? "1 thread is waiting on you."
-        : `${waiting} threads are waiting on you.`;
+    waiting === 1 ? "1 thread is waiting on you." : `${waiting} threads are waiting on you.`;
   return urgent === 0 ? `${date} · ${state}` : `${date} · ${state} ${urgent} urgent.`;
 }
 

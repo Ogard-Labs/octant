@@ -16,7 +16,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("shows this host's load and says so when it has no battery", async () => {
+it("shows this host's load and draws no Energy row when it has no battery", async () => {
   const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
     Response.json(snapshot({ gpu: { percent: 42 } })),
   );
@@ -29,10 +29,23 @@ it("shows this host's load and says so when it has no battery", async () => {
   // One sample is a figure, not a line: no empty chart box under it.
   expect(container.querySelector(".vitals__chart")).toBeNull();
   expect(screen.getByText("GPU")).toBeVisible();
-  expect(screen.getByText("No battery")).toBeVisible();
+  expect(screen.queryByText("Energy")).toBeNull();
+  expect(screen.queryByText("No battery")).toBeNull();
   expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
     "http://127.0.0.1:4000/api/host/resources?detail=vitals",
   );
+});
+
+it("shows the battery level and charging state when the host has a battery", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json(snapshot({ energy: { batteryPercent: 81, charging: true } }))),
+  );
+  render(
+    <VitalsModule serverUrl="http://127.0.0.1:4000" subject={{ mode: "code", threadId: "t" }} />,
+  );
+  await waitFor(() => expect(screen.getByText("Energy")).toBeVisible());
+  expect(screen.getByText("81% · charging")).toBeVisible();
 });
 
 it("reads a thread's server over its Project's route and tells a refused window plainly", async () => {

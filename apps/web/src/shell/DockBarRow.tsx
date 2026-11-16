@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   OctantMenuGroup,
+  OctantMenuCheckboxItem,
   OctantMenuGroupLabel,
   OctantMenuItem,
   OctantMenuPopup,
@@ -270,6 +271,9 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={item.label}
+        {...(item.active === undefined
+          ? {}
+          : { "aria-description": item.active, "data-active": "true" })}
         className="shell-icon-button dock-tile__control window-no-drag"
         title={item.label}
       >
@@ -278,16 +282,7 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
       <OctantMenuPortal>
         <OctantMenuPositioner>
           <OctantMenuPopup aria-label={item.label}>
-            {item.items.map((entry) => (
-              <OctantMenuItem
-                className="workspace-disclosure__action window-no-drag"
-                disabled={entry.disabled === true}
-                key={entry.id}
-                onClick={() => item.onSelect(entry.id)}
-              >
-                <span>{entry.label}</span>
-              </OctantMenuItem>
-            ))}
+            <MenuEntries item={item} />
           </OctantMenuPopup>
         </OctantMenuPositioner>
       </OctantMenuPortal>
@@ -295,15 +290,86 @@ function ActionMenu(props: { readonly item: Extract<DockBarItem, { kind: "menu" 
   );
 }
 
+/**
+ * The rows of one menu control: actions, settings that are on or off, and
+ * runs of choices where exactly one holds. A radio group needs its rows
+ * together, so consecutive `radio` rows are gathered into one group.
+ */
+export function MenuEntries(props: { readonly item: Extract<DockBarItem, { kind: "menu" }> }) {
+  const { item } = props;
+  const out: ReactNode[] = [];
+  for (let index = 0; index < item.items.length; index += 1) {
+    const entry = item.items[index];
+    if (entry === undefined) continue;
+    if (entry.choice === "radio") {
+      const run: Array<(typeof item.items)[number]> = [];
+      while (item.items[index]?.choice === "radio") {
+        const next = item.items[index];
+        if (next !== undefined) run.push(next);
+        index += 1;
+      }
+      index -= 1;
+      out.push(
+        <OctantMenuRadioGroup
+          key={run.map((row) => row.id).join(":")}
+          onValueChange={(value) => item.onSelect(String(value))}
+          value={run.find((row) => row.checked === true)?.id ?? ""}
+        >
+          {run.map((row) => (
+            <OctantMenuRadioItem
+              className="workspace-disclosure__action window-no-drag"
+              closeOnClick
+              disabled={row.disabled === true}
+              key={row.id}
+              value={row.id}
+            >
+              <span>{row.label}</span>
+            </OctantMenuRadioItem>
+          ))}
+        </OctantMenuRadioGroup>,
+      );
+    } else if (entry.choice === "check") {
+      out.push(
+        <OctantMenuCheckboxItem
+          checked={entry.checked === true}
+          className="workspace-disclosure__action window-no-drag"
+          closeOnClick
+          disabled={entry.disabled === true}
+          key={entry.id}
+          onCheckedChange={() => item.onSelect(entry.id)}
+        >
+          <span>{entry.label}</span>
+        </OctantMenuCheckboxItem>,
+      );
+    } else {
+      out.push(
+        <OctantMenuItem
+          className="workspace-disclosure__action window-no-drag"
+          disabled={entry.disabled === true}
+          key={entry.id}
+          onClick={() => item.onSelect(entry.id)}
+        >
+          <span>{entry.label}</span>
+        </OctantMenuItem>,
+      );
+    }
+  }
+  return <>{out}</>;
+}
+
 function MoreMenu(props: {
   readonly items: ReadonlyArray<DockBarItem>;
   readonly toolLabel: string;
 }) {
   const name = `More ${props.toolLabel} actions`;
+  const active = props.items
+    .flatMap((item) => (item.kind === "menu" && item.active !== undefined ? [item.active] : []))
+    .join(", ");
   return (
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label={name}
+        {...(active === "" ? {} : { "aria-description": active, "data-active": "true" })}
         className="shell-icon-button dock-tile__control window-no-drag"
         title={name}
       >
@@ -326,16 +392,7 @@ function MoreMenu(props: {
                 <OctantMenuGroup key={item.id}>
                   {index === 0 ? null : <OctantMenuSeparator />}
                   <OctantMenuGroupLabel>{item.label}</OctantMenuGroupLabel>
-                  {item.items.map((entry) => (
-                    <OctantMenuItem
-                      className="workspace-disclosure__action window-no-drag"
-                      disabled={entry.disabled === true}
-                      key={entry.id}
-                      onClick={() => item.onSelect(entry.id)}
-                    >
-                      <span>{entry.label}</span>
-                    </OctantMenuItem>
-                  ))}
+                  <MenuEntries item={item} />
                 </OctantMenuGroup>
               ) : null,
             )}

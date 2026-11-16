@@ -4172,6 +4172,11 @@ form > .work-composer-adapter__attachments {
   background: var(--oct-success);
 }
 
+.browser-workspace__local-note {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 /* Under Glass the Browser is clear wherever it shows Octant's own start page,
    and its rows are cards. Its page colour made the dock's Browser a black
    slab beside a thread of glass on an OLED preset. A loaded page keeps its

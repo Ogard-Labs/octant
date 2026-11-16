@@ -31,9 +31,16 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Columns2, Ellipsis, Info, ListChecks, Pilcrow, RefreshCw, Rows2 } from "../ui/icons";
+import { Ellipsis, Info, ListChecks, RefreshCw } from "../ui/icons";
 import { OctantIconButton } from "../ui/base/OctantButton";
-import { OctantMenu } from "../ui/base/OctantMenu";
+import {
+  OctantMenuPopup,
+  OctantMenuPortal,
+  OctantMenuPositioner,
+  OctantMenuRoot,
+  OctantMenuTrigger,
+} from "../ui/base/OctantMenu";
+import { MenuEntries } from "../shell/DockBarRow";
 import { ReviewDiffShownContext, ReviewToolbarSlotContext } from "./reviewToolbarSlot";
 import { useDockBarControls, type DockBarItem } from "../shell/dockBarControls";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
@@ -44,9 +51,12 @@ import { CodeSelectedHunks } from "./CodeSelectedHunks";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantDialogPresence } from "../ui/base/OctantDialogPresence";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { OctantAlert } from "../ui/base/OctantAlert";
-import { readCodeDiffLayout, writeCodeDiffLayout } from "./codeDiffLayoutPreference";
+import {
+  clearCodeDiffLayout,
+  readCodeDiffLayout,
+  writeCodeDiffLayout,
+} from "./codeDiffLayoutPreference";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
@@ -432,6 +442,63 @@ function AvailableDiff(
           createGitOperationId: props.createGitOperationId,
         }
       : undefined;
+  // Layout and whitespace are set once and stay, so they live in one menu
+  // rather than as two buttons that sit on the bar all day. The menu's button
+  // wears a dot while either is off its default, and Reset puts both back.
+  const defaultLayout: CodeDiffLayout = props.defaultLayout ?? "unified";
+  const whitespaceLabel =
+    props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace";
+  const viewActive = [
+    layout === defaultLayout
+      ? undefined
+      : `Layout: ${layout === "unified" ? "Unified" : "Side by side"}`,
+    props.ignoreWhitespace?.value === true ? `${whitespaceLabel} on` : undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
+  const viewChoices = [
+    {
+      id: "layout-unified",
+      label: "Unified",
+      choice: "radio" as const,
+      checked: layout === "unified",
+    },
+    {
+      id: "layout-side-by-side",
+      label: "Side by side",
+      choice: "radio" as const,
+      checked: layout === "side-by-side",
+    },
+    ...(props.ignoreWhitespace === undefined
+      ? []
+      : [
+          {
+            id: "whitespace",
+            label: whitespaceLabel,
+            choice: "check" as const,
+            checked: props.ignoreWhitespace.value,
+          },
+        ]),
+    ...(viewActive === "" ? [] : [{ id: "reset", label: "Reset" }]),
+  ];
+  const chooseLayout = (next: CodeDiffLayout) => {
+    choseLayout.current = true;
+    setLayout(next);
+    writeCodeDiffLayout(threadId, next);
+  };
+  const chooseView = (id: string) => {
+    if (id === "layout-unified") chooseLayout("unified");
+    else if (id === "layout-side-by-side") chooseLayout("side-by-side");
+    else if (id === "whitespace") props.ignoreWhitespace?.onChange(!props.ignoreWhitespace.value);
+    else if (id === "reset") {
+      // Back to following Settings: the stored choice is forgotten, not
+      // replaced by today's default.
+      choseLayout.current = false;
+      clearCodeDiffLayout(threadId);
+      setLayout(defaultLayout);
+      if (props.ignoreWhitespace?.value === true) props.ignoreWhitespace.onChange(false);
+    } else if (id === "hunks") setHunksOpen((open) => !open);
+  };
   // In a pane the diff's controls are the bar's actions, after the view switch:
   // one toolbar. A row of their own under the bar held four icons at its right
   // end and nothing else.
@@ -440,30 +507,14 @@ function AvailableDiff(
       ? []
       : [
           {
-            kind: "button",
-            id: "diff-layout",
-            label: layout === "unified" ? "Show side by side" : "Show unified",
-            icon: layout === "unified" ? Columns2 : Rows2,
-            onSelect: () => {
-              const next = layout === "unified" ? "side-by-side" : "unified";
-              choseLayout.current = true;
-              setLayout(next);
-              writeCodeDiffLayout(threadId, next);
-            },
+            kind: "menu" as const,
+            id: "diff-more",
+            label: "More review actions",
+            icon: Ellipsis,
+            items: viewChoices,
+            ...(viewActive === "" ? {} : { active: viewActive }),
+            onSelect: chooseView,
           },
-          ...(props.ignoreWhitespace === undefined
-            ? []
-            : [
-                {
-                  kind: "button" as const,
-                  id: "diff-whitespace",
-                  label:
-                    props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace",
-                  icon: Pilcrow,
-                  pressed: props.ignoreWhitespace.value,
-                  onSelect: () => props.ignoreWhitespace?.onChange(!props.ignoreWhitespace.value),
-                },
-              ]),
           ...(props.onRefresh === undefined
             ? []
             : [
@@ -491,50 +542,41 @@ function AvailableDiff(
   const barHosted = useDockBarControls(barItems) !== undefined;
   const controls = (
     <div className="code-diff-pane__controls">
-      <OctantToggleGroup<CodeDiffLayout>
-        aria-label="Diff layout"
-        onValueChange={(value) => {
-          const selected = value[0];
-          if (selected === undefined) return;
-          choseLayout.current = true;
-          setLayout(selected);
-          writeCodeDiffLayout(threadId, selected);
-        }}
-        value={[layout]}
-      >
-        <OctantToggleGroupItem aria-label="Unified" title="Unified" value="unified">
-          <Rows2 aria-hidden="true" size={14} />
-        </OctantToggleGroupItem>
-        <OctantToggleGroupItem aria-label="Side by side" title="Side by side" value="side-by-side">
-          <Columns2 aria-hidden="true" size={14} />
-        </OctantToggleGroupItem>
-      </OctantToggleGroup>
-      {props.ignoreWhitespace === undefined ? null : (
-        <OctantIconButton
-          aria-pressed={props.ignoreWhitespace.value}
-          className="code-diff-pane__toggle"
-          label={props.diff.state === "turn" ? "Ignore edge whitespace" : "Ignore whitespace"}
-          onClick={() => props.ignoreWhitespace?.onChange(!props.ignoreWhitespace.value)}
-          size="icon-sm"
-        >
-          <Pilcrow aria-hidden="true" size={14} />
-        </OctantIconButton>
-      )}
       {props.onRefresh === undefined ? null : (
         <OctantIconButton label="Refresh review" onClick={props.onRefresh} size="icon-sm">
           <RefreshCw aria-hidden="true" size={14} />
         </OctantIconButton>
       )}
-      {hunkInputs !== undefined ? (
-        <OctantMenu
-          items={[{ label: "Select Git hunks", value: "hunks" }]}
-          onValueChange={() => setHunksOpen((open) => !open)}
-          selectionMode="action"
-          trigger={<Ellipsis aria-hidden="true" size={14} />}
-          triggerLabel="More review actions"
-          value=""
-        />
-      ) : null}
+      <OctantMenuRoot>
+        <OctantMenuTrigger
+          aria-label="More review actions"
+          {...(viewActive === "" ? {} : { "aria-description": viewActive, "data-active": "true" })}
+          className="octant-menu__trigger window-no-drag"
+        >
+          <Ellipsis aria-hidden="true" size={14} />
+        </OctantMenuTrigger>
+        <OctantMenuPortal>
+          <OctantMenuPositioner>
+            <OctantMenuPopup aria-label="More review actions">
+              <MenuEntries
+                item={{
+                  kind: "menu",
+                  id: "diff-more",
+                  label: "More review actions",
+                  icon: Ellipsis,
+                  items: [
+                    ...viewChoices,
+                    ...(hunkInputs === undefined
+                      ? []
+                      : [{ id: "hunks", label: "Select Git hunks" }]),
+                  ],
+                  onSelect: chooseView,
+                }}
+              />
+            </OctantMenuPopup>
+          </OctantMenuPositioner>
+        </OctantMenuPortal>
+      </OctantMenuRoot>
     </div>
   );
 

@@ -11,7 +11,7 @@ import type {
   CodeDebugConfiguration,
   CodeDebugConfigurationsResult,
 } from "@octant/contracts/code-debug";
-import { Bug, Play, Plus, RotateCw } from "../ui/icons";
+import { Bug, Info, Play, Plus, RotateCw } from "../ui/icons";
 import { useDockBarControls } from "../shell/dockBarControls";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import { OctantEmpty } from "../ui/base/OctantEmpty";
@@ -517,9 +517,21 @@ function Configurations(props: {
     <>
       <section aria-labelledby={confirmedId} className="run-debug__section">
         <div className="run-debug__section-head">
-          <h3 className="run-debug__heading" id={confirmedId} ref={heading} tabIndex={-1}>
-            Configurations
-          </h3>
+          <span className="run-debug__heading-line">
+            <h3 className="run-debug__heading" id={confirmedId} ref={heading} tabIndex={-1}>
+              Configurations
+            </h3>
+            {launchFile.status === "absent" ? null : (
+              // The launch file's promise is said once, here, rather than as a
+              // line under its list that reads the same on every visit.
+              <OctantIconButton
+                label="Octant reads .vscode/launch.json only to propose configurations. Nothing in it runs until you confirm it."
+                size="icon-sm"
+              >
+                <Info aria-hidden="true" size={14} />
+              </OctantIconButton>
+            )}
+          </span>
           <OctantButton
             onClick={() =>
               props.onWrite(adapters[0] === undefined ? undefined : String(adapters[0].adapter))
@@ -534,8 +546,9 @@ function Configurations(props: {
         </div>
         {approved.length === 0 ? (
           <p className="run-debug__empty">
-            No configuration is confirmed here yet. Confirm one from the repository below, or write
-            a new one.
+            {launchFile.status === "absent"
+              ? "No configuration is confirmed here yet. Write a new one."
+              : "No configuration is confirmed here yet. Confirm one from the repository below, or write a new one."}
           </p>
         ) : (
           <ul className="run-debug__list">
@@ -566,67 +579,66 @@ function Configurations(props: {
           </ul>
         )}
       </section>
-      <section aria-labelledby={proposedId} className="run-debug__section">
-        <h3 className="run-debug__heading" id={proposedId}>
-          From .vscode/launch.json
-        </h3>
-        {launchFile.status === "absent" ? (
-          <p className="run-debug__empty">This checkout has no .vscode/launch.json.</p>
-        ) : launchFile.status === "unreadable" ? (
-          <p className="run-debug__empty">
-            Octant could not read .vscode/launch.json: it is not valid JSON with comments, is too
-            large, or lists no configurations.
-          </p>
-        ) : launchFile.proposals.length === 0 ? (
-          <p className="run-debug__empty">.vscode/launch.json lists no configurations.</p>
-        ) : (
-          <ul className="run-debug__list">
-            {launchFile.proposals.map((proposal, index) =>
-              proposal.status === "proposed" ? (
-                <li className="run-debug__row" key={`proposal-${index}`}>
-                  <div className="run-debug__row-text">
-                    <span className="run-debug__row-name">{proposal.configuration.name}</span>
-                    <span className="run-debug__row-meta">
-                      {adapterName(adapters, String(proposal.configuration.adapter))} ·{" "}
-                      {proposal.configuration.program}
-                      {approved.some((entry) =>
-                        sameConfiguration(entry.configuration, proposal.configuration),
-                      )
-                        ? " · confirmed"
-                        : ""}
-                    </span>
-                  </div>
-                  <OctantButton
-                    aria-label={`Review ${proposal.configuration.name}`}
-                    onClick={() => props.onConfirm(proposal.configuration, proposal.unusedFields)}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
+      {launchFile.status === "absent" ? null : (
+        <section aria-labelledby={proposedId} className="run-debug__section">
+          <h3 className="run-debug__heading" id={proposedId}>
+            From .vscode/launch.json
+          </h3>
+          {launchFile.status === "unreadable" ? (
+            <p className="run-debug__empty">
+              Octant could not read .vscode/launch.json: it is not valid JSON with comments, is too
+              large, or lists no configurations.
+            </p>
+          ) : launchFile.proposals.length === 0 ? (
+            <p className="run-debug__empty">.vscode/launch.json lists no configurations.</p>
+          ) : (
+            <ul className="run-debug__list">
+              {launchFile.proposals.map((proposal, index) =>
+                proposal.status === "proposed" ? (
+                  <li className="run-debug__row" key={`proposal-${index}`}>
+                    <div className="run-debug__row-text">
+                      <span className="run-debug__row-name">{proposal.configuration.name}</span>
+                      <span className="run-debug__row-meta">
+                        {adapterName(adapters, String(proposal.configuration.adapter))} ·{" "}
+                        {proposal.configuration.program}
+                        {approved.some((entry) =>
+                          sameConfiguration(entry.configuration, proposal.configuration),
+                        )
+                          ? " · confirmed"
+                          : ""}
+                      </span>
+                    </div>
+                    <OctantButton
+                      aria-label={`Review ${proposal.configuration.name}`}
+                      onClick={() => props.onConfirm(proposal.configuration, proposal.unusedFields)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Review
+                    </OctantButton>
+                  </li>
+                ) : (
+                  <li
+                    className="run-debug__row run-debug__row--unmappable"
+                    key={`proposal-${index}`}
                   >
-                    Review
-                  </OctantButton>
-                </li>
-              ) : (
-                <li className="run-debug__row run-debug__row--unmappable" key={`proposal-${index}`}>
-                  <div className="run-debug__row-text">
-                    <span className="run-debug__row-name">
-                      {proposal.name ?? "An unnamed entry"}
-                    </span>
-                    <span className="run-debug__row-meta">{unmappableText(proposal.reason)}</span>
-                  </div>
-                </li>
-              ),
-            )}
-          </ul>
-        )}
-        {launchFile.status === "read" && launchFile.truncated ? (
-          <p className="run-debug__empty">Only the first 64 entries are shown.</p>
-        ) : null}
-        <p className="run-debug__hint">
-          Octant reads this file only to propose configurations. Nothing in it runs until you
-          confirm it.
-        </p>
-      </section>
+                    <div className="run-debug__row-text">
+                      <span className="run-debug__row-name">
+                        {proposal.name ?? "An unnamed entry"}
+                      </span>
+                      <span className="run-debug__row-meta">{unmappableText(proposal.reason)}</span>
+                    </div>
+                  </li>
+                ),
+              )}
+            </ul>
+          )}
+          {launchFile.status === "read" && launchFile.truncated ? (
+            <p className="run-debug__empty">Only the first 64 entries are shown.</p>
+          ) : null}
+        </section>
+      )}
     </>
   );
 }

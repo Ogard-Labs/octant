@@ -1224,8 +1224,12 @@ describe("App", () => {
       target: within(projectsNavigation).getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await user.hover(await screen.findByRole("menuitem", { name: "More" }));
     const handOffAction = await screen.findByRole("menuitem", { name: "Hand off…" });
-    await user.click(handOffAction);
+    // Pressed as an event, not as a pointer path: while the pointer travels
+    // from More to its submenu the menu takes no pointer, and under this
+    // test's stopped clock that guard never lifts.
+    fireEvent.click(handOffAction);
 
     const progress = await screen.findByText(
       "Writing the hand-off document for Controller foundation…",
@@ -7653,7 +7657,8 @@ describe("App", () => {
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(bandTool("Review")).toHaveAttribute("aria-pressed", "true");
-    await user.click(await within(dock).findByRole("button", { name: "Show side by side" }));
+    await user.click(await within(dock).findByRole("button", { name: "More review actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Side by side" }));
     expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
     expect(thread).toBeVisible();
     expect(screen.queryByRole("heading", { name: "No Code Project open" })).not.toBeInTheDocument();

@@ -195,16 +195,16 @@ function VitalsView(props: { readonly history: ReadonlyArray<HostResourceSnapsho
       {latest.gpu === undefined ? null : (
         <VitalsTile label="GPU" max={100} series={[series.gpu]} value={`${latest.gpu.percent}%`} />
       )}
-      <div className="vitals__row">
-        <div className="vitals__head">
-          <span>Energy</span>
-          <span>
-            {latest.energy === undefined
-              ? "No battery"
-              : `${latest.energy.batteryPercent}%${latest.energy.charging ? " · charging" : ""}`}
-          </span>
+      {latest.energy === undefined ? null : (
+        <div className="vitals__row">
+          <div className="vitals__head">
+            <span>Energy</span>
+            <span>
+              {`${latest.energy.batteryPercent}%${latest.energy.charging ? " · charging" : ""}`}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }

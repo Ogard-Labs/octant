@@ -382,11 +382,11 @@ describe("ProjectThreadRows", () => {
 
     const menu = document.querySelector(".thread-row-context-menu");
     expect(menu).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Copy" })).toBeVisible();
     expect(screen.queryByRole("menuitem", { name: "Copy title" })).toBeNull();
     expect(menu?.querySelectorAll(".thread-row-context-menu__icon").length).toBeGreaterThan(0);
 
-    await userEvent.hover(screen.getByRole("menuitem", { name: "Copy" }));
+    await userEvent.hover(screen.getByRole("menuitem", { name: "More" }));
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "Copy" }));
     expect(await screen.findByRole("menuitem", { name: "Copy title" })).toBeVisible();
     expect(screen.getByRole("menuitem", { name: "Copy thread ID" })).toBeVisible();
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy title" }));
@@ -477,6 +477,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
 
     expect(screen.queryByRole("menuitem", { name: "Complete follow-up" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Mark for follow-up" }));
@@ -500,6 +501,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
 
     expect(screen.queryByRole("menuitem", { name: "Mark for follow-up" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Complete follow-up" }));
@@ -522,6 +524,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
 
     expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
@@ -541,6 +544,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Hand off…" }));
 
     expect(onHandOffThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
@@ -560,6 +564,7 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Move to Project…" }));
 
     expect(onMoveToProject).toHaveBeenCalledWith(
@@ -580,8 +585,56 @@ describe("ProjectThreadRows", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    await screen.findByRole("menuitem", { name: "Pin" });
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
+    await screen.findByRole("menuitem", { name: "Copy" });
     expect(screen.queryByRole("menuitem", { name: "Move to Project…" })).toBeNull();
+  });
+
+  it("keeps the top level to the everyday groups, files the rest under More, and ends with Archive", async () => {
+    const onExportThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{
+          onPinThread: vi.fn(),
+          onPinInPane: vi.fn(),
+          onStartRenameThread: vi.fn(),
+          onMarkThreadUnread: vi.fn(),
+          onCompleteThread: vi.fn(),
+          onSnoozeThread: vi.fn(),
+          onAttachAsContext: vi.fn(),
+          onMarkFollowUp: vi.fn(),
+          onExportThread,
+          onHandOffThread: vi.fn(),
+          onLeaveNoTrace: vi.fn(),
+          onArchiveThread: vi.fn(),
+        }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    const top = within(await screen.findByRole("menu", { name: /Actions for/ }))
+      .getAllByRole("menuitem")
+      .map((item) => item.textContent);
+    expect(top).toEqual([
+      "Pin in pane",
+      "Pin",
+      "Rename",
+      "Mark as unread",
+      "Put away",
+      "Snooze",
+      "More",
+      "Archive",
+    ]);
+
+    await userEvent.hover(screen.getByRole("menuitem", { name: "More" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
+    expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
   });
 
   it("offers no export when the host resolves no export client", async () => {
@@ -1419,6 +1472,10 @@ describe("coordinator threads in a thread row's menu", () => {
     });
   }
 
+  async function openMore() {
+    await userEvent.hover(await screen.findByRole("menuitem", { name: "More" }));
+  }
+
   it("offers Make coordinator on an ordinary thread and Stop coordinating on a coordinator", async () => {
     const onSetCoordinator = vi.fn();
     const { rerender } = render(
@@ -1429,6 +1486,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
     // Make coordinator offers the worker-level choice the New coordinator draft offers.
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
@@ -1440,6 +1498,7 @@ describe("coordinator threads in a thread row's menu", () => {
     expect(onSetCoordinator).toHaveBeenCalledWith("thread-one", true, undefined);
 
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.hover(await screen.findByRole("menuitem", { name: "Make coordinator" }));
     await userEvent.click(await screen.findByRole("menuitem", { name: "Full access" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", true, "full-access");
@@ -1452,6 +1511,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Stop coordinating" }));
     expect(onSetCoordinator).toHaveBeenLastCalledWith("thread-one", false);
   });
@@ -1463,9 +1523,10 @@ describe("coordinator threads in a thread row's menu", () => {
       <ProjectThreadRows actions={actions} onSelectThread={vi.fn()} threads={[thread]} />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitem", { name: "Make coordinator" });
     expect(screen.queryByRole("menuitem", { name: "Coordinator limits…" })).toBeNull();
-    await userEvent.keyboard("{Escape}");
+    await userEvent.keyboard("{Escape}{Escape}");
 
     rerender(
       <ProjectThreadRows
@@ -1475,6 +1536,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Coordinator limits…" }));
     expect(onEditCoordinatorBounds).toHaveBeenCalledExactlyOnceWith("thread-one");
   });
@@ -1489,6 +1551,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     const off = await screen.findByRole("menuitemcheckbox", {
       name: "Wake when a message arrives",
     });
@@ -1504,6 +1567,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     const on = await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
     expect(on).toHaveAttribute("aria-checked", "true");
     await userEvent.click(on);
@@ -1524,12 +1588,14 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Work brief/);
+    await openMore();
     await userEvent.click(
       await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
     );
     expect(work.onSetMessageWake).toHaveBeenCalledExactlyOnceWith("work-one", true);
 
     await openMenu(/Chat question/);
+    await openMore();
     await screen.findByRole("menuitemcheckbox", { name: "Continue after restart" });
     expect(
       screen.queryByRole("menuitemcheckbox", { name: "Wake when a message arrives" }),
@@ -1548,6 +1614,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
     const wake = await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" });
     expect(wake).toHaveAttribute("aria-checked", "true");
@@ -1562,6 +1629,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     expect(
       await screen.findByRole("menuitemcheckbox", { name: "Wake for coordinator" }),
     ).toHaveAttribute("aria-checked", "false");
@@ -1576,6 +1644,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitemcheckbox", { name: "Wake when a message arrives" });
     expect(screen.queryByRole("menuitem", { name: "Stop coordinating" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Make coordinator" })).toBeNull();
@@ -1590,6 +1659,7 @@ describe("coordinator threads in a thread row's menu", () => {
       />,
     );
     await openMenu(/Controller foundation/);
+    await openMore();
     await screen.findByRole("menuitem", { name: "Make coordinator" });
     expect(screen.queryByRole("menuitemcheckbox", { name: "Wake for coordinator" })).toBeNull();
   });

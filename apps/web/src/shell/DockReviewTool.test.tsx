@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import type { CodeThreadView } from "@octant/contracts/code";
 import { DockReviewTool } from "./DockReviewTool";
+import { chooseReviewView, reviewViewIsOn } from "../code/reviewMenuTestHelpers";
 
 const DIFF = [
   "diff --git a/src/index.ts b/src/index.ts",
@@ -38,8 +39,7 @@ const RUN_DIFF = [
  * side-by-side layout; the stacked default has no separate file navigation.
  */
 async function chooseSideBySide() {
-  const control = await screen.findByRole("button", { name: "Side by side" });
-  if (control.getAttribute("aria-pressed") !== "true") await userEvent.setup().click(control);
+  if (!(await reviewViewIsOn("Side by side"))) await chooseReviewView("Side by side");
 }
 
 describe("Review beside the active thread", () => {
@@ -73,20 +73,17 @@ describe("Review beside the active thread", () => {
     await chooseSideBySide();
     await screen.findByRole("navigation", { name: "Changed files" });
     await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
-    await user.click(screen.getByRole("button", { name: "Unified" }));
+    await chooseReviewView("Unified");
     expect(screen.getByRole("navigation", { name: "Changed files" })).toBeInTheDocument();
   });
 
   it("puts the diff controls in one toolbar row and the counts in one status row", async () => {
     render(<DockReviewTool {...bound()} loadRuntime={runtime().loadRuntime} />);
-    expect(await screen.findByRole("button", { name: "Unified" })).toBeVisible();
-    for (const name of [
-      "Side by side",
-      "Ignore whitespace",
-      "Refresh review",
-      "More review actions",
-    ])
-      expect(screen.getByRole("button", { name })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "More review actions" })).toBeVisible();
+    // Layout and whitespace are reached from the menu, not drawn on the bar.
+    for (const name of ["Unified", "Side by side", "Ignore whitespace"])
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh review" })).toBeVisible();
     expect(await screen.findByText(/2 files changed/)).toBeVisible();
     expect(screen.getByRole("button", { name: /Checkout changes only/ })).toBeInTheDocument();
   });

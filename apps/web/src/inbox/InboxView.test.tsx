@@ -512,12 +512,18 @@ function waitingThread(id: string) {
 }
 
 describe("InboxView page", () => {
-  it("says the date and that nothing waits when no thread needs the person", () => {
+  it("says the date and how many threads wait when a thread needs the person", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(2026, 10, 11, 12, 0, 0));
     try {
-      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
-      const state = screen.getByText(/Nothing is waiting on you\./);
+      render(
+        <InboxView
+          attentionItems={[waitingThread("a")]}
+          onClose={vi.fn()}
+          onOpenThread={vi.fn()}
+        />,
+      );
+      const state = screen.getByText(/1 thread is waiting on you\./);
       expect(state).toHaveTextContent(/Wednesday/);
       expect(state).toHaveTextContent(/November/);
     } finally {
@@ -525,16 +531,31 @@ describe("InboxView page", () => {
     }
   });
 
+  it("says it once, in the card, when nothing waits on the person", () => {
+    render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
+    expect(screen.queryByText(/Nothing is waiting on you/)).toBeNull();
+    expect(
+      screen.getByText("Threads that need an answer, an approval or a look show up here."),
+    ).toBeVisible();
+    expect(document.querySelector(".surface-header__detail")).toBeNull();
+  });
+
   it("changes its date after midnight in a window with no decision source", () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(2026, 10, 11, 23, 59, 30));
     try {
-      render(<InboxView attentionItems={[]} onClose={vi.fn()} onOpenThread={vi.fn()} />);
-      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Wednesday/);
+      render(
+        <InboxView
+          attentionItems={[waitingThread("a")]}
+          onClose={vi.fn()}
+          onOpenThread={vi.fn()}
+        />,
+      );
+      expect(screen.getByText(/1 thread is waiting on you\./)).toHaveTextContent(/Wednesday/);
       act(() => {
         vi.advanceTimersByTime(60_000);
       });
-      expect(screen.getByText(/Nothing is waiting on you\./)).toHaveTextContent(/Thursday/);
+      expect(screen.getByText(/1 thread is waiting on you\./)).toHaveTextContent(/Thursday/);
     } finally {
       vi.useRealTimers();
     }
@@ -715,7 +736,7 @@ describe("InboxView page", () => {
     expect(list).toHaveBeenCalledTimes(1);
   });
 
-  it("reads title, state, Needs you, GitHub in that order", async () => {
+  it("reads title, Needs you, GitHub in that order", async () => {
     render(
       <InboxView
         attentionItems={[]}
@@ -728,13 +749,11 @@ describe("InboxView page", () => {
       />,
     );
     const title = screen.getByRole("heading", { level: 1, name: "Inbox" });
-    const state = screen.getByText(/Nothing is waiting on you\./);
     const needs = screen.getByRole("heading", { level: 2, name: "Needs you" });
     const github = screen.getByRole("heading", { level: 2, name: "GitHub" });
     const follows = (a: Element, b: Element) =>
       Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(follows(title, state)).toBe(true);
-    expect(follows(state, needs)).toBe(true);
+    expect(follows(title, needs)).toBe(true);
     expect(follows(needs, github)).toBe(true);
     await screen.findByText("Nothing is assigned to you.");
   });

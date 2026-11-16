@@ -10,6 +10,7 @@ import {
   Clock,
   Copy,
   Download,
+  Ellipsis,
   ExternalLink,
   EyeOff,
   Flag,
@@ -204,20 +205,20 @@ export function ThreadRowMenu(props: {
   const threadId = props.thread.navigationId ?? props.thread.threadId;
   const pinned = props.thread.pinned === true;
   const pullRequestDestinations = threadRowPullRequestDestinations(props.thread, props.actions);
-  const hasThreadActions =
-    props.actions.onAttachAsContext !== undefined ||
+  const hasPlacementActions =
     props.actions.onPinInPane !== undefined ||
     props.actions.onPinThread !== undefined ||
-    props.actions.onStartRenameThread !== undefined ||
-    props.actions.onMarkThreadRead !== undefined ||
-    props.actions.onMarkThreadUnread !== undefined ||
-    props.actions.onCompleteFollowUp !== undefined ||
-    props.actions.onMarkFollowUp !== undefined;
+    props.actions.onStartRenameThread !== undefined;
   const hasCoordinatorActions = threadCoordinatorMenuOffers(props.thread, props.actions);
   // Reopen undoes either way a person closed the thread: put away, or
   // marked Done.
   const closed = props.thread.completedAt !== undefined || props.thread.markedDone === true;
+  const readStateAction =
+    props.thread.unread === true
+      ? props.actions.onMarkThreadRead
+      : props.actions.onMarkThreadUnread;
   const hasLifecycleActions =
+    readStateAction !== undefined ||
     (closed ? props.actions.onReopenThread : props.actions.onCompleteThread) !== undefined ||
     (props.thread.markedDone !== true && props.actions.onMarkThreadDone !== undefined) ||
     (props.thread.snooze === undefined
@@ -228,45 +229,41 @@ export function ThreadRowMenu(props: {
       aria-label={`Actions for ${props.thread.title}`}
       className="thread-row-context-menu"
     >
-      {hasThreadActions ? (
+      {hasPlacementActions ? (
+        <OctantContextMenuGroup>
+          {props.actions.onPinInPane === undefined ? null : (
+            <OctantContextMenuItem
+              className="thread-row-context-menu__item"
+              label="Pin in pane"
+              onClick={() => props.actions.onPinInPane?.(threadId)}
+            >
+              <MenuContent icon={Pin}>Pin in pane</MenuContent>
+            </OctantContextMenuItem>
+          )}
+          {props.actions.onPinThread === undefined ? null : (
+            <OctantContextMenuItem
+              className="thread-row-context-menu__item"
+              label={pinned ? "Unpin" : "Pin"}
+              onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
+            >
+              <MenuContent icon={pinned ? PinOff : Pin}>{pinned ? "Unpin" : "Pin"}</MenuContent>
+            </OctantContextMenuItem>
+          )}
+          {props.actions.onStartRenameThread === undefined ? null : (
+            <OctantContextMenuItem
+              className="thread-row-context-menu__item"
+              label="Rename"
+              onClick={() => props.actions.onStartRenameThread?.(threadId)}
+            >
+              <MenuContent icon={Pencil}>Rename</MenuContent>
+            </OctantContextMenuItem>
+          )}
+        </OctantContextMenuGroup>
+      ) : null}
+      {hasLifecycleActions ? (
         <>
+          {hasPlacementActions ? <OctantContextMenuSeparator /> : null}
           <OctantContextMenuGroup>
-            {props.actions.onAttachAsContext === undefined ? null : (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                label="Attach as context"
-                onClick={() => props.actions.onAttachAsContext?.(threadId, props.thread.title)}
-              >
-                <MenuContent icon={Hash}>Attach as context</MenuContent>
-              </OctantContextMenuItem>
-            )}
-            {props.actions.onPinInPane === undefined ? null : (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                label="Pin in pane"
-                onClick={() => props.actions.onPinInPane?.(threadId)}
-              >
-                <MenuContent icon={Pin}>Pin in pane</MenuContent>
-              </OctantContextMenuItem>
-            )}
-            {props.actions.onPinThread === undefined ? null : (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                label={pinned ? "Unpin" : "Pin"}
-                onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
-              >
-                <MenuContent icon={pinned ? PinOff : Pin}>{pinned ? "Unpin" : "Pin"}</MenuContent>
-              </OctantContextMenuItem>
-            )}
-            {props.actions.onStartRenameThread === undefined ? null : (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                label="Rename"
-                onClick={() => props.actions.onStartRenameThread?.(threadId)}
-              >
-                <MenuContent icon={Pencil}>Rename</MenuContent>
-              </OctantContextMenuItem>
-            )}
             {/* A row offers the one read-state action that would change the
                 thread: marking it with the state it is already in would render
                 as present and inert. */}
@@ -289,38 +286,6 @@ export function ThreadRowMenu(props: {
                 <MenuContent icon={Mail}>Mark as unread</MenuContent>
               </OctantContextMenuItem>
             )}
-            {props.thread.followUp === true ? (
-              props.actions.onCompleteFollowUp === undefined ? null : (
-                <OctantContextMenuItem
-                  className="thread-row-context-menu__item"
-                  label="Complete follow-up"
-                  onClick={() => props.actions.onCompleteFollowUp?.(threadId)}
-                >
-                  <MenuContent icon={Check}>Complete follow-up</MenuContent>
-                </OctantContextMenuItem>
-              )
-            ) : props.actions.onMarkFollowUp === undefined ? null : (
-              <OctantContextMenuItem
-                className="thread-row-context-menu__item"
-                label="Mark for follow-up"
-                onClick={() => props.actions.onMarkFollowUp?.(threadId)}
-              >
-                <MenuContent icon={Flag}>Mark for follow-up</MenuContent>
-              </OctantContextMenuItem>
-            )}
-          </OctantContextMenuGroup>
-        </>
-      ) : null}
-      {hasCoordinatorActions ? (
-        <>
-          {hasThreadActions ? <OctantContextMenuSeparator /> : null}
-          <ThreadCoordinatorMenuItems actions={props.actions} thread={props.thread} />
-        </>
-      ) : null}
-      {hasLifecycleActions ? (
-        <>
-          <OctantContextMenuSeparator />
-          <OctantContextMenuGroup>
             {props.thread.markedDone === true ||
             props.actions.onMarkThreadDone === undefined ? null : (
               <OctantContextMenuItem
@@ -415,78 +380,128 @@ export function ThreadRowMenu(props: {
           </OctantContextMenuGroup>
         </>
       )}
+      {/* The rarer actions sit one level down so the list a person scans on
+          every right-click stays short; Copy needs nothing from the host, so
+          the submenu always has at least one item. */}
       <OctantContextMenuSeparator />
       <OctantContextMenuGroup>
         <OctantContextMenuSub>
-          <OctantContextMenuSubTrigger className="thread-row-context-menu__item" label="Copy">
-            <MenuContent icon={Copy}>Copy</MenuContent>
+          <OctantContextMenuSubTrigger className="thread-row-context-menu__item" label="More">
+            <MenuContent icon={Ellipsis}>More</MenuContent>
           </OctantContextMenuSubTrigger>
           <OctantContextMenuSubContent className="thread-row-context-menu">
-            <OctantContextMenuItem
-              className="thread-row-context-menu__item"
-              label="Copy title"
-              onClick={() => void copyText(props.thread.title)}
-            >
-              <MenuContent icon={Copy}>Copy title</MenuContent>
-            </OctantContextMenuItem>
-            <OctantContextMenuItem
-              className="thread-row-context-menu__item"
-              label="Copy thread ID"
-              onClick={() => void copyText(String(props.thread.threadId))}
-            >
-              <MenuContent icon={Copy}>Copy thread ID</MenuContent>
-            </OctantContextMenuItem>
+            {props.actions.onAttachAsContext === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Attach as context"
+                onClick={() => props.actions.onAttachAsContext?.(threadId, props.thread.title)}
+              >
+                <MenuContent icon={Hash}>Attach as context</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {props.thread.followUp === true ? (
+              props.actions.onCompleteFollowUp === undefined ? null : (
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  label="Complete follow-up"
+                  onClick={() => props.actions.onCompleteFollowUp?.(threadId)}
+                >
+                  <MenuContent icon={Check}>Complete follow-up</MenuContent>
+                </OctantContextMenuItem>
+              )
+            ) : props.actions.onMarkFollowUp === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Mark for follow-up"
+                onClick={() => props.actions.onMarkFollowUp?.(threadId)}
+              >
+                <MenuContent icon={Flag}>Mark for follow-up</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            <OctantContextMenuSub>
+              <OctantContextMenuSubTrigger className="thread-row-context-menu__item" label="Copy">
+                <MenuContent icon={Copy}>Copy</MenuContent>
+              </OctantContextMenuSubTrigger>
+              <OctantContextMenuSubContent className="thread-row-context-menu">
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  label="Copy title"
+                  onClick={() => void copyText(props.thread.title)}
+                >
+                  <MenuContent icon={Copy}>Copy title</MenuContent>
+                </OctantContextMenuItem>
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  label="Copy thread ID"
+                  onClick={() => void copyText(String(props.thread.threadId))}
+                >
+                  <MenuContent icon={Copy}>Copy thread ID</MenuContent>
+                </OctantContextMenuItem>
+              </OctantContextMenuSubContent>
+            </OctantContextMenuSub>
+            {props.actions.onMoveToProject === undefined ||
+            props.actions.canMoveToProject?.(threadId) === false ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Move to Project…"
+                onClick={() =>
+                  props.actions.onMoveToProject?.(
+                    String(props.thread.threadId),
+                    props.thread.title,
+                    props.thread.projectId,
+                  )
+                }
+              >
+                <MenuContent icon={FolderInput}>Move to Project…</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {props.actions.onExportThread === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Export…"
+                onClick={() =>
+                  props.actions.onExportThread?.(String(props.thread.threadId), props.thread.title)
+                }
+              >
+                <MenuContent icon={Download}>Export…</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {props.actions.onHandOffThread === undefined ? null : (
+              <OctantContextMenuItem
+                className="thread-row-context-menu__item"
+                label="Hand off…"
+                onClick={() =>
+                  props.actions.onHandOffThread?.(String(props.thread.threadId), props.thread.title)
+                }
+              >
+                <MenuContent icon={Forward}>Hand off…</MenuContent>
+              </OctantContextMenuItem>
+            )}
+            {hasCoordinatorActions ? (
+              <>
+                <OctantContextMenuSeparator />
+                <ThreadCoordinatorMenuItems actions={props.actions} thread={props.thread} />
+              </>
+            ) : null}
+            {props.actions.onLeaveNoTrace === undefined ? null : (
+              <>
+                {hasCoordinatorActions ? <OctantContextMenuSeparator /> : null}
+                <OctantContextMenuItem
+                  className="thread-row-context-menu__item"
+                  label="Leave no trace in memory"
+                  onClick={() =>
+                    props.actions.onLeaveNoTrace?.(
+                      String(props.thread.threadId),
+                      props.thread.title,
+                    )
+                  }
+                >
+                  <MenuContent icon={EyeOff}>Leave no trace in memory</MenuContent>
+                </OctantContextMenuItem>
+              </>
+            )}
           </OctantContextMenuSubContent>
         </OctantContextMenuSub>
-        {props.actions.onMoveToProject === undefined ||
-        props.actions.canMoveToProject?.(threadId) === false ? null : (
-          <OctantContextMenuItem
-            className="thread-row-context-menu__item"
-            label="Move to Project…"
-            onClick={() =>
-              props.actions.onMoveToProject?.(
-                String(props.thread.threadId),
-                props.thread.title,
-                props.thread.projectId,
-              )
-            }
-          >
-            <MenuContent icon={FolderInput}>Move to Project…</MenuContent>
-          </OctantContextMenuItem>
-        )}
-        {props.actions.onExportThread === undefined ? null : (
-          <OctantContextMenuItem
-            className="thread-row-context-menu__item"
-            label="Export…"
-            onClick={() =>
-              props.actions.onExportThread?.(String(props.thread.threadId), props.thread.title)
-            }
-          >
-            <MenuContent icon={Download}>Export…</MenuContent>
-          </OctantContextMenuItem>
-        )}
-        {props.actions.onHandOffThread === undefined ? null : (
-          <OctantContextMenuItem
-            className="thread-row-context-menu__item"
-            label="Hand off…"
-            onClick={() =>
-              props.actions.onHandOffThread?.(String(props.thread.threadId), props.thread.title)
-            }
-          >
-            <MenuContent icon={Forward}>Hand off…</MenuContent>
-          </OctantContextMenuItem>
-        )}
-        {props.actions.onLeaveNoTrace === undefined ? null : (
-          <OctantContextMenuItem
-            className="thread-row-context-menu__item"
-            label="Leave no trace in memory"
-            onClick={() =>
-              props.actions.onLeaveNoTrace?.(String(props.thread.threadId), props.thread.title)
-            }
-          >
-            <MenuContent icon={EyeOff}>Leave no trace in memory</MenuContent>
-          </OctantContextMenuItem>
-        )}
       </OctantContextMenuGroup>
       {props.actions.onArchiveThread === undefined ? null : (
         <>

@@ -2,6 +2,7 @@ import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it } from "vitest";
 import {
   CODE_DIFF_LAYOUT_STORAGE_KEY,
+  clearCodeDiffLayout,
   readCodeDiffLayout,
   writeCodeDiffLayout,
 } from "./codeDiffLayoutPreference";
@@ -17,6 +18,15 @@ describe("codeDiffLayoutPreference", () => {
     writeCodeDiffLayout(threadB, "unified", storage);
     expect(readCodeDiffLayout(threadA, storage)).toBe("side-by-side");
     expect(readCodeDiffLayout(threadB, storage)).toBe("unified");
+  });
+
+  it("forgets one thread's layout so it follows the default again, and keeps the other's", () => {
+    const storage = memoryStorage();
+    writeCodeDiffLayout(threadA, "side-by-side", storage);
+    writeCodeDiffLayout(threadB, "side-by-side", storage);
+    clearCodeDiffLayout(threadA, storage);
+    expect(readCodeDiffLayout(threadA, storage)).toBeUndefined();
+    expect(readCodeDiffLayout(threadB, storage)).toBe("side-by-side");
   });
 
   it("falls back quietly when storage is missing or refuses", () => {

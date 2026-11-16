@@ -3249,6 +3249,23 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   gap: var(--oct-space-1);
 }
 
+/* The menu that holds layout and whitespace wears a dot while either is off
+   its default, the same mark the dock bar's menu button wears. */
+.code-diff-pane__controls .octant-menu__trigger[data-active="true"] {
+  position: relative;
+}
+
+.code-diff-pane__controls .octant-menu__trigger[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  top: var(--oct-space-1);
+  right: var(--oct-space-1);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--oct-accent);
+}
+
 .git-history__toolbar-actions {
   margin-inline-start: auto;
 }

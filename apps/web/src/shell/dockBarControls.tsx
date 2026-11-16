@@ -41,8 +41,21 @@ export interface DockBarMenu {
     readonly id: string;
     readonly label: string;
     readonly disabled?: boolean;
+    /**
+     * A row that holds a setting rather than starting an action. `radio` rows
+     * that follow one another are one choice; `check` is a switch. Both read
+     * `checked` and report a change through `onSelect` with their id.
+     */
+    readonly choice?: "radio" | "check";
+    readonly checked?: boolean;
   }>;
   readonly onSelect: (item: string) => void;
+  /**
+   * Words for a setting in the menu that is not at its default (Review's
+   * layout, whitespace). A menu that hides a setting says so on its button: a
+   * dot, and these words as its description.
+   */
+  readonly active?: string;
 }
 
 /**
@@ -160,7 +173,7 @@ export function useDockBarControls(
             item.pressed,
           ];
         case "menu":
-          return [item.id, item.label, item.items];
+          return [item.id, item.label, item.items, item.active];
         case "choice":
           return [item.id, item.label, item.value, item.options, item.compact === true];
         case "text":
